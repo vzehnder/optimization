@@ -95,14 +95,16 @@ Minimum validations:
 - `0 < charge_efficiency <= 1`.
 - `0 < discharge_efficiency <= 1`.
 - `degradation_cost_per_mwh_delta_soc >= 0`.
+- `terminal_condition` is one of `none`, `equal_initial`, or `min_terminal`.
 - If `terminal_condition = min_terminal`, `terminal_energy_min_mwh` must be provided.
+- If `terminal_condition = min_terminal`, `energy_min_mwh <= terminal_energy_min_mwh <= energy_max_mwh`.
 - If `terminal_condition = equal_initial`, no additional terminal energy parameter is required.
 
 Invalid input data must fail fast with explicit error messages.
 
 ### 5.3 Configurable Constraints
 
-The configuration must provide a simple way to activate or deactivate selected constraints before each run.
+The configuration must provide a simple way to activate or deactivate selected non-core constraints before each run.
 
 Core physical constraints are mandatory in standard runs:
 
@@ -116,19 +118,17 @@ Configurable constraints:
 - Terminal condition.
 - Linear degradation based on absolute SOC movement.
 
-Recommended config shape:
+MVP config shape:
 
 ```yaml
 constraints:
-  energy_balance: true
-  soc_bounds: true
-  power_bounds: true
   prevent_simultaneous_charge_discharge: true
   terminal_condition: equal_initial
+  terminal_energy_min_mwh: null
   degradation_linear_delta_soc: true
 ```
 
-For the MVP, standard runs should reject attempts to disable core physical constraints. A later research mode can introduce `strict_physics: false` if needed.
+For the MVP, `energy_balance`, `soc_bounds`, and `power_bounds` are always active in standard runs and are not exposed as configurable fields. If a loader accepts explicit core constraint flags for compatibility, standard runs must reject attempts to set any of them to `false`. A later research mode can introduce `strict_physics: false` if needed.
 
 ### 5.4 Horizon Handling
 
@@ -162,6 +162,8 @@ The MVP supports these terminal condition modes:
 - `none`: no terminal energy constraint.
 - `equal_initial`: final energy must equal `initial_energy_mwh`.
 - `min_terminal`: final energy must be at least `terminal_energy_min_mwh`.
+
+The `terminal_energy_min_mwh` parameter belongs to the constraint configuration and is required only when `terminal_condition = min_terminal`.
 
 Default mode:
 
@@ -272,6 +274,7 @@ end
 struct ConstraintConfig
     prevent_simultaneous_charge_discharge::Bool
     terminal_condition::String
+    terminal_energy_min_mwh::Union{Float64,Nothing}
     degradation_linear_delta_soc::Bool
 end
 ```
@@ -329,6 +332,7 @@ solver:
 constraints:
   prevent_simultaneous_charge_discharge: true
   terminal_condition: equal_initial
+  terminal_energy_min_mwh: null
   degradation_linear_delta_soc: true
 
 horizon:

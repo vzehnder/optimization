@@ -16,7 +16,7 @@ External issue tracker integration has not been configured, so each issue is sto
 
 | ID | Title | Type | Status | Blocked by | Issue file |
 | --- | --- | --- | --- | --- | --- |
-| BESS-MVP-000 | Review Mathematical Formulation Before Implementation | HITL | Todo | None | [BESS-MVP-000-review-mathematical-formulation.md](BESS-MVP-000-review-mathematical-formulation.md) |
+| BESS-MVP-000 | Review Mathematical Formulation Before Implementation | HITL | Done | None | [BESS-MVP-000-review-mathematical-formulation.md](BESS-MVP-000-review-mathematical-formulation.md) |
 | BESS-MVP-001 | Bootstrap Julia Package With Smoke Test | AFK | Todo | None | [BESS-MVP-001-bootstrap-julia-package.md](BESS-MVP-001-bootstrap-julia-package.md) |
 | BESS-MVP-002 | Load And Validate Arbitrage Case Data | AFK | Todo | BESS-MVP-001 | [BESS-MVP-002-load-and-validate-case-data.md](BESS-MVP-002-load-and-validate-case-data.md) |
 | BESS-MVP-003 | Solve Core Full-Horizon Arbitrage Model | AFK | Todo | BESS-MVP-000, BESS-MVP-002 | [BESS-MVP-003-solve-core-arbitrage-model.md](BESS-MVP-003-solve-core-arbitrage-model.md) |
@@ -43,6 +43,7 @@ External issue tracker integration has not been configured, so each issue is sto
 | Date | Issue | Status change | Notes |
 | --- | --- | --- | --- |
 | 2026-05-24 | All | Created | Initial local issue set generated from the PRD. |
+| 2026-05-24 | BESS-MVP-000 | Todo -> Done | Reviewed PRD and mathematical model together. Approved MVP modeling contract after clarifying terminal minimum configuration, mandatory core constraints, grid-side power convention, and disabled degradation reporting. |
 
 ## How To Update This Tracker
 

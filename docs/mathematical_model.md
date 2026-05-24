@@ -38,6 +38,8 @@ duration_hours[t] > 0
 
 The decision variables `p_charge_mw[t]` and `p_discharge_mw[t]` represent average power during period `t`.
 
+Both power variables are measured on the grid side of the BESS connection. Charging efficiency maps grid import into stored energy, and discharge efficiency maps stored energy withdrawal into grid export.
+
 The state variable `energy_mwh[t]` represents stored energy at the end of period `t`.
 
 For `t = 1`, the energy balance starts from `initial_energy_mwh`.
@@ -87,7 +89,7 @@ equal_initial
 min_terminal
 ```
 
-If the mode is `min_terminal`, the additional parameter is:
+If the mode is `min_terminal`, the additional constraint-configuration parameter is:
 
 ```text
 terminal_energy_min_mwh
@@ -101,7 +103,7 @@ energy_min_mwh <= terminal_energy_min_mwh <= energy_max_mwh
 
 ## 5. Decision Variables
 
-For each period `t`:
+For the default MVP formulation, each period `t` has:
 
 ```text
 p_charge_mw[t] >= 0
@@ -118,6 +120,8 @@ Interpretation:
 - `energy_mwh[t]`: stored energy at the end of period `t`.
 - `delta_soc_abs_mwh[t]`: absolute change in stored energy during period `t`.
 - `is_charging[t]`: binary variable used to prevent simultaneous charge and discharge.
+
+If `prevent_simultaneous_charge_discharge = false`, `is_charging[t]` is not required as a decision variable. If `degradation_linear_delta_soc = false`, `delta_soc_abs_mwh[t]` is not required for optimization and should be reported as zero.
 
 ## 6. Derived Output Variables
 
@@ -243,7 +247,7 @@ delta_soc_abs_mwh[t] >= energy_mwh[t - 1] - energy_mwh[t]
 
 Because `delta_soc_abs_mwh[t]` has a nonnegative cost in a maximization objective, the optimizer will set it equal to the absolute value at optimum.
 
-If this degradation constraint is disabled, the objective must omit the degradation term or set `delta_soc_abs_mwh[t] = 0` for reporting consistency.
+If this degradation constraint is disabled, the objective must omit the degradation term and `delta_soc_abs_mwh[t]` should be set to zero for reporting consistency.
 
 ### 8.6 Terminal Energy Condition
 
