@@ -1,0 +1,21 @@
+name = "BESSDispatch"
+uuid = "f1db11d5-b65b-4df8-a261-d70e656fdd33"
+version = "0.1.0"
+
+[deps]
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+HiGHS = "87dc4568-4c63-4d18-b0c0-bb2238e4078b"
+JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
+JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
+YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
+
+[compat]
+julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]

@@ -17,7 +17,7 @@ External issue tracker integration has not been configured, so each issue is sto
 | ID | Title | Type | Status | Blocked by | Issue file |
 | --- | --- | --- | --- | --- | --- |
 | BESS-MVP-000 | Review Mathematical Formulation Before Implementation | HITL | Done | None | [BESS-MVP-000-review-mathematical-formulation.md](BESS-MVP-000-review-mathematical-formulation.md) |
-| BESS-MVP-001 | Bootstrap Julia Package With Smoke Test | AFK | Todo | None | [BESS-MVP-001-bootstrap-julia-package.md](BESS-MVP-001-bootstrap-julia-package.md) |
+| BESS-MVP-001 | Bootstrap Julia Package With Smoke Test | AFK | Done | None | [BESS-MVP-001-bootstrap-julia-package.md](BESS-MVP-001-bootstrap-julia-package.md) |
 | BESS-MVP-002 | Load And Validate Arbitrage Case Data | AFK | Todo | BESS-MVP-001 | [BESS-MVP-002-load-and-validate-case-data.md](BESS-MVP-002-load-and-validate-case-data.md) |
 | BESS-MVP-003 | Solve Core Full-Horizon Arbitrage Model | AFK | Todo | BESS-MVP-000, BESS-MVP-002 | [BESS-MVP-003-solve-core-arbitrage-model.md](BESS-MVP-003-solve-core-arbitrage-model.md) |
 | BESS-MVP-004 | Add Configurable Terminal Condition Modes | AFK | Todo | BESS-MVP-003 | [BESS-MVP-004-add-terminal-condition-modes.md](BESS-MVP-004-add-terminal-condition-modes.md) |
@@ -44,6 +44,8 @@ External issue tracker integration has not been configured, so each issue is sto
 | --- | --- | --- | --- |
 | 2026-05-24 | All | Created | Initial local issue set generated from the PRD. |
 | 2026-05-24 | BESS-MVP-000 | Todo -> Done | Reviewed PRD and mathematical model together. Approved MVP modeling contract after clarifying terminal minimum configuration, mandatory core constraints, grid-side power convention, and disabled degradation reporting. |
+| 2026-05-24 | BESS-MVP-001 | Todo -> In Progress | Started Julia package bootstrap with a TDD smoke-test slice for importing the package. |
+| 2026-05-24 | BESS-MVP-001 | In Progress -> Done | Added `Project.toml`, `src/BESSDispatch.jl`, and `test/runtests.jl`. Verification passed with `julia --project=. -e "import Pkg; Pkg.test()"`. |
 
 ## How To Update This Tracker
 

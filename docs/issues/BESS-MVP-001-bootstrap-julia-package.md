@@ -1,6 +1,6 @@
 # BESS-MVP-001: Bootstrap Julia Package With Smoke Test
 
-Status: Todo
+Status: Done
 Type: AFK
 Source: `docs/prd_bess_dispatch.md`
 
@@ -12,11 +12,19 @@ This slice should establish the minimum runnable path for future work: package m
 
 ## Acceptance criteria
 
-- [ ] The repository contains a Julia package skeleton with a module entry point.
-- [ ] Required MVP dependencies are declared: JuMP, HiGHS, CSV, DataFrames, YAML, JSON3, and Dates.
-- [ ] A smoke test verifies that the package can be imported.
-- [ ] The test command is documented in the tracking register or project docs.
-- [ ] No optimization model behavior is implemented in this issue.
+- [x] The repository contains a Julia package skeleton with a module entry point.
+- [x] Required MVP dependencies are declared: JuMP, HiGHS, CSV, DataFrames, YAML, JSON3, and Dates.
+- [x] A smoke test verifies that the package can be imported.
+- [x] The test command is documented in the tracking register or project docs.
+- [x] No optimization model behavior is implemented in this issue.
+
+## Verification
+
+```powershell
+julia --project=. -e "import Pkg; Pkg.test()"
+```
+
+Result: passed.
 
 ## Blocked by
 
