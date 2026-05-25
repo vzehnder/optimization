@@ -6,6 +6,7 @@ struct DispatchModel
     p_charge_mw::Vector{JuMP.VariableRef}
     p_discharge_mw::Vector{JuMP.VariableRef}
     energy_mwh::Vector{JuMP.VariableRef}
+    is_charging::Union{Nothing,Vector{JuMP.VariableRef}}
 end
 
 struct DispatchResult
@@ -18,6 +19,7 @@ struct DispatchResult
     net_discharge_mw::Vector{Float64}
     energy_mwh::Vector{Float64}
     market_value_usd::Vector{Float64}
+    is_charging::Union{Nothing,Vector{Float64}}
 end
 
 function build_dispatch_model(case_data::CaseData)::DispatchModel
@@ -44,6 +46,22 @@ function build_dispatch_model(case_data::CaseData)::DispatchModel
     @variable(model, 0 <= p_charge_mw[1:n_periods] <= bess.charge_power_max_mw)
     @variable(model, 0 <= p_discharge_mw[1:n_periods] <= bess.discharge_power_max_mw)
     @variable(model, bess.energy_min_mwh <= energy_mwh[1:n_periods] <= bess.energy_max_mwh)
+
+    is_charging = nothing
+    if case_data.constraints.prevent_simultaneous_charge_discharge
+        @variable(model, is_charging[1:n_periods], Bin)
+
+        @constraint(
+            model,
+            [period in 1:n_periods],
+            p_charge_mw[period] <= bess.charge_power_max_mw * is_charging[period]
+        )
+        @constraint(
+            model,
+            [period in 1:n_periods],
+            p_discharge_mw[period] <= bess.discharge_power_max_mw * (1 - is_charging[period])
+        )
+    end
 
     @constraint(
         model,
@@ -79,7 +97,7 @@ function build_dispatch_model(case_data::CaseData)::DispatchModel
         )
     )
 
-    return DispatchModel(model, p_charge_mw, p_discharge_mw, energy_mwh)
+    return DispatchModel(model, p_charge_mw, p_discharge_mw, energy_mwh, is_charging)
 end
 
 function solve_dispatch(case_data::CaseData)::DispatchResult
@@ -94,6 +112,7 @@ function solve_dispatch(case_data::CaseData)::DispatchResult
     p_charge = value.(dispatch_model.p_charge_mw)
     p_discharge = value.(dispatch_model.p_discharge_mw)
     energy = value.(dispatch_model.energy_mwh)
+    is_charging = dispatch_model.is_charging === nothing ? nothing : value.(dispatch_model.is_charging)
     net_discharge = p_discharge .- p_charge
     market_value = case_data.time_series.price_usd_per_mwh .* net_discharge .* case_data.time_series.duration_hours
 
@@ -107,5 +126,7 @@ function solve_dispatch(case_data::CaseData)::DispatchResult
         net_discharge,
         energy,
         market_value,
+        is_charging,
     )
 end
+

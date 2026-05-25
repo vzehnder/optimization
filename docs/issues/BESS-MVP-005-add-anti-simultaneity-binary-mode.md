@@ -1,6 +1,6 @@
 # BESS-MVP-005: Add Binary Anti-Simultaneity Dispatch Mode
 
-Status: Todo
+Status: Done
 Type: AFK
 Source: `docs/prd_bess_dispatch.md`, `docs/mathematical_model.md`
 
@@ -12,11 +12,15 @@ This slice should verify the physical behavior through solved dispatch results.
 
 ## Acceptance criteria
 
-- [ ] When enabled, charge power is allowed only in charging mode.
-- [ ] When enabled, discharge power is allowed only in non-charging mode.
-- [ ] Solved results never contain charge and discharge above tolerance in the same period when the flag is enabled.
-- [ ] When disabled, the model can be built without the anti-simultaneity binary variable.
-- [ ] Tests cover enabled and disabled configurations.
+- [x] When enabled, charge power is allowed only in charging mode.
+- [x] When enabled, discharge power is allowed only in non-charging mode.
+- [x] Solved results never contain charge and discharge above tolerance in the same period when the flag is enabled.
+- [x] When disabled, the model can be built without the anti-simultaneity binary variable.
+- [x] Tests cover enabled and disabled configurations.
+
+## Verification
+
+- `julia --project=. -e "import Pkg; Pkg.test()"` passed with 72 tests.
 
 ## Blocked by
 

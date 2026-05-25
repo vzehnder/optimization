@@ -32,6 +32,7 @@ function core_arbitrage_case(;
     initial_energy_mwh = 0.0,
     charge_efficiency = 1.0,
     discharge_efficiency = 1.0,
+    prevent_simultaneous_charge_discharge = false,
     terminal_condition = "none",
     terminal_energy_min_mwh = nothing,
 )
@@ -50,7 +51,12 @@ function core_arbitrage_case(;
             0.0,
         ),
         time_series = BESSDispatch.TimeSeriesData(timestamps, prices, period_durations),
-        constraints = BESSDispatch.ConstraintConfig(false, terminal_condition, terminal_energy_min_mwh, false),
+        constraints = BESSDispatch.ConstraintConfig(
+            prevent_simultaneous_charge_discharge,
+            terminal_condition,
+            terminal_energy_min_mwh,
+            false,
+        ),
     )
 end
 
@@ -284,5 +290,62 @@ end
 
         @test result.termination_status == "OPTIMAL"
         @test result.energy_mwh[end] ≈ 4.0 atol = 1e-6
+    end
+
+    @testset "enabled anti-simultaneity mode reports physically consistent dispatch modes" begin
+        result = BESSDispatch.solve_dispatch(
+            core_arbitrage_case(
+                prices = [10.0, 100.0],
+                prevent_simultaneous_charge_discharge = true,
+                terminal_condition = "equal_initial",
+            ),
+        )
+
+        @test result.termination_status == "OPTIMAL"
+        @test result.is_charging !== nothing
+        @test result.p_charge_mw[1] > 1e-6
+        @test result.p_discharge_mw[2] > 1e-6
+        @test isapprox(result.is_charging[1], 1.0; atol = 1e-6)
+        @test isapprox(result.is_charging[2], 0.0; atol = 1e-6)
+        @test all(
+            !(
+                result.p_charge_mw[period] > 1e-6 &&
+                result.p_discharge_mw[period] > 1e-6
+            ) for period in eachindex(result.p_charge_mw)
+        )
+    end
+
+    @testset "enabled anti-simultaneity mode prevents same-period lossy cycling" begin
+        result = BESSDispatch.solve_dispatch(
+            core_arbitrage_case(
+                prices = [-10.0],
+                initial_energy_mwh = 5.0,
+                charge_efficiency = 0.95,
+                discharge_efficiency = 0.95,
+                prevent_simultaneous_charge_discharge = true,
+                terminal_condition = "equal_initial",
+            ),
+        )
+
+        @test result.termination_status == "OPTIMAL"
+        @test result.p_charge_mw[1] <= 1e-6
+        @test result.p_discharge_mw[1] <= 1e-6
+        @test isapprox(result.energy_mwh[1], 5.0; atol = 1e-6)
+    end
+
+    @testset "disabled anti-simultaneity mode builds without charging mode binary" begin
+        case_data = core_arbitrage_case(
+            prices = [10.0, 100.0],
+            prevent_simultaneous_charge_discharge = false,
+            terminal_condition = "equal_initial",
+        )
+
+        dispatch_model = BESSDispatch.build_dispatch_model(case_data)
+        result = BESSDispatch.solve_dispatch(case_data)
+
+        @test dispatch_model.is_charging === nothing
+        @test all(!JuMP.is_binary(variable) for variable in JuMP.all_variables(dispatch_model.model))
+        @test result.termination_status == "OPTIMAL"
+        @test result.is_charging === nothing
     end
 end
