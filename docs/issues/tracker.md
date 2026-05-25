@@ -22,7 +22,7 @@ External issue tracker integration has not been configured, so each issue is sto
 | BESS-MVP-003 | Solve Core Full-Horizon Arbitrage Model | AFK | Done | BESS-MVP-000, BESS-MVP-002 | [BESS-MVP-003-solve-core-arbitrage-model.md](BESS-MVP-003-solve-core-arbitrage-model.md) |
 | BESS-MVP-004 | Add Configurable Terminal Condition Modes | AFK | Done | BESS-MVP-003 | [BESS-MVP-004-add-terminal-condition-modes.md](BESS-MVP-004-add-terminal-condition-modes.md) |
 | BESS-MVP-005 | Add Binary Anti-Simultaneity Dispatch Mode | AFK | Done | BESS-MVP-003 | [BESS-MVP-005-add-anti-simultaneity-binary-mode.md](BESS-MVP-005-add-anti-simultaneity-binary-mode.md) |
-| BESS-MVP-006 | Add Linear Delta-SOC Degradation Cost | AFK | Todo | BESS-MVP-003 | [BESS-MVP-006-add-delta-soc-degradation.md](BESS-MVP-006-add-delta-soc-degradation.md) |
+| BESS-MVP-006 | Add Linear Delta-SOC Degradation Cost | AFK | Done | BESS-MVP-003 | [BESS-MVP-006-add-delta-soc-degradation.md](BESS-MVP-006-add-delta-soc-degradation.md) |
 | BESS-MVP-007 | Persist Dispatch Results And Run Metadata | AFK | Todo | BESS-MVP-004, BESS-MVP-005, BESS-MVP-006 | [BESS-MVP-007-persist-run-outputs.md](BESS-MVP-007-persist-run-outputs.md) |
 | BESS-MVP-008 | Generate Plotly Dispatch Report From Run Output | AFK | Todo | BESS-MVP-007 | [BESS-MVP-008-generate-plotly-dispatch-report.md](BESS-MVP-008-generate-plotly-dispatch-report.md) |
 | BESS-MVP-009 | Prove MVP With Acceptance Scenario Suite | AFK | Todo | BESS-MVP-007, BESS-MVP-008 | [BESS-MVP-009-prove-mvp-with-acceptance-suite.md](BESS-MVP-009-prove-mvp-with-acceptance-suite.md) |
@@ -54,6 +54,8 @@ External issue tracker integration has not been configured, so each issue is sto
 | 2026-05-25 | BESS-MVP-004 | In Progress -> Done | Added solved-result coverage for `none`, `equal_initial`, and `min_terminal`, and implemented terminal energy constraints in the JuMP model. Existing validation tests cover invalid terminal configuration. Verification passed with `julia --project=. -e "import Pkg; Pkg.test()"`. |
 | 2026-05-25 | BESS-MVP-005 | Todo -> In Progress | Started binary anti-simultaneity dispatch mode using TDD. |
 | 2026-05-25 | BESS-MVP-005 | In Progress -> Done | Added optional `is_charging` binary variables, anti-simultaneity constraints, solved-result mode reporting, and enabled/disabled tests. Verification passed with `julia --project=. -e "import Pkg; Pkg.test()"` (72 tests). |
+| 2026-05-25 | BESS-MVP-006 | Todo -> In Progress | Started linear delta-SOC degradation formulation using TDD. |
+| 2026-05-25 | BESS-MVP-006 | In Progress -> Done | Added optional `delta_soc_abs_mwh` variables, degradation objective penalty, solved-result degradation reporting, and enabled/disabled/no-cycling tests. Verification passed with `julia --project=. -e "import Pkg; Pkg.test()"` (89 tests). |
 
 ## How To Update This Tracker
 

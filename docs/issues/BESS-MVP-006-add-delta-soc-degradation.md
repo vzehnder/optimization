@@ -1,6 +1,6 @@
 # BESS-MVP-006: Add Linear Delta-SOC Degradation Cost
 
-Status: Todo
+Status: Done
 Type: AFK
 Source: `docs/prd_bess_dispatch.md`, `docs/mathematical_model.md`
 
@@ -12,12 +12,12 @@ The degradation term must reduce the objective and be available for reporting.
 
 ## Acceptance criteria
 
-- [ ] `delta_soc_abs_mwh` is constrained against the initial energy in the first period.
-- [ ] `delta_soc_abs_mwh` is constrained against the previous period energy for all later periods.
-- [ ] The objective subtracts `degradation_cost_per_mwh_delta_soc * delta_soc_abs_mwh[t]`.
-- [ ] With constant prices and positive degradation cost, the model does not cycle unnecessarily.
-- [ ] When degradation is disabled, the model omits the degradation penalty or reports zero degradation consistently.
-- [ ] Tests cover enabled and disabled degradation configurations.
+- [x] `delta_soc_abs_mwh` is constrained against the initial energy in the first period.
+- [x] `delta_soc_abs_mwh` is constrained against the previous period energy for all later periods.
+- [x] The objective subtracts `degradation_cost_per_mwh_delta_soc * delta_soc_abs_mwh[t]`.
+- [x] With constant prices and positive degradation cost, the model does not cycle unnecessarily.
+- [x] When degradation is disabled, the model omits the degradation penalty or reports zero degradation consistently.
+- [x] Tests cover enabled and disabled degradation configurations.
 
 ## Blocked by
 

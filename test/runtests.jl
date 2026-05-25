@@ -32,9 +32,11 @@ function core_arbitrage_case(;
     initial_energy_mwh = 0.0,
     charge_efficiency = 1.0,
     discharge_efficiency = 1.0,
+    degradation_cost_per_mwh_delta_soc = 0.0,
     prevent_simultaneous_charge_discharge = false,
     terminal_condition = "none",
     terminal_energy_min_mwh = nothing,
+    degradation_linear_delta_soc = false,
 )
     timestamps = [DateTime("2026-01-01T00:00:00") + Hour(index - 1) for index in eachindex(prices)]
     period_durations = durations === nothing ? fill(1.0, length(prices)) : durations
@@ -48,14 +50,14 @@ function core_arbitrage_case(;
             initial_energy_mwh,
             charge_efficiency,
             discharge_efficiency,
-            0.0,
+            degradation_cost_per_mwh_delta_soc,
         ),
         time_series = BESSDispatch.TimeSeriesData(timestamps, prices, period_durations),
         constraints = BESSDispatch.ConstraintConfig(
             prevent_simultaneous_charge_discharge,
             terminal_condition,
             terminal_energy_min_mwh,
-            false,
+            degradation_linear_delta_soc,
         ),
     )
 end
@@ -250,6 +252,60 @@ end
         @test result.energy_mwh[1] ≈ 5.0 atol = 1e-6
         @test result.net_discharge_mw[2] ≈ 5.0 atol = 1e-6
         @test result.energy_mwh[2] ≈ 0.0 atol = 1e-6
+    end
+
+    @testset "enabled degradation reports absolute SOC movement and subtracts cost" begin
+        result = BESSDispatch.solve_dispatch(
+            core_arbitrage_case(
+                prices = [10.0, 100.0, 10.0],
+                degradation_cost_per_mwh_delta_soc = 2.0,
+                degradation_linear_delta_soc = true,
+            ),
+        )
+
+        @test result.termination_status == "OPTIMAL"
+        @test isapprox(result.delta_soc_abs_mwh[1], 10.0; atol = 1e-6)
+        @test isapprox(result.delta_soc_abs_mwh[2], 10.0; atol = 1e-6)
+        @test isapprox(result.delta_soc_abs_mwh[3], 0.0; atol = 1e-6)
+        @test result.degradation_cost_usd == result.delta_soc_abs_mwh .* 2.0
+        @test isapprox(result.objective_value_usd, 860.0; atol = 1e-6)
+    end
+
+    @testset "disabled degradation omits penalty and reports zero movement cost" begin
+        case_data = core_arbitrage_case(
+            prices = [10.0, 100.0],
+            degradation_cost_per_mwh_delta_soc = 50.0,
+            degradation_linear_delta_soc = false,
+        )
+
+        dispatch_model = BESSDispatch.build_dispatch_model(case_data)
+        result = BESSDispatch.solve_dispatch(case_data)
+
+        @test dispatch_model.delta_soc_abs_mwh === nothing
+        @test result.termination_status == "OPTIMAL"
+        @test result.delta_soc_abs_mwh == [0.0, 0.0]
+        @test result.degradation_cost_usd == [0.0, 0.0]
+        @test isapprox(result.objective_value_usd, 900.0; atol = 1e-6)
+    end
+
+    @testset "positive degradation avoids unnecessary cycling at constant prices" begin
+        result = BESSDispatch.solve_dispatch(
+            core_arbitrage_case(
+                prices = [50.0, 50.0, 50.0],
+                initial_energy_mwh = 5.0,
+                degradation_cost_per_mwh_delta_soc = 2.0,
+                prevent_simultaneous_charge_discharge = true,
+                terminal_condition = "equal_initial",
+                degradation_linear_delta_soc = true,
+            ),
+        )
+
+        @test result.termination_status == "OPTIMAL"
+        @test all(result.p_charge_mw .<= 1e-6)
+        @test all(result.p_discharge_mw .<= 1e-6)
+        @test all(abs.(result.energy_mwh .- 5.0) .<= 1e-6)
+        @test all(result.delta_soc_abs_mwh .<= 1e-6)
+        @test isapprox(result.objective_value_usd, 0.0; atol = 1e-6)
     end
 
     @testset "terminal_condition none leaves final energy unconstrained" begin
