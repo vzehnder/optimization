@@ -63,6 +63,12 @@ function build_dispatch_model(case_data::CaseData)::DispatchModel
         )
     end
 
+    if case_data.constraints.terminal_condition == "equal_initial"
+        @constraint(model, energy_mwh[n_periods] == bess.initial_energy_mwh)
+    elseif case_data.constraints.terminal_condition == "min_terminal"
+        @constraint(model, energy_mwh[n_periods] >= case_data.constraints.terminal_energy_min_mwh)
+    end
+
     @objective(
         model,
         Max,

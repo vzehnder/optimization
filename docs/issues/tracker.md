@@ -20,7 +20,7 @@ External issue tracker integration has not been configured, so each issue is sto
 | BESS-MVP-001 | Bootstrap Julia Package With Smoke Test | AFK | Done | None | [BESS-MVP-001-bootstrap-julia-package.md](BESS-MVP-001-bootstrap-julia-package.md) |
 | BESS-MVP-002 | Load And Validate Arbitrage Case Data | AFK | Done | BESS-MVP-001 | [BESS-MVP-002-load-and-validate-case-data.md](BESS-MVP-002-load-and-validate-case-data.md) |
 | BESS-MVP-003 | Solve Core Full-Horizon Arbitrage Model | AFK | Done | BESS-MVP-000, BESS-MVP-002 | [BESS-MVP-003-solve-core-arbitrage-model.md](BESS-MVP-003-solve-core-arbitrage-model.md) |
-| BESS-MVP-004 | Add Configurable Terminal Condition Modes | AFK | Todo | BESS-MVP-003 | [BESS-MVP-004-add-terminal-condition-modes.md](BESS-MVP-004-add-terminal-condition-modes.md) |
+| BESS-MVP-004 | Add Configurable Terminal Condition Modes | AFK | Done | BESS-MVP-003 | [BESS-MVP-004-add-terminal-condition-modes.md](BESS-MVP-004-add-terminal-condition-modes.md) |
 | BESS-MVP-005 | Add Binary Anti-Simultaneity Dispatch Mode | AFK | Todo | BESS-MVP-003 | [BESS-MVP-005-add-anti-simultaneity-binary-mode.md](BESS-MVP-005-add-anti-simultaneity-binary-mode.md) |
 | BESS-MVP-006 | Add Linear Delta-SOC Degradation Cost | AFK | Todo | BESS-MVP-003 | [BESS-MVP-006-add-delta-soc-degradation.md](BESS-MVP-006-add-delta-soc-degradation.md) |
 | BESS-MVP-007 | Persist Dispatch Results And Run Metadata | AFK | Todo | BESS-MVP-004, BESS-MVP-005, BESS-MVP-006 | [BESS-MVP-007-persist-run-outputs.md](BESS-MVP-007-persist-run-outputs.md) |
@@ -50,6 +50,8 @@ External issue tracker integration has not been configured, so each issue is sto
 | 2026-05-24 | BESS-MVP-002 | In Progress -> Done | Added PRD structs, `load_case`, YAML/CSV sample case, validation for time series, BESS parameters, efficiencies, and terminal config. Verification passed with `julia --project=. -e "import Pkg; Pkg.test()"`. |
 | 2026-05-25 | BESS-MVP-003 | Todo -> In Progress | Started core full-horizon JuMP arbitrage model using TDD. |
 | 2026-05-25 | BESS-MVP-003 | In Progress -> Done | Added `build_dispatch_model` and `solve_dispatch` for the continuous core arbitrage model, with tests for sample model construction, low-high-low dispatch, and variable duration energy balance. Verification passed with `julia --project=. -e "import Pkg; Pkg.test()"`. |
+| 2026-05-25 | BESS-MVP-004 | Todo -> In Progress | Started configurable terminal condition modes using TDD. |
+| 2026-05-25 | BESS-MVP-004 | In Progress -> Done | Added solved-result coverage for `none`, `equal_initial`, and `min_terminal`, and implemented terminal energy constraints in the JuMP model. Existing validation tests cover invalid terminal configuration. Verification passed with `julia --project=. -e "import Pkg; Pkg.test()"`. |
 
 ## How To Update This Tracker
 

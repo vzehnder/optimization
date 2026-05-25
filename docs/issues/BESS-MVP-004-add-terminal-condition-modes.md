@@ -1,6 +1,6 @@
 # BESS-MVP-004: Add Configurable Terminal Condition Modes
 
-Status: Todo
+Status: Done
 Type: AFK
 Source: `docs/prd_bess_dispatch.md`, `docs/mathematical_model.md`
 
@@ -12,11 +12,11 @@ The behavior must be testable from input data through solved results, not only a
 
 ## Acceptance criteria
 
-- [ ] `terminal_condition = none` solves without a final energy constraint.
-- [ ] `terminal_condition = equal_initial` constrains final energy to initial energy within numerical tolerance.
-- [ ] `terminal_condition = min_terminal` constrains final energy to the configured minimum.
-- [ ] Invalid terminal configuration fails during validation before model construction.
-- [ ] Tests cover all terminal modes.
+- [x] `terminal_condition = none` solves without a final energy constraint.
+- [x] `terminal_condition = equal_initial` constrains final energy to initial energy within numerical tolerance.
+- [x] `terminal_condition = min_terminal` constrains final energy to the configured minimum.
+- [x] Invalid terminal configuration fails during validation before model construction.
+- [x] Tests cover all terminal modes.
 
 ## Blocked by
 

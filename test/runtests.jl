@@ -28,12 +28,15 @@ end
 
 function core_arbitrage_case(;
     prices = [10.0, 100.0, 10.0],
-    durations = [1.0, 1.0, 1.0],
+    durations = nothing,
     initial_energy_mwh = 0.0,
     charge_efficiency = 1.0,
     discharge_efficiency = 1.0,
+    terminal_condition = "none",
+    terminal_energy_min_mwh = nothing,
 )
     timestamps = [DateTime("2026-01-01T00:00:00") + Hour(index - 1) for index in eachindex(prices)]
+    period_durations = durations === nothing ? fill(1.0, length(prices)) : durations
 
     return valid_case_data(
         bess = BESSDispatch.BESSParameters(
@@ -46,8 +49,8 @@ function core_arbitrage_case(;
             discharge_efficiency,
             0.0,
         ),
-        time_series = BESSDispatch.TimeSeriesData(timestamps, prices, durations),
-        constraints = BESSDispatch.ConstraintConfig(false, "none", nothing, false),
+        time_series = BESSDispatch.TimeSeriesData(timestamps, prices, period_durations),
+        constraints = BESSDispatch.ConstraintConfig(false, terminal_condition, terminal_energy_min_mwh, false),
     )
 end
 
@@ -241,5 +244,45 @@ end
         @test result.energy_mwh[1] ≈ 5.0 atol = 1e-6
         @test result.net_discharge_mw[2] ≈ 5.0 atol = 1e-6
         @test result.energy_mwh[2] ≈ 0.0 atol = 1e-6
+    end
+
+    @testset "terminal_condition none leaves final energy unconstrained" begin
+        result = BESSDispatch.solve_dispatch(
+            core_arbitrage_case(
+                prices = [100.0, 10.0],
+                initial_energy_mwh = 10.0,
+                terminal_condition = "none",
+            ),
+        )
+
+        @test result.termination_status == "OPTIMAL"
+        @test result.energy_mwh[end] < 10.0 - 1e-6
+    end
+
+    @testset "terminal_condition equal_initial returns final energy to initial energy" begin
+        result = BESSDispatch.solve_dispatch(
+            core_arbitrage_case(
+                prices = [100.0, 10.0],
+                initial_energy_mwh = 10.0,
+                terminal_condition = "equal_initial",
+            ),
+        )
+
+        @test result.termination_status == "OPTIMAL"
+        @test result.energy_mwh[end] ≈ 10.0 atol = 1e-6
+    end
+
+    @testset "terminal_condition min_terminal returns final energy to configured minimum" begin
+        result = BESSDispatch.solve_dispatch(
+            core_arbitrage_case(
+                prices = [100.0, 10.0],
+                initial_energy_mwh = 10.0,
+                terminal_condition = "min_terminal",
+                terminal_energy_min_mwh = 4.0,
+            ),
+        )
+
+        @test result.termination_status == "OPTIMAL"
+        @test result.energy_mwh[end] ≈ 4.0 atol = 1e-6
     end
 end
