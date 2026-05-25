@@ -1,0 +1,18 @@
+case_name: arbitrage_mvp
+
+solver:
+  name: HiGHS
+  options: {}
+
+constraints:
+  prevent_simultaneous_charge_discharge: true
+  terminal_condition: equal_initial
+  terminal_energy_min_mwh: null
+  degradation_linear_delta_soc: true
+
+horizon:
+  mode: full_horizon
+  start_timestamp: null
+  end_timestamp: null
+  step_hours: null
+  lookahead_periods: null

@@ -1,6 +1,6 @@
 # BESS-MVP-003: Solve Core Full-Horizon Arbitrage Model
 
-Status: Todo
+Status: Done
 Type: AFK
 Source: `docs/prd_bess_dispatch.md`, `docs/mathematical_model.md`
 
@@ -12,14 +12,14 @@ This slice should produce an optimization result in memory that can be inspected
 
 ## Acceptance criteria
 
-- [ ] A validated sample case can be converted into a JuMP model.
-- [ ] The model includes period-indexed `duration_hours`.
-- [ ] The model enforces energy balance using end-of-period energy.
-- [ ] The model enforces energy and power bounds.
-- [ ] The objective maximizes price-taker arbitrage value before degradation.
-- [ ] The model solves with HiGHS.
-- [ ] Tests verify that a low-high-low price shape produces economically sensible dispatch when physically feasible.
-- [ ] Tests verify that variable period duration changes energy according to `MW * hours = MWh`.
+- [x] A validated sample case can be converted into a JuMP model.
+- [x] The model includes period-indexed `duration_hours`.
+- [x] The model enforces energy balance using end-of-period energy.
+- [x] The model enforces energy and power bounds.
+- [x] The objective maximizes price-taker arbitrage value before degradation.
+- [x] The model solves with HiGHS.
+- [x] Tests verify that a low-high-low price shape produces economically sensible dispatch when physically feasible.
+- [x] Tests verify that variable period duration changes energy according to `MW * hours = MWh`.
 
 ## Blocked by
 

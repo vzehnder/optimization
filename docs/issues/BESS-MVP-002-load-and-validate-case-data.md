@@ -1,6 +1,6 @@
 # BESS-MVP-002: Load And Validate Arbitrage Case Data
 
-Status: Todo
+Status: Done
 Type: AFK
 Source: `docs/prd_bess_dispatch.md`
 
@@ -12,14 +12,14 @@ The model builder must remain independent from file paths and data source detail
 
 ## Acceptance criteria
 
-- [ ] A sample arbitrage case exists with scalar BESS parameters, run configuration, and a price time series.
-- [ ] Loading the sample case returns validated internal structs matching the PRD contract.
-- [ ] Validation rejects nonpositive durations.
-- [ ] Validation rejects missing or invalid prices.
-- [ ] Validation rejects invalid energy bounds and invalid initial energy.
-- [ ] Validation rejects invalid charge and discharge efficiencies.
-- [ ] Validation rejects invalid terminal configuration.
-- [ ] Tests cover successful loading and representative validation failures.
+- [x] A sample arbitrage case exists with scalar BESS parameters, run configuration, and a price time series.
+- [x] Loading the sample case returns validated internal structs matching the PRD contract.
+- [x] Validation rejects nonpositive durations.
+- [x] Validation rejects missing or invalid prices.
+- [x] Validation rejects invalid energy bounds and invalid initial energy.
+- [x] Validation rejects invalid charge and discharge efficiencies.
+- [x] Validation rejects invalid terminal configuration.
+- [x] Tests cover successful loading and representative validation failures.
 
 ## Blocked by
 

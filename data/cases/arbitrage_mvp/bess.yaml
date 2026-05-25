@@ -1,0 +1,8 @@
+charge_power_max_mw: 10.0
+discharge_power_max_mw: 10.0
+energy_min_mwh: 0.0
+energy_max_mwh: 40.0
+initial_energy_mwh: 20.0
+charge_efficiency: 0.95
+discharge_efficiency: 0.95
+degradation_cost_per_mwh_delta_soc: 2.0
