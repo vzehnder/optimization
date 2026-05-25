@@ -13,6 +13,7 @@ end
 struct DispatchResult
     case_name::String
     solver_name::String
+    solver_status::String
     termination_status::String
     objective_value_usd::Float64
     p_charge_mw::Vector{Float64}
@@ -129,6 +130,7 @@ function solve_dispatch(case_data::CaseData)::DispatchResult
     optimize!(dispatch_model.model)
 
     termination = string(termination_status(dispatch_model.model))
+    solver_status = raw_solver_status(dispatch_model.model, termination)
     if !has_values(dispatch_model.model)
         throw(ErrorException("optimization finished without primal values; termination_status=$termination"))
     end
@@ -147,6 +149,7 @@ function solve_dispatch(case_data::CaseData)::DispatchResult
     return DispatchResult(
         case_data.case_name,
         case_data.solver.name,
+        solver_status,
         termination,
         objective_value(dispatch_model.model),
         p_charge,
@@ -170,4 +173,13 @@ function realized_delta_soc_abs(initial_energy_mwh::Float64, energy_mwh::Vector{
     end
 
     return delta_soc_abs
+end
+
+function raw_solver_status(model::JuMP.Model, fallback::String)::String
+    try
+        status = raw_status(model)
+        return isempty(status) ? fallback : string(status)
+    catch
+        return fallback
+    end
 end

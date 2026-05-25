@@ -1,7 +1,10 @@
 using Dates
 using BESSDispatch
+using CSV
+using JSON3
 using JuMP
 using Test
+using YAML
 
 function valid_case_data(;
     bess = BESSDispatch.BESSParameters(10.0, 10.0, 0.0, 40.0, 20.0, 0.95, 0.95, 2.0),
@@ -237,6 +240,74 @@ end
         @test length(dispatch_model.p_charge_mw) == 3
         @test length(dispatch_model.p_discharge_mw) == 3
         @test length(dispatch_model.energy_mwh) == 3
+    end
+
+    @testset "running the sample case writes persisted run outputs" begin
+        case_dir = joinpath(@__DIR__, "..", "data", "cases", "arbitrage_mvp")
+
+        mktempdir() do output_root
+            run_output = BESSDispatch.run_case(
+                case_dir;
+                output_root = output_root,
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+
+            @test run_output.case_name == "arbitrage_mvp"
+            @test run_output.run_timestamp == "20260102T030405000"
+            @test run_output.output_dir == joinpath(output_root, "arbitrage_mvp", "20260102T030405000")
+            @test isfile(run_output.dispatch_path)
+            @test isfile(run_output.summary_path)
+            @test isfile(run_output.config_resolved_path)
+            @test isfile(run_output.model_metadata_path)
+
+            dispatch_rows = collect(CSV.File(run_output.dispatch_path))
+            @test length(dispatch_rows) == 3
+            @test propertynames(dispatch_rows[1]) == [
+                :timestamp,
+                :duration_hours,
+                :price_usd_per_mwh,
+                :p_charge_mw,
+                :p_discharge_mw,
+                :net_discharge_mw,
+                :energy_mwh,
+                :delta_soc_abs_mwh,
+                :is_charging,
+                :period_profit_usd,
+                :degradation_cost_usd,
+            ]
+
+            summary = JSON3.read(read(run_output.summary_path, String))
+            @test string(summary.case_name) == "arbitrage_mvp"
+            @test string(summary.run_timestamp) == "20260102T030405000"
+            @test string(summary.solver_name) == "HiGHS"
+            @test !isempty(string(summary.solver_status))
+            @test string(summary.termination_status) == "OPTIMAL"
+            @test summary.objective_value_usd == run_output.result.objective_value_usd
+            @test string(summary.source_identifiers.case_dir) == abspath(case_dir)
+
+            resolved_config = YAML.load_file(run_output.config_resolved_path)
+            @test resolved_config["case_name"] == "arbitrage_mvp"
+            @test resolved_config["constraints"]["terminal_condition"] == "equal_initial"
+            @test resolved_config["constraints"]["degradation_linear_delta_soc"] == true
+
+            metadata = JSON3.read(read(run_output.model_metadata_path, String))
+            @test string(metadata.model_name) == "single_bess_price_taker_dispatch"
+            @test metadata.number_of_periods == 3
+            @test string(metadata.terminal_condition) == "equal_initial"
+            @test metadata.active_constraint_flags.prevent_simultaneous_charge_discharge == true
+            @test metadata.active_constraint_flags.degradation_linear_delta_soc == true
+            @test string(metadata.unit_conventions.energy) == "MWh"
+
+            second_run_output = BESSDispatch.run_case(
+                case_dir;
+                output_root = output_root,
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+
+            @test second_run_output.run_timestamp == "20260102T030405000-02"
+            @test second_run_output.output_dir != run_output.output_dir
+            @test isfile(second_run_output.dispatch_path)
+        end
     end
 
     @testset "uses period duration in energy balance" begin
