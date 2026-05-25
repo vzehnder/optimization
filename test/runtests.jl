@@ -65,6 +65,25 @@ function core_arbitrage_case(;
     )
 end
 
+function plot_report_command(script_path::AbstractString, run_output_dir::AbstractString)
+    python = Sys.which("python")
+    if python !== nothing
+        return `$(python) $(script_path) $(run_output_dir)`
+    end
+
+    python3 = Sys.which("python3")
+    if python3 !== nothing
+        return `$(python3) $(script_path) $(run_output_dir)`
+    end
+
+    py = Sys.which("py")
+    if py !== nothing
+        return `$(py) -3 $(script_path) $(run_output_dir)`
+    end
+
+    error("Python executable is required to run the Plotly report smoke check")
+end
+
 @testset "BESSDispatch package" begin
     @testset "can be imported" begin
         @test BESSDispatch isa Module
@@ -86,12 +105,35 @@ end
         @test case_data.bess.degradation_cost_per_mwh_delta_soc == 2.0
 
         @test case_data.time_series.timestamp == [
-            DateTime("2026-01-01T00:00:00"),
-            DateTime("2026-01-01T01:00:00"),
-            DateTime("2026-01-01T02:00:00"),
+            DateTime("2026-01-01T00:00:00") + Hour(hour) for hour in 0:23
         ]
-        @test case_data.time_series.price_usd_per_mwh == [40.0, 20.0, 90.0]
-        @test case_data.time_series.duration_hours == [1.0, 1.0, 1.0]
+        @test case_data.time_series.price_usd_per_mwh == [
+            40.0,
+            38.0,
+            35.0,
+            32.0,
+            30.0,
+            34.0,
+            45.0,
+            55.0,
+            60.0,
+            50.0,
+            35.0,
+            25.0,
+            20.0,
+            22.0,
+            28.0,
+            45.0,
+            70.0,
+            95.0,
+            110.0,
+            100.0,
+            80.0,
+            60.0,
+            50.0,
+            42.0,
+        ]
+        @test case_data.time_series.duration_hours == fill(1.0, 24)
 
         @test case_data.constraints.prevent_simultaneous_charge_discharge
         @test case_data.constraints.terminal_condition == "equal_initial"
@@ -237,9 +279,9 @@ end
         dispatch_model = BESSDispatch.build_dispatch_model(BESSDispatch.load_case(case_dir))
 
         @test dispatch_model.model isa JuMP.Model
-        @test length(dispatch_model.p_charge_mw) == 3
-        @test length(dispatch_model.p_discharge_mw) == 3
-        @test length(dispatch_model.energy_mwh) == 3
+        @test length(dispatch_model.p_charge_mw) == 24
+        @test length(dispatch_model.p_discharge_mw) == 24
+        @test length(dispatch_model.energy_mwh) == 24
     end
 
     @testset "running the sample case writes persisted run outputs" begin
@@ -261,7 +303,7 @@ end
             @test isfile(run_output.model_metadata_path)
 
             dispatch_rows = collect(CSV.File(run_output.dispatch_path))
-            @test length(dispatch_rows) == 3
+            @test length(dispatch_rows) == 24
             @test propertynames(dispatch_rows[1]) == [
                 :timestamp,
                 :duration_hours,
@@ -292,7 +334,7 @@ end
 
             metadata = JSON3.read(read(run_output.model_metadata_path, String))
             @test string(metadata.model_name) == "single_bess_price_taker_dispatch"
-            @test metadata.number_of_periods == 3
+            @test metadata.number_of_periods == 24
             @test string(metadata.terminal_condition) == "equal_initial"
             @test metadata.active_constraint_flags.prevent_simultaneous_charge_discharge == true
             @test metadata.active_constraint_flags.degradation_linear_delta_soc == true
@@ -307,6 +349,34 @@ end
             @test second_run_output.run_timestamp == "20260102T030405000-02"
             @test second_run_output.output_dir != run_output.output_dir
             @test isfile(second_run_output.dispatch_path)
+        end
+    end
+
+    @testset "plot report script creates an HTML report for a sample run" begin
+        case_dir = joinpath(@__DIR__, "..", "data", "cases", "arbitrage_mvp")
+        script_path = joinpath(@__DIR__, "..", "python", "plot_results.py")
+
+        mktempdir() do output_root
+            run_output = BESSDispatch.run_case(
+                case_dir;
+                output_root = output_root,
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+
+            report_path = joinpath(run_output.output_dir, "plots", "dispatch_report.html")
+            @test !isfile(report_path)
+
+            run(plot_report_command(script_path, run_output.output_dir))
+
+            @test isfile(report_path)
+            report_html = read(report_path, String)
+            @test occursin("Plotly.newPlot", report_html)
+            @test occursin("price_usd_per_mwh", report_html)
+            @test occursin("p_charge_mw", report_html)
+            @test occursin("p_discharge_mw", report_html)
+            @test occursin("energy_mwh", report_html)
+            @test occursin("period_profit_usd", report_html)
+            @test occursin("degradation_cost_usd", report_html)
         end
     end
 

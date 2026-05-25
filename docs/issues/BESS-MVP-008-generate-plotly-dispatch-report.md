@@ -1,6 +1,6 @@
 # BESS-MVP-008: Generate Plotly Dispatch Report From Run Output
 
-Status: Todo
+Status: Done
 Type: AFK
 Source: `docs/prd_bess_dispatch.md`
 
@@ -12,13 +12,13 @@ The script should depend on the persisted output contract, not on Julia internal
 
 ## Acceptance criteria
 
-- [ ] The script accepts a run output folder as input.
-- [ ] The script reads `dispatch.csv` from that folder.
-- [ ] The generated HTML includes price and dispatch traces.
-- [ ] The generated HTML includes stored energy over time.
-- [ ] The generated HTML includes period profit and degradation cost.
-- [ ] The report is written under a `plots` folder inside the run output folder.
-- [ ] A smoke check verifies that the HTML report is created for the sample run.
+- [x] The script accepts a run output folder as input.
+- [x] The script reads `dispatch.csv` from that folder.
+- [x] The generated HTML includes price and dispatch traces.
+- [x] The generated HTML includes stored energy over time.
+- [x] The generated HTML includes period profit and degradation cost.
+- [x] The report is written under a `plots` folder inside the run output folder.
+- [x] A smoke check verifies that the HTML report is created for the sample run.
 
 ## Blocked by
 
