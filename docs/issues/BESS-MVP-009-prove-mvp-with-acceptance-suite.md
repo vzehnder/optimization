@@ -1,6 +1,6 @@
 # BESS-MVP-009: Prove MVP With Acceptance Scenario Suite
 
-Status: Todo
+Status: Done
 Type: AFK
 Source: `docs/prd_bess_dispatch.md`, `docs/mathematical_model.md`
 
@@ -12,14 +12,20 @@ This slice should make it clear how to run the Julia tests, execute the sample c
 
 ## Acceptance criteria
 
-- [ ] The test suite covers constant prices with positive degradation and verifies no unnecessary cycling.
-- [ ] The test suite covers low-high-low prices and verifies charge/discharge timing when feasible.
-- [ ] The test suite verifies `equal_initial` terminal energy within tolerance.
-- [ ] The test suite verifies anti-simultaneity within tolerance.
-- [ ] The test suite verifies variable duration energy accounting.
-- [ ] Project documentation explains how to run tests.
-- [ ] Project documentation explains how to run the sample case.
-- [ ] Project documentation explains how to generate the Plotly report.
+- [x] The test suite covers constant prices with positive degradation and verifies no unnecessary cycling.
+- [x] The test suite covers low-high-low prices and verifies charge/discharge timing when feasible.
+- [x] The test suite verifies `equal_initial` terminal energy within tolerance.
+- [x] The test suite verifies anti-simultaneity within tolerance.
+- [x] The test suite verifies variable duration energy accounting.
+- [x] Project documentation explains how to run tests.
+- [x] Project documentation explains how to run the sample case.
+- [x] Project documentation explains how to generate the Plotly report.
+
+## Verification
+
+- `julia --project=. -e "import Pkg; Pkg.test()"` passed with 153 tests.
+- Documented sample-case command produced `outputs\arbitrage_mvp\20260526T100855145`.
+- `python python/plot_results.py outputs\arbitrage_mvp\20260526T100855145` produced `plots\dispatch_report.html`.
 
 ## Blocked by
 

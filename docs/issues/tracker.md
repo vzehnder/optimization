@@ -25,7 +25,7 @@ External issue tracker integration has not been configured, so each issue is sto
 | BESS-MVP-006 | Add Linear Delta-SOC Degradation Cost | AFK | Done | BESS-MVP-003 | [BESS-MVP-006-add-delta-soc-degradation.md](BESS-MVP-006-add-delta-soc-degradation.md) |
 | BESS-MVP-007 | Persist Dispatch Results And Run Metadata | AFK | Done | BESS-MVP-004, BESS-MVP-005, BESS-MVP-006 | [BESS-MVP-007-persist-run-outputs.md](BESS-MVP-007-persist-run-outputs.md) |
 | BESS-MVP-008 | Generate Plotly Dispatch Report From Run Output | AFK | Done | BESS-MVP-007 | [BESS-MVP-008-generate-plotly-dispatch-report.md](BESS-MVP-008-generate-plotly-dispatch-report.md) |
-| BESS-MVP-009 | Prove MVP With Acceptance Scenario Suite | AFK | Todo | BESS-MVP-007, BESS-MVP-008 | [BESS-MVP-009-prove-mvp-with-acceptance-suite.md](BESS-MVP-009-prove-mvp-with-acceptance-suite.md) |
+| BESS-MVP-009 | Prove MVP With Acceptance Scenario Suite | AFK | Done | BESS-MVP-007, BESS-MVP-008 | [BESS-MVP-009-prove-mvp-with-acceptance-suite.md](BESS-MVP-009-prove-mvp-with-acceptance-suite.md) |
 
 ## Recommended Execution Order
 
@@ -60,6 +60,8 @@ External issue tracker integration has not been configured, so each issue is sto
 | 2026-05-25 | BESS-MVP-007 | In Progress -> Done | Added `run_case` and `write_run_outputs`, persisted dispatch CSV, summary JSON, resolved config YAML, and model metadata JSON with unique run folders. Verification passed with `julia --project=. -e "import Pkg; Pkg.test()"` (117 tests). |
 | 2026-05-25 | BESS-MVP-008 | Todo -> In Progress | Started Plotly dispatch report generation from persisted run output using TDD. |
 | 2026-05-25 | BESS-MVP-008 | In Progress -> Done | Added `python/plot_results.py` and a smoke test that runs it against a sample persisted run output and verifies `plots/dispatch_report.html` contains Plotly traces for price, dispatch, energy, profit, and degradation cost. Verification passed with `julia --project=. -e "import Pkg; Pkg.test()"` (126 tests). |
+| 2026-05-26 | BESS-MVP-009 | Todo -> In Progress | Started final MVP acceptance scenario suite and run instructions using TDD. |
+| 2026-05-26 | BESS-MVP-009 | In Progress -> Done | Added grouped MVP acceptance scenarios and README run instructions for tests, sample case execution, and Plotly report generation. Verification passed with `julia --project=. -e "import Pkg; Pkg.test()"` (153 tests), the documented `BESSDispatch.run_case` command, and `python python/plot_results.py outputs\arbitrage_mvp\20260526T100855145`. |
 
 ## How To Update This Tracker
 

@@ -6,6 +6,10 @@ using JuMP
 using Test
 using YAML
 
+const POWER_TOLERANCE_MW = 1e-6
+const ENERGY_TOLERANCE_MWH = 1e-6
+const OBJECTIVE_TOLERANCE_USD = 1e-5
+
 function valid_case_data(;
     bess = BESSDispatch.BESSParameters(10.0, 10.0, 0.0, 40.0, 20.0, 0.95, 0.95, 2.0),
     time_series = BESSDispatch.TimeSeriesData(
@@ -102,7 +106,7 @@ end
         @test case_data.bess.initial_energy_mwh == 20.0
         @test case_data.bess.charge_efficiency == 0.95
         @test case_data.bess.discharge_efficiency == 0.95
-        @test case_data.bess.degradation_cost_per_mwh_delta_soc == 2.0
+        @test case_data.bess.degradation_cost_per_mwh_delta_soc == 20.0
 
         @test case_data.time_series.timestamp == [
             DateTime("2026-01-01T00:00:00") + Hour(hour) for hour in 0:23
@@ -544,5 +548,109 @@ end
         @test all(!JuMP.is_binary(variable) for variable in JuMP.all_variables(dispatch_model.model))
         @test result.termination_status == "OPTIMAL"
         @test result.is_charging === nothing
+    end
+
+    @testset "MVP acceptance scenario suite" begin
+        @testset "constant prices with positive degradation do not cycle" begin
+            result = BESSDispatch.solve_dispatch(
+                core_arbitrage_case(
+                    prices = [50.0, 50.0, 50.0],
+                    initial_energy_mwh = 5.0,
+                    degradation_cost_per_mwh_delta_soc = 2.0,
+                    prevent_simultaneous_charge_discharge = true,
+                    terminal_condition = "equal_initial",
+                    degradation_linear_delta_soc = true,
+                ),
+            )
+
+            @test result.termination_status == "OPTIMAL"
+            @test all(result.p_charge_mw .<= POWER_TOLERANCE_MW)
+            @test all(result.p_discharge_mw .<= POWER_TOLERANCE_MW)
+            @test all(abs.(result.energy_mwh .- 5.0) .<= ENERGY_TOLERANCE_MWH)
+            @test all(result.delta_soc_abs_mwh .<= ENERGY_TOLERANCE_MWH)
+            @test isapprox(result.objective_value_usd, 0.0; atol = OBJECTIVE_TOLERANCE_USD)
+        end
+
+        @testset "low-high-low shape charges low and discharges high" begin
+            result = BESSDispatch.solve_dispatch(
+                core_arbitrage_case(
+                    prices = [30.0, 10.0, 100.0, 30.0],
+                    initial_energy_mwh = 0.0,
+                    prevent_simultaneous_charge_discharge = true,
+                    terminal_condition = "equal_initial",
+                ),
+            )
+
+            @test result.termination_status == "OPTIMAL"
+            @test result.p_charge_mw[2] > POWER_TOLERANCE_MW
+            @test result.p_discharge_mw[3] > POWER_TOLERANCE_MW
+            @test isapprox(result.energy_mwh[end], 0.0; atol = ENERGY_TOLERANCE_MWH)
+            @test result.objective_value_usd > 0.0
+        end
+
+        @testset "equal_initial terminal energy is enforced" begin
+            initial_energy_mwh = 10.0
+            result = BESSDispatch.solve_dispatch(
+                core_arbitrage_case(
+                    prices = [100.0, 10.0],
+                    initial_energy_mwh = initial_energy_mwh,
+                    terminal_condition = "equal_initial",
+                ),
+            )
+
+            @test result.termination_status == "OPTIMAL"
+            @test isapprox(result.energy_mwh[end], initial_energy_mwh; atol = ENERGY_TOLERANCE_MWH)
+        end
+
+        @testset "anti-simultaneity prevents same-period charge and discharge" begin
+            result = BESSDispatch.solve_dispatch(
+                core_arbitrage_case(
+                    prices = [10.0, 100.0],
+                    prevent_simultaneous_charge_discharge = true,
+                    terminal_condition = "equal_initial",
+                ),
+            )
+
+            @test result.termination_status == "OPTIMAL"
+            @test result.is_charging !== nothing
+            @test all(
+                !(
+                    result.p_charge_mw[period] > POWER_TOLERANCE_MW &&
+                    result.p_discharge_mw[period] > POWER_TOLERANCE_MW
+                ) for period in eachindex(result.p_charge_mw)
+            )
+        end
+
+        @testset "variable duration energy accounting uses MW times hours" begin
+            result = BESSDispatch.solve_dispatch(
+                core_arbitrage_case(
+                    prices = [10.0, 100.0],
+                    durations = [0.5, 1.0],
+                    prevent_simultaneous_charge_discharge = true,
+                ),
+            )
+
+            @test result.termination_status == "OPTIMAL"
+            @test isapprox(result.p_charge_mw[1], 10.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(result.energy_mwh[1], 10.0 * 0.5; atol = ENERGY_TOLERANCE_MWH)
+            @test isapprox(result.p_discharge_mw[2], 5.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(result.energy_mwh[end], 0.0; atol = ENERGY_TOLERANCE_MWH)
+        end
+    end
+
+    @testset "README documents MVP execution flow" begin
+        readme_path = joinpath(@__DIR__, "..", "README.md")
+
+        @test isfile(readme_path)
+
+        if isfile(readme_path)
+            readme = read(readme_path, String)
+
+            @test occursin("julia --project=. -e \"import Pkg; Pkg.test()\"", readme)
+            @test occursin("BESSDispatch.run_case", readme)
+            @test occursin("data/cases/arbitrage_mvp", readme)
+            @test occursin("python python/plot_results.py", readme)
+            @test occursin("plots/dispatch_report.html", readme)
+        end
     end
 end
