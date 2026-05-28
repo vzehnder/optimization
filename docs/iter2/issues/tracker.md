@@ -16,14 +16,14 @@ External issue tracker integration has not been configured, so each issue is sto
 
 | ID | Title | Type | Triage | Status | Blocked by | Issue file |
 | --- | --- | --- | --- | --- | --- | --- |
-| BESS-ITER2-000 | Review One-Bus Mathematical Formulation | HITL | ready-for-agent | Todo | None | [BESS-ITER2-000-review-one-bus-mathematical-formulation.md](BESS-ITER2-000-review-one-bus-mathematical-formulation.md) |
+| BESS-ITER2-000 | Review One-Bus Mathematical Formulation | HITL | ready-for-agent | Done | None | [BESS-ITER2-000-review-one-bus-mathematical-formulation.md](BESS-ITER2-000-review-one-bus-mathematical-formulation.md) |
 | BESS-ITER2-001 | Run Minimal Hybrid System End To End | AFK | ready-for-agent | Todo | BESS-ITER2-000 | [BESS-ITER2-001-run-minimal-hybrid-system-end-to-end.md](BESS-ITER2-001-run-minimal-hybrid-system-end-to-end.md) |
 | BESS-ITER2-002 | Harden Graph And Time-Series Validation | AFK | ready-for-agent | Todo | BESS-ITER2-001 | [BESS-ITER2-002-harden-graph-and-time-series-validation.md](BESS-ITER2-002-harden-graph-and-time-series-validation.md) |
 | BESS-ITER2-003 | Add Curtailment And Curtailment Penalty Scenario | AFK | ready-for-agent | Todo | BESS-ITER2-001 | [BESS-ITER2-003-add-curtailment-and-curtailment-penalty-scenario.md](BESS-ITER2-003-add-curtailment-and-curtailment-penalty-scenario.md) |
 | BESS-ITER2-004 | Add Local Load Scenario | AFK | ready-for-agent | Todo | BESS-ITER2-001, BESS-ITER2-002 | [BESS-ITER2-004-add-local-load-scenario.md](BESS-ITER2-004-add-local-load-scenario.md) |
 | BESS-ITER2-005 | Add Grid Limits And Import Export Anti-Simultaneity | AFK | ready-for-agent | Todo | BESS-ITER2-001 | [BESS-ITER2-005-add-grid-limits-and-import-export-anti-simultaneity.md](BESS-ITER2-005-add-grid-limits-and-import-export-anti-simultaneity.md) |
 | BESS-ITER2-006 | Publish Stable Julia API And CLI Contract | AFK | ready-for-agent | Todo | BESS-ITER2-001 | [BESS-ITER2-006-publish-stable-julia-api-and-cli-contract.md](BESS-ITER2-006-publish-stable-julia-api-and-cli-contract.md) |
-| BESS-ITER2-007 | Preserve Single-BESS MVP Regression Contract | AFK | ready-for-agent | Todo | None | [BESS-ITER2-007-preserve-single-bess-mvp-regression-contract.md](BESS-ITER2-007-preserve-single-bess-mvp-regression-contract.md) |
+| BESS-ITER2-007 | Preserve Single-BESS MVP Regression Contract | AFK | ready-for-agent | Done | None | [BESS-ITER2-007-preserve-single-bess-mvp-regression-contract.md](BESS-ITER2-007-preserve-single-bess-mvp-regression-contract.md) |
 | BESS-ITER2-008 | Finalize Sample Docs And Acceptance Suite | AFK | ready-for-agent | Todo | BESS-ITER2-002, BESS-ITER2-003, BESS-ITER2-004, BESS-ITER2-005, BESS-ITER2-006, BESS-ITER2-007 | [BESS-ITER2-008-finalize-sample-docs-and-acceptance-suite.md](BESS-ITER2-008-finalize-sample-docs-and-acceptance-suite.md) |
 
 ## Recommended Execution Order
@@ -41,6 +41,18 @@ External issue tracker integration has not been configured, so each issue is sto
 | --- | --- | --- | --- |
 | 2026-05-28 | All | Created | Initial local issue set generated from the iteration 2 PRD and one-bus mathematical model. |
 | 2026-05-28 | All | Reworked | Replaced horizontal layer tickets with vertical tracer-bullet slices that each deliver a verifiable end-to-end behavior. |
+| 2026-05-28 | BESS-ITER2-000 | Todo -> Done | Reviewed and accepted the one-bus mathematical formulation. No corrections were required in `docs/iter2/mathematical_model.md`. |
+| 2026-05-28 | BESS-ITER2-007 | Todo -> Done | Added an explicit single-BESS MVP public contract regression guard and verified the full Julia suite with 163 tests, including the Plotly report smoke test. |
+
+## Regression Guard
+
+Every iteration 2 slice that changes code must run:
+
+```powershell
+julia --project=. -e "import Pkg; Pkg.test()"
+```
+
+This suite is the single-BESS MVP regression guard. It covers the public Julia names, the original YAML and CSV sample case, single-BESS solve behavior, persisted output files and columns, the Plotly report smoke flow, and MVP acceptance scenarios for constant price, low-high-low price, variable duration, terminal condition, degradation, and anti-simultaneity. Iteration 2 JSON inputs must not become a prerequisite for running iteration 1 cases.
 
 ## Dependency Notes
 

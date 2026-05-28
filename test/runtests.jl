@@ -93,6 +93,49 @@ end
         @test BESSDispatch isa Module
     end
 
+    @testset "single-BESS MVP public contract remains available" begin
+        exported_names = Set(names(BESSDispatch))
+        required_public_names = [
+            :BESSParameters,
+            :TimeSeriesData,
+            :ConstraintConfig,
+            :SolverConfig,
+            :HorizonConfig,
+            :CaseData,
+            :DispatchModel,
+            :DispatchResult,
+            :RunOutput,
+            :build_dispatch_model,
+            :load_case,
+            :run_case,
+            :solve_dispatch,
+            :validate_case_data,
+            :write_run_outputs,
+        ]
+
+        @test all(name -> name in exported_names, required_public_names)
+
+        case_dir = joinpath(@__DIR__, "..", "data", "cases", "arbitrage_mvp")
+        @test isfile(joinpath(case_dir, "config.yaml"))
+        @test isfile(joinpath(case_dir, "bess.yaml"))
+        @test isfile(joinpath(case_dir, "timeseries.csv"))
+        @test !isfile(joinpath(case_dir, "system_case.json"))
+
+        mktempdir() do output_root
+            run_output = BESSDispatch.run_case(
+                case_dir;
+                output_root = output_root,
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+
+            @test run_output.result.termination_status == "OPTIMAL"
+            @test isfile(run_output.dispatch_path)
+            @test isfile(run_output.summary_path)
+            @test isfile(run_output.config_resolved_path)
+            @test isfile(run_output.model_metadata_path)
+        end
+    end
+
     @testset "loads the sample arbitrage case" begin
         case_dir = joinpath(@__DIR__, "..", "data", "cases", "arbitrage_mvp")
 
