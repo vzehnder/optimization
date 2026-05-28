@@ -5,6 +5,10 @@ Type: HITL
 Triage: ready-for-agent
 Source: `docs/iter2/prd_bess_system_dispatch.md`
 
+## User stories covered
+
+18, 19, 20, 21, 29
+
 ## What to build
 
 Review and approve the one-bus hybrid system mathematical formulation before implementation starts.
