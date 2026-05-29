@@ -255,6 +255,10 @@ function write_minimal_system_case_json(case_dir::AbstractString; document = min
     return write_system_case_json(joinpath(case_dir, "system_case.json"), document)
 end
 
+function sample_hybrid_system_case_path()
+    return joinpath(@__DIR__, "..", "data", "cases", "hybrid_system", "system_case.json")
+end
+
 function system_case_node(document, node_id::AbstractString)
     return only(node for node in document["nodes"] if node["id"] == node_id)
 end
@@ -841,6 +845,78 @@ end
         end
     end
 
+    @testset "sample hybrid system case proves final acceptance flow" begin
+        sample_path = sample_hybrid_system_case_path()
+        @test isfile(sample_path)
+
+        system_case = BESSDispatch.load_system_case(sample_path)
+        @test system_case.case_name == "hybrid_system"
+        @test Set(node.id for node in system_case.nodes) == Set(["bus_1", "solar_1", "battery_1", "grid_1", "load_1"])
+
+        optimization_case = BESSDispatch.normalize_system_case(system_case)
+        @test optimization_case.case_name == "hybrid_system"
+        @test [asset.id for asset in optimization_case.renewables] == ["solar_1"]
+        @test [asset.id for asset in optimization_case.batteries] == ["battery_1"]
+        @test [asset.id for asset in optimization_case.grids] == ["grid_1"]
+        @test [asset.id for asset in optimization_case.loads] == ["load_1"]
+        @test optimization_case.renewable_available_power_mw == [2.0 10.0 0.0 1.0]
+        @test optimization_case.load_demand_mw == [1.0 1.0 5.0 0.0]
+        @test optimization_case.grids[1].export_power_max_mw == 4.0
+        @test optimization_case.grids[1].prevent_simultaneous_grid_import_export
+
+        result = BESSDispatch.solve_system_dispatch(optimization_case)
+        @test result.termination_status == "OPTIMAL"
+        @test any(result.p_renewable_curtailed_mw .> POWER_TOLERANCE_MW)
+        @test all(
+            !(
+                result.p_grid_import_mw[1, period] > POWER_TOLERANCE_MW &&
+                result.p_grid_export_mw[1, period] > POWER_TOLERANCE_MW
+            ) for period in axes(result.p_grid_import_mw, 2)
+        )
+
+        mktempdir() do output_root
+            run_output = BESSDispatch.run_system_case(
+                sample_path;
+                output_root = output_root,
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+
+            @test isfile(run_output.dispatch_path)
+            @test isfile(run_output.asset_dispatch_path)
+            @test isfile(run_output.summary_path)
+            @test isfile(run_output.system_case_resolved_path)
+            @test isfile(run_output.model_metadata_path)
+
+            dispatch_rows = collect(CSV.File(run_output.dispatch_path))
+            @test length(dispatch_rows) == 4
+            @test any(row -> row.renewable_curtailed_mw > POWER_TOLERANCE_MW, dispatch_rows)
+            @test any(row -> row.load_demand_mw > POWER_TOLERANCE_MW, dispatch_rows)
+            @test all(row -> row.grid_export_mw <= 4.0 + POWER_TOLERANCE_MW, dispatch_rows)
+
+            asset_rows = collect(CSV.File(run_output.asset_dispatch_path))
+            @test Set(string(row.asset_id) for row in asset_rows) == Set(["solar_1", "battery_1", "grid_1", "load_1"])
+            @test any(
+                row -> string(row.asset_id) == "solar_1" && row.renewable_curtailed_mw > POWER_TOLERANCE_MW,
+                asset_rows,
+            )
+            @test any(
+                row -> string(row.asset_id) == "load_1" && row.load_demand_mw > POWER_TOLERANCE_MW,
+                asset_rows,
+            )
+        end
+
+        mktempdir() do output_root
+            script_path = normpath(joinpath(@__DIR__, "..", "scripts", "run_system_case.jl"))
+            stdout = read(system_cli_command(script_path, sample_path, output_root), String)
+            payload = JSON3.read(stdout)
+
+            @test string(payload.case_name) == "hybrid_system"
+            @test string(payload.run_timestamp) == "20260102T030405000"
+            @test isfile(string(payload.summary_path))
+            @test string(payload.termination_status) == "OPTIMAL"
+        end
+    end
+
     @testset "system dispatch public API and CLI contract are stable" begin
         exported_names = Set(names(BESSDispatch))
         required_public_names = [
@@ -1284,10 +1360,15 @@ end
             @test occursin("BESSDispatch.run_system_case", readme)
             @test occursin("BESSDispatch.load_system_case", readme)
             @test occursin("scripts/run_system_case.jl", readme)
+            @test occursin("data/cases/hybrid_system/system_case.json", readme)
             @test occursin("--output-root", readme)
             @test occursin("summary_path", readme)
             @test occursin("termination_status", readme)
             @test occursin("asset_dispatch.csv", readme)
+            @test occursin("renewable_curtailed_mw", readme)
+            @test occursin("load_demand_mw", readme)
+            @test occursin("grid_import_mw", readme)
+            @test occursin("grid_export_mw", readme)
         end
     end
 end

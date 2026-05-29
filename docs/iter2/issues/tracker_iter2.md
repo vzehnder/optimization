@@ -24,7 +24,7 @@ External issue tracker integration has not been configured, so each issue is sto
 | BESS-ITER2-005 | Add Grid Limits And Import Export Anti-Simultaneity | AFK | ready-for-agent | Done | BESS-ITER2-001 | [BESS-ITER2-005-add-grid-limits-and-import-export-anti-simultaneity.md](BESS-ITER2-005-add-grid-limits-and-import-export-anti-simultaneity.md) |
 | BESS-ITER2-006 | Publish Stable Julia API And CLI Contract | AFK | ready-for-agent | Done | BESS-ITER2-001 | [BESS-ITER2-006-publish-stable-julia-api-and-cli-contract.md](BESS-ITER2-006-publish-stable-julia-api-and-cli-contract.md) |
 | BESS-ITER2-007 | Preserve Single-BESS MVP Regression Contract | AFK | ready-for-agent | Done | None | [BESS-ITER2-007-preserve-single-bess-mvp-regression-contract.md](BESS-ITER2-007-preserve-single-bess-mvp-regression-contract.md) |
-| BESS-ITER2-008 | Finalize Sample Docs And Acceptance Suite | AFK | ready-for-agent | Todo | BESS-ITER2-002, BESS-ITER2-003, BESS-ITER2-004, BESS-ITER2-005, BESS-ITER2-006, BESS-ITER2-007 | [BESS-ITER2-008-finalize-sample-docs-and-acceptance-suite.md](BESS-ITER2-008-finalize-sample-docs-and-acceptance-suite.md) |
+| BESS-ITER2-008 | Finalize Sample Docs And Acceptance Suite | AFK | ready-for-agent | Done | BESS-ITER2-002, BESS-ITER2-003, BESS-ITER2-004, BESS-ITER2-005, BESS-ITER2-006, BESS-ITER2-007 | [BESS-ITER2-008-finalize-sample-docs-and-acceptance-suite.md](BESS-ITER2-008-finalize-sample-docs-and-acceptance-suite.md) |
 
 ## Recommended Execution Order
 
@@ -49,6 +49,7 @@ External issue tracker integration has not been configured, so each issue is sto
 | 2026-05-29 | BESS-ITER2-004 | Todo -> Done | Added local load input validation, normalization, bus-balance consumption, wide/long output reporting, and metadata. Verified `julia --project=. -e "import Pkg; Pkg.test()"` with 253 tests. |
 | 2026-05-29 | BESS-ITER2-005 | Todo -> Done | Added grid import/export limit validation, default anti-simultaneity coverage, disabled anti-sim boundedness coverage, and wide/long grid output assertions. Verified `julia --project=. -e "import Pkg; Pkg.test()"` with 299 tests. |
 | 2026-05-29 | BESS-ITER2-006 | Todo -> Done | Added the stable system-dispatch CLI, parseable stdout/nonzero failure contract, public API regression checks, and README API/CLI documentation. Verified `julia --project=. -e "import Pkg; Pkg.test()"` with 299 tests. |
+| 2026-05-29 | BESS-ITER2-008 | Todo -> Done | Added the real hybrid `system_case.json` sample, final acceptance coverage for sample API/output/CLI flow, and README run/output documentation. Verified `julia --project=. -e "import Pkg; Pkg.test()"` with 335 tests plus the documented system CLI and single-BESS sample/report flows. |
 
 ## Regression Guard
 
