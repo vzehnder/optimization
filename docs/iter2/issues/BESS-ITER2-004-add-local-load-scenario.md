@@ -1,6 +1,6 @@
 # BESS-ITER2-004: Add Local Load Scenario
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/iter2/prd_bess_system_dispatch.md`
@@ -15,18 +15,25 @@ Add an end-to-end local load scenario. A `load` asset provides fixed demand by p
 
 ## Acceptance criteria
 
-- [ ] The system JSON contract supports `load` nodes with load demand keyed by load asset ID.
-- [ ] Missing load demand for a load asset is rejected.
-- [ ] Negative load demand is rejected.
-- [ ] Load enters the one-bus balance as fixed consumption.
-- [ ] A load scenario solves with supply from at least one available source.
-- [ ] Wide dispatch output reports total load per period.
-- [ ] Long asset dispatch output reports load demand by load asset ID.
-- [ ] Existing minimal hybrid, validation, and single-BESS tests remain green after the slice.
+- [x] The system JSON contract supports `load` nodes with load demand keyed by load asset ID.
+- [x] Missing load demand for a load asset is rejected.
+- [x] Negative load demand is rejected.
+- [x] Load enters the one-bus balance as fixed consumption.
+- [x] A load scenario solves with supply from at least one available source.
+- [x] Wide dispatch output reports total load per period.
+- [x] Long asset dispatch output reports load demand by load asset ID.
+- [x] Existing minimal hybrid, validation, and single-BESS tests remain green after the slice.
+
+## Implementation notes
+
+- Added `load_demand_mw` period input parsing and validation for every `load` asset ID.
+- Added `LoadAssetParameters`, normalized load-demand matrices, and public export for the load asset parameter type.
+- Added fixed local load to the one-bus balance as consumption and included load in derived finite grid bounds.
+- Added `load_demand_mw` to wide dispatch output, long asset dispatch rows, resolved system input, and model metadata asset IDs.
 
 ## Verification
 
-Run load validation tests, a solved load-balance scenario, the minimal system test, and existing MVP tests.
+Passed `julia --project=. -e "import Pkg; Pkg.test()"` with 253 tests, including load validation, solved load-balance scenario, minimal system case, and existing MVP regression tests.
 
 ## Blocked by
 

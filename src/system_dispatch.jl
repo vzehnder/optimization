@@ -25,6 +25,7 @@ struct SystemPeriodData
     price_usd_per_mwh::Float64
     duration_hours::Float64
     renewable_available_power_mw::Dict{String,Float64}
+    load_demand_mw::Dict{String,Float64}
 end
 
 struct SystemGraphData
@@ -56,6 +57,10 @@ struct GridAssetParameters
     prevent_simultaneous_grid_import_export::Bool
 end
 
+struct LoadAssetParameters
+    id::String
+end
+
 struct SystemOptimizationData
     case_name::String
     schema_version::String
@@ -63,10 +68,12 @@ struct SystemOptimizationData
     batteries::Vector{BatteryAssetParameters}
     renewables::Vector{RenewableAssetParameters}
     grids::Vector{GridAssetParameters}
+    loads::Vector{LoadAssetParameters}
     timestamp::Vector{DateTime}
     price_usd_per_mwh::Vector{Float64}
     duration_hours::Vector{Float64}
     renewable_available_power_mw::Matrix{Float64}
+    load_demand_mw::Matrix{Float64}
     solver::SolverConfig
     graph::SystemGraphData
 end
@@ -175,9 +182,12 @@ function validate_system_case(system_case::SystemGraphData)::SystemGraphData
 
     validate_system_connectivity(system_case, bus_nodes[1].id)
     validate_system_time_series(system_case.time_series)
+    validate_system_asset_time_series(system_case)
     for node in system_case.nodes
         if node.type == "battery"
             parse_system_battery_asset(node)
+        elseif node.type == "renewable"
+            parse_system_renewable_asset(node)
         end
     end
 
@@ -191,16 +201,13 @@ function normalize_system_case(system_case::SystemGraphData)::SystemOptimization
     batteries = BatteryAssetParameters[]
     renewables = RenewableAssetParameters[]
     grids = GridAssetParameters[]
+    loads = LoadAssetParameters[]
 
     for node in system_case.nodes
         if node.type == "battery"
             push!(batteries, parse_system_battery_asset(node))
         elseif node.type == "renewable"
-            penalty = optional_float(get(node.attributes, "curtailment_penalty_usd_per_mwh", 0.0), "curtailment_penalty_usd_per_mwh")
-            if !isfinite(penalty) || penalty < 0
-                throw(ArgumentError("renewable $(node.id) curtailment_penalty_usd_per_mwh must be nonnegative; got $penalty"))
-            end
-            push!(renewables, RenewableAssetParameters(node.id, penalty))
+            push!(renewables, parse_system_renewable_asset(node))
         elseif node.type == "grid"
             import_limit = optional_float(get(node.attributes, "import_power_max_mw", nothing), "import_power_max_mw")
             export_limit = optional_float(get(node.attributes, "export_power_max_mw", nothing), "export_power_max_mw")
@@ -217,7 +224,7 @@ function normalize_system_case(system_case::SystemGraphData)::SystemOptimization
                 optional_bool(node.attributes, "prevent_simultaneous_grid_import_export", true),
             ))
         elseif node.type == "load"
-            throw(ArgumentError("load nodes are not supported until the local load slice is implemented"))
+            push!(loads, parse_system_load_asset(node))
         end
     end
 
@@ -235,6 +242,7 @@ function normalize_system_case(system_case::SystemGraphData)::SystemOptimization
     prices = [period.price_usd_per_mwh for period in system_case.time_series]
     durations = [period.duration_hours for period in system_case.time_series]
     availability = zeros(length(renewables), length(system_case.time_series))
+    load_demand = zeros(length(loads), length(system_case.time_series))
 
     for (renewable_index, renewable) in enumerate(renewables)
         for (period_index, period) in enumerate(system_case.time_series)
@@ -254,6 +262,12 @@ function normalize_system_case(system_case::SystemGraphData)::SystemOptimization
         end
     end
 
+    for (load_index, load) in enumerate(loads)
+        for (period_index, period) in enumerate(system_case.time_series)
+            load_demand[load_index, period_index] = period.load_demand_mw[load.id]
+        end
+    end
+
     return SystemOptimizationData(
         system_case.case_name,
         system_case.schema_version,
@@ -261,13 +275,33 @@ function normalize_system_case(system_case::SystemGraphData)::SystemOptimization
         batteries,
         renewables,
         grids,
+        loads,
         timestamps,
         prices,
         durations,
         availability,
+        load_demand,
         system_case.solver,
         system_case,
     )
+end
+
+function parse_system_renewable_asset(node::SystemNode)::RenewableAssetParameters
+    penalty = optional_float(
+        get(node.attributes, "curtailment_penalty_usd_per_mwh", 0.0),
+        "curtailment_penalty_usd_per_mwh",
+    )
+    if !isfinite(penalty) || penalty < 0
+        throw(ArgumentError(
+            "renewable $(node.id) curtailment_penalty_usd_per_mwh must be nonnegative; got $penalty",
+        ))
+    end
+
+    return RenewableAssetParameters(node.id, penalty)
+end
+
+function parse_system_load_asset(node::SystemNode)::LoadAssetParameters
+    return LoadAssetParameters(node.id)
 end
 
 function parse_system_battery_asset(node::SystemNode)::BatteryAssetParameters
@@ -303,6 +337,7 @@ function build_system_dispatch_model(data::SystemOptimizationData)::SystemDispat
     n_batteries = length(data.batteries)
     n_renewables = length(data.renewables)
     n_grids = length(data.grids)
+    n_loads = length(data.loads)
     n_periods = length(data.timestamp)
 
     model = Model(HiGHS.Optimizer)
@@ -458,7 +493,8 @@ function build_system_dispatch_model(data::SystemOptimizationData)::SystemDispat
         sum(p_renewable_used_mw[renewable, period] for renewable in 1:n_renewables) +
         sum(p_battery_discharge_mw[battery, period] for battery in 1:n_batteries) ==
         sum(p_grid_export_mw[grid, period] for grid in 1:n_grids) +
-        sum(p_battery_charge_mw[battery, period] for battery in 1:n_batteries)
+        sum(p_battery_charge_mw[battery, period] for battery in 1:n_batteries) +
+        sum(data.load_demand_mw[load, period] for load in 1:n_loads)
     )
 
     market_value_objective = sum(
@@ -685,11 +721,21 @@ function parse_system_periods(periods)::Vector{SystemPeriodData}
                 )
             end
 
+            load_values = Dict{String,Float64}()
+            raw_load_values = get(period_dict, "load_demand_mw", Dict{String,Any}())
+            for (asset_id, value) in pairs(to_string_key_dict(raw_load_values))
+                load_values[string(asset_id)] = parse_required_float(
+                    value,
+                    "time_series[$index].load_demand_mw[$asset_id]",
+                )
+            end
+
             push!(parsed_periods, SystemPeriodData(
                 parse_required_datetime(required_value(period_dict, "timestamp"), "time_series[$index].timestamp"),
                 parse_required_float(required_value(period_dict, "price_usd_per_mwh"), "time_series[$index].price_usd_per_mwh"),
                 parse_required_float(required_value(period_dict, "duration_hours"), "time_series[$index].duration_hours"),
                 renewable_values,
+                load_values,
             ))
         catch error
             throw(ArgumentError("time_series[$index] is invalid: $(sprint(showerror, error))"))
@@ -722,6 +768,46 @@ function validate_system_connectivity(system_case::SystemGraphData, bus_id::Stri
         if !(node.type in SYSTEM_BUS_NODE_TYPES) && !(node.id in seen)
             throw(ArgumentError("asset node $(node.id) is disconnected from bus $(bus_id)"))
         end
+    end
+end
+
+function validate_system_asset_time_series(system_case::SystemGraphData)
+    renewable_ids = [node.id for node in system_case.nodes if node.type == "renewable"]
+    load_ids = [node.id for node in system_case.nodes if node.type == "load"]
+
+    for (period_index, period) in enumerate(system_case.time_series)
+        for renewable_id in renewable_ids
+            validate_required_nonnegative_series_value(
+                period.renewable_available_power_mw,
+                "renewable_available_power_mw",
+                renewable_id,
+                period_index,
+            )
+        end
+        for load_id in load_ids
+            validate_required_nonnegative_series_value(
+                period.load_demand_mw,
+                "load_demand_mw",
+                load_id,
+                period_index,
+            )
+        end
+    end
+end
+
+function validate_required_nonnegative_series_value(
+    values::Dict{String,Float64},
+    field_name::AbstractString,
+    asset_id::AbstractString,
+    period_index::Int,
+)
+    if !haskey(values, asset_id)
+        throw(ArgumentError("$field_name for asset $asset_id is required at time_series[$period_index]"))
+    end
+
+    value = values[asset_id]
+    if !isfinite(value) || value < 0
+        throw(ArgumentError("$field_name[$asset_id] at time_series[$period_index] must be nonnegative; got $value"))
     end
 end
 
@@ -784,8 +870,9 @@ function derived_system_grid_bound(data::SystemOptimizationData)::Float64
         battery.parameters.charge_power_max_mw + battery.parameters.discharge_power_max_mw for battery in data.batteries
     )
     renewable_power = isempty(data.renewable_available_power_mw) ? 0.0 : maximum(data.renewable_available_power_mw)
+    load_power = isempty(data.load_demand_mw) ? 0.0 : maximum(data.load_demand_mw)
 
-    return max(1.0, battery_power + renewable_power)
+    return max(1.0, battery_power + renewable_power + load_power)
 end
 
 function realized_system_delta_soc_abs(data::SystemOptimizationData, battery_energy_mwh::Matrix{Float64})::Matrix{Float64}
@@ -815,6 +902,7 @@ function system_dispatch_dataframe(data::SystemOptimizationData, result::SystemD
     grid_export = period_sum(result.p_grid_export_mw, n_periods)
     renewable_used = period_sum(result.p_renewable_used_mw, n_periods)
     renewable_curtailed = period_sum(result.p_renewable_curtailed_mw, n_periods)
+    load_demand = period_sum(data.load_demand_mw, n_periods)
     battery_charge = period_sum(result.p_battery_charge_mw, n_periods)
     battery_discharge = period_sum(result.p_battery_discharge_mw, n_periods)
     battery_energy = period_sum(result.battery_energy_mwh, n_periods)
@@ -832,6 +920,7 @@ function system_dispatch_dataframe(data::SystemOptimizationData, result::SystemD
         net_grid_export_mw = grid_export .- grid_import,
         renewable_used_mw = renewable_used,
         renewable_curtailed_mw = renewable_curtailed,
+        load_demand_mw = load_demand,
         battery_charge_mw = battery_charge,
         battery_discharge_mw = battery_discharge,
         battery_net_discharge_mw = battery_discharge .- battery_charge,
@@ -854,6 +943,7 @@ function system_asset_dispatch_dataframe(data::SystemOptimizationData, result::S
     grid_export_mw = Float64[]
     renewable_used_mw = Float64[]
     renewable_curtailed_mw = Float64[]
+    load_demand_mw = Float64[]
     battery_charge_mw = Float64[]
     battery_discharge_mw = Float64[]
     battery_energy_mwh = Float64[]
@@ -871,6 +961,7 @@ function system_asset_dispatch_dataframe(data::SystemOptimizationData, result::S
                 grid_export_mw,
                 renewable_used_mw,
                 renewable_curtailed_mw,
+                load_demand_mw,
                 battery_charge_mw,
                 battery_discharge_mw,
                 battery_energy_mwh,
@@ -881,6 +972,7 @@ function system_asset_dispatch_dataframe(data::SystemOptimizationData, result::S
                 "grid",
                 result.p_grid_import_mw[grid_index, period],
                 result.p_grid_export_mw[grid_index, period],
+                0.0,
                 0.0,
                 0.0,
                 0.0,
@@ -901,6 +993,7 @@ function system_asset_dispatch_dataframe(data::SystemOptimizationData, result::S
                 grid_export_mw,
                 renewable_used_mw,
                 renewable_curtailed_mw,
+                load_demand_mw,
                 battery_charge_mw,
                 battery_discharge_mw,
                 battery_energy_mwh,
@@ -913,6 +1006,39 @@ function system_asset_dispatch_dataframe(data::SystemOptimizationData, result::S
                 0.0,
                 result.p_renewable_used_mw[renewable_index, period],
                 result.p_renewable_curtailed_mw[renewable_index, period],
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            )
+        end
+
+        for (load_index, load) in enumerate(data.loads)
+            push_system_asset_row!(
+                timestamp,
+                duration_hours,
+                price_usd_per_mwh,
+                asset_id,
+                asset_type,
+                grid_import_mw,
+                grid_export_mw,
+                renewable_used_mw,
+                renewable_curtailed_mw,
+                load_demand_mw,
+                battery_charge_mw,
+                battery_discharge_mw,
+                battery_energy_mwh,
+                battery_delta_soc_abs_mwh,
+                data,
+                period,
+                load.id,
+                "load",
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                data.load_demand_mw[load_index, period],
                 0.0,
                 0.0,
                 0.0,
@@ -931,6 +1057,7 @@ function system_asset_dispatch_dataframe(data::SystemOptimizationData, result::S
                 grid_export_mw,
                 renewable_used_mw,
                 renewable_curtailed_mw,
+                load_demand_mw,
                 battery_charge_mw,
                 battery_discharge_mw,
                 battery_energy_mwh,
@@ -939,6 +1066,7 @@ function system_asset_dispatch_dataframe(data::SystemOptimizationData, result::S
                 period,
                 battery.id,
                 "battery",
+                0.0,
                 0.0,
                 0.0,
                 0.0,
@@ -961,6 +1089,7 @@ function system_asset_dispatch_dataframe(data::SystemOptimizationData, result::S
         grid_export_mw = grid_export_mw,
         renewable_used_mw = renewable_used_mw,
         renewable_curtailed_mw = renewable_curtailed_mw,
+        load_demand_mw = load_demand_mw,
         battery_charge_mw = battery_charge_mw,
         battery_discharge_mw = battery_discharge_mw,
         battery_energy_mwh = battery_energy_mwh,
@@ -978,6 +1107,7 @@ function push_system_asset_row!(
     grid_export_mw,
     renewable_used_mw,
     renewable_curtailed_mw,
+    load_demand_mw,
     battery_charge_mw,
     battery_discharge_mw,
     battery_energy_mwh,
@@ -990,6 +1120,7 @@ function push_system_asset_row!(
     current_grid_export_mw::Float64,
     current_renewable_used_mw::Float64,
     current_renewable_curtailed_mw::Float64,
+    current_load_demand_mw::Float64,
     current_battery_charge_mw::Float64,
     current_battery_discharge_mw::Float64,
     current_battery_energy_mwh::Float64,
@@ -1004,6 +1135,7 @@ function push_system_asset_row!(
     push!(grid_export_mw, current_grid_export_mw)
     push!(renewable_used_mw, current_renewable_used_mw)
     push!(renewable_curtailed_mw, current_renewable_curtailed_mw)
+    push!(load_demand_mw, current_load_demand_mw)
     push!(battery_charge_mw, current_battery_charge_mw)
     push!(battery_discharge_mw, current_battery_discharge_mw)
     push!(battery_energy_mwh, current_battery_energy_mwh)
@@ -1038,6 +1170,7 @@ function system_model_metadata_dict(data::SystemOptimizationData)::Dict{String,A
             "batteries" => [battery.id for battery in data.batteries],
             "renewables" => [renewable.id for renewable in data.renewables],
             "grids" => [grid.id for grid in data.grids],
+            "loads" => [load.id for load in data.loads],
         ),
         "active_constraint_flags" => Dict{String,Any}(
             "one_bus_balance" => true,
@@ -1078,6 +1211,7 @@ function system_case_dict(system_case::SystemGraphData)::Dict{String,Any}
                 "duration_hours" => period.duration_hours,
                 "price_usd_per_mwh" => period.price_usd_per_mwh,
                 "renewable_available_power_mw" => period.renewable_available_power_mw,
+                "load_demand_mw" => period.load_demand_mw,
             )
             for period in system_case.time_series
         ],

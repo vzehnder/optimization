@@ -1,6 +1,6 @@
 # BESS-ITER2-003: Add Curtailment And Curtailment Penalty Scenario
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/iter2/prd_bess_system_dispatch.md`
@@ -15,18 +15,24 @@ Add an end-to-end renewable curtailment scenario where available renewable gener
 
 ## Acceptance criteria
 
-- [ ] Renewable assets accept `curtailment_penalty_usd_per_mwh`, defaulting to zero when omitted.
-- [ ] Negative curtailment penalties are rejected.
-- [ ] The model enforces available renewable power equals used plus curtailed power in every period.
-- [ ] A case with excess renewable availability curtails the infeasible excess.
-- [ ] Curtailment appears in wide system dispatch output.
-- [ ] Curtailment appears in long asset dispatch output with the renewable asset ID.
-- [ ] Objective value reflects configured curtailment penalties.
-- [ ] Existing minimal hybrid and single-BESS tests remain green after the slice.
+- [x] Renewable assets accept `curtailment_penalty_usd_per_mwh`, defaulting to zero when omitted.
+- [x] Negative curtailment penalties are rejected.
+- [x] The model enforces available renewable power equals used plus curtailed power in every period.
+- [x] A case with excess renewable availability curtails the infeasible excess.
+- [x] Curtailment appears in wide system dispatch output.
+- [x] Curtailment appears in long asset dispatch output with the renewable asset ID.
+- [x] Objective value reflects configured curtailment penalties.
+- [x] Existing minimal hybrid and single-BESS tests remain green after the slice.
+
+## Implementation notes
+
+- Added loader-time validation for renewable `curtailment_penalty_usd_per_mwh`, including rejection of negative values.
+- Added an end-to-end curtailment scenario where constrained export and limited battery storage force renewable curtailment.
+- Verified default zero curtailment penalty, wide dispatch curtailment columns, long renewable asset curtailment rows, and objective impact from configured penalties.
 
 ## Verification
 
-Run a curtailment scenario test, an objective-sign test with positive curtailment penalty, the minimal system test, and existing MVP tests.
+Passed `julia --project=. -e "import Pkg; Pkg.test()"` with 253 tests, including the curtailment scenario, objective-sign check with positive curtailment penalty, minimal system case, and existing MVP regression tests.
 
 ## Blocked by
 

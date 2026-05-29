@@ -19,8 +19,8 @@ External issue tracker integration has not been configured, so each issue is sto
 | BESS-ITER2-000 | Review One-Bus Mathematical Formulation | HITL | ready-for-agent | Done | None | [BESS-ITER2-000-review-one-bus-mathematical-formulation.md](BESS-ITER2-000-review-one-bus-mathematical-formulation.md) |
 | BESS-ITER2-001 | Run Minimal Hybrid System End To End | AFK | ready-for-agent | Done | BESS-ITER2-000 | [BESS-ITER2-001-run-minimal-hybrid-system-end-to-end.md](BESS-ITER2-001-run-minimal-hybrid-system-end-to-end.md) |
 | BESS-ITER2-002 | Harden Graph And Time-Series Validation | AFK | ready-for-agent | Done | BESS-ITER2-001 | [BESS-ITER2-002-harden-graph-and-time-series-validation.md](BESS-ITER2-002-harden-graph-and-time-series-validation.md) |
-| BESS-ITER2-003 | Add Curtailment And Curtailment Penalty Scenario | AFK | ready-for-agent | Todo | BESS-ITER2-001 | [BESS-ITER2-003-add-curtailment-and-curtailment-penalty-scenario.md](BESS-ITER2-003-add-curtailment-and-curtailment-penalty-scenario.md) |
-| BESS-ITER2-004 | Add Local Load Scenario | AFK | ready-for-agent | Todo | BESS-ITER2-001, BESS-ITER2-002 | [BESS-ITER2-004-add-local-load-scenario.md](BESS-ITER2-004-add-local-load-scenario.md) |
+| BESS-ITER2-003 | Add Curtailment And Curtailment Penalty Scenario | AFK | ready-for-agent | Done | BESS-ITER2-001 | [BESS-ITER2-003-add-curtailment-and-curtailment-penalty-scenario.md](BESS-ITER2-003-add-curtailment-and-curtailment-penalty-scenario.md) |
+| BESS-ITER2-004 | Add Local Load Scenario | AFK | ready-for-agent | Done | BESS-ITER2-001, BESS-ITER2-002 | [BESS-ITER2-004-add-local-load-scenario.md](BESS-ITER2-004-add-local-load-scenario.md) |
 | BESS-ITER2-005 | Add Grid Limits And Import Export Anti-Simultaneity | AFK | ready-for-agent | Todo | BESS-ITER2-001 | [BESS-ITER2-005-add-grid-limits-and-import-export-anti-simultaneity.md](BESS-ITER2-005-add-grid-limits-and-import-export-anti-simultaneity.md) |
 | BESS-ITER2-006 | Publish Stable Julia API And CLI Contract | AFK | ready-for-agent | Todo | BESS-ITER2-001 | [BESS-ITER2-006-publish-stable-julia-api-and-cli-contract.md](BESS-ITER2-006-publish-stable-julia-api-and-cli-contract.md) |
 | BESS-ITER2-007 | Preserve Single-BESS MVP Regression Contract | AFK | ready-for-agent | Done | None | [BESS-ITER2-007-preserve-single-bess-mvp-regression-contract.md](BESS-ITER2-007-preserve-single-bess-mvp-regression-contract.md) |
@@ -45,6 +45,8 @@ External issue tracker integration has not been configured, so each issue is sto
 | 2026-05-28 | BESS-ITER2-007 | Todo -> Done | Added an explicit single-BESS MVP public contract regression guard and verified the full Julia suite with 163 tests, including the Plotly report smoke test. |
 | 2026-05-29 | BESS-ITER2-001 | Todo -> Done | Added the versioned `system_case` loader, normalizer, one-bus system dispatch model, and wide/long outputs for a minimal renewable plus BESS plus grid case. Verified `julia --project=. -e "import Pkg; Pkg.test()"` with 222 tests. |
 | 2026-05-29 | BESS-ITER2-002 | Todo -> Done | Hardened schema, graph, edge, time-series, and battery validation before model construction. Verified `julia --project=. -e "import Pkg; Pkg.test()"` with 222 tests. |
+| 2026-05-29 | BESS-ITER2-003 | Todo -> Done | Added curtailment penalty validation and an end-to-end excess-renewable scenario covering wide/long outputs and objective impact. Verified `julia --project=. -e "import Pkg; Pkg.test()"` with 253 tests. |
+| 2026-05-29 | BESS-ITER2-004 | Todo -> Done | Added local load input validation, normalization, bus-balance consumption, wide/long output reporting, and metadata. Verified `julia --project=. -e "import Pkg; Pkg.test()"` with 253 tests. |
 
 ## Regression Guard
 

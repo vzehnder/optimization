@@ -149,6 +149,57 @@ function minimal_system_case_document()
     )
 end
 
+function curtailment_system_case_document()
+    document = minimal_system_case_document()
+    document["case_name"] = "curtailment_system"
+
+    battery = system_case_node(document, "battery_1")
+    battery["charge_power_max_mw"] = 3.0
+    battery["discharge_power_max_mw"] = 0.0
+    battery["energy_max_mwh"] = 3.0
+    battery["initial_energy_mwh"] = 0.0
+    battery["terminal_condition"] = "none"
+    battery["degradation_linear_delta_soc"] = false
+
+    renewable = system_case_node(document, "solar_1")
+    renewable["curtailment_penalty_usd_per_mwh"] = 2.0
+
+    grid = system_case_node(document, "grid_1")
+    grid["import_power_max_mw"] = 0.0
+    grid["export_power_max_mw"] = 0.0
+
+    document["time_series"] = [
+        Dict{String,Any}(
+            "timestamp" => "2026-01-01T00:00:00",
+            "duration_hours" => 1.0,
+            "price_usd_per_mwh" => 0.0,
+            "renewable_available_power_mw" => Dict{String,Any}("solar_1" => 10.0),
+        ),
+    ]
+
+    return document
+end
+
+function local_load_system_case_document()
+    document = minimal_system_case_document()
+    document["case_name"] = "local_load_system"
+    add_load_node!(document; demands = [5.0, 2.0])
+
+    battery = system_case_node(document, "battery_1")
+    battery["charge_power_max_mw"] = 0.0
+    battery["discharge_power_max_mw"] = 0.0
+    battery["energy_max_mwh"] = 1.0
+    battery["initial_energy_mwh"] = 0.0
+    battery["degradation_linear_delta_soc"] = false
+
+    document["time_series"][1]["price_usd_per_mwh"] = 100.0
+    document["time_series"][1]["renewable_available_power_mw"] = Dict{String,Any}("solar_1" => 3.0)
+    document["time_series"][2]["price_usd_per_mwh"] = 100.0
+    document["time_series"][2]["renewable_available_power_mw"] = Dict{String,Any}("solar_1" => 0.0)
+
+    return document
+end
+
 function write_system_case_json(path::AbstractString, document)
     open(path, "w") do io
         JSON3.write(io, document)
@@ -164,6 +215,19 @@ end
 
 function system_case_node(document, node_id::AbstractString)
     return only(node for node in document["nodes"] if node["id"] == node_id)
+end
+
+function add_load_node!(document; demands = nothing)
+    push!(document["nodes"], Dict{String,Any}("id" => "load_1", "type" => "load"))
+    push!(document["edges"], Dict{String,Any}("from" => "load_1", "to" => "bus_1"))
+
+    if demands !== nothing
+        for (period, demand) in zip(document["time_series"], demands)
+            period["load_demand_mw"] = Dict{String,Any}("load_1" => demand)
+        end
+    end
+
+    return document
 end
 
 function system_case_validation_message(document)
@@ -508,6 +572,7 @@ end
             @test optimization_case.case_name == "minimal_hybrid_system"
             @test optimization_case.bus_id == "bus_1"
             @test [asset.id for asset in optimization_case.renewables] == ["solar_1"]
+            @test optimization_case.renewables[1].curtailment_penalty_usd_per_mwh == 0.0
             @test [asset.id for asset in optimization_case.batteries] == ["battery_1"]
             @test [asset.id for asset in optimization_case.grids] == ["grid_1"]
             @test optimization_case.renewable_available_power_mw == [5.0 0.0]
@@ -542,6 +607,7 @@ end
                 :net_grid_export_mw,
                 :renewable_used_mw,
                 :renewable_curtailed_mw,
+                :load_demand_mw,
                 :battery_charge_mw,
                 :battery_discharge_mw,
                 :battery_net_discharge_mw,
@@ -560,7 +626,7 @@ end
 
             for row in dispatch_rows
                 supply = row.grid_import_mw + row.renewable_used_mw + row.battery_discharge_mw
-                consumption = row.grid_export_mw + row.battery_charge_mw
+                consumption = row.grid_export_mw + row.battery_charge_mw + row.load_demand_mw
                 @test isapprox(supply, consumption; atol = POWER_TOLERANCE_MW)
             end
 
@@ -586,6 +652,82 @@ end
             @test collect(string.(metadata.asset_ids.batteries)) == ["battery_1"]
             @test collect(string.(metadata.asset_ids.renewables)) == ["solar_1"]
             @test collect(string.(metadata.asset_ids.grids)) == ["grid_1"]
+        end
+    end
+
+    @testset "curtails excess renewable generation and applies configured penalty" begin
+        mktempdir() do case_dir
+            case_path = write_minimal_system_case_json(case_dir; document = curtailment_system_case_document())
+
+            optimization_case = BESSDispatch.normalize_system_case(BESSDispatch.load_system_case(case_path))
+            @test optimization_case.renewables[1].curtailment_penalty_usd_per_mwh == 2.0
+
+            result = BESSDispatch.solve_system_dispatch(optimization_case)
+            @test result.termination_status == "OPTIMAL"
+            @test isapprox(result.p_renewable_used_mw[1, 1], 3.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(result.p_renewable_curtailed_mw[1, 1], 7.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(result.p_battery_charge_mw[1, 1], 3.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(result.curtailment_penalty_usd[1, 1], 14.0; atol = OBJECTIVE_TOLERANCE_USD)
+            @test isapprox(result.objective_value_usd, -14.0; atol = OBJECTIVE_TOLERANCE_USD)
+
+            run_output = BESSDispatch.run_system_case(
+                case_path;
+                output_root = joinpath(case_dir, "outputs"),
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+
+            dispatch_row = only(collect(CSV.File(run_output.dispatch_path)))
+            @test isapprox(dispatch_row.renewable_used_mw, 3.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(dispatch_row.renewable_curtailed_mw, 7.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(dispatch_row.curtailment_penalty_usd, 14.0; atol = OBJECTIVE_TOLERANCE_USD)
+            @test isapprox(dispatch_row.period_profit_usd, -14.0; atol = OBJECTIVE_TOLERANCE_USD)
+
+            renewable_row = only(row for row in CSV.File(run_output.asset_dispatch_path) if string(row.asset_id) == "solar_1")
+            @test string(renewable_row.asset_type) == "renewable"
+            @test isapprox(renewable_row.renewable_used_mw, 3.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(renewable_row.renewable_curtailed_mw, 7.0; atol = POWER_TOLERANCE_MW)
+        end
+    end
+
+    @testset "serves local load and reports demand in system outputs" begin
+        mktempdir() do case_dir
+            case_path = write_minimal_system_case_json(case_dir; document = local_load_system_case_document())
+
+            system_case = BESSDispatch.load_system_case(case_path)
+            optimization_case = BESSDispatch.normalize_system_case(system_case)
+            @test [asset.id for asset in optimization_case.loads] == ["load_1"]
+            @test optimization_case.load_demand_mw == [5.0 2.0]
+
+            result = BESSDispatch.solve_system_dispatch(optimization_case)
+            @test result.termination_status == "OPTIMAL"
+            @test isapprox(result.p_renewable_used_mw[1, 1], 3.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(result.p_grid_import_mw[1, 1], 2.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(result.p_grid_import_mw[1, 2], 2.0; atol = POWER_TOLERANCE_MW)
+
+            run_output = BESSDispatch.run_system_case(
+                case_path;
+                output_root = joinpath(case_dir, "outputs"),
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+
+            dispatch_rows = collect(CSV.File(run_output.dispatch_path))
+            @test isapprox(dispatch_rows[1].load_demand_mw, 5.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(dispatch_rows[2].load_demand_mw, 2.0; atol = POWER_TOLERANCE_MW)
+            for row in dispatch_rows
+                supply = row.grid_import_mw + row.renewable_used_mw + row.battery_discharge_mw
+                consumption = row.grid_export_mw + row.battery_charge_mw + row.load_demand_mw
+                @test isapprox(supply, consumption; atol = POWER_TOLERANCE_MW)
+            end
+
+            asset_rows = collect(CSV.File(run_output.asset_dispatch_path))
+            @test Set(string(row.asset_id) for row in asset_rows) == Set(["solar_1", "battery_1", "grid_1", "load_1"])
+            @test any(
+                row -> string(row.asset_id) == "load_1" && isapprox(row.load_demand_mw, 5.0; atol = POWER_TOLERANCE_MW),
+                asset_rows,
+            )
+
+            metadata = JSON3.read(read(run_output.model_metadata_path, String))
+            @test collect(string.(metadata.asset_ids.loads)) == ["load_1"]
         end
     end
 
@@ -649,6 +791,15 @@ end
         ))
         @test occursin("battery battery_1 degradation_cost_per_mwh_delta_soc must be nonnegative", invalid_system_case_error_text(
             document -> system_case_node(document, "battery_1")["degradation_cost_per_mwh_delta_soc"] = -1.0,
+        ))
+        @test occursin("renewable solar_1 curtailment_penalty_usd_per_mwh must be nonnegative", invalid_system_case_error_text(
+            document -> system_case_node(document, "solar_1")["curtailment_penalty_usd_per_mwh"] = -1.0,
+        ))
+        @test occursin("load_demand_mw for asset load_1 is required", invalid_system_case_error_text(
+            document -> add_load_node!(document),
+        ))
+        @test occursin("load_demand_mw[load_1] at time_series[1] must be nonnegative", invalid_system_case_error_text(
+            document -> add_load_node!(document; demands = [-1.0, 1.0]),
         ))
     end
 
