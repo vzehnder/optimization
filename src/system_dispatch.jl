@@ -188,6 +188,8 @@ function validate_system_case(system_case::SystemGraphData)::SystemGraphData
             parse_system_battery_asset(node)
         elseif node.type == "renewable"
             parse_system_renewable_asset(node)
+        elseif node.type == "grid"
+            parse_system_grid_asset(node)
         end
     end
 
@@ -209,20 +211,7 @@ function normalize_system_case(system_case::SystemGraphData)::SystemOptimization
         elseif node.type == "renewable"
             push!(renewables, parse_system_renewable_asset(node))
         elseif node.type == "grid"
-            import_limit = optional_float(get(node.attributes, "import_power_max_mw", nothing), "import_power_max_mw")
-            export_limit = optional_float(get(node.attributes, "export_power_max_mw", nothing), "export_power_max_mw")
-            if import_limit !== nothing && (!isfinite(import_limit) || import_limit < 0)
-                throw(ArgumentError("grid $(node.id) import_power_max_mw must be nonnegative; got $import_limit"))
-            end
-            if export_limit !== nothing && (!isfinite(export_limit) || export_limit < 0)
-                throw(ArgumentError("grid $(node.id) export_power_max_mw must be nonnegative; got $export_limit"))
-            end
-            push!(grids, GridAssetParameters(
-                node.id,
-                import_limit,
-                export_limit,
-                optional_bool(node.attributes, "prevent_simultaneous_grid_import_export", true),
-            ))
+            push!(grids, parse_system_grid_asset(node))
         elseif node.type == "load"
             push!(loads, parse_system_load_asset(node))
         end
@@ -302,6 +291,24 @@ end
 
 function parse_system_load_asset(node::SystemNode)::LoadAssetParameters
     return LoadAssetParameters(node.id)
+end
+
+function parse_system_grid_asset(node::SystemNode)::GridAssetParameters
+    import_limit = optional_float(get(node.attributes, "import_power_max_mw", nothing), "import_power_max_mw")
+    export_limit = optional_float(get(node.attributes, "export_power_max_mw", nothing), "export_power_max_mw")
+    if import_limit !== nothing && (!isfinite(import_limit) || import_limit < 0)
+        throw(ArgumentError("grid $(node.id) import_power_max_mw must be nonnegative; got $import_limit"))
+    end
+    if export_limit !== nothing && (!isfinite(export_limit) || export_limit < 0)
+        throw(ArgumentError("grid $(node.id) export_power_max_mw must be nonnegative; got $export_limit"))
+    end
+
+    return GridAssetParameters(
+        node.id,
+        import_limit,
+        export_limit,
+        optional_bool(node.attributes, "prevent_simultaneous_grid_import_export", true),
+    )
 end
 
 function parse_system_battery_asset(node::SystemNode)::BatteryAssetParameters

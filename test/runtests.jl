@@ -88,6 +88,11 @@ function plot_report_command(script_path::AbstractString, run_output_dir::Abstra
     error("Python executable is required to run the Plotly report smoke check")
 end
 
+function system_cli_command(script_path::AbstractString, case_path::AbstractString, output_root::AbstractString)
+    project_root = normpath(joinpath(@__DIR__, ".."))
+    return `$(Base.julia_cmd()) --project=$(project_root) $(script_path) $(case_path) --output-root $(output_root) --run-timestamp 2026-01-02T03:04:05`
+end
+
 function minimal_system_case_document()
     return Dict{String,Any}(
         "schema_version" => "bess_system_dispatch.v1",
@@ -196,6 +201,43 @@ function local_load_system_case_document()
     document["time_series"][1]["renewable_available_power_mw"] = Dict{String,Any}("solar_1" => 3.0)
     document["time_series"][2]["price_usd_per_mwh"] = 100.0
     document["time_series"][2]["renewable_available_power_mw"] = Dict{String,Any}("solar_1" => 0.0)
+
+    return document
+end
+
+function grid_limited_system_case_document()
+    document = minimal_system_case_document()
+    document["case_name"] = "grid_limited_system"
+    add_load_node!(document; demands = [5.0, 0.0])
+
+    battery = system_case_node(document, "battery_1")
+    battery["charge_power_max_mw"] = 0.0
+    battery["discharge_power_max_mw"] = 0.0
+    battery["energy_max_mwh"] = 1.0
+    battery["initial_energy_mwh"] = 0.0
+    battery["degradation_linear_delta_soc"] = false
+
+    grid = system_case_node(document, "grid_1")
+    grid["import_power_max_mw"] = 2.0
+    grid["export_power_max_mw"] = 2.0
+
+    document["time_series"][1]["price_usd_per_mwh"] = 100.0
+    document["time_series"][1]["renewable_available_power_mw"] = Dict{String,Any}("solar_1" => 3.0)
+    document["time_series"][2]["price_usd_per_mwh"] = 100.0
+    document["time_series"][2]["renewable_available_power_mw"] = Dict{String,Any}("solar_1" => 5.0)
+
+    return document
+end
+
+function grid_anti_sim_disabled_system_case_document()
+    document = minimal_system_case_document()
+    document["case_name"] = "grid_anti_sim_disabled_system"
+
+    battery = system_case_node(document, "battery_1")
+    battery["prevent_simultaneous_charge_discharge"] = false
+
+    grid = system_case_node(document, "grid_1")
+    grid["prevent_simultaneous_grid_import_export"] = false
 
     return document
 end
@@ -731,6 +773,133 @@ end
         end
     end
 
+    @testset "enforces grid limits and default import export anti-simultaneity" begin
+        mktempdir() do case_dir
+            case_path = write_minimal_system_case_json(case_dir; document = grid_limited_system_case_document())
+
+            optimization_case = BESSDispatch.normalize_system_case(BESSDispatch.load_system_case(case_path))
+            @test optimization_case.grids[1].import_power_max_mw == 2.0
+            @test optimization_case.grids[1].export_power_max_mw == 2.0
+            @test optimization_case.grids[1].prevent_simultaneous_grid_import_export == true
+
+            dispatch_model = BESSDispatch.build_system_dispatch_model(optimization_case)
+            @test dispatch_model.is_grid_importing !== nothing
+            @test all(JuMP.is_binary(dispatch_model.is_grid_importing[1, period]) for period in 1:2)
+
+            result = BESSDispatch.solve_system_dispatch(optimization_case)
+            @test result.termination_status == "OPTIMAL"
+            @test isapprox(result.p_grid_import_mw[1, 1], 2.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(result.p_grid_export_mw[1, 1], 0.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(result.p_grid_import_mw[1, 2], 0.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(result.p_grid_export_mw[1, 2], 2.0; atol = POWER_TOLERANCE_MW)
+            @test all(
+                !(
+                    result.p_grid_import_mw[1, period] > POWER_TOLERANCE_MW &&
+                    result.p_grid_export_mw[1, period] > POWER_TOLERANCE_MW
+                ) for period in 1:2
+            )
+
+            run_output = BESSDispatch.run_system_case(
+                case_path;
+                output_root = joinpath(case_dir, "outputs"),
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+
+            dispatch_rows = collect(CSV.File(run_output.dispatch_path))
+            @test isapprox(dispatch_rows[1].grid_import_mw, 2.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(dispatch_rows[1].grid_export_mw, 0.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(dispatch_rows[1].net_grid_export_mw, -2.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(dispatch_rows[2].grid_import_mw, 0.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(dispatch_rows[2].grid_export_mw, 2.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(dispatch_rows[2].net_grid_export_mw, 2.0; atol = POWER_TOLERANCE_MW)
+
+            grid_rows = [row for row in CSV.File(run_output.asset_dispatch_path) if string(row.asset_id) == "grid_1"]
+            @test length(grid_rows) == 2
+            @test isapprox(grid_rows[1].grid_import_mw, 2.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(grid_rows[2].grid_export_mw, 2.0; atol = POWER_TOLERANCE_MW)
+        end
+    end
+
+    @testset "disabled grid anti-simultaneity remains bounded without grid binaries" begin
+        mktempdir() do case_dir
+            case_path = write_minimal_system_case_json(
+                case_dir;
+                document = grid_anti_sim_disabled_system_case_document(),
+            )
+
+            optimization_case = BESSDispatch.normalize_system_case(BESSDispatch.load_system_case(case_path))
+            @test optimization_case.grids[1].prevent_simultaneous_grid_import_export == false
+
+            dispatch_model = BESSDispatch.build_system_dispatch_model(optimization_case)
+            @test dispatch_model.is_grid_importing === nothing
+            @test isfinite(JuMP.upper_bound(dispatch_model.p_grid_import_mw[1, 1]))
+            @test isfinite(JuMP.upper_bound(dispatch_model.p_grid_export_mw[1, 1]))
+            @test all(!JuMP.is_binary(variable) for variable in JuMP.all_variables(dispatch_model.model))
+
+            result = BESSDispatch.solve_system_dispatch(optimization_case)
+            @test result.termination_status == "OPTIMAL"
+        end
+    end
+
+    @testset "system dispatch public API and CLI contract are stable" begin
+        exported_names = Set(names(BESSDispatch))
+        required_public_names = [
+            :SystemGraphData,
+            :SystemOptimizationData,
+            :SystemDispatchResult,
+            :SystemRunOutput,
+            :load_system_case,
+            :normalize_system_case,
+            :build_system_dispatch_model,
+            :solve_system_dispatch,
+            :run_system_case,
+            :write_system_run_outputs,
+        ]
+        @test all(name -> name in exported_names, required_public_names)
+
+        script_path = normpath(joinpath(@__DIR__, "..", "scripts", "run_system_case.jl"))
+        @test isfile(script_path)
+
+        mktempdir() do case_dir
+            case_path = write_minimal_system_case_json(case_dir)
+            output_root = joinpath(case_dir, "outputs")
+
+            stdout = read(system_cli_command(script_path, case_path, output_root), String)
+            payload = JSON3.read(stdout)
+
+            @test string(payload.case_name) == "minimal_hybrid_system"
+            @test string(payload.run_timestamp) == "20260102T030405000"
+            @test string(payload.output_dir) == joinpath(output_root, "minimal_hybrid_system", "20260102T030405000")
+            @test isfile(string(payload.summary_path))
+            @test string(payload.termination_status) == "OPTIMAL"
+        end
+
+        mktempdir() do case_dir
+            document = minimal_system_case_document()
+            delete!(document, "schema_version")
+            case_path = write_minimal_system_case_json(case_dir; document = document)
+            output_root = joinpath(case_dir, "outputs")
+            stdout_path = joinpath(case_dir, "stdout.txt")
+            stderr_path = joinpath(case_dir, "stderr.txt")
+
+            process = open(stdout_path, "w") do stdout_io
+                open(stderr_path, "w") do stderr_io
+                    return run(pipeline(
+                        ignorestatus(system_cli_command(script_path, case_path, output_root));
+                        stdout = stdout_io,
+                        stderr = stderr_io,
+                    ))
+                end
+            end
+
+            @test !success(process)
+            @test isempty(strip(read(stdout_path, String)))
+            error_payload = JSON3.read(read(stderr_path, String))
+            @test string(error_payload.status) == "error"
+            @test occursin("schema_version is required", string(error_payload.message))
+        end
+    end
+
     @testset "rejects invalid system battery bounds before model construction" begin
         document = minimal_system_case_document()
         battery = system_case_node(document, "battery_1")
@@ -794,6 +963,9 @@ end
         ))
         @test occursin("renewable solar_1 curtailment_penalty_usd_per_mwh must be nonnegative", invalid_system_case_error_text(
             document -> system_case_node(document, "solar_1")["curtailment_penalty_usd_per_mwh"] = -1.0,
+        ))
+        @test occursin("grid grid_1 import_power_max_mw must be nonnegative", invalid_system_case_error_text(
+            document -> system_case_node(document, "grid_1")["import_power_max_mw"] = -1.0,
         ))
         @test occursin("load_demand_mw for asset load_1 is required", invalid_system_case_error_text(
             document -> add_load_node!(document),
@@ -1098,6 +1270,24 @@ end
             @test occursin("data/cases/arbitrage_mvp", readme)
             @test occursin("python python/plot_results.py", readme)
             @test occursin("plots/dispatch_report.html", readme)
+        end
+    end
+
+    @testset "README documents system dispatch API and CLI flow" begin
+        readme_path = joinpath(@__DIR__, "..", "README.md")
+
+        @test isfile(readme_path)
+
+        if isfile(readme_path)
+            readme = read(readme_path, String)
+
+            @test occursin("BESSDispatch.run_system_case", readme)
+            @test occursin("BESSDispatch.load_system_case", readme)
+            @test occursin("scripts/run_system_case.jl", readme)
+            @test occursin("--output-root", readme)
+            @test occursin("summary_path", readme)
+            @test occursin("termination_status", readme)
+            @test occursin("asset_dispatch.csv", readme)
         end
     end
 end
