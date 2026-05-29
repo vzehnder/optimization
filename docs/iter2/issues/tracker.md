@@ -17,8 +17,8 @@ External issue tracker integration has not been configured, so each issue is sto
 | ID | Title | Type | Triage | Status | Blocked by | Issue file |
 | --- | --- | --- | --- | --- | --- | --- |
 | BESS-ITER2-000 | Review One-Bus Mathematical Formulation | HITL | ready-for-agent | Done | None | [BESS-ITER2-000-review-one-bus-mathematical-formulation.md](BESS-ITER2-000-review-one-bus-mathematical-formulation.md) |
-| BESS-ITER2-001 | Run Minimal Hybrid System End To End | AFK | ready-for-agent | Todo | BESS-ITER2-000 | [BESS-ITER2-001-run-minimal-hybrid-system-end-to-end.md](BESS-ITER2-001-run-minimal-hybrid-system-end-to-end.md) |
-| BESS-ITER2-002 | Harden Graph And Time-Series Validation | AFK | ready-for-agent | Todo | BESS-ITER2-001 | [BESS-ITER2-002-harden-graph-and-time-series-validation.md](BESS-ITER2-002-harden-graph-and-time-series-validation.md) |
+| BESS-ITER2-001 | Run Minimal Hybrid System End To End | AFK | ready-for-agent | Done | BESS-ITER2-000 | [BESS-ITER2-001-run-minimal-hybrid-system-end-to-end.md](BESS-ITER2-001-run-minimal-hybrid-system-end-to-end.md) |
+| BESS-ITER2-002 | Harden Graph And Time-Series Validation | AFK | ready-for-agent | Done | BESS-ITER2-001 | [BESS-ITER2-002-harden-graph-and-time-series-validation.md](BESS-ITER2-002-harden-graph-and-time-series-validation.md) |
 | BESS-ITER2-003 | Add Curtailment And Curtailment Penalty Scenario | AFK | ready-for-agent | Todo | BESS-ITER2-001 | [BESS-ITER2-003-add-curtailment-and-curtailment-penalty-scenario.md](BESS-ITER2-003-add-curtailment-and-curtailment-penalty-scenario.md) |
 | BESS-ITER2-004 | Add Local Load Scenario | AFK | ready-for-agent | Todo | BESS-ITER2-001, BESS-ITER2-002 | [BESS-ITER2-004-add-local-load-scenario.md](BESS-ITER2-004-add-local-load-scenario.md) |
 | BESS-ITER2-005 | Add Grid Limits And Import Export Anti-Simultaneity | AFK | ready-for-agent | Todo | BESS-ITER2-001 | [BESS-ITER2-005-add-grid-limits-and-import-export-anti-simultaneity.md](BESS-ITER2-005-add-grid-limits-and-import-export-anti-simultaneity.md) |
@@ -43,6 +43,8 @@ External issue tracker integration has not been configured, so each issue is sto
 | 2026-05-28 | All | Reworked | Replaced horizontal layer tickets with vertical tracer-bullet slices that each deliver a verifiable end-to-end behavior. |
 | 2026-05-28 | BESS-ITER2-000 | Todo -> Done | Reviewed and accepted the one-bus mathematical formulation. No corrections were required in `docs/iter2/mathematical_model.md`. |
 | 2026-05-28 | BESS-ITER2-007 | Todo -> Done | Added an explicit single-BESS MVP public contract regression guard and verified the full Julia suite with 163 tests, including the Plotly report smoke test. |
+| 2026-05-29 | BESS-ITER2-001 | Todo -> Done | Added the versioned `system_case` loader, normalizer, one-bus system dispatch model, and wide/long outputs for a minimal renewable plus BESS plus grid case. Verified `julia --project=. -e "import Pkg; Pkg.test()"` with 222 tests. |
+| 2026-05-29 | BESS-ITER2-002 | Todo -> Done | Hardened schema, graph, edge, time-series, and battery validation before model construction. Verified `julia --project=. -e "import Pkg; Pkg.test()"` with 222 tests. |
 
 ## Regression Guard
 

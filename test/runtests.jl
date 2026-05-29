@@ -88,6 +88,103 @@ function plot_report_command(script_path::AbstractString, run_output_dir::Abstra
     error("Python executable is required to run the Plotly report smoke check")
 end
 
+function minimal_system_case_document()
+    return Dict{String,Any}(
+        "schema_version" => "bess_system_dispatch.v1",
+        "case_name" => "minimal_hybrid_system",
+        "nodes" => [
+            Dict{String,Any}(
+                "id" => "bus_1",
+                "type" => "bus",
+            ),
+            Dict{String,Any}(
+                "id" => "solar_1",
+                "type" => "renewable",
+            ),
+            Dict{String,Any}(
+                "id" => "battery_1",
+                "type" => "battery",
+                "charge_power_max_mw" => 5.0,
+                "discharge_power_max_mw" => 5.0,
+                "energy_min_mwh" => 0.0,
+                "energy_max_mwh" => 5.0,
+                "initial_energy_mwh" => 0.0,
+                "charge_efficiency" => 1.0,
+                "discharge_efficiency" => 1.0,
+                "degradation_cost_per_mwh_delta_soc" => 0.0,
+                "prevent_simultaneous_charge_discharge" => true,
+                "terminal_condition" => "equal_initial",
+                "terminal_energy_min_mwh" => nothing,
+                "degradation_linear_delta_soc" => true,
+            ),
+            Dict{String,Any}(
+                "id" => "grid_1",
+                "type" => "grid",
+            ),
+        ],
+        "edges" => [
+            Dict{String,Any}("from" => "solar_1", "to" => "bus_1"),
+            Dict{String,Any}("from" => "battery_1", "to" => "bus_1"),
+            Dict{String,Any}("from" => "grid_1", "to" => "bus_1"),
+        ],
+        "time_series" => [
+            Dict{String,Any}(
+                "timestamp" => "2026-01-01T00:00:00",
+                "duration_hours" => 1.0,
+                "price_usd_per_mwh" => 0.0,
+                "renewable_available_power_mw" => Dict{String,Any}("solar_1" => 5.0),
+            ),
+            Dict{String,Any}(
+                "timestamp" => "2026-01-01T01:00:00",
+                "duration_hours" => 1.0,
+                "price_usd_per_mwh" => 100.0,
+                "renewable_available_power_mw" => Dict{String,Any}("solar_1" => 0.0),
+            ),
+        ],
+        "constraints" => Dict{String,Any}(),
+        "solver" => Dict{String,Any}(
+            "name" => "HiGHS",
+            "options" => Dict{String,Any}(),
+        ),
+    )
+end
+
+function write_system_case_json(path::AbstractString, document)
+    open(path, "w") do io
+        JSON3.write(io, document)
+        write(io, "\n")
+    end
+
+    return path
+end
+
+function write_minimal_system_case_json(case_dir::AbstractString; document = minimal_system_case_document())
+    return write_system_case_json(joinpath(case_dir, "system_case.json"), document)
+end
+
+function system_case_node(document, node_id::AbstractString)
+    return only(node for node in document["nodes"] if node["id"] == node_id)
+end
+
+function system_case_validation_message(document)
+    return mktempdir() do case_dir
+        case_path = write_minimal_system_case_json(case_dir; document = document)
+        try
+            BESSDispatch.load_system_case(case_path)
+            return nothing
+        catch error
+            return sprint(showerror, error)
+        end
+    end
+end
+
+function invalid_system_case_error_text(mutator)
+    document = minimal_system_case_document()
+    mutator(document)
+    message = system_case_validation_message(document)
+    return message === nothing ? "" : message
+end
+
 @testset "BESSDispatch package" begin
     @testset "can be imported" begin
         @test BESSDispatch isa Module
@@ -397,6 +494,162 @@ end
             @test second_run_output.output_dir != run_output.output_dir
             @test isfile(second_run_output.dispatch_path)
         end
+    end
+
+    @testset "runs minimal hybrid system case end to end" begin
+        mktempdir() do case_dir
+            case_path = write_minimal_system_case_json(case_dir)
+
+            system_case = BESSDispatch.load_system_case(case_path)
+            @test system_case.schema_version == "bess_system_dispatch.v1"
+            @test Set(node.id for node in system_case.nodes) == Set(["bus_1", "solar_1", "battery_1", "grid_1"])
+
+            optimization_case = BESSDispatch.normalize_system_case(system_case)
+            @test optimization_case.case_name == "minimal_hybrid_system"
+            @test optimization_case.bus_id == "bus_1"
+            @test [asset.id for asset in optimization_case.renewables] == ["solar_1"]
+            @test [asset.id for asset in optimization_case.batteries] == ["battery_1"]
+            @test [asset.id for asset in optimization_case.grids] == ["grid_1"]
+            @test optimization_case.renewable_available_power_mw == [5.0 0.0]
+
+            result = BESSDispatch.solve_system_dispatch(optimization_case)
+            @test result.termination_status == "OPTIMAL"
+            @test isapprox(result.objective_value_usd, 500.0; atol = OBJECTIVE_TOLERANCE_USD)
+
+            output_root = joinpath(case_dir, "outputs")
+            run_output = BESSDispatch.run_system_case(
+                case_path;
+                output_root = output_root,
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+
+            @test run_output.case_name == "minimal_hybrid_system"
+            @test run_output.output_dir == joinpath(output_root, "minimal_hybrid_system", "20260102T030405000")
+            @test isfile(run_output.dispatch_path)
+            @test isfile(run_output.asset_dispatch_path)
+            @test isfile(run_output.summary_path)
+            @test isfile(run_output.system_case_resolved_path)
+            @test isfile(run_output.model_metadata_path)
+
+            dispatch_rows = collect(CSV.File(run_output.dispatch_path))
+            @test length(dispatch_rows) == 2
+            @test propertynames(dispatch_rows[1]) == [
+                :timestamp,
+                :duration_hours,
+                :price_usd_per_mwh,
+                :grid_import_mw,
+                :grid_export_mw,
+                :net_grid_export_mw,
+                :renewable_used_mw,
+                :renewable_curtailed_mw,
+                :battery_charge_mw,
+                :battery_discharge_mw,
+                :battery_net_discharge_mw,
+                :battery_energy_mwh,
+                :battery_delta_soc_abs_mwh,
+                :market_value_usd,
+                :battery_degradation_cost_usd,
+                :curtailment_penalty_usd,
+                :period_profit_usd,
+            ]
+            @test isapprox(dispatch_rows[1].renewable_used_mw, 5.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(dispatch_rows[1].renewable_curtailed_mw, 0.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(dispatch_rows[1].battery_charge_mw, 5.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(dispatch_rows[2].battery_discharge_mw, 5.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(dispatch_rows[2].grid_export_mw, 5.0; atol = POWER_TOLERANCE_MW)
+
+            for row in dispatch_rows
+                supply = row.grid_import_mw + row.renewable_used_mw + row.battery_discharge_mw
+                consumption = row.grid_export_mw + row.battery_charge_mw
+                @test isapprox(supply, consumption; atol = POWER_TOLERANCE_MW)
+            end
+
+            asset_rows = collect(CSV.File(run_output.asset_dispatch_path))
+            @test Set(string(row.asset_id) for row in asset_rows) == Set(["solar_1", "battery_1", "grid_1"])
+            @test any(row -> string(row.asset_id) == "solar_1" && isapprox(row.renewable_used_mw, 5.0; atol = POWER_TOLERANCE_MW), asset_rows)
+            @test any(row -> string(row.asset_id) == "battery_1" && isapprox(row.battery_discharge_mw, 5.0; atol = POWER_TOLERANCE_MW), asset_rows)
+            @test any(row -> string(row.asset_id) == "grid_1" && isapprox(row.grid_export_mw, 5.0; atol = POWER_TOLERANCE_MW), asset_rows)
+
+            summary = JSON3.read(read(run_output.summary_path, String))
+            @test string(summary.case_name) == "minimal_hybrid_system"
+            @test string(summary.termination_status) == "OPTIMAL"
+            @test summary.objective_value_usd == run_output.result.objective_value_usd
+            @test string(summary.source_identifiers.system_case) == abspath(case_path)
+
+            resolved_case = JSON3.read(read(run_output.system_case_resolved_path, String))
+            @test string(resolved_case.schema_version) == "bess_system_dispatch.v1"
+            @test string(resolved_case.case_name) == "minimal_hybrid_system"
+
+            metadata = JSON3.read(read(run_output.model_metadata_path, String))
+            @test string(metadata.model_name) == "one_bus_hybrid_system_dispatch"
+            @test metadata.number_of_periods == 2
+            @test collect(string.(metadata.asset_ids.batteries)) == ["battery_1"]
+            @test collect(string.(metadata.asset_ids.renewables)) == ["solar_1"]
+            @test collect(string.(metadata.asset_ids.grids)) == ["grid_1"]
+        end
+    end
+
+    @testset "rejects invalid system battery bounds before model construction" begin
+        document = minimal_system_case_document()
+        battery = system_case_node(document, "battery_1")
+        battery["energy_min_mwh"] = 5.0
+        battery["energy_max_mwh"] = 5.0
+
+        @test occursin("battery battery_1 energy_min_mwh must be less than energy_max_mwh", system_case_validation_message(document))
+    end
+
+    @testset "rejects invalid system graph and time-series inputs" begin
+        @test occursin("schema_version is required", invalid_system_case_error_text(
+            document -> delete!(document, "schema_version"),
+        ))
+        @test occursin("schema_version must be bess_system_dispatch.v1", invalid_system_case_error_text(
+            document -> document["schema_version"] = "bess_system_dispatch.v2",
+        ))
+        @test occursin("node id battery_1 is duplicated", invalid_system_case_error_text(
+            document -> system_case_node(document, "solar_1")["id"] = "battery_1",
+        ))
+        @test occursin("unsupported type thermal", invalid_system_case_error_text(
+            document -> system_case_node(document, "solar_1")["type"] = "thermal",
+        ))
+        @test occursin("exactly one bus or PCC node; found 0", invalid_system_case_error_text(
+            document -> filter!(node -> node["type"] != "bus", document["nodes"]),
+        ))
+        @test occursin("exactly one bus or PCC node; found 2", invalid_system_case_error_text(
+            document -> push!(document["nodes"], Dict{String,Any}("id" => "bus_2", "type" => "pcc")),
+        ))
+        @test occursin("edge references missing node id missing_node", invalid_system_case_error_text(
+            document -> document["edges"][1]["from"] = "missing_node",
+        ))
+        @test occursin("asset node battery_1 is disconnected from bus bus_1", invalid_system_case_error_text(
+            document -> filter!(edge -> edge["from"] != "battery_1" && edge["to"] != "battery_1", document["edges"]),
+        ))
+        @test occursin("field capacity_mw is not supported", invalid_system_case_error_text(
+            document -> document["edges"][1]["capacity_mw"] = 5.0,
+        ))
+        @test occursin("time_series must contain at least one period", invalid_system_case_error_text(
+            document -> document["time_series"] = [],
+        ))
+        @test occursin("duration_hours[1] must be positive", invalid_system_case_error_text(
+            document -> document["time_series"][1]["duration_hours"] = 0.0,
+        ))
+        @test occursin("price_usd_per_mwh", invalid_system_case_error_text(
+            document -> delete!(document["time_series"][1], "price_usd_per_mwh"),
+        ))
+        @test occursin("price_usd_per_mwh[1] must be finite", invalid_system_case_error_text(
+            document -> document["time_series"][1]["price_usd_per_mwh"] = "NaN",
+        ))
+        @test occursin("timestamps must be strictly increasing", invalid_system_case_error_text(
+            document -> document["time_series"][2]["timestamp"] = "2026-01-01T00:00:00",
+        ))
+        @test occursin("battery battery_1 charge_efficiency must be in (0, 1]", invalid_system_case_error_text(
+            document -> system_case_node(document, "battery_1")["charge_efficiency"] = 0.0,
+        ))
+        @test occursin("battery battery_1 terminal_condition must be one of", invalid_system_case_error_text(
+            document -> system_case_node(document, "battery_1")["terminal_condition"] = "target_energy",
+        ))
+        @test occursin("battery battery_1 degradation_cost_per_mwh_delta_soc must be nonnegative", invalid_system_case_error_text(
+            document -> system_case_node(document, "battery_1")["degradation_cost_per_mwh_delta_soc"] = -1.0,
+        ))
     end
 
     @testset "plot report script creates an HTML report for a sample run" begin
