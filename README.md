@@ -61,11 +61,30 @@ On success the CLI prints compact JSON to stdout with `case_name`,
 validation or solve failure it exits nonzero and writes error JSON to stderr, so
 stdout remains parseable by the caller.
 
+System periods may use the legacy single price field:
+
+```json
+"price_usd_per_mwh": 45.0
+```
+
+or paired import/export prices:
+
+```json
+"import_price_usd_per_mwh": 55.0,
+"export_price_usd_per_mwh": 38.0
+```
+
+When separate prices are present, import cost and export revenue drive the
+objective and are included in result outputs. Legacy single-price cases remain
+valid and keep the existing `price_usd_per_mwh` output column.
+
 Each system run folder contains:
 
 - `dispatch.csv`: one row per period with system totals including
   `grid_import_mw`, `grid_export_mw`, `renewable_curtailed_mw`,
-  `load_demand_mw`, battery totals, market value, and period profit.
+  `load_demand_mw`, battery totals, market value, and period profit. Separate
+  price runs also include import/export prices, import cost, export revenue,
+  and net market value columns.
 - `asset_dispatch.csv`: long asset-level rows keyed by `asset_id`, with the
   same grid, renewable, load, and battery dispatch fields for dynamic UI tables.
 - `summary.json`: compact run status, objective value, source identifiers, and

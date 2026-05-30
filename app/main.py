@@ -1027,6 +1027,7 @@ def render_summary_details(summary: dict) -> str:
 
 def render_chart_grid(charts: dict) -> str:
     chart_keys = [
+        "price",
         "grid_import_export",
         "renewable_used_curtailed",
         "bess_charge_discharge_soc",

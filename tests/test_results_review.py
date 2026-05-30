@@ -107,6 +107,14 @@ class ResultsReaderTests(unittest.TestCase):
                 self.assertEqual(grid_chart["series"][0]["values"], [2.5])
                 self.assertEqual(grid_chart["series"][1]["values"], [0.0])
 
+                price_chart = results["charts"]["price"]
+                self.assertTrue(price_chart["available"])
+                self.assertEqual(
+                    [series["key"] for series in price_chart["series"]],
+                    ["price_usd_per_mwh"],
+                )
+                self.assertEqual(price_chart["series"][0]["values"], [45.0])
+
                 bess_chart = results["charts"]["bess_charge_discharge_soc"]
                 self.assertTrue(bess_chart["available"])
                 self.assertEqual(
@@ -114,6 +122,30 @@ class ResultsReaderTests(unittest.TestCase):
                     ["BESS Charge MW", "BESS Discharge MW", "BESS SOC MWh"],
                 )
                 self.assertEqual(bess_chart["series"][2]["values"], [20.0])
+            finally:
+                store.close()
+
+    def test_price_chart_prefers_separate_import_export_prices_when_available(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_separate_price_result_artifacts(store, artifact_root)
+
+                results = read_run_results(run, store.list_run_artifacts(run["id"]), artifact_root)
+
+                price_chart = results["charts"]["price"]
+                self.assertTrue(price_chart["available"])
+                self.assertEqual(
+                    [series["key"] for series in price_chart["series"]],
+                    ["import_price_usd_per_mwh", "export_price_usd_per_mwh"],
+                )
+                self.assertEqual(
+                    [series["label"] for series in price_chart["series"]],
+                    ["Import Price USD/MWh", "Export Price USD/MWh"],
+                )
+                self.assertEqual(price_chart["series"][0]["values"], [10.0])
+                self.assertEqual(price_chart["series"][1]["values"], [100.0])
             finally:
                 store.close()
 
@@ -272,6 +304,7 @@ class ResultsTemplateTests(unittest.TestCase):
 
                 self.assertEqual(response.status_code, 200)
                 self.assertIn("Basic Charts", response.text)
+                self.assertIn('data-chart-id="price"', response.text)
                 self.assertIn('data-chart-id="grid-import-export"', response.text)
                 self.assertIn('data-chart-id="renewable-used-curtailed"', response.text)
                 self.assertIn('data-chart-id="bess-charge-discharge-soc"', response.text)
@@ -515,6 +548,75 @@ def create_completed_run_with_result_artifacts(store, artifact_root):
         "renewable_used_mw,renewable_curtailed_mw,load_demand_mw,battery_charge_mw,battery_discharge_mw,"
         "battery_energy_mwh,battery_delta_soc_abs_mwh\n"
         "2026-01-01T00:00:00,1.0,45.0,grid_1,grid,2.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0\n",
+        encoding="utf-8",
+    )
+
+    scenario_version = create_persisted_scenario_version(store)
+    run = store.create_run(scenario_version_id=scenario_version["id"])
+    store.mark_run_running(
+        run["id"],
+        workspace_path=str(artifact_root / "runs" / str(run["id"])),
+        input_snapshot_path=str(artifact_root / "runs" / str(run["id"]) / "input" / "system_case.json"),
+    )
+    run = store.mark_run_succeeded(
+        run["id"],
+        exit_code=0,
+        stdout="{}",
+        stderr="",
+        success_payload={"termination_status": "OPTIMAL"},
+        output_dir=str(output_dir),
+        summary_path=str(summary_path),
+    )
+    for artifact_type, path, display_name, media_type in [
+        ("summary_json", summary_path, "summary.json", "application/json"),
+        ("dispatch_csv", dispatch_path, "dispatch.csv", "text/csv"),
+        ("asset_dispatch_csv", asset_dispatch_path, "asset_dispatch.csv", "text/csv"),
+    ]:
+        store.register_run_artifact(
+            run_id=run["id"],
+            artifact_type=artifact_type,
+            path=str(path),
+            display_name=display_name,
+            media_type=media_type,
+        )
+    return run
+
+
+def create_completed_run_with_separate_price_result_artifacts(store, artifact_root):
+    output_dir = artifact_root / "runs" / "1" / "outputs"
+    output_dir.mkdir(parents=True)
+    summary_path = output_dir / "summary.json"
+    dispatch_path = output_dir / "dispatch.csv"
+    asset_dispatch_path = output_dir / "asset_dispatch.csv"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "case_name": "separate_price_system",
+                "solver_status": "OPTIMAL",
+                "termination_status": "OPTIMAL",
+                "objective_value_usd": 450.0,
+                "price_mode": "separate_import_export",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    dispatch_path.write_text(
+        "timestamp,duration_hours,import_price_usd_per_mwh,export_price_usd_per_mwh,"
+        "grid_import_mw,grid_export_mw,net_grid_export_mw,renewable_used_mw,renewable_curtailed_mw,"
+        "load_demand_mw,battery_charge_mw,battery_discharge_mw,battery_net_discharge_mw,"
+        "battery_energy_mwh,battery_delta_soc_abs_mwh,import_cost_usd,export_revenue_usd,"
+        "net_market_value_usd,market_value_usd,battery_degradation_cost_usd,curtailment_penalty_usd,"
+        "period_profit_usd\n"
+        "2026-01-01T00:00:00,1.0,10.0,100.0,5.0,0.0,-5.0,0.0,0.0,0.0,5.0,0.0,-5.0,5.0,5.0,50.0,0.0,-50.0,-50.0,0.0,0.0,-50.0\n",
+        encoding="utf-8",
+    )
+    asset_dispatch_path.write_text(
+        "timestamp,duration_hours,import_price_usd_per_mwh,export_price_usd_per_mwh,asset_id,asset_type,"
+        "grid_import_mw,grid_export_mw,renewable_used_mw,renewable_curtailed_mw,load_demand_mw,"
+        "battery_charge_mw,battery_discharge_mw,battery_energy_mwh,battery_delta_soc_abs_mwh\n"
+        "2026-01-01T00:00:00,1.0,10.0,100.0,grid_1,grid,5.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0\n",
         encoding="utf-8",
     )
 

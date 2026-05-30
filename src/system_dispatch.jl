@@ -22,7 +22,10 @@ end
 
 struct SystemPeriodData
     timestamp::DateTime
-    price_usd_per_mwh::Float64
+    price_usd_per_mwh::Union{Float64,Nothing}
+    import_price_usd_per_mwh::Float64
+    export_price_usd_per_mwh::Float64
+    uses_separate_prices::Bool
     duration_hours::Float64
     renewable_available_power_mw::Dict{String,Float64}
     load_demand_mw::Dict{String,Float64}
@@ -70,7 +73,10 @@ struct SystemOptimizationData
     grids::Vector{GridAssetParameters}
     loads::Vector{LoadAssetParameters}
     timestamp::Vector{DateTime}
-    price_usd_per_mwh::Vector{Float64}
+    price_usd_per_mwh::Vector{Union{Float64,Nothing}}
+    import_price_usd_per_mwh::Vector{Float64}
+    export_price_usd_per_mwh::Vector{Float64}
+    uses_separate_prices::Vector{Bool}
     duration_hours::Vector{Float64}
     renewable_available_power_mw::Matrix{Float64}
     load_demand_mw::Matrix{Float64}
@@ -107,6 +113,8 @@ struct SystemDispatchResult
     p_grid_import_mw::Matrix{Float64}
     p_grid_export_mw::Matrix{Float64}
     market_value_usd::Vector{Float64}
+    import_cost_usd::Vector{Float64}
+    export_revenue_usd::Vector{Float64}
     battery_degradation_cost_usd::Matrix{Float64}
     curtailment_penalty_usd::Matrix{Float64}
 end
@@ -229,6 +237,9 @@ function normalize_system_case(system_case::SystemGraphData)::SystemOptimization
 
     timestamps = [period.timestamp for period in system_case.time_series]
     prices = [period.price_usd_per_mwh for period in system_case.time_series]
+    import_prices = [period.import_price_usd_per_mwh for period in system_case.time_series]
+    export_prices = [period.export_price_usd_per_mwh for period in system_case.time_series]
+    uses_separate_prices = [period.uses_separate_prices for period in system_case.time_series]
     durations = [period.duration_hours for period in system_case.time_series]
     availability = zeros(length(renewables), length(system_case.time_series))
     load_demand = zeros(length(loads), length(system_case.time_series))
@@ -267,6 +278,9 @@ function normalize_system_case(system_case::SystemGraphData)::SystemOptimization
         loads,
         timestamps,
         prices,
+        import_prices,
+        export_prices,
+        uses_separate_prices,
         durations,
         availability,
         load_demand,
@@ -505,9 +519,10 @@ function build_system_dispatch_model(data::SystemOptimizationData)::SystemDispat
     )
 
     market_value_objective = sum(
-        data.price_usd_per_mwh[period] *
         (
+            data.export_price_usd_per_mwh[period] *
             sum(p_grid_export_mw[grid, period] for grid in 1:n_grids) -
+            data.import_price_usd_per_mwh[period] *
             sum(p_grid_import_mw[grid, period] for grid in 1:n_grids)
         ) *
         data.duration_hours[period] for period in 1:n_periods
@@ -565,9 +580,11 @@ function solve_system_dispatch(data::SystemOptimizationData)::SystemDispatchResu
     p_grid_export = value.(dispatch_model.p_grid_export_mw)
 
     battery_delta_soc_abs = realized_system_delta_soc_abs(data, battery_energy)
-    market_value = data.price_usd_per_mwh .*
-                   (period_sum(p_grid_export, length(data.timestamp)) .- period_sum(p_grid_import, length(data.timestamp))) .*
-                   data.duration_hours
+    grid_import = period_sum(p_grid_import, length(data.timestamp))
+    grid_export = period_sum(p_grid_export, length(data.timestamp))
+    import_cost = data.import_price_usd_per_mwh .* grid_import .* data.duration_hours
+    export_revenue = data.export_price_usd_per_mwh .* grid_export .* data.duration_hours
+    market_value = export_revenue .- import_cost
     battery_degradation_cost = zeros(size(battery_delta_soc_abs))
     for (battery_index, battery_asset) in enumerate(data.batteries)
         if battery_asset.constraints.degradation_linear_delta_soc
@@ -597,6 +614,8 @@ function solve_system_dispatch(data::SystemOptimizationData)::SystemDispatchResu
         p_grid_import,
         p_grid_export,
         market_value,
+        import_cost,
+        export_revenue,
         battery_degradation_cost,
         curtailment_penalty,
     )
@@ -737,9 +756,17 @@ function parse_system_periods(periods)::Vector{SystemPeriodData}
                 )
             end
 
+            legacy_price, import_price, export_price, uses_separate_prices = parse_system_period_prices(
+                period_dict,
+                index,
+            )
+
             push!(parsed_periods, SystemPeriodData(
                 parse_required_datetime(required_value(period_dict, "timestamp"), "time_series[$index].timestamp"),
-                parse_required_float(required_value(period_dict, "price_usd_per_mwh"), "time_series[$index].price_usd_per_mwh"),
+                legacy_price,
+                import_price,
+                export_price,
+                uses_separate_prices,
                 parse_required_float(required_value(period_dict, "duration_hours"), "time_series[$index].duration_hours"),
                 renewable_values,
                 load_values,
@@ -750,6 +777,41 @@ function parse_system_periods(periods)::Vector{SystemPeriodData}
     end
 
     return parsed_periods
+end
+
+function parse_system_period_prices(period_dict::Dict{String,Any}, index::Int)
+    has_legacy_price = haskey(period_dict, "price_usd_per_mwh") && period_dict["price_usd_per_mwh"] !== nothing
+    has_import_price =
+        haskey(period_dict, "import_price_usd_per_mwh") && period_dict["import_price_usd_per_mwh"] !== nothing
+    has_export_price =
+        haskey(period_dict, "export_price_usd_per_mwh") && period_dict["export_price_usd_per_mwh"] !== nothing
+
+    if has_import_price != has_export_price
+        throw(ArgumentError(
+            "time_series[$index] must provide both import_price_usd_per_mwh and export_price_usd_per_mwh when using separate prices",
+        ))
+    end
+
+    if has_import_price
+        legacy_price = has_legacy_price ?
+                       parse_required_float(period_dict["price_usd_per_mwh"], "time_series[$index].price_usd_per_mwh") :
+                       nothing
+        import_price = parse_required_float(
+            period_dict["import_price_usd_per_mwh"],
+            "time_series[$index].import_price_usd_per_mwh",
+        )
+        export_price = parse_required_float(
+            period_dict["export_price_usd_per_mwh"],
+            "time_series[$index].export_price_usd_per_mwh",
+        )
+        return legacy_price, import_price, export_price, true
+    end
+
+    legacy_price = parse_required_float(
+        required_value(period_dict, "price_usd_per_mwh"),
+        "time_series[$index].price_usd_per_mwh",
+    )
+    return legacy_price, legacy_price, legacy_price, false
 end
 
 function validate_system_connectivity(system_case::SystemGraphData, bus_id::String)
@@ -832,8 +894,21 @@ function validate_system_time_series(periods::Vector{SystemPeriodData})
     end
 
     for (index, period) in enumerate(periods)
-        if !isfinite(period.price_usd_per_mwh)
+        if period.price_usd_per_mwh !== nothing && !isfinite(period.price_usd_per_mwh)
             throw(ArgumentError("price_usd_per_mwh[$index] must be finite; got $(period.price_usd_per_mwh)"))
+        end
+        if !period.uses_separate_prices && period.price_usd_per_mwh === nothing
+            throw(ArgumentError("price_usd_per_mwh[$index] is required when separate prices are not provided"))
+        end
+        if !isfinite(period.import_price_usd_per_mwh)
+            throw(ArgumentError(
+                "import_price_usd_per_mwh[$index] must be finite; got $(period.import_price_usd_per_mwh)",
+            ))
+        end
+        if !isfinite(period.export_price_usd_per_mwh)
+            throw(ArgumentError(
+                "export_price_usd_per_mwh[$index] must be finite; got $(period.export_price_usd_per_mwh)",
+            ))
         end
         if !isfinite(period.duration_hours) || !(period.duration_hours > 0)
             throw(ArgumentError("duration_hours[$index] must be positive; got $(period.duration_hours)"))
@@ -903,6 +978,18 @@ function period_sum(values::Matrix{Float64}, n_periods::Int)::Vector{Float64}
     return vec(sum(values; dims = 1))
 end
 
+function uses_separate_price_case(data::SystemOptimizationData)::Bool
+    return any(data.uses_separate_prices)
+end
+
+function system_price_mode(data::SystemOptimizationData)::String
+    return uses_separate_price_case(data) ? "separate_import_export" : "legacy_single_price"
+end
+
+function legacy_price_vector(data::SystemOptimizationData)::Vector{Float64}
+    return [price === nothing ? NaN : price for price in data.price_usd_per_mwh]
+end
+
 function system_dispatch_dataframe(data::SystemOptimizationData, result::SystemDispatchResult)::DataFrame
     n_periods = length(data.timestamp)
     grid_import = period_sum(result.p_grid_import_mw, n_periods)
@@ -917,33 +1004,50 @@ function system_dispatch_dataframe(data::SystemOptimizationData, result::SystemD
     battery_degradation_cost = period_sum(result.battery_degradation_cost_usd, n_periods)
     curtailment_penalty = period_sum(result.curtailment_penalty_usd, n_periods)
     period_profit = result.market_value_usd .- battery_degradation_cost .- curtailment_penalty
-
-    return DataFrame(
+    frame = DataFrame(
         timestamp = string.(data.timestamp),
         duration_hours = data.duration_hours,
-        price_usd_per_mwh = data.price_usd_per_mwh,
-        grid_import_mw = grid_import,
-        grid_export_mw = grid_export,
-        net_grid_export_mw = grid_export .- grid_import,
-        renewable_used_mw = renewable_used,
-        renewable_curtailed_mw = renewable_curtailed,
-        load_demand_mw = load_demand,
-        battery_charge_mw = battery_charge,
-        battery_discharge_mw = battery_discharge,
-        battery_net_discharge_mw = battery_discharge .- battery_charge,
-        battery_energy_mwh = battery_energy,
-        battery_delta_soc_abs_mwh = battery_delta_soc_abs,
-        market_value_usd = result.market_value_usd,
-        battery_degradation_cost_usd = battery_degradation_cost,
-        curtailment_penalty_usd = curtailment_penalty,
-        period_profit_usd = period_profit,
     )
+
+    if uses_separate_price_case(data)
+        frame.import_price_usd_per_mwh = data.import_price_usd_per_mwh
+        frame.export_price_usd_per_mwh = data.export_price_usd_per_mwh
+    else
+        frame.price_usd_per_mwh = legacy_price_vector(data)
+    end
+
+    frame.grid_import_mw = grid_import
+    frame.grid_export_mw = grid_export
+    frame.net_grid_export_mw = grid_export .- grid_import
+    frame.renewable_used_mw = renewable_used
+    frame.renewable_curtailed_mw = renewable_curtailed
+    frame.load_demand_mw = load_demand
+    frame.battery_charge_mw = battery_charge
+    frame.battery_discharge_mw = battery_discharge
+    frame.battery_net_discharge_mw = battery_discharge .- battery_charge
+    frame.battery_energy_mwh = battery_energy
+    frame.battery_delta_soc_abs_mwh = battery_delta_soc_abs
+
+    if uses_separate_price_case(data)
+        frame.import_cost_usd = result.import_cost_usd
+        frame.export_revenue_usd = result.export_revenue_usd
+        frame.net_market_value_usd = result.market_value_usd
+    end
+
+    frame.market_value_usd = result.market_value_usd
+    frame.battery_degradation_cost_usd = battery_degradation_cost
+    frame.curtailment_penalty_usd = curtailment_penalty
+    frame.period_profit_usd = period_profit
+
+    return frame
 end
 
 function system_asset_dispatch_dataframe(data::SystemOptimizationData, result::SystemDispatchResult)::DataFrame
     timestamp = String[]
     duration_hours = Float64[]
-    price_usd_per_mwh = Float64[]
+    price_usd_per_mwh = Vector{Union{Float64,Missing}}()
+    import_price_usd_per_mwh = Float64[]
+    export_price_usd_per_mwh = Float64[]
     asset_id = String[]
     asset_type = String[]
     grid_import_mw = Float64[]
@@ -962,6 +1066,8 @@ function system_asset_dispatch_dataframe(data::SystemOptimizationData, result::S
                 timestamp,
                 duration_hours,
                 price_usd_per_mwh,
+                import_price_usd_per_mwh,
+                export_price_usd_per_mwh,
                 asset_id,
                 asset_type,
                 grid_import_mw,
@@ -994,6 +1100,8 @@ function system_asset_dispatch_dataframe(data::SystemOptimizationData, result::S
                 timestamp,
                 duration_hours,
                 price_usd_per_mwh,
+                import_price_usd_per_mwh,
+                export_price_usd_per_mwh,
                 asset_id,
                 asset_type,
                 grid_import_mw,
@@ -1026,6 +1134,8 @@ function system_asset_dispatch_dataframe(data::SystemOptimizationData, result::S
                 timestamp,
                 duration_hours,
                 price_usd_per_mwh,
+                import_price_usd_per_mwh,
+                export_price_usd_per_mwh,
                 asset_id,
                 asset_type,
                 grid_import_mw,
@@ -1058,6 +1168,8 @@ function system_asset_dispatch_dataframe(data::SystemOptimizationData, result::S
                 timestamp,
                 duration_hours,
                 price_usd_per_mwh,
+                import_price_usd_per_mwh,
+                export_price_usd_per_mwh,
                 asset_id,
                 asset_type,
                 grid_import_mw,
@@ -1086,28 +1198,39 @@ function system_asset_dispatch_dataframe(data::SystemOptimizationData, result::S
         end
     end
 
-    return DataFrame(
+    frame = DataFrame(
         timestamp = timestamp,
         duration_hours = duration_hours,
-        price_usd_per_mwh = price_usd_per_mwh,
-        asset_id = asset_id,
-        asset_type = asset_type,
-        grid_import_mw = grid_import_mw,
-        grid_export_mw = grid_export_mw,
-        renewable_used_mw = renewable_used_mw,
-        renewable_curtailed_mw = renewable_curtailed_mw,
-        load_demand_mw = load_demand_mw,
-        battery_charge_mw = battery_charge_mw,
-        battery_discharge_mw = battery_discharge_mw,
-        battery_energy_mwh = battery_energy_mwh,
-        battery_delta_soc_abs_mwh = battery_delta_soc_abs_mwh,
     )
+
+    if uses_separate_price_case(data)
+        frame.import_price_usd_per_mwh = import_price_usd_per_mwh
+        frame.export_price_usd_per_mwh = export_price_usd_per_mwh
+    else
+        frame.price_usd_per_mwh = price_usd_per_mwh
+    end
+
+    frame.asset_id = asset_id
+    frame.asset_type = asset_type
+    frame.grid_import_mw = grid_import_mw
+    frame.grid_export_mw = grid_export_mw
+    frame.renewable_used_mw = renewable_used_mw
+    frame.renewable_curtailed_mw = renewable_curtailed_mw
+    frame.load_demand_mw = load_demand_mw
+    frame.battery_charge_mw = battery_charge_mw
+    frame.battery_discharge_mw = battery_discharge_mw
+    frame.battery_energy_mwh = battery_energy_mwh
+    frame.battery_delta_soc_abs_mwh = battery_delta_soc_abs_mwh
+
+    return frame
 end
 
 function push_system_asset_row!(
     timestamp,
     duration_hours,
     price_usd_per_mwh,
+    import_price_usd_per_mwh,
+    export_price_usd_per_mwh,
     asset_id,
     asset_type,
     grid_import_mw,
@@ -1135,7 +1258,10 @@ function push_system_asset_row!(
 )
     push!(timestamp, string(data.timestamp[period]))
     push!(duration_hours, data.duration_hours[period])
-    push!(price_usd_per_mwh, data.price_usd_per_mwh[period])
+    legacy_price = data.price_usd_per_mwh[period]
+    push!(price_usd_per_mwh, legacy_price === nothing ? missing : legacy_price)
+    push!(import_price_usd_per_mwh, data.import_price_usd_per_mwh[period])
+    push!(export_price_usd_per_mwh, data.export_price_usd_per_mwh[period])
     push!(asset_id, current_asset_id)
     push!(asset_type, current_asset_type)
     push!(grid_import_mw, current_grid_import_mw)
@@ -1162,6 +1288,7 @@ function system_summary_dict(
         "solver_status" => result.solver_status,
         "termination_status" => result.termination_status,
         "objective_value_usd" => result.objective_value_usd,
+        "price_mode" => system_price_mode(data),
         "source_identifiers" => Dict{String,Any}(string(key) => value for (key, value) in pairs(source_identifiers)),
         "model_version" => package_version_string(),
     )
@@ -1172,6 +1299,7 @@ function system_model_metadata_dict(data::SystemOptimizationData)::Dict{String,A
         "model_name" => "one_bus_hybrid_system_dispatch",
         "schema_version" => data.schema_version,
         "bus_id" => data.bus_id,
+        "price_mode" => system_price_mode(data),
         "number_of_periods" => length(data.timestamp),
         "asset_ids" => Dict{String,Any}(
             "batteries" => [battery.id for battery in data.batteries],
@@ -1212,22 +1340,34 @@ function system_case_dict(system_case::SystemGraphData)::Dict{String,Any}
             Dict{String,Any}("from" => edge.from, "to" => edge.to)
             for edge in system_case.edges
         ],
-        "time_series" => [
-            Dict{String,Any}(
-                "timestamp" => string(period.timestamp),
-                "duration_hours" => period.duration_hours,
-                "price_usd_per_mwh" => period.price_usd_per_mwh,
-                "renewable_available_power_mw" => period.renewable_available_power_mw,
-                "load_demand_mw" => period.load_demand_mw,
-            )
-            for period in system_case.time_series
-        ],
+        "time_series" => [system_period_dict(period) for period in system_case.time_series],
         "constraints" => system_case.constraints,
         "solver" => Dict{String,Any}(
             "name" => system_case.solver.name,
             "options" => Dict{String,Any}(string(key) => value for (key, value) in pairs(system_case.solver.options)),
         ),
     )
+end
+
+function system_period_dict(period::SystemPeriodData)::Dict{String,Any}
+    period_dict = Dict{String,Any}(
+        "timestamp" => string(period.timestamp),
+        "duration_hours" => period.duration_hours,
+        "renewable_available_power_mw" => period.renewable_available_power_mw,
+        "load_demand_mw" => period.load_demand_mw,
+    )
+
+    if period.uses_separate_prices
+        period_dict["import_price_usd_per_mwh"] = period.import_price_usd_per_mwh
+        period_dict["export_price_usd_per_mwh"] = period.export_price_usd_per_mwh
+        if period.price_usd_per_mwh !== nothing
+            period_dict["price_usd_per_mwh"] = period.price_usd_per_mwh
+        end
+    else
+        period_dict["price_usd_per_mwh"] = period.price_usd_per_mwh
+    end
+
+    return period_dict
 end
 
 function system_case_source_identifiers(path::AbstractString)::Dict{String,Any}

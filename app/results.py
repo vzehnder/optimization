@@ -46,6 +46,7 @@ def read_run_results(run: dict[str, Any], artifacts: list[dict[str, Any]], artif
 
 def build_chart_data(dispatch_table: dict[str, Any], asset_dispatch_table: dict[str, Any]) -> dict[str, Any]:
     return {
+        "price": build_price_chart(dispatch_table),
         "grid_import_export": build_line_chart(
             "grid-import-export",
             "Grid Import / Export",
@@ -85,6 +86,27 @@ def build_chart_data(dispatch_table: dict[str, Any], asset_dispatch_table: dict[
             "asset_dispatch": len(asset_dispatch_table["rows"]),
         },
     }
+
+
+def build_price_chart(dispatch_table: dict[str, Any]) -> dict[str, Any]:
+    columns = dispatch_table["columns"]
+    if "import_price_usd_per_mwh" in columns and "export_price_usd_per_mwh" in columns:
+        return build_line_chart(
+            "price",
+            "Energy Price",
+            dispatch_table,
+            [
+                ("import_price_usd_per_mwh", "Import Price USD/MWh", "USD/MWh"),
+                ("export_price_usd_per_mwh", "Export Price USD/MWh", "USD/MWh"),
+            ],
+        )
+
+    return build_line_chart(
+        "price",
+        "Energy Price",
+        dispatch_table,
+        [("price_usd_per_mwh", "Price USD/MWh", "USD/MWh")],
+    )
 
 
 def build_line_chart(

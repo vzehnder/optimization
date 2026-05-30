@@ -190,6 +190,33 @@ function curtailment_system_case_document()
     return document
 end
 
+function separate_price_system_case_document()
+    document = minimal_system_case_document()
+    document["case_name"] = "separate_price_system"
+
+    battery = system_case_node(document, "battery_1")
+    battery["degradation_linear_delta_soc"] = false
+
+    document["time_series"] = [
+        Dict{String,Any}(
+            "timestamp" => "2026-01-01T00:00:00",
+            "duration_hours" => 1.0,
+            "import_price_usd_per_mwh" => 10.0,
+            "export_price_usd_per_mwh" => 5.0,
+            "renewable_available_power_mw" => Dict{String,Any}("solar_1" => 0.0),
+        ),
+        Dict{String,Any}(
+            "timestamp" => "2026-01-01T01:00:00",
+            "duration_hours" => 1.0,
+            "import_price_usd_per_mwh" => 80.0,
+            "export_price_usd_per_mwh" => 100.0,
+            "renewable_available_power_mw" => Dict{String,Any}("solar_1" => 0.0),
+        ),
+    ]
+
+    return document
+end
+
 function local_load_system_case_document()
     document = minimal_system_case_document()
     document["case_name"] = "local_load_system"
@@ -706,6 +733,74 @@ end
         end
     end
 
+    @testset "runs separate import export price system case end to end" begin
+        mktempdir() do case_dir
+            case_path = write_minimal_system_case_json(case_dir; document = separate_price_system_case_document())
+
+            system_case = BESSDispatch.load_system_case(case_path)
+            optimization_case = BESSDispatch.normalize_system_case(system_case)
+            @test optimization_case.price_usd_per_mwh == [nothing, nothing]
+            @test optimization_case.import_price_usd_per_mwh == [10.0, 80.0]
+            @test optimization_case.export_price_usd_per_mwh == [5.0, 100.0]
+
+            result = BESSDispatch.solve_system_dispatch(optimization_case)
+            @test result.termination_status == "OPTIMAL"
+            @test isapprox(result.p_grid_import_mw[1, 1], 5.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(result.p_grid_export_mw[1, 2], 5.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(result.import_cost_usd[1], 50.0; atol = OBJECTIVE_TOLERANCE_USD)
+            @test isapprox(result.export_revenue_usd[2], 500.0; atol = OBJECTIVE_TOLERANCE_USD)
+            @test isapprox(result.market_value_usd[1], -50.0; atol = OBJECTIVE_TOLERANCE_USD)
+            @test isapprox(result.market_value_usd[2], 500.0; atol = OBJECTIVE_TOLERANCE_USD)
+            @test isapprox(result.objective_value_usd, 450.0; atol = OBJECTIVE_TOLERANCE_USD)
+
+            run_output = BESSDispatch.run_system_case(
+                case_path;
+                output_root = joinpath(case_dir, "outputs"),
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+
+            dispatch_rows = collect(CSV.File(run_output.dispatch_path))
+            @test propertynames(dispatch_rows[1]) == [
+                :timestamp,
+                :duration_hours,
+                :import_price_usd_per_mwh,
+                :export_price_usd_per_mwh,
+                :grid_import_mw,
+                :grid_export_mw,
+                :net_grid_export_mw,
+                :renewable_used_mw,
+                :renewable_curtailed_mw,
+                :load_demand_mw,
+                :battery_charge_mw,
+                :battery_discharge_mw,
+                :battery_net_discharge_mw,
+                :battery_energy_mwh,
+                :battery_delta_soc_abs_mwh,
+                :import_cost_usd,
+                :export_revenue_usd,
+                :net_market_value_usd,
+                :market_value_usd,
+                :battery_degradation_cost_usd,
+                :curtailment_penalty_usd,
+                :period_profit_usd,
+            ]
+            @test isapprox(dispatch_rows[1].import_cost_usd, 50.0; atol = OBJECTIVE_TOLERANCE_USD)
+            @test isapprox(dispatch_rows[2].export_revenue_usd, 500.0; atol = OBJECTIVE_TOLERANCE_USD)
+            @test isapprox(dispatch_rows[1].period_profit_usd, -50.0; atol = OBJECTIVE_TOLERANCE_USD)
+            @test isapprox(dispatch_rows[2].period_profit_usd, 500.0; atol = OBJECTIVE_TOLERANCE_USD)
+
+            asset_rows = collect(CSV.File(run_output.asset_dispatch_path))
+            @test :import_price_usd_per_mwh in propertynames(asset_rows[1])
+            @test :export_price_usd_per_mwh in propertynames(asset_rows[1])
+
+            summary = JSON3.read(read(run_output.summary_path, String))
+            @test string(summary.price_mode) == "separate_import_export"
+
+            metadata = JSON3.read(read(run_output.model_metadata_path, String))
+            @test string(metadata.price_mode) == "separate_import_export"
+        end
+    end
+
     @testset "curtails excess renewable generation and applies configured penalty" begin
         mktempdir() do case_dir
             case_path = write_minimal_system_case_json(case_dir; document = curtailment_system_case_document())
@@ -1093,6 +1188,12 @@ end
         ))
         @test occursin("price_usd_per_mwh[1] must be finite", invalid_system_case_error_text(
             document -> document["time_series"][1]["price_usd_per_mwh"] = "NaN",
+        ))
+        @test occursin("must provide both import_price_usd_per_mwh and export_price_usd_per_mwh", invalid_system_case_error_text(
+            document -> begin
+                delete!(document["time_series"][1], "price_usd_per_mwh")
+                document["time_series"][1]["import_price_usd_per_mwh"] = 10.0
+            end,
         ))
         @test occursin("timestamps must be strictly increasing", invalid_system_case_error_text(
             document -> document["time_series"][2]["timestamp"] = "2026-01-01T00:00:00",
