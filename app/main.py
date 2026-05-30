@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from app.persistence import AnalystStore
+from app.runner import JuliaRunExecutor, LocalRunQueue
 from app.validation import JuliaValidationService, ValidationResult
 
 
@@ -35,15 +36,19 @@ def create_app(
     *,
     database_url: str | None = None,
     store: AnalystStore | None = None,
+    run_queue=None,
 ) -> FastAPI:
     service = validation_service or JuliaValidationService()
     analyst_store = store or AnalystStore(database_url)
+    local_run_queue = run_queue or LocalRunQueue(executor=JuliaRunExecutor(store=analyst_store))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         try:
             yield
         finally:
+            if local_run_queue is not None:
+                local_run_queue.stop()
             analyst_store.close()
 
     app = FastAPI(title="BESS Analyst App", lifespan=lifespan)
@@ -73,6 +78,11 @@ def create_app(
             validation_payload=result.payload,
         )
         return version, None
+
+    def create_and_enqueue_run(scenario_version_id: int) -> dict:
+        run = analyst_store.create_run(scenario_version_id=scenario_version_id)
+        local_run_queue.enqueue(run["id"])
+        return run
 
     @app.get("/")
     async def root():
@@ -159,6 +169,22 @@ def create_app(
             versions = analyst_store.list_scenario_versions(scenario_id)
             return HTMLResponse(render_scenario_page(scenario, versions, candidate_text, error))
         return RedirectResponse(f"/scenarios/{scenario_id}#version-{version['id']}", status_code=303)
+
+    @app.post("/scenario-versions/{scenario_version_id}/runs")
+    async def create_manual_run_from_page(scenario_version_id: int):
+        try:
+            run = create_and_enqueue_run(scenario_version_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return RedirectResponse(f"/runs/{run['id']}", status_code=303)
+
+    @app.get("/runs/{run_id}", response_class=HTMLResponse)
+    async def run_page(run_id: int):
+        try:
+            run = analyst_store.get_run(run_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return HTMLResponse(render_run_page(run))
 
     @app.get("/system-cases/validate", response_class=HTMLResponse)
     async def validation_page():
@@ -275,6 +301,22 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"scenario_version": scenario_version}
+
+    @app.post("/api/scenario-versions/{scenario_version_id}/runs", status_code=201)
+    async def create_manual_run(scenario_version_id: int):
+        try:
+            run = create_and_enqueue_run(scenario_version_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return run
+
+    @app.get("/api/runs/{run_id}")
+    async def get_run(run_id: int):
+        try:
+            run = analyst_store.get_run(run_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"run": run}
 
     return app
 
@@ -501,6 +543,9 @@ def render_scenario_page(
         f'<span>{escape(version["case_name"])} | {escape(version["schema_version"])} | '
         f'{version["period_count"]} periods | {format_asset_counts(version["asset_counts"])}</span>'
         f'<a href="/scenarios/{scenario["id"]}?from_version_id={version["id"]}">Use as base</a>'
+        f'<form class="inline-form" method="post" action="/scenario-versions/{version["id"]}/runs">'
+        f'<button type="submit">Launch Run</button>'
+        f"</form>"
         "</li>"
         for version in versions
     )
@@ -631,6 +676,12 @@ def render_app_page(title: str, content: str) -> str:
       padding: 16px;
       background: var(--surface);
     }}
+    .inline-form {{
+      display: block;
+      border: 0;
+      padding: 0;
+      background: transparent;
+    }}
     label {{
       color: var(--muted);
       font-size: 13px;
@@ -688,6 +739,43 @@ def render_app_page(title: str, content: str) -> str:
   </main>
 </body>
 </html>"""
+
+
+def render_run_page(run: dict) -> str:
+    return render_app_page(
+        f"Run {run['id']}",
+        f"""
+        <nav><a href="/api/scenario-versions/{run["scenario_version_id"]}">Scenario Version</a></nav>
+        <section class="toolbar">
+          <h1>Run {run["id"]}</h1>
+          <p>Status: <strong id="run-status">{escape(run["status"])}</strong></p>
+        </section>
+        <section class="details">
+          <dl>
+            <dt>Created</dt><dd id="run-created-at">{escape(str(run["created_at"]))}</dd>
+            <dt>Started</dt><dd id="run-started-at">{escape(str(run["started_at"] or ""))}</dd>
+            <dt>Finished</dt><dd id="run-finished-at">{escape(str(run["finished_at"] or ""))}</dd>
+            <dt>Exit Code</dt><dd id="run-exit-code">{escape(str(run["exit_code"] if run["exit_code"] is not None else ""))}</dd>
+          </dl>
+        </section>
+        <script>
+          async function pollRun() {{
+            const response = await fetch("/api/runs/{run["id"]}");
+            if (!response.ok) return;
+            const payload = await response.json();
+            const run = payload.run;
+            document.getElementById("run-status").textContent = run.status;
+            document.getElementById("run-started-at").textContent = run.started_at || "";
+            document.getElementById("run-finished-at").textContent = run.finished_at || "";
+            document.getElementById("run-exit-code").textContent = run.exit_code ?? "";
+            if (run.status === "queued" || run.status === "running") {{
+              window.setTimeout(pollRun, 1000);
+            }}
+          }}
+          window.setTimeout(pollRun, 1000);
+        </script>
+        """,
+    )
 
 
 def format_asset_counts(asset_counts: dict) -> str:

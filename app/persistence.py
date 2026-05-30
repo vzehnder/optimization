@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import json
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -12,12 +13,22 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def elapsed_seconds(started_at: str | None, finished_at: str) -> float | None:
+    if not started_at:
+        return None
+
+    start = datetime.fromisoformat(started_at)
+    finish = datetime.fromisoformat(finished_at)
+    return max(0.0, (finish - start).total_seconds())
+
+
 class AnalystStore:
     def __init__(self, database_url: str | None = None):
         self.database_url = database_url or os.environ.get("DATABASE_URL") or "sqlite:///.tmp/analyst_app.sqlite3"
         self.database_path = sqlite_path_from_url(self.database_url)
         if self.database_path != ":memory:":
             Path(self.database_path).parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
         self.connection = sqlite3.connect(self.database_path, check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")
@@ -74,6 +85,29 @@ class AnalystStore:
             BEGIN
                 SELECT RAISE(ABORT, 'scenario versions are immutable');
             END;
+
+            CREATE TABLE IF NOT EXISTS runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scenario_version_id INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                duration_seconds REAL,
+                exit_code INTEGER,
+                workspace_path TEXT,
+                input_snapshot_path TEXT,
+                output_dir TEXT,
+                summary_path TEXT,
+                success_payload_json TEXT NOT NULL DEFAULT '{}',
+                error_payload_json TEXT NOT NULL DEFAULT '{}',
+                stdout TEXT NOT NULL DEFAULT '',
+                stderr TEXT NOT NULL DEFAULT '',
+                triggered_by TEXT NOT NULL,
+                trigger_type TEXT NOT NULL,
+                FOREIGN KEY (scenario_version_id) REFERENCES scenario_versions(id) ON DELETE CASCADE,
+                CHECK (status IN ('queued', 'running', 'succeeded', 'failed'))
+            );
             """
         )
         self.connection.commit()
@@ -249,6 +283,174 @@ class AnalystStore:
             raise KeyError(f"scenario version {scenario_version_id} not found")
         return scenario_version_row_to_dict(row, include_document=include_document)
 
+    def create_run(
+        self,
+        *,
+        scenario_version_id: int,
+        triggered_by: str = "internal_analyst",
+        trigger_type: str = "manual",
+    ) -> dict[str, Any]:
+        with self._lock:
+            self.get_scenario_version(scenario_version_id, include_document=False)
+            created_at = utc_now_iso()
+            cursor = self.connection.execute(
+                """
+                INSERT INTO runs (
+                    scenario_version_id,
+                    status,
+                    created_at,
+                    triggered_by,
+                    trigger_type
+                )
+                VALUES (?, 'queued', ?, ?, ?)
+                """,
+                (scenario_version_id, created_at, triggered_by, trigger_type),
+            )
+            self.connection.commit()
+            return self.get_run(cursor.lastrowid)
+
+    def get_run(self, run_id: int) -> dict[str, Any]:
+        with self._lock:
+            row = self.connection.execute(
+                """
+                SELECT
+                    id,
+                    scenario_version_id,
+                    status,
+                    created_at,
+                    started_at,
+                    finished_at,
+                    duration_seconds,
+                    exit_code,
+                    workspace_path,
+                    input_snapshot_path,
+                    output_dir,
+                    summary_path,
+                    success_payload_json,
+                    error_payload_json,
+                    stdout,
+                    stderr,
+                    triggered_by,
+                    trigger_type
+                FROM runs
+                WHERE id = ?
+                """,
+                (run_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"run {run_id} not found")
+            return run_row_to_dict(row)
+
+    def mark_run_running(
+        self,
+        run_id: int,
+        *,
+        workspace_path: str,
+        input_snapshot_path: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            started_at = utc_now_iso()
+            cursor = self.connection.execute(
+                """
+                UPDATE runs
+                SET
+                    status = 'running',
+                    started_at = ?,
+                    workspace_path = ?,
+                    input_snapshot_path = ?
+                WHERE id = ?
+                """,
+                (started_at, workspace_path, input_snapshot_path, run_id),
+            )
+            if cursor.rowcount == 0:
+                raise KeyError(f"run {run_id} not found")
+            self.connection.commit()
+            return self.get_run(run_id)
+
+    def mark_run_succeeded(
+        self,
+        run_id: int,
+        *,
+        exit_code: int,
+        stdout: str,
+        stderr: str,
+        success_payload: dict[str, Any],
+        output_dir: str | None,
+        summary_path: str | None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            run = self.get_run(run_id)
+            finished_at = utc_now_iso()
+            duration_seconds = elapsed_seconds(run.get("started_at"), finished_at)
+            self.connection.execute(
+                """
+                UPDATE runs
+                SET
+                    status = 'succeeded',
+                    finished_at = ?,
+                    duration_seconds = ?,
+                    exit_code = ?,
+                    stdout = ?,
+                    stderr = ?,
+                    success_payload_json = ?,
+                    output_dir = ?,
+                    summary_path = ?
+                WHERE id = ?
+                """,
+                (
+                    finished_at,
+                    duration_seconds,
+                    exit_code,
+                    stdout,
+                    stderr,
+                    json.dumps(success_payload, sort_keys=True),
+                    output_dir,
+                    summary_path,
+                    run_id,
+                ),
+            )
+            self.connection.commit()
+            return self.get_run(run_id)
+
+    def mark_run_failed(
+        self,
+        run_id: int,
+        *,
+        exit_code: int | None,
+        stdout: str,
+        stderr: str,
+        error_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        with self._lock:
+            run = self.get_run(run_id)
+            finished_at = utc_now_iso()
+            duration_seconds = elapsed_seconds(run.get("started_at"), finished_at)
+            self.connection.execute(
+                """
+                UPDATE runs
+                SET
+                    status = 'failed',
+                    finished_at = ?,
+                    duration_seconds = ?,
+                    exit_code = ?,
+                    stdout = ?,
+                    stderr = ?,
+                    error_payload_json = ?
+                WHERE id = ?
+                """,
+                (
+                    finished_at,
+                    duration_seconds,
+                    exit_code,
+                    stdout,
+                    stderr,
+                    json.dumps(error_payload, sort_keys=True),
+                    run_id,
+                ),
+            )
+            self.connection.commit()
+            return self.get_run(run_id)
+
     def _next_version_number(self, scenario_id: int) -> int:
         row = self.connection.execute(
             """
@@ -301,4 +503,11 @@ def scenario_version_row_to_dict(row: sqlite3.Row, *, include_document: bool) ->
     if include_document:
         value["system_case_json"] = json.loads(value.pop("system_case_json"))
         value["validation_payload"] = json.loads(value.pop("validation_payload_json"))
+    return value
+
+
+def run_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    value = row_to_dict(row)
+    value["success_payload"] = json.loads(value.pop("success_payload_json") or "{}")
+    value["error_payload"] = json.loads(value.pop("error_payload_json") or "{}")
     return value

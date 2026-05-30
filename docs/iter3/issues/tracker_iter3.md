@@ -23,7 +23,7 @@ triage label.
 | BESS-ITER3-001 | Validate A System Case From The Web App | AFK | ready-for-agent | Done | BESS-ITER3-000 | [BESS-ITER3-001-validate-a-system-case-from-the-web-app.md](BESS-ITER3-001-validate-a-system-case-from-the-web-app.md) |
 | BESS-ITER3-002 | Save A Validated Scenario Version Under A Project | AFK | ready-for-agent | Done | BESS-ITER3-001 | [BESS-ITER3-002-save-a-validated-scenario-version-under-a-project.md](BESS-ITER3-002-save-a-validated-scenario-version-under-a-project.md) |
 | BESS-ITER3-003 | Preserve Immutable Version History From Paste Or Upload | AFK | ready-for-agent | Done | BESS-ITER3-002 | [BESS-ITER3-003-preserve-immutable-version-history-from-paste-or-upload.md](BESS-ITER3-003-preserve-immutable-version-history-from-paste-or-upload.md) |
-| BESS-ITER3-004 | Launch Manual Runs And Track Success State | AFK | ready-for-agent | Todo | BESS-ITER3-003 | [BESS-ITER3-004-launch-manual-runs-and-track-success-state.md](BESS-ITER3-004-launch-manual-runs-and-track-success-state.md) |
+| BESS-ITER3-004 | Launch Manual Runs And Track Success State | AFK | ready-for-agent | Done | BESS-ITER3-003 | [BESS-ITER3-004-launch-manual-runs-and-track-success-state.md](BESS-ITER3-004-launch-manual-runs-and-track-success-state.md) |
 | BESS-ITER3-005 | Capture Failed Runs Logs And Input Snapshots | AFK | ready-for-agent | Todo | BESS-ITER3-004 | [BESS-ITER3-005-capture-failed-runs-logs-and-input-snapshots.md](BESS-ITER3-005-capture-failed-runs-logs-and-input-snapshots.md) |
 | BESS-ITER3-006 | Register And Download Auditable Artifacts | AFK | ready-for-agent | Todo | BESS-ITER3-004, BESS-ITER3-005 | [BESS-ITER3-006-register-and-download-auditable-artifacts.md](BESS-ITER3-006-register-and-download-auditable-artifacts.md) |
 | BESS-ITER3-007 | Review Run Summary And Result Tables | AFK | ready-for-agent | Todo | BESS-ITER3-006 | [BESS-ITER3-007-review-run-summary-and-result-tables.md](BESS-ITER3-007-review-run-summary-and-result-tables.md) |
@@ -55,6 +55,8 @@ triage label.
 | 2026-05-29 | BESS-ITER3-003 | Todo -> In Progress | Started paste/upload immutable version history workflow using TDD. |
 | 2026-05-29 | BESS-ITER3-002 | In Progress -> Done | Added DATABASE_URL-backed persistence, project/scenario API and UI, validated scenario version saves, metadata extraction, and invalid-case no-save behavior. Verified Python web tests with 17 tests and full Julia suite with 351 tests. |
 | 2026-05-29 | BESS-ITER3-003 | In Progress -> Done | Added shared paste/upload version creation, editable prefill from existing versions, version listings, and immutability coverage. Verified Python web tests with 17 tests and full Julia suite with 351 tests. |
+| 2026-05-29 | BESS-ITER3-004 | Todo -> In Progress | Started the manual run execution and polling workflow using TDD. |
+| 2026-05-29 | BESS-ITER3-004 | In Progress -> Done | Added run persistence, single-worker local queue, Julia execution runner, API/UI launch, status polling, input snapshots, and success payload recording. Verified Python web tests with 22 tests, real backend runner sample success, and full Julia suite with 351 tests. |
 
 ## Regression Guard
 
