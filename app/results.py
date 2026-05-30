@@ -40,7 +40,100 @@ def read_run_results(run: dict[str, Any], artifacts: list[dict[str, Any]], artif
         "summary": summary,
         "dispatch_table": dispatch_table,
         "asset_dispatch_table": asset_dispatch_table,
+        "charts": build_chart_data(dispatch_table, asset_dispatch_table),
     }
+
+
+def build_chart_data(dispatch_table: dict[str, Any], asset_dispatch_table: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "grid_import_export": build_line_chart(
+            "grid-import-export",
+            "Grid Import / Export",
+            dispatch_table,
+            [
+                ("grid_import_mw", "Grid Import MW", "MW"),
+                ("grid_export_mw", "Grid Export MW", "MW"),
+            ],
+        ),
+        "renewable_used_curtailed": build_line_chart(
+            "renewable-used-curtailed",
+            "Renewable Used / Curtailed",
+            dispatch_table,
+            [
+                ("renewable_used_mw", "Renewable Used MW", "MW"),
+                ("renewable_curtailed_mw", "Renewable Curtailed MW", "MW"),
+            ],
+        ),
+        "bess_charge_discharge_soc": build_line_chart(
+            "bess-charge-discharge-soc",
+            "BESS Charge / Discharge / SOC",
+            dispatch_table,
+            [
+                ("battery_charge_mw", "BESS Charge MW", "MW"),
+                ("battery_discharge_mw", "BESS Discharge MW", "MW"),
+                ("battery_energy_mwh", "BESS SOC MWh", "MWh"),
+            ],
+        ),
+        "period_profit": build_line_chart(
+            "period-profit",
+            "Period Profit",
+            dispatch_table,
+            [("period_profit_usd", "Period Profit USD", "USD")],
+        ),
+        "source_rows": {
+            "dispatch": len(dispatch_table["rows"]),
+            "asset_dispatch": len(asset_dispatch_table["rows"]),
+        },
+    }
+
+
+def build_line_chart(
+    chart_id: str,
+    title: str,
+    table: dict[str, Any],
+    series_columns: list[tuple[str, str, str]],
+) -> dict[str, Any]:
+    required_columns = ["timestamp"] + [column for column, _, _ in series_columns]
+    missing_columns = [column for column in required_columns if column not in table["columns"]]
+    if missing_columns:
+        return {
+            "id": chart_id,
+            "title": title,
+            "available": False,
+            "labels": [],
+            "series": [],
+            "missing_columns": missing_columns,
+            "message": f"Missing columns: {', '.join(missing_columns)}",
+        }
+
+    rows = table["rows"]
+    return {
+        "id": chart_id,
+        "title": title,
+        "available": True,
+        "labels": [str(row.get("timestamp") or "") for row in rows],
+        "series": [
+            {
+                "key": column,
+                "label": label,
+                "unit": unit,
+                "source": "dispatch.csv",
+                "values": [parse_chart_value(row.get(column)) for row in rows],
+            }
+            for column, label, unit in series_columns
+        ],
+        "missing_columns": [],
+        "message": "",
+    }
+
+
+def parse_chart_value(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def read_json_artifact(

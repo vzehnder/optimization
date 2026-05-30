@@ -840,6 +840,51 @@ def render_app_page(title: str, content: str) -> str:
     .results-section {{
       margin-top: 26px;
     }}
+    .chart-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }}
+    .chart-panel {{
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 12px;
+      background: white;
+    }}
+    .chart-panel h3 {{
+      font-size: 14px;
+      line-height: 1.3;
+      margin: 0 0 10px;
+    }}
+    .chart-panel p {{
+      font-size: 13px;
+    }}
+    .chart-svg {{
+      display: block;
+      width: 100%;
+      aspect-ratio: 16 / 7;
+      min-height: 180px;
+    }}
+    .chart-legend {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      margin: 8px 0 0;
+      padding: 0;
+      list-style: none;
+      color: var(--muted);
+      font-size: 12px;
+    }}
+    .legend-swatch {{
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      margin-right: 5px;
+      vertical-align: -1px;
+    }}
     .table-scroll {{
       border: 1px solid var(--line);
       border-radius: 6px;
@@ -952,6 +997,8 @@ def render_results_section(results: dict | None, results_error: str = "") -> str
         <section class="results-section">
           <h2>Run Summary</h2>
           {render_summary_details(results["summary"])}
+          <h2>Basic Charts</h2>
+          {render_chart_grid(results["charts"])}
           <h2>System Dispatch</h2>
           {render_result_table(results["dispatch_table"])}
           <h2>Asset Dispatch</h2>
@@ -976,6 +1023,130 @@ def render_summary_details(summary: dict) -> str:
         if key in summary
     )
     return f'<div class="details"><dl>{rows}</dl></div>'
+
+
+def render_chart_grid(charts: dict) -> str:
+    chart_keys = [
+        "grid_import_export",
+        "renewable_used_curtailed",
+        "bess_charge_discharge_soc",
+        "period_profit",
+    ]
+    panels = "".join(render_chart_panel(charts[key]) for key in chart_keys if key in charts)
+    return f'<div class="chart-grid">{panels}</div>'
+
+
+def render_chart_panel(chart: dict) -> str:
+    chart_id = escape(chart["id"])
+    title = escape(chart["title"])
+    if not chart["available"]:
+        message = escape(chart.get("message") or "Chart data is not available for this run.")
+        return (
+            f'<section class="chart-panel" data-chart-id="{chart_id}">'
+            f"<h3>{title}</h3>"
+            f"<p>{message}</p>"
+            "</section>"
+        )
+
+    return (
+        f'<section class="chart-panel" data-chart-id="{chart_id}">'
+        f"<h3>{title}</h3>"
+        f"{render_chart_svg(chart)}"
+        f"{render_chart_legend(chart)}"
+        "</section>"
+    )
+
+
+def render_chart_svg(chart: dict) -> str:
+    width = 640
+    height = 280
+    left = 52
+    right = 18
+    top = 22
+    bottom = 42
+    plot_width = width - left - right
+    plot_height = height - top - bottom
+    labels = chart["labels"]
+    values = [
+        value
+        for series in chart["series"]
+        for value in series["values"]
+        if isinstance(value, (int, float))
+    ]
+    if not values:
+        return '<p>No numeric chart data is available for this run.</p>'
+
+    y_min = min(values)
+    y_max = max(values)
+    if y_min == y_max:
+        padding = max(abs(y_min) * 0.1, 1.0)
+        y_min -= padding
+        y_max += padding
+
+    def x_position(index: int) -> float:
+        if len(labels) <= 1:
+            return left + plot_width / 2
+        return left + (plot_width * index / (len(labels) - 1))
+
+    def y_position(value: float) -> float:
+        return top + ((y_max - value) / (y_max - y_min)) * plot_height
+
+    colors = ["#2563eb", "#dc2626", "#0f766e", "#ca8a04"]
+    series_markup = []
+    for series_index, series in enumerate(chart["series"]):
+        color = colors[series_index % len(colors)]
+        points = [
+            (x_position(index), y_position(value), value)
+            for index, value in enumerate(series["values"])
+            if isinstance(value, (int, float))
+        ]
+        if len(points) > 1:
+            point_text = " ".join(f"{x:.2f},{y:.2f}" for x, y, _ in points)
+            series_markup.append(
+                f'<polyline points="{point_text}" fill="none" stroke="{color}" '
+                'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></polyline>'
+            )
+        for x, y, value in points:
+            series_markup.append(
+                f'<circle cx="{x:.2f}" cy="{y:.2f}" r="4" fill="{color}" '
+                f'data-series="{escape(series["key"])}" data-value="{format_chart_number(value)}">'
+                f"<title>{escape(series['label'])}: {format_chart_number(value)}</title>"
+                "</circle>"
+            )
+
+    first_label = escape(labels[0]) if labels else ""
+    last_label = escape(labels[-1]) if labels else ""
+    axis_markup = f"""
+      <line x1="{left}" y1="{height - bottom}" x2="{width - right}" y2="{height - bottom}" stroke="#9aa4b2"></line>
+      <line x1="{left}" y1="{top}" x2="{left}" y2="{height - bottom}" stroke="#9aa4b2"></line>
+      <text x="{left}" y="{height - 14}" fill="#606a78" font-size="11">{first_label}</text>
+      <text x="{width - right}" y="{height - 14}" fill="#606a78" font-size="11" text-anchor="end">{last_label}</text>
+      <text x="{left - 8}" y="{top + 4}" fill="#606a78" font-size="11" text-anchor="end">{format_chart_number(y_max)}</text>
+      <text x="{left - 8}" y="{height - bottom + 4}" fill="#606a78" font-size="11" text-anchor="end">{format_chart_number(y_min)}</text>
+    """
+    return (
+        f'<svg class="chart-svg" viewBox="0 0 {width} {height}" role="img" '
+        f'aria-label="{escape(chart["title"])}">'
+        f"{axis_markup}"
+        f"{''.join(series_markup)}"
+        "</svg>"
+    )
+
+
+def render_chart_legend(chart: dict) -> str:
+    colors = ["#2563eb", "#dc2626", "#0f766e", "#ca8a04"]
+    items = "".join(
+        '<li>'
+        f'<span class="legend-swatch" style="background:{colors[index % len(colors)]}"></span>'
+        f'{escape(series["label"])}'
+        "</li>"
+        for index, series in enumerate(chart["series"])
+    )
+    return f'<ul class="chart-legend">{items}</ul>'
+
+
+def format_chart_number(value: float) -> str:
+    return f"{value:g}"
 
 
 def render_result_table(table: dict) -> str:
