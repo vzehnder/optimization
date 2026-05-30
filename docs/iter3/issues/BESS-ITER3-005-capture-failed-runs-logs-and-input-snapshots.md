@@ -1,6 +1,6 @@
 # BESS-ITER3-005: Capture Failed Runs Logs And Input Snapshots
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/iter3/prd_analyst_web_flow.md`
@@ -19,20 +19,52 @@ This slice should make failures auditable instead of transient process output.
 
 ## Acceptance criteria
 
-- [ ] Execution revalidates the exact run input snapshot before invoking the
+- [x] Execution revalidates the exact run input snapshot before invoking the
       solver.
-- [ ] Failed validation during run execution marks the run failed and records a
+- [x] Failed validation during run execution marks the run failed and records a
       structured error.
-- [ ] A nonzero Julia process exit marks the run failed.
-- [ ] Complete stdout and stderr are captured as run artifacts or log files.
-- [ ] The database stores short structured fields for exit code, error message,
+- [x] A nonzero Julia process exit marks the run failed.
+- [x] Complete stdout and stderr are captured as run artifacts or log files.
+- [x] The database stores short structured fields for exit code, error message,
       started timestamp, finished timestamp, and duration.
-- [ ] The backend parses structured Julia error payloads from stderr when
+- [x] The backend parses structured Julia error payloads from stderr when
       available.
-- [ ] The run detail UI/API shows failure status and a useful error message.
-- [ ] The input JSON used by the failed run remains available for audit.
-- [ ] Tests cover validation failure, process failure, log capture, and error
+- [x] The run detail UI/API shows failure status and a useful error message.
+- [x] The input JSON used by the failed run remains available for audit.
+- [x] Tests cover validation failure, process failure, log capture, and error
       display.
+
+## Implementation notes
+
+- Added execution-time revalidation of the exact `system_case.json` input
+  snapshot before invoking the solve CLI.
+- Failed execution validation now marks the run `failed`, preserves stdout,
+  stderr, exit code, structured error payload, and the input snapshot path.
+- Nonzero Julia process exits now persist a short `error_message`, parse
+  structured stderr JSON when available, and keep complete stdout/stderr in the
+  database.
+- Added `stdout.log` and `stderr.log` files under each run workspace for
+  auditable failed-run logs.
+- Extended persisted run records with `error_message`, `stdout_log_path`, and
+  `stderr_log_path`, including lightweight SQLite migration for existing local
+  databases.
+- Updated the run detail API and page polling UI to expose the failure message.
+
+## Verification
+
+Passed:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+julia --project=. -e "import Pkg; Pkg.test()"
+```
+
+Results:
+
+- Python web tests: 25 passed.
+- Julia package tests: 351 passed.
+- Browser verification: run detail page at `/runs/1` showed `failed`, exit code
+  `23`, and `optimization failed before solve`.
 
 ## Blocked by
 

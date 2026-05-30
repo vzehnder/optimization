@@ -99,6 +99,9 @@ class AnalystStore:
                 input_snapshot_path TEXT,
                 output_dir TEXT,
                 summary_path TEXT,
+                stdout_log_path TEXT,
+                stderr_log_path TEXT,
+                error_message TEXT NOT NULL DEFAULT '',
                 success_payload_json TEXT NOT NULL DEFAULT '{}',
                 error_payload_json TEXT NOT NULL DEFAULT '{}',
                 stdout TEXT NOT NULL DEFAULT '',
@@ -110,7 +113,18 @@ class AnalystStore:
             );
             """
         )
+        self._ensure_column("runs", "stdout_log_path", "TEXT")
+        self._ensure_column("runs", "stderr_log_path", "TEXT")
+        self._ensure_column("runs", "error_message", "TEXT NOT NULL DEFAULT ''")
         self.connection.commit()
+
+    def _ensure_column(self, table_name: str, column_name: str, definition: str) -> None:
+        columns = {
+            row["name"]
+            for row in self.connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
+        if column_name not in columns:
+            self.connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
     def create_project(self, *, name: str, description: str = "", created_by: str = "internal_analyst") -> dict[str, Any]:
         created_at = utc_now_iso()
@@ -326,6 +340,9 @@ class AnalystStore:
                     input_snapshot_path,
                     output_dir,
                     summary_path,
+                    stdout_log_path,
+                    stderr_log_path,
+                    error_message,
                     success_payload_json,
                     error_payload_json,
                     stdout,
@@ -377,6 +394,8 @@ class AnalystStore:
         success_payload: dict[str, Any],
         output_dir: str | None,
         summary_path: str | None,
+        stdout_log_path: str | None = None,
+        stderr_log_path: str | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             run = self.get_run(run_id)
@@ -394,7 +413,10 @@ class AnalystStore:
                     stderr = ?,
                     success_payload_json = ?,
                     output_dir = ?,
-                    summary_path = ?
+                    summary_path = ?,
+                    stdout_log_path = ?,
+                    stderr_log_path = ?,
+                    error_message = ''
                 WHERE id = ?
                 """,
                 (
@@ -406,6 +428,8 @@ class AnalystStore:
                     json.dumps(success_payload, sort_keys=True),
                     output_dir,
                     summary_path,
+                    stdout_log_path,
+                    stderr_log_path,
                     run_id,
                 ),
             )
@@ -420,11 +444,15 @@ class AnalystStore:
         stdout: str,
         stderr: str,
         error_payload: dict[str, Any],
+        error_message: str | None = None,
+        stdout_log_path: str | None = None,
+        stderr_log_path: str | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             run = self.get_run(run_id)
             finished_at = utc_now_iso()
             duration_seconds = elapsed_seconds(run.get("started_at"), finished_at)
+            stored_error_message = error_message or str(error_payload.get("message") or "")
             self.connection.execute(
                 """
                 UPDATE runs
@@ -435,7 +463,10 @@ class AnalystStore:
                     exit_code = ?,
                     stdout = ?,
                     stderr = ?,
-                    error_payload_json = ?
+                    error_payload_json = ?,
+                    error_message = ?,
+                    stdout_log_path = ?,
+                    stderr_log_path = ?
                 WHERE id = ?
                 """,
                 (
@@ -445,6 +476,9 @@ class AnalystStore:
                     stdout,
                     stderr,
                     json.dumps(error_payload, sort_keys=True),
+                    stored_error_message,
+                    stdout_log_path,
+                    stderr_log_path,
                     run_id,
                 ),
             )

@@ -725,9 +725,27 @@ def render_app_page(title: str, content: str) -> str:
       border-left-color: var(--error);
       background: #fff4f2;
     }}
+    .details dl {{
+      display: grid;
+      grid-template-columns: minmax(92px, 140px) minmax(0, 1fr);
+      gap: 10px 16px;
+      margin: 0;
+      max-width: 760px;
+    }}
+    .details dt {{
+      color: var(--muted);
+      font-weight: 700;
+    }}
+    .details dd {{
+      margin: 0;
+      overflow-wrap: anywhere;
+    }}
     @media (max-width: 760px) {{
       .split,
       .split.wide {{
+        grid-template-columns: 1fr;
+      }}
+      .details dl {{
         grid-template-columns: 1fr;
       }}
     }}
@@ -756,6 +774,7 @@ def render_run_page(run: dict) -> str:
             <dt>Started</dt><dd id="run-started-at">{escape(str(run["started_at"] or ""))}</dd>
             <dt>Finished</dt><dd id="run-finished-at">{escape(str(run["finished_at"] or ""))}</dd>
             <dt>Exit Code</dt><dd id="run-exit-code">{escape(str(run["exit_code"] if run["exit_code"] is not None else ""))}</dd>
+            <dt>Error</dt><dd id="run-error-message">{escape(str(run["error_message"] or ""))}</dd>
           </dl>
         </section>
         <script>
@@ -768,6 +787,7 @@ def render_run_page(run: dict) -> str:
             document.getElementById("run-started-at").textContent = run.started_at || "";
             document.getElementById("run-finished-at").textContent = run.finished_at || "";
             document.getElementById("run-exit-code").textContent = run.exit_code ?? "";
+            document.getElementById("run-error-message").textContent = run.error_message || "";
             if (run.status === "queued" || run.status === "running") {{
               window.setTimeout(pollRun, 1000);
             }}

@@ -81,6 +81,36 @@ class JuliaValidationService:
         finally:
             temp_path.unlink(missing_ok=True)
 
+        return self._result_from_completed_process(completed)
+
+    def validate_file(self, candidate_path: Path | str) -> ValidationResult:
+        try:
+            completed = self._run_julia_validation(Path(candidate_path))
+        except subprocess.TimeoutExpired:
+            return ValidationResult(
+                ok=False,
+                phase="julia",
+                message=f"Julia validation timed out after {self.timeout_seconds:g} seconds",
+                payload={"status": "error"},
+            )
+        except FileNotFoundError:
+            return ValidationResult(
+                ok=False,
+                phase="julia",
+                message=f"Julia executable not found: {self.julia_executable}",
+                payload={"status": "error"},
+            )
+        except OSError as error:
+            return ValidationResult(
+                ok=False,
+                phase="julia",
+                message=f"Julia validation could not start: {error}",
+                payload={"status": "error"},
+            )
+
+        return self._result_from_completed_process(completed)
+
+    def _result_from_completed_process(self, completed: subprocess.CompletedProcess[str]) -> ValidationResult:
         stdout = completed.stdout or ""
         stderr = completed.stderr or ""
 

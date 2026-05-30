@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 
 from app.persistence import AnalystStore
-from app.validation import resolve_julia_executable
+from app.validation import JuliaValidationService, ValidationResult, resolve_julia_executable
 
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
@@ -17,6 +17,11 @@ Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 class RunExecutor(Protocol):
     def execute(self, run_id: int) -> Any:
+        ...
+
+
+class ValidationService(Protocol):
+    def validate_file(self, candidate_path: Path | str) -> ValidationResult:
         ...
 
 
@@ -67,6 +72,7 @@ class JuliaRunExecutor:
         artifact_root: Path | str | None = None,
         julia_executable: str | None = None,
         runner: Runner | None = None,
+        validation_service: ValidationService | None = None,
         timeout_seconds: float = 300.0,
     ):
         self.store = store
@@ -77,6 +83,11 @@ class JuliaRunExecutor:
         self.julia_executable = julia_executable or resolve_julia_executable()
         self.runner = runner or subprocess.run
         self.timeout_seconds = timeout_seconds
+        self.validation_service = validation_service or JuliaValidationService(
+            repo_root=self.repo_root,
+            julia_executable=self.julia_executable,
+            timeout_seconds=self.timeout_seconds,
+        )
 
     def execute(self, run_id: int) -> dict[str, Any]:
         run = self.store.get_run(run_id)
@@ -88,6 +99,24 @@ class JuliaRunExecutor:
             workspace_path=str(workspace_path),
             input_snapshot_path=str(input_snapshot_path),
         )
+
+        validation_result = self.validation_service.validate_file(input_snapshot_path)
+        if not validation_result.ok:
+            stdout_log_path, stderr_log_path = self._write_log_files(
+                workspace_path,
+                validation_result.raw_stdout,
+                validation_result.raw_stderr,
+            )
+            return self.store.mark_run_failed(
+                run_id,
+                exit_code=validation_result.exit_code,
+                stdout=validation_result.raw_stdout,
+                stderr=validation_result.raw_stderr,
+                error_payload=run_error_payload(validation_result.payload, validation_result.message),
+                error_message=validation_result.message,
+                stdout_log_path=str(stdout_log_path),
+                stderr_log_path=str(stderr_log_path),
+            )
 
         try:
             completed = self._run_julia(input_snapshot_path, workspace_path / "outputs")
@@ -118,6 +147,7 @@ class JuliaRunExecutor:
 
         stdout = completed.stdout or ""
         stderr = completed.stderr or ""
+        stdout_log_path, stderr_log_path = self._write_log_files(workspace_path, stdout, stderr)
         if completed.returncode == 0:
             payload = parse_json_payload(stdout)
             if payload:
@@ -129,6 +159,8 @@ class JuliaRunExecutor:
                     success_payload=payload,
                     output_dir=string_or_none(payload.get("output_dir")),
                     summary_path=string_or_none(payload.get("summary_path")),
+                    stdout_log_path=str(stdout_log_path),
+                    stderr_log_path=str(stderr_log_path),
                 )
 
             return self.store.mark_run_failed(
@@ -137,6 +169,9 @@ class JuliaRunExecutor:
                 stdout=stdout,
                 stderr=stderr,
                 error_payload={"status": "error", "message": "Julia run succeeded without parseable JSON stdout"},
+                error_message="Julia run succeeded without parseable JSON stdout",
+                stdout_log_path=str(stdout_log_path),
+                stderr_log_path=str(stderr_log_path),
             )
 
         payload = parse_json_payload(stderr)
@@ -147,6 +182,9 @@ class JuliaRunExecutor:
             stdout=stdout,
             stderr=stderr,
             error_payload=payload or {"status": "error", "message": message},
+            error_message=message,
+            stdout_log_path=str(stdout_log_path),
+            stderr_log_path=str(stderr_log_path),
         )
 
     def _workspace_path(self, run_id: int) -> Path:
@@ -158,6 +196,15 @@ class JuliaRunExecutor:
         input_snapshot_path = input_dir / "system_case.json"
         input_snapshot_path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return input_snapshot_path
+
+    def _write_log_files(self, workspace_path: Path, stdout: str, stderr: str) -> tuple[Path, Path]:
+        log_dir = workspace_path / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stdout_log_path = log_dir / "stdout.log"
+        stderr_log_path = log_dir / "stderr.log"
+        stdout_log_path.write_text(stdout, encoding="utf-8")
+        stderr_log_path.write_text(stderr, encoding="utf-8")
+        return stdout_log_path, stderr_log_path
 
     def _run_julia(self, input_snapshot_path: Path, output_root: Path) -> subprocess.CompletedProcess[str]:
         output_root.mkdir(parents=True, exist_ok=True)
@@ -197,3 +244,10 @@ def string_or_none(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def run_error_payload(payload: dict[str, Any], message: str) -> dict[str, Any]:
+    structured = dict(payload)
+    structured.setdefault("status", "error")
+    structured.setdefault("message", message)
+    return structured

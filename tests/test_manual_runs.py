@@ -42,6 +42,19 @@ class RecordingRunQueue:
         pass
 
 
+class AcceptingRunValidationService:
+    def validate_file(self, candidate_path):
+        return ValidationResult(
+            ok=True,
+            phase="julia",
+            message="Validation succeeded",
+            payload={"status": "ok"},
+            exit_code=0,
+            raw_stdout='{"status":"ok"}\n',
+            raw_stderr="",
+        )
+
+
 class ManualRunApiTests(unittest.TestCase):
     def setUp(self):
         self.validation_service = StubValidationService()
@@ -95,6 +108,32 @@ class ManualRunApiTests(unittest.TestCase):
         self.assertEqual(run_page.status_code, 200)
         self.assertIn("queued", run_page.text)
         self.assertIn(f"/api/runs/{run_id}", run_page.text)
+
+    def test_run_detail_api_and_page_show_failure_message(self):
+        scenario_version = self._create_scenario_version()
+        store = self.client.app.state.analyst_store
+        run = store.create_run(scenario_version_id=scenario_version["id"])
+        store.mark_run_running(
+            run["id"],
+            workspace_path="workspace",
+            input_snapshot_path="workspace/input/system_case.json",
+        )
+        store.mark_run_failed(
+            run["id"],
+            exit_code=23,
+            stdout="solver stdout",
+            stderr='{"status":"error","message":"optimization failed before solve"}',
+            error_payload={"status": "error", "message": "optimization failed before solve"},
+        )
+
+        api_response = self.client.get(f"/api/runs/{run['id']}")
+        self.assertEqual(api_response.status_code, 200)
+        self.assertEqual(api_response.json()["run"]["error_message"], "optimization failed before solve")
+
+        page_response = self.client.get(f"/runs/{run['id']}")
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn("failed", page_response.text)
+        self.assertIn("optimization failed before solve", page_response.text)
 
     def _create_scenario_version(self):
         project = self.client.post("/api/projects", json={"name": "Hybrid PMGD"}).json()
@@ -179,6 +218,63 @@ class ManualRunPollingTests(unittest.TestCase):
 
 
 class JuliaRunExecutorTests(unittest.TestCase):
+    def test_runner_revalidates_input_snapshot_and_fails_before_solving_when_invalid(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                scenario_version = create_persisted_scenario_version(store)
+                run = store.create_run(scenario_version_id=scenario_version["id"])
+
+                class RejectingValidationService:
+                    def __init__(self):
+                        self.validated_paths = []
+
+                    def validate_file(self, candidate_path):
+                        self.validated_paths.append(Path(candidate_path))
+                        return ValidationResult(
+                            ok=False,
+                            phase="julia",
+                            message="schema_version is required",
+                            payload={"status": "error", "message": "schema_version is required"},
+                            exit_code=7,
+                            raw_stdout="validation stdout",
+                            raw_stderr='{"status":"error","message":"schema_version is required"}\n',
+                        )
+
+                validation_service = RejectingValidationService()
+
+                def solver_runner(command, **kwargs):
+                    raise AssertionError("solver should not run after validation failure")
+
+                executor = JuliaRunExecutor(
+                    store=store,
+                    repo_root=REPO_ROOT,
+                    artifact_root=Path(temp_dir),
+                    julia_executable="julia",
+                    runner=solver_runner,
+                    validation_service=validation_service,
+                )
+
+                executor.execute(run["id"])
+
+                completed = store.get_run(run["id"])
+                input_snapshot_path = Path(completed["input_snapshot_path"])
+                self.assertEqual(completed["status"], "failed")
+                self.assertEqual(completed["exit_code"], 7)
+                self.assertEqual(completed["error_message"], "schema_version is required")
+                self.assertEqual(completed["error_payload"]["message"], "schema_version is required")
+                self.assertEqual(completed["stdout"], "validation stdout")
+                self.assertIn("schema_version is required", completed["stderr"])
+                self.assertTrue(input_snapshot_path.is_file())
+                self.assertEqual(Path(completed["stdout_log_path"]).read_text(encoding="utf-8"), "validation stdout")
+                self.assertIn(
+                    "schema_version is required",
+                    Path(completed["stderr_log_path"]).read_text(encoding="utf-8"),
+                )
+                self.assertEqual(validation_service.validated_paths, [input_snapshot_path])
+            finally:
+                store.close()
+
     def test_runner_writes_input_snapshot_invokes_julia_and_marks_run_succeeded(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = AnalystStore("sqlite:///:memory:")
@@ -212,6 +308,7 @@ class JuliaRunExecutorTests(unittest.TestCase):
                     artifact_root=Path(temp_dir),
                     julia_executable="julia",
                     runner=fake_runner,
+                    validation_service=AcceptingRunValidationService(),
                 )
 
                 executor.execute(run["id"])
@@ -238,6 +335,53 @@ class JuliaRunExecutorTests(unittest.TestCase):
                 self.assertEqual(kwargs["cwd"], str(REPO_ROOT))
                 self.assertTrue(kwargs["capture_output"])
                 self.assertTrue(kwargs["text"])
+            finally:
+                store.close()
+
+    def test_runner_records_process_failure_with_structured_error_and_log_files(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                scenario_version = create_persisted_scenario_version(store)
+                run = store.create_run(scenario_version_id=scenario_version["id"])
+
+                def failing_runner(command, **kwargs):
+                    return subprocess.CompletedProcess(
+                        command,
+                        23,
+                        stdout="solver stdout\nsecond line\n",
+                        stderr='{"status":"error","message":"optimization failed before solve"}\n',
+                    )
+
+                executor = JuliaRunExecutor(
+                    store=store,
+                    repo_root=REPO_ROOT,
+                    artifact_root=Path(temp_dir),
+                    julia_executable="julia",
+                    runner=failing_runner,
+                    validation_service=AcceptingRunValidationService(),
+                )
+
+                executor.execute(run["id"])
+
+                completed = store.get_run(run["id"])
+                self.assertEqual(completed["status"], "failed")
+                self.assertEqual(completed["exit_code"], 23)
+                self.assertEqual(completed["error_message"], "optimization failed before solve")
+                self.assertEqual(completed["error_payload"]["message"], "optimization failed before solve")
+                self.assertEqual(completed["stdout"], "solver stdout\nsecond line\n")
+                self.assertIn("optimization failed before solve", completed["stderr"])
+                self.assertIsNotNone(completed["started_at"])
+                self.assertIsNotNone(completed["finished_at"])
+                self.assertIsNotNone(completed["duration_seconds"])
+
+                stdout_log_path = Path(completed["stdout_log_path"])
+                stderr_log_path = Path(completed["stderr_log_path"])
+                self.assertEqual(stdout_log_path.read_text(encoding="utf-8"), "solver stdout\nsecond line\n")
+                self.assertEqual(
+                    stderr_log_path.read_text(encoding="utf-8"),
+                    '{"status":"error","message":"optimization failed before solve"}\n',
+                )
             finally:
                 store.close()
 
