@@ -78,6 +78,136 @@ class AnalystPersistenceTests(unittest.TestCase):
         self.assertEqual(detail_response.status_code, 200)
         self.assertEqual(detail_response.json()["scenario"]["description"], "Initial modeling branch")
 
+    def test_scenario_draft_can_be_created_read_and_updated_without_creating_version(self):
+        project = self.client.post("/api/projects", json={"name": "Hybrid PMGD"}).json()
+        scenario = self.client.post(
+            f"/api/projects/{project['id']}/scenarios",
+            json={"name": "Base case"},
+        ).json()
+        draft_document = {
+            "schema_version": "bess_editor_draft.v1",
+            "case": {"name": "Working draft"},
+            "assets": [],
+        }
+
+        create_response = self.client.post(
+            f"/api/scenarios/{scenario['id']}/draft",
+            json={"document": draft_document},
+        )
+
+        self.assertEqual(create_response.status_code, 201)
+        created = create_response.json()
+        self.assertEqual(created["scenario_id"], scenario["id"])
+        self.assertEqual(created["document"], draft_document)
+        self.assertIsNone(created["source_version_id"])
+
+        read_response = self.client.get(f"/api/scenarios/{scenario['id']}/draft")
+        self.assertEqual(read_response.status_code, 200)
+        self.assertEqual(read_response.json()["draft"]["id"], created["id"])
+
+        updated_document = {
+            "schema_version": "bess_editor_draft.v1",
+            "case": {"name": "Edited draft"},
+            "assets": [{"id": "battery_1", "type": "battery"}],
+        }
+        update_response = self.client.put(
+            f"/api/scenarios/{scenario['id']}/draft",
+            json={"document": updated_document},
+        )
+
+        self.assertEqual(update_response.status_code, 200)
+        updated = update_response.json()
+        self.assertEqual(updated["id"], created["id"])
+        self.assertEqual(updated["document"], updated_document)
+
+        recreate_response = self.client.post(
+            f"/api/scenarios/{scenario['id']}/draft",
+            json={"document": draft_document},
+        )
+        self.assertEqual(recreate_response.status_code, 201)
+        self.assertEqual(recreate_response.json()["id"], created["id"])
+
+        versions_response = self.client.get(f"/api/scenarios/{scenario['id']}/versions")
+        self.assertEqual(versions_response.json()["versions"], [])
+
+    def test_scenario_draft_can_start_from_version_without_mutating_source_version(self):
+        project = self.client.post("/api/projects", json={"name": "Hybrid PMGD"}).json()
+        scenario = self.client.post(
+            f"/api/projects/{project['id']}/scenarios",
+            json={"name": "Base case"},
+        ).json()
+        sample_text = (REPO_ROOT / "data" / "cases" / "hybrid_system" / "system_case.json").read_text()
+        version = self.client.post(
+            f"/api/scenarios/{scenario['id']}/versions",
+            json={"system_case_json": sample_text},
+        ).json()
+        original_version_document = self.client.get(
+            f"/api/scenario-versions/{version['id']}"
+        ).json()["scenario_version"]["system_case_json"]
+
+        create_response = self.client.post(
+            f"/api/scenarios/{scenario['id']}/draft",
+            json={"source_version_id": version["id"]},
+        )
+
+        self.assertEqual(create_response.status_code, 201)
+        draft = create_response.json()
+        self.assertEqual(draft["source_version_id"], version["id"])
+        self.assertEqual(draft["document"]["schema_version"], "bess_editor_draft.v1")
+        self.assertEqual(draft["document"]["case"]["name"], "hybrid_system")
+        self.assertEqual(draft["document"]["source"]["kind"], "scenario_version")
+        self.assertEqual(draft["document"]["source"]["scenario_version_id"], version["id"])
+        self.assertEqual(draft["document"]["system_case_seed"], original_version_document)
+
+        edited_document = dict(draft["document"])
+        edited_document["case"] = {"name": "Edited structured draft"}
+        update_response = self.client.put(
+            f"/api/scenarios/{scenario['id']}/draft",
+            json={"document": edited_document},
+        )
+        self.assertEqual(update_response.status_code, 200)
+
+        source_after_update = self.client.get(
+            f"/api/scenario-versions/{version['id']}"
+        ).json()["scenario_version"]["system_case_json"]
+        self.assertEqual(source_after_update, original_version_document)
+
+    def test_scenario_draft_page_exposes_basic_view_and_save_flow(self):
+        project = self.client.post("/api/projects", json={"name": "Hybrid PMGD"}).json()
+        scenario = self.client.post(
+            f"/api/projects/{project['id']}/scenarios",
+            json={"name": "Base case"},
+        ).json()
+
+        scenario_page = self.client.get(f"/scenarios/{scenario['id']}")
+        self.assertEqual(scenario_page.status_code, 200)
+        self.assertIn(f'href="/scenarios/{scenario["id"]}/draft"', scenario_page.text)
+
+        draft_page = self.client.get(f"/scenarios/{scenario['id']}/draft")
+        self.assertEqual(draft_page.status_code, 200)
+        self.assertIn("Structured Draft", draft_page.text)
+        self.assertIn('name="structured_draft_json"', draft_page.text)
+        self.assertIn(f'action="/scenarios/{scenario["id"]}/draft"', draft_page.text)
+
+        saved_document = {
+            "schema_version": "bess_editor_draft.v1",
+            "case": {"name": "Saved draft"},
+            "assets": [{"id": "battery_1", "type": "battery"}],
+        }
+        save_response = self.client.post(
+            f"/scenarios/{scenario['id']}/draft",
+            data={"structured_draft_json": json.dumps(saved_document)},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(save_response.status_code, 303)
+        self.assertEqual(save_response.headers["location"], f"/scenarios/{scenario['id']}/draft")
+
+        saved_page = self.client.get(f"/scenarios/{scenario['id']}/draft")
+        self.assertEqual(saved_page.status_code, 200)
+        self.assertIn("&quot;Saved draft&quot;", saved_page.text)
+        self.assertEqual(self.client.get(f"/api/scenarios/{scenario['id']}/versions").json()["versions"], [])
+
     def test_valid_system_case_is_saved_as_scenario_version_with_metadata(self):
         project = self.client.post("/api/projects", json={"name": "Hybrid PMGD"}).json()
         scenario = self.client.post(

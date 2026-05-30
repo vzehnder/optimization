@@ -86,6 +86,19 @@ class AnalystStore:
                 SELECT RAISE(ABORT, 'scenario versions are immutable');
             END;
 
+            CREATE TABLE IF NOT EXISTS scenario_drafts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scenario_id INTEGER NOT NULL UNIQUE,
+                source_version_id INTEGER,
+                document_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (scenario_id) REFERENCES scenarios(id) ON DELETE CASCADE,
+                FOREIGN KEY (source_version_id) REFERENCES scenario_versions(id) ON DELETE SET NULL
+            );
+
             CREATE TABLE IF NOT EXISTS runs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 scenario_version_id INTEGER NOT NULL,
@@ -309,6 +322,125 @@ class AnalystStore:
         if row is None:
             raise KeyError(f"scenario version {scenario_version_id} not found")
         return scenario_version_row_to_dict(row, include_document=include_document)
+
+    def create_or_replace_scenario_draft(
+        self,
+        *,
+        scenario_id: int,
+        document: dict[str, Any],
+        source_version_id: int | None = None,
+        created_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        with self._lock:
+            self.get_scenario(scenario_id)
+            self._ensure_source_version_belongs_to_scenario(scenario_id, source_version_id)
+            now = utc_now_iso()
+            existing = self.connection.execute(
+                """
+                SELECT id
+                FROM scenario_drafts
+                WHERE scenario_id = ?
+                """,
+                (scenario_id,),
+            ).fetchone()
+            if existing is None:
+                cursor = self.connection.execute(
+                    """
+                    INSERT INTO scenario_drafts (
+                        scenario_id,
+                        source_version_id,
+                        document_json,
+                        created_at,
+                        updated_at,
+                        created_by,
+                        updated_by
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        scenario_id,
+                        source_version_id,
+                        json.dumps(document, sort_keys=True),
+                        now,
+                        now,
+                        created_by,
+                        created_by,
+                    ),
+                )
+                draft_id = cursor.lastrowid
+            else:
+                draft_id = int(existing["id"])
+                self.connection.execute(
+                    """
+                    UPDATE scenario_drafts
+                    SET
+                        source_version_id = ?,
+                        document_json = ?,
+                        updated_at = ?,
+                        updated_by = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        source_version_id,
+                        json.dumps(document, sort_keys=True),
+                        now,
+                        created_by,
+                        draft_id,
+                    ),
+                )
+            self.connection.commit()
+            return self.get_scenario_draft(scenario_id)
+
+    def get_scenario_draft(self, scenario_id: int) -> dict[str, Any]:
+        self.get_scenario(scenario_id)
+        row = self.connection.execute(
+            """
+            SELECT
+                id,
+                scenario_id,
+                source_version_id,
+                document_json,
+                created_at,
+                updated_at,
+                created_by,
+                updated_by
+            FROM scenario_drafts
+            WHERE scenario_id = ?
+            """,
+            (scenario_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"scenario draft for scenario {scenario_id} not found")
+        return scenario_draft_row_to_dict(row)
+
+    def update_scenario_draft(
+        self,
+        *,
+        scenario_id: int,
+        document: dict[str, Any],
+        updated_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        with self._lock:
+            self.get_scenario_draft(scenario_id)
+            updated_at = utc_now_iso()
+            self.connection.execute(
+                """
+                UPDATE scenario_drafts
+                SET
+                    document_json = ?,
+                    updated_at = ?,
+                    updated_by = ?
+                WHERE scenario_id = ?
+                """,
+                (
+                    json.dumps(document, sort_keys=True),
+                    updated_at,
+                    updated_by,
+                    scenario_id,
+                ),
+            )
+            self.connection.commit()
+            return self.get_scenario_draft(scenario_id)
 
     def create_run(
         self,
@@ -594,6 +726,18 @@ class AnalystStore:
         ).fetchone()
         return int(row["next_version_number"])
 
+    def _ensure_source_version_belongs_to_scenario(
+        self,
+        scenario_id: int,
+        source_version_id: int | None,
+    ) -> None:
+        if source_version_id is None:
+            return
+
+        source_version = self.get_scenario_version(source_version_id, include_document=False)
+        if source_version["scenario_id"] != scenario_id:
+            raise KeyError(f"scenario version {source_version_id} not found for scenario {scenario_id}")
+
 
 def sqlite_path_from_url(database_url: str) -> str:
     if database_url == "sqlite:///:memory:":
@@ -635,6 +779,12 @@ def scenario_version_row_to_dict(row: sqlite3.Row, *, include_document: bool) ->
     if include_document:
         value["system_case_json"] = json.loads(value.pop("system_case_json"))
         value["validation_payload"] = json.loads(value.pop("validation_payload_json"))
+    return value
+
+
+def scenario_draft_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    value = row_to_dict(row)
+    value["document"] = json.loads(value.pop("document_json"))
     return value
 
 

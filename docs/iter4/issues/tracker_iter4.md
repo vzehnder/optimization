@@ -22,7 +22,7 @@ triage label.
 | --- | --- | --- | --- | --- | --- | --- |
 | BESS-ITER4-000 | Review Structured Editor And Ingestion PRD | HITL | ready-for-agent | Done | None | [BESS-ITER4-000-review-structured-editor-and-ingestion-prd.md](BESS-ITER4-000-review-structured-editor-and-ingestion-prd.md) |
 | BESS-ITER4-001 | Run A Separate Import Export Price Case End To End | AFK | ready-for-agent | Done | BESS-ITER4-000 | [BESS-ITER4-001-run-a-separate-import-export-price-case-end-to-end.md](BESS-ITER4-001-run-a-separate-import-export-price-case-end-to-end.md) |
-| BESS-ITER4-002 | Create And Edit One Active Scenario Draft | AFK | ready-for-agent | Todo | BESS-ITER4-000 | [BESS-ITER4-002-create-and-edit-one-active-scenario-draft.md](BESS-ITER4-002-create-and-edit-one-active-scenario-draft.md) |
+| BESS-ITER4-002 | Create And Edit One Active Scenario Draft | AFK | ready-for-agent | Done | BESS-ITER4-000 | [BESS-ITER4-002-create-and-edit-one-active-scenario-draft.md](BESS-ITER4-002-create-and-edit-one-active-scenario-draft.md) |
 | BESS-ITER4-003 | Define One-Bus Assets In The Draft Editor | AFK | ready-for-agent | Todo | BESS-ITER4-002 | [BESS-ITER4-003-define-one-bus-assets-in-the-draft-editor.md](BESS-ITER4-003-define-one-bus-assets-in-the-draft-editor.md) |
 | BESS-ITER4-004 | Upload And Preview A CSV Time-Series Source | AFK | ready-for-agent | Todo | BESS-ITER4-002 | [BESS-ITER4-004-upload-and-preview-a-csv-time-series-source.md](BESS-ITER4-004-upload-and-preview-a-csv-time-series-source.md) |
 | BESS-ITER4-005 | Generate And Validate A System Case From Draft Plus CSV | AFK | ready-for-agent | Todo | BESS-ITER4-001, BESS-ITER4-003, BESS-ITER4-004 | [BESS-ITER4-005-generate-and-validate-a-system-case-from-draft-plus-csv.md](BESS-ITER4-005-generate-and-validate-a-system-case-from-draft-plus-csv.md) |
@@ -53,6 +53,8 @@ triage label.
 | 2026-05-30 | BESS-ITER4-000 | Todo -> Done | Reviewed and accepted the structured editor and ingestion PRD against the final objective, completed Iteration 2 optimizer contract, and completed Iteration 3 analyst workflow. No PRD corrections were required. |
 | 2026-05-30 | BESS-ITER4-001 | Todo -> In Progress | Started separate import/export price support using TDD, with a Julia end-to-end tracer bullet for validation, solve, output economics, and metadata. |
 | 2026-05-30 | BESS-ITER4-001 | In Progress -> Done | Added backward-compatible separate-price economics in Julia, result output columns, summary/metadata price mode, and Python result price-chart fallback behavior. Verified 41 Python tests and 372 Julia tests. Browser and Chrome DevTools MCP attempts were blocked by local runtime/profile errors. |
+| 2026-05-30 | BESS-ITER4-002 | Todo -> In Progress | Started one-active-draft persistence using TDD, with API behavior as the first tracer bullet. |
+| 2026-05-30 | BESS-ITER4-002 | In Progress -> Done | Added `scenario_drafts` persistence, API read/create/update endpoints, initialization from immutable scenario versions, and a basic SSR draft view/save flow. Verified 44 Python tests and Chrome DevTools page inspection. |
 
 ## Regression Guard
 

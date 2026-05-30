@@ -5,6 +5,7 @@ import os
 from contextlib import asynccontextmanager
 from html import escape
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -32,6 +33,11 @@ class ScenarioCreateRequest(BaseModel):
 
 class ScenarioVersionCreateRequest(BaseModel):
     system_case_json: str = Field(min_length=1)
+
+
+class ScenarioDraftWriteRequest(BaseModel):
+    document: dict[str, Any] | None = None
+    source_version_id: int | None = None
 
 
 def create_app(
@@ -133,6 +139,66 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         return RedirectResponse(f"/scenarios/{scenario['id']}", status_code=303)
+
+    @app.get("/scenarios/{scenario_id}/draft", response_class=HTMLResponse)
+    async def scenario_draft_page(scenario_id: int, source_version_id: int | None = None):
+        try:
+            scenario = analyst_store.get_scenario(scenario_id)
+            draft = None
+            if source_version_id is None:
+                try:
+                    draft = analyst_store.get_scenario_draft(scenario_id)
+                    draft_document = draft["document"]
+                except KeyError:
+                    draft_document = create_initial_draft_document(analyst_store, scenario_id, None)
+            else:
+                draft_document = create_initial_draft_document(analyst_store, scenario_id, source_version_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return HTMLResponse(
+            render_scenario_draft_page(
+                scenario,
+                draft,
+                draft_document,
+                source_version_id=source_version_id,
+            )
+        )
+
+    @app.post("/scenarios/{scenario_id}/draft")
+    async def save_scenario_draft_from_page(scenario_id: int, request: Request):
+        form = await request.form()
+        candidate_text = str(form.get("structured_draft_json", ""))
+        source_version_text = str(form.get("source_version_id", "")).strip()
+        source_version_id = int(source_version_text) if source_version_text else None
+        try:
+            draft_document = json.loads(candidate_text)
+            if not isinstance(draft_document, dict):
+                raise ValueError("Draft JSON must be an object")
+            analyst_store.create_or_replace_scenario_draft(
+                scenario_id=scenario_id,
+                document=draft_document,
+                source_version_id=source_version_id,
+            )
+        except (json.JSONDecodeError, ValueError) as error:
+            try:
+                scenario = analyst_store.get_scenario(scenario_id)
+            except KeyError as not_found:
+                raise HTTPException(status_code=404, detail=str(not_found)) from not_found
+            message = str(error)
+            if isinstance(error, json.JSONDecodeError):
+                message = f"Malformed JSON: {error.msg} at line {error.lineno}, column {error.colno}"
+            return HTMLResponse(
+                render_scenario_draft_page(
+                    scenario,
+                    None,
+                    candidate_text,
+                    source_version_id=source_version_id,
+                    error_message=message,
+                )
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return RedirectResponse(f"/scenarios/{scenario_id}/draft", status_code=303)
 
     @app.get("/scenarios/{scenario_id}", response_class=HTMLResponse)
     async def scenario_page(scenario_id: int, from_version_id: int | None = None):
@@ -278,6 +344,46 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"scenario": scenario}
+
+    @app.post("/api/scenarios/{scenario_id}/draft", status_code=201)
+    async def create_scenario_draft(scenario_id: int, payload: ScenarioDraftWriteRequest):
+        try:
+            draft_document = payload.document
+            if draft_document is None:
+                draft_document = create_initial_draft_document(
+                    analyst_store,
+                    scenario_id,
+                    payload.source_version_id,
+                )
+            draft = analyst_store.create_or_replace_scenario_draft(
+                scenario_id=scenario_id,
+                document=draft_document,
+                source_version_id=payload.source_version_id,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return draft
+
+    @app.get("/api/scenarios/{scenario_id}/draft")
+    async def get_scenario_draft(scenario_id: int):
+        try:
+            draft = analyst_store.get_scenario_draft(scenario_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"draft": draft}
+
+    @app.put("/api/scenarios/{scenario_id}/draft")
+    async def update_scenario_draft(scenario_id: int, payload: ScenarioDraftWriteRequest):
+        if payload.document is None:
+            raise HTTPException(status_code=400, detail="draft document is required")
+        try:
+            draft = analyst_store.update_scenario_draft(
+                scenario_id=scenario_id,
+                document=payload.document,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return draft
 
     @app.post("/api/scenarios/{scenario_id}/versions", status_code=201)
     async def create_scenario_version(scenario_id: int, payload: ScenarioVersionCreateRequest):
@@ -432,6 +538,57 @@ def artifact_path_is_safe(path: str, artifact_root: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def create_initial_draft_document(
+    analyst_store: AnalystStore,
+    scenario_id: int,
+    source_version_id: int | None,
+) -> dict[str, Any]:
+    if source_version_id is None:
+        scenario = analyst_store.get_scenario(scenario_id)
+        return empty_scenario_draft_document(scenario["name"])
+
+    source_version = analyst_store.get_scenario_version(source_version_id)
+    if source_version["scenario_id"] != scenario_id:
+        raise KeyError(f"scenario version {source_version_id} not found for scenario {scenario_id}")
+    return scenario_draft_document_from_version(source_version)
+
+
+def empty_scenario_draft_document(case_name: str) -> dict[str, Any]:
+    return {
+        "schema_version": "bess_editor_draft.v1",
+        "case": {"name": case_name},
+        "source": None,
+        "assets": [],
+        "time_series": {"sources": []},
+        "solver": {"name": "HiGHS", "options": {}},
+    }
+
+
+def scenario_draft_document_from_version(source_version: dict[str, Any]) -> dict[str, Any]:
+    system_case = source_version["system_case_json"]
+    solver = system_case.get("solver") if isinstance(system_case, dict) else None
+    solver_name = "HiGHS"
+    solver_options: dict[str, Any] = {}
+    if isinstance(solver, dict):
+        solver_name = str(solver.get("name") or solver_name)
+        if isinstance(solver.get("options"), dict):
+            solver_options = solver["options"]
+
+    return {
+        "schema_version": "bess_editor_draft.v1",
+        "case": {"name": str(system_case.get("case_name") or source_version["case_name"])},
+        "source": {
+            "kind": "scenario_version",
+            "scenario_version_id": source_version["id"],
+            "version_number": source_version["version_number"],
+        },
+        "assets": [],
+        "time_series": {"sources": []},
+        "solver": {"name": solver_name, "options": solver_options},
+        "system_case_seed": system_case,
+    }
 
 
 def render_validation_page(candidate_text: str = "", result: ValidationResult | None = None) -> str:
@@ -640,6 +797,7 @@ def render_scenario_page(
         f'<span>{escape(version["case_name"])} | {escape(version["schema_version"])} | '
         f'{version["period_count"]} periods | {format_asset_counts(version["asset_counts"])}</span>'
         f'<a href="/scenarios/{scenario["id"]}?from_version_id={version["id"]}">Use as base</a>'
+        f'<a href="/scenarios/{scenario["id"]}/draft?source_version_id={version["id"]}">Use as draft base</a>'
         f'<form class="inline-form" method="post" action="/scenario-versions/{version["id"]}/runs">'
         f'<button type="submit">Launch Run</button>'
         f"</form>"
@@ -667,6 +825,11 @@ def render_scenario_page(
           <p>{escape(scenario["description"])}</p>
         </section>
         {error_markup}
+        <section class="notice">
+          <h2>Structured Draft</h2>
+          <p>One active editable draft can be saved before promotion to an immutable version.</p>
+          <a href="/scenarios/{scenario["id"]}/draft">Open Draft</a>
+        </section>
         <section class="split wide">
           <div>
             <h2>Versions</h2>
@@ -681,6 +844,59 @@ def render_scenario_page(
             <button type="submit">Validate And Save</button>
           </form>
         </section>
+        """,
+    )
+
+
+def render_scenario_draft_page(
+    scenario: dict,
+    draft: dict | None,
+    draft_document: dict | str,
+    *,
+    source_version_id: int | None = None,
+    error_message: str = "",
+) -> str:
+    if isinstance(draft_document, str):
+        draft_text = draft_document
+    else:
+        draft_text = json.dumps(draft_document, indent=2, sort_keys=True)
+
+    status_text = "No active draft saved yet"
+    if draft is not None:
+        status_text = f"Active draft {draft['id']} last saved at {draft['updated_at']}"
+
+    source_version_value = source_version_id
+    if source_version_value is None and draft is not None:
+        source_version_value = draft["source_version_id"]
+    hidden_source = ""
+    if source_version_value is not None:
+        hidden_source = f'<input type="hidden" name="source_version_id" value="{source_version_value}">'
+
+    error_markup = ""
+    if error_message:
+        error_markup = (
+            '<section class="notice error">'
+            "<h2>Draft Error</h2>"
+            f"<p>{escape(error_message)}</p>"
+            "</section>"
+        )
+
+    return render_app_page(
+        "Structured Draft",
+        f"""
+        <nav><a href="/scenarios/{scenario["id"]}">Scenario</a></nav>
+        <section class="toolbar">
+          <h1>Structured Draft</h1>
+          <p>{escape(scenario["name"])} | {escape(status_text)}</p>
+        </section>
+        {error_markup}
+        <form method="post" action="/scenarios/{scenario["id"]}/draft">
+          <h2>Draft Document</h2>
+          <label for="structured_draft_json">structured_draft_json</label>
+          <textarea id="structured_draft_json" name="structured_draft_json" spellcheck="false">{escape(draft_text)}</textarea>
+          {hidden_source}
+          <button type="submit">Save Draft</button>
+        </form>
         """,
     )
 
@@ -798,7 +1014,8 @@ def render_app_page(title: str, content: str) -> str:
       min-height: 116px;
       resize: vertical;
     }}
-    #system_case_json {{
+    #system_case_json,
+    #structured_draft_json {{
       min-height: 420px;
       font: 13px/1.45 Consolas, "Liberation Mono", monospace;
     }}
