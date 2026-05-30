@@ -93,6 +93,11 @@ function system_cli_command(script_path::AbstractString, case_path::AbstractStri
     return `$(Base.julia_cmd()) --project=$(project_root) $(script_path) $(case_path) --output-root $(output_root) --run-timestamp 2026-01-02T03:04:05`
 end
 
+function system_validation_cli_command(script_path::AbstractString, case_path::AbstractString)
+    project_root = normpath(joinpath(@__DIR__, ".."))
+    return `$(Base.julia_cmd()) --project=$(project_root) $(script_path) $(case_path)`
+end
+
 function minimal_system_case_document()
     return Dict{String,Any}(
         "schema_version" => "bess_system_dispatch.v1",
@@ -962,6 +967,70 @@ end
                 open(stderr_path, "w") do stderr_io
                     return run(pipeline(
                         ignorestatus(system_cli_command(script_path, case_path, output_root));
+                        stdout = stdout_io,
+                        stderr = stderr_io,
+                    ))
+                end
+            end
+
+            @test !success(process)
+            @test isempty(strip(read(stdout_path, String)))
+            error_payload = JSON3.read(read(stderr_path, String))
+            @test string(error_payload.status) == "error"
+            @test occursin("schema_version is required", string(error_payload.message))
+        end
+    end
+
+    @testset "system case validation CLI validates without solving" begin
+        script_path = normpath(joinpath(@__DIR__, "..", "scripts", "validate_system_case.jl"))
+        @test isfile(script_path)
+
+        sample_path = sample_hybrid_system_case_path()
+        stdout = read(system_validation_cli_command(script_path, sample_path), String)
+        payload = JSON3.read(stdout)
+
+        @test string(payload.status) == "ok"
+        @test string(payload.case_name) == "hybrid_system"
+        @test string(payload.schema_version) == "bess_system_dispatch.v1"
+        @test Int(payload.period_count) == 4
+        @test Int(payload.asset_counts.battery) == 1
+        @test Int(payload.asset_counts.renewable) == 1
+        @test Int(payload.asset_counts.grid) == 1
+        @test Int(payload.asset_counts.load) == 1
+        @test !occursin("output_dir", stdout)
+
+        mktempdir() do case_dir
+            document = local_load_system_case_document()
+            grid = system_case_node(document, "grid_1")
+            grid["import_power_max_mw"] = 0.0
+            grid["export_power_max_mw"] = 0.0
+            battery = system_case_node(document, "battery_1")
+            battery["charge_power_max_mw"] = 0.0
+            battery["discharge_power_max_mw"] = 0.0
+            for period in document["time_series"]
+                period["renewable_available_power_mw"] = Dict{String,Any}("solar_1" => 0.0)
+                period["load_demand_mw"] = Dict{String,Any}("load_1" => 100.0)
+            end
+
+            case_path = write_minimal_system_case_json(case_dir; document = document)
+            validation_stdout = read(system_validation_cli_command(script_path, case_path), String)
+            validation_payload = JSON3.read(validation_stdout)
+
+            @test string(validation_payload.status) == "ok"
+            @test string(validation_payload.case_name) == "local_load_system"
+        end
+
+        mktempdir() do case_dir
+            document = minimal_system_case_document()
+            delete!(document, "schema_version")
+            case_path = write_minimal_system_case_json(case_dir; document = document)
+            stdout_path = joinpath(case_dir, "stdout.txt")
+            stderr_path = joinpath(case_dir, "stderr.txt")
+
+            process = open(stdout_path, "w") do stdout_io
+                open(stderr_path, "w") do stderr_io
+                    return run(pipeline(
+                        ignorestatus(system_validation_cli_command(script_path, case_path));
                         stdout = stdout_io,
                         stderr = stderr_io,
                     ))

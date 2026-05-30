@@ -19,8 +19,8 @@ triage label.
 
 | ID | Title | Type | Triage | Status | Blocked by | Issue file |
 | --- | --- | --- | --- | --- | --- | --- |
-| BESS-ITER3-000 | Review Analyst Web Flow PRD | HITL | ready-for-agent | Todo | None | [BESS-ITER3-000-review-analyst-web-flow-prd.md](BESS-ITER3-000-review-analyst-web-flow-prd.md) |
-| BESS-ITER3-001 | Validate A System Case From The Web App | AFK | ready-for-agent | Todo | BESS-ITER3-000 | [BESS-ITER3-001-validate-a-system-case-from-the-web-app.md](BESS-ITER3-001-validate-a-system-case-from-the-web-app.md) |
+| BESS-ITER3-000 | Review Analyst Web Flow PRD | HITL | ready-for-agent | Done | None | [BESS-ITER3-000-review-analyst-web-flow-prd.md](BESS-ITER3-000-review-analyst-web-flow-prd.md) |
+| BESS-ITER3-001 | Validate A System Case From The Web App | AFK | ready-for-agent | Done | BESS-ITER3-000 | [BESS-ITER3-001-validate-a-system-case-from-the-web-app.md](BESS-ITER3-001-validate-a-system-case-from-the-web-app.md) |
 | BESS-ITER3-002 | Save A Validated Scenario Version Under A Project | AFK | ready-for-agent | Todo | BESS-ITER3-001 | [BESS-ITER3-002-save-a-validated-scenario-version-under-a-project.md](BESS-ITER3-002-save-a-validated-scenario-version-under-a-project.md) |
 | BESS-ITER3-003 | Preserve Immutable Version History From Paste Or Upload | AFK | ready-for-agent | Todo | BESS-ITER3-002 | [BESS-ITER3-003-preserve-immutable-version-history-from-paste-or-upload.md](BESS-ITER3-003-preserve-immutable-version-history-from-paste-or-upload.md) |
 | BESS-ITER3-004 | Launch Manual Runs And Track Success State | AFK | ready-for-agent | Todo | BESS-ITER3-003 | [BESS-ITER3-004-launch-manual-runs-and-track-success-state.md](BESS-ITER3-004-launch-manual-runs-and-track-success-state.md) |
@@ -48,6 +48,9 @@ triage label.
 | Date | Issue | Status change | Notes |
 | --- | --- | --- | --- |
 | 2026-05-29 | All | Created | Initial local issue set generated from the Iteration 3 PRD and approved vertical-slice breakdown. |
+| 2026-05-29 | BESS-ITER3-000 | Todo -> Done | Reviewed and accepted the analyst web flow PRD against the final objective and completed Iteration 2 contract. No PRD corrections were required. |
+| 2026-05-29 | BESS-ITER3-001 | Todo -> In Progress | Started the first web-to-Julia validation slice using TDD. |
+| 2026-05-29 | BESS-ITER3-001 | In Progress -> Done | Added Julia validation CLI plus FastAPI validation page/API. Verified Python web tests with 7 tests and full Julia suite with 351 tests. |
 
 ## Regression Guard
 
