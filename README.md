@@ -90,3 +90,112 @@ outputs/arbitrage_mvp/<run_timestamp>/plots/dispatch_report.html
 
 The report includes price and dispatch, stored energy, period profit, and
 degradation cost traces.
+
+## Run The Analyst Web App
+
+Iteration 3 adds a private FastAPI analyst flow around the Julia system-case
+CLI. From the repository root, install the Python web dependencies in the local
+virtual environment and start the app:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+$env:DATABASE_URL = "sqlite:///.tmp/analyst_app.sqlite3"
+$env:ARTIFACT_ROOT = ".tmp/artifacts"
+$env:JULIA = "julia"
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+```
+
+Open `http://127.0.0.1:8000/projects`. The first screen is the internal
+project list and project creation form.
+
+### Database Configuration
+
+The app reads `DATABASE_URL` at startup. The Iteration 3 local implementation
+supports `sqlite:///...` URLs, including `sqlite:///:memory:` for tests and
+`sqlite:///.tmp/analyst_app.sqlite3` for local development.
+
+The app domain is already organized around tables that map cleanly to a future
+PostgreSQL or Supabase-backed deployment:
+
+- `projects`
+- `scenarios`
+- `scenario_versions`
+- `runs`
+- `run_artifacts`
+
+Supabase is not required for Iteration 3. Supabase Auth, Storage, Row Level
+Security, Edge Functions, and platform-specific behavior remain out of scope for
+this local analyst proof.
+
+### Validate And Save A Scenario Version
+
+Create a project, open it, create a scenario, then paste the full contents of
+`data/cases/hybrid_system/system_case.json` into the scenario page's
+`system_case_json` textarea. Click `Validate And Save`.
+
+The backend first parses JSON, then delegates system-case contract validation to
+Julia through:
+
+```powershell
+julia --project=. scripts/validate_system_case.jl <candidate-system-case.json>
+```
+
+Valid inputs are saved as immutable `ScenarioVersion` records. Invalid JSON or
+Julia validation errors are returned to the API/UI and no version is created.
+The JSON document remains the canonical optimization input for that version.
+
+### Launch A Manual Run
+
+Each saved scenario version has a `Launch Run` action. Launching a run creates a
+queued `Run` quickly, then the local single-worker queue executes Julia through:
+
+```powershell
+julia --project=. scripts/run_system_case.jl <run-input-system-case.json> --output-root <run-output-root>
+```
+
+The run detail page polls `/api/runs/{run_id}` and shows `queued`, `running`,
+`succeeded`, or `failed`, plus timestamps, exit code, and any stored error
+message. Completed runs expose parsed summary, dispatch tables, asset dispatch
+tables, and fixed basic charts from the Julia output artifacts.
+
+### Auditable Artifacts And Downloads
+
+Set `ARTIFACT_ROOT` to choose where run files are written. For a local run, the
+backend stores files under:
+
+```text
+<ARTIFACT_ROOT>/runs/<run_id>/
+```
+
+The app preserves and registers:
+
+- `input/system_case.json`: exact input snapshot used for execution.
+- `logs/stdout.log`: captured Julia stdout.
+- `logs/stderr.log`: captured Julia stderr.
+- `outputs/<case>/<timestamp>/summary.json`: run summary.
+- `outputs/<case>/<timestamp>/dispatch.csv`: system-level dispatch table.
+- `outputs/<case>/<timestamp>/asset_dispatch.csv`: asset-level dispatch table.
+- `outputs/<case>/<timestamp>/model_metadata.json`: model metadata.
+
+The database stores artifact metadata and safe filesystem paths. Downloads are
+served through `/api/run-artifacts/{artifact_id}/download` only when the
+registered file is under `ARTIFACT_ROOT`.
+
+### Iteration 3 Acceptance Verification
+
+Run the full Python web acceptance suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Run the Julia optimizer regression suite:
+
+```powershell
+julia --project=. -e "import Pkg; Pkg.test()"
+```
+
+The Iteration 3 acceptance test covers project creation, scenario creation,
+validated scenario version creation, manual run launch, successful completion,
+artifact registration, summary/table review, chart payloads, artifact
+downloads, malformed JSON rejection, and failed-run logs/errors.

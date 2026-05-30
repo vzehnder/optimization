@@ -28,7 +28,7 @@ triage label.
 | BESS-ITER3-006 | Register And Download Auditable Artifacts | AFK | ready-for-agent | Done | BESS-ITER3-004, BESS-ITER3-005 | [BESS-ITER3-006-register-and-download-auditable-artifacts.md](BESS-ITER3-006-register-and-download-auditable-artifacts.md) |
 | BESS-ITER3-007 | Review Run Summary And Result Tables | AFK | ready-for-agent | Done | BESS-ITER3-006 | [BESS-ITER3-007-review-run-summary-and-result-tables.md](BESS-ITER3-007-review-run-summary-and-result-tables.md) |
 | BESS-ITER3-008 | Add Basic Result Charts | AFK | ready-for-agent | Done | BESS-ITER3-007 | [BESS-ITER3-008-add-basic-result-charts.md](BESS-ITER3-008-add-basic-result-charts.md) |
-| BESS-ITER3-009 | Finalize Iteration 3 Acceptance Suite And Docs | AFK | ready-for-agent | Todo | BESS-ITER3-001 through BESS-ITER3-008 | [BESS-ITER3-009-finalize-iteration-3-acceptance-suite-and-docs.md](BESS-ITER3-009-finalize-iteration-3-acceptance-suite-and-docs.md) |
+| BESS-ITER3-009 | Finalize Iteration 3 Acceptance Suite And Docs | AFK | ready-for-agent | Done | BESS-ITER3-001 through BESS-ITER3-008 | [BESS-ITER3-009-finalize-iteration-3-acceptance-suite-and-docs.md](BESS-ITER3-009-finalize-iteration-3-acceptance-suite-and-docs.md) |
 
 ## Recommended Execution Order
 
@@ -65,6 +65,8 @@ triage label.
 | 2026-05-30 | BESS-ITER3-007 | In Progress -> Done | Added artifact-backed results reader, `/api/runs/{run_id}/results`, completed-run summary rendering, and dispatch/asset table rendering. Verified Python web tests with 35 tests, local HTTP results-page check, and full Julia suite with 351 tests. |
 | 2026-05-30 | BESS-ITER3-008 | Todo -> In Progress | Started basic result charts using TDD after rechecking the BESS-ITER3-007 results reader/API/UI path. |
 | 2026-05-30 | BESS-ITER3-008 | In Progress -> Done | Added artifact-derived chart payloads, run-page SVG chart panels, missing-column fallbacks, and API/template coverage. Verified Python web tests with 38 tests, local HTTP charts-page check, and full Julia suite with 351 tests. |
+| 2026-05-30 | BESS-ITER3-009 | Todo -> In Progress | Started the final Iteration 3 acceptance suite and documentation slice after rechecking the BESS-ITER3-008 chart results path. |
+| 2026-05-30 | BESS-ITER3-009 | In Progress -> Done | Added the final private analyst flow acceptance suite and local app documentation, including database/artifact configuration and final verification instructions. Verified Python web tests with 40 tests, local HTTP app checks, and full Julia suite with 351 tests. |
 
 ## Regression Guard
 
@@ -77,6 +79,26 @@ julia --project=. -e "import Pkg; Pkg.test()"
 Every slice that changes the Python web application should run the relevant
 backend/API/template tests introduced for Iteration 3. The final acceptance
 slice must prove the complete private analyst flow end to end.
+
+## Final Iteration 3 Verification
+
+The closing acceptance slice must run the full Python web acceptance suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+It must also keep the Julia optimizer regression suite green:
+
+```powershell
+julia --project=. -e "import Pkg; Pkg.test()"
+```
+
+The final acceptance coverage must prove the private analyst flow end to end:
+project creation, scenario creation, immutable scenario version creation,
+Julia-backed validation, manual run launch, successful completion, artifact
+registration, summary/table review, chart data, downloads, malformed input
+rejection, and failed-run errors/logs.
 
 ## Dependency Notes
 
