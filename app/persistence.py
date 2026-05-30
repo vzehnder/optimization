@@ -111,6 +111,19 @@ class AnalystStore:
                 FOREIGN KEY (scenario_version_id) REFERENCES scenario_versions(id) ON DELETE CASCADE,
                 CHECK (status IN ('queued', 'running', 'succeeded', 'failed'))
             );
+
+            CREATE TABLE IF NOT EXISTS run_artifacts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id INTEGER NOT NULL,
+                artifact_type TEXT NOT NULL,
+                path TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                media_type TEXT NOT NULL,
+                byte_size INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
+                UNIQUE (run_id, artifact_type)
+            );
             """
         )
         self._ensure_column("runs", "stdout_log_path", "TEXT")
@@ -484,6 +497,91 @@ class AnalystStore:
             )
             self.connection.commit()
             return self.get_run(run_id)
+
+    def register_run_artifact(
+        self,
+        *,
+        run_id: int,
+        artifact_type: str,
+        path: str,
+        display_name: str,
+        media_type: str,
+        byte_size: int | None = None,
+    ) -> dict[str, Any]:
+        self.get_run(run_id)
+        resolved_byte_size = byte_size
+        if resolved_byte_size is None:
+            resolved_byte_size = Path(path).stat().st_size
+        created_at = utc_now_iso()
+        with self._lock:
+            cursor = self.connection.execute(
+                """
+                INSERT INTO run_artifacts (
+                    run_id,
+                    artifact_type,
+                    path,
+                    display_name,
+                    media_type,
+                    byte_size,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (run_id, artifact_type) DO UPDATE SET
+                    path = excluded.path,
+                    display_name = excluded.display_name,
+                    media_type = excluded.media_type,
+                    byte_size = excluded.byte_size,
+                    created_at = excluded.created_at
+                """,
+                (
+                    run_id,
+                    artifact_type,
+                    path,
+                    display_name,
+                    media_type,
+                    resolved_byte_size,
+                    created_at,
+                ),
+            )
+            self.connection.commit()
+            artifact_id = cursor.lastrowid
+            if artifact_id == 0:
+                row = self.connection.execute(
+                    """
+                    SELECT id
+                    FROM run_artifacts
+                    WHERE run_id = ? AND artifact_type = ?
+                    """,
+                    (run_id, artifact_type),
+                ).fetchone()
+                artifact_id = int(row["id"])
+            return self.get_run_artifact(artifact_id)
+
+    def list_run_artifacts(self, run_id: int) -> list[dict[str, Any]]:
+        self.get_run(run_id)
+        rows = self.connection.execute(
+            """
+            SELECT id, run_id, artifact_type, path, display_name, media_type, byte_size, created_at
+            FROM run_artifacts
+            WHERE run_id = ?
+            ORDER BY id
+            """,
+            (run_id,),
+        ).fetchall()
+        return [row_to_dict(row) for row in rows]
+
+    def get_run_artifact(self, artifact_id: int) -> dict[str, Any]:
+        row = self.connection.execute(
+            """
+            SELECT id, run_id, artifact_type, path, display_name, media_type, byte_size, created_at
+            FROM run_artifacts
+            WHERE id = ?
+            """,
+            (artifact_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"run artifact {artifact_id} not found")
+        return row_to_dict(row)
 
     def _next_version_number(self, scenario_id: int) -> int:
         row = self.connection.execute(

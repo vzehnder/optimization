@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 from contextlib import asynccontextmanager
 from html import escape
+from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from app.persistence import AnalystStore
@@ -37,10 +39,18 @@ def create_app(
     database_url: str | None = None,
     store: AnalystStore | None = None,
     run_queue=None,
+    artifact_root: Path | str | None = None,
 ) -> FastAPI:
     service = validation_service or JuliaValidationService()
     analyst_store = store or AnalystStore(database_url)
-    local_run_queue = run_queue or LocalRunQueue(executor=JuliaRunExecutor(store=analyst_store))
+    configured_artifact_root = Path(
+        artifact_root
+        or os.environ.get("ARTIFACT_ROOT")
+        or Path(__file__).resolve().parents[1] / ".tmp" / "artifacts"
+    )
+    local_run_queue = run_queue or LocalRunQueue(
+        executor=JuliaRunExecutor(store=analyst_store, artifact_root=configured_artifact_root)
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -182,9 +192,14 @@ def create_app(
     async def run_page(run_id: int):
         try:
             run = analyst_store.get_run(run_id)
+            artifacts = [
+                artifact_response_body(artifact)
+                for artifact in analyst_store.list_run_artifacts(run_id)
+                if artifact_path_is_safe(artifact["path"], configured_artifact_root)
+            ]
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        return HTMLResponse(render_run_page(run))
+        return HTMLResponse(render_run_page(run, artifacts))
 
     @app.get("/system-cases/validate", response_class=HTMLResponse)
     async def validation_page():
@@ -318,6 +333,39 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"run": run}
 
+    @app.get("/api/runs/{run_id}/artifacts")
+    async def list_run_artifacts(run_id: int):
+        try:
+            artifacts = analyst_store.list_run_artifacts(run_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {
+            "artifacts": [
+                artifact_response_body(artifact)
+                for artifact in artifacts
+                if artifact_path_is_safe(artifact["path"], configured_artifact_root)
+            ]
+        }
+
+    @app.get("/api/run-artifacts/{artifact_id}/download")
+    async def download_run_artifact(artifact_id: int):
+        try:
+            artifact = analyst_store.get_run_artifact(artifact_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        if not artifact_path_is_safe(artifact["path"], configured_artifact_root):
+            raise HTTPException(status_code=404, detail="artifact not found")
+
+        artifact_path = Path(artifact["path"])
+        if not artifact_path.is_file():
+            raise HTTPException(status_code=404, detail="artifact file not found")
+
+        return FileResponse(
+            artifact_path,
+            media_type=artifact["media_type"],
+            filename=artifact["display_name"],
+        )
+
     return app
 
 
@@ -335,6 +383,30 @@ def validation_response_body(result: ValidationResult) -> dict:
         "message": result.message,
         "validation": result.payload,
     }
+
+
+def artifact_response_body(artifact: dict) -> dict:
+    return {
+        "id": artifact["id"],
+        "run_id": artifact["run_id"],
+        "artifact_type": artifact["artifact_type"],
+        "path": artifact["path"],
+        "display_name": artifact["display_name"],
+        "media_type": artifact["media_type"],
+        "byte_size": artifact["byte_size"],
+        "created_at": artifact["created_at"],
+        "download_url": f"/api/run-artifacts/{artifact['id']}/download",
+    }
+
+
+def artifact_path_is_safe(path: str, artifact_root: Path) -> bool:
+    root = artifact_root.resolve(strict=False)
+    resolved_path = Path(path).resolve(strict=False)
+    try:
+        resolved_path.relative_to(root)
+    except ValueError:
+        return False
+    return True
 
 
 def render_validation_page(candidate_text: str = "", result: ValidationResult | None = None) -> str:
@@ -759,7 +831,8 @@ def render_app_page(title: str, content: str) -> str:
 </html>"""
 
 
-def render_run_page(run: dict) -> str:
+def render_run_page(run: dict, artifacts: list[dict] | None = None) -> str:
+    artifact_items = render_artifact_items(artifacts or [])
     return render_app_page(
         f"Run {run['id']}",
         f"""
@@ -776,6 +849,10 @@ def render_run_page(run: dict) -> str:
             <dt>Exit Code</dt><dd id="run-exit-code">{escape(str(run["exit_code"] if run["exit_code"] is not None else ""))}</dd>
             <dt>Error</dt><dd id="run-error-message">{escape(str(run["error_message"] or ""))}</dd>
           </dl>
+        </section>
+        <section>
+          <h2>Artifacts</h2>
+          <ul class="entity-list" id="artifact-list">{artifact_items}</ul>
         </section>
         <script>
           async function pollRun() {{
@@ -795,6 +872,18 @@ def render_run_page(run: dict) -> str:
           window.setTimeout(pollRun, 1000);
         </script>
         """,
+    )
+
+
+def render_artifact_items(artifacts: list[dict]) -> str:
+    if not artifacts:
+        return '<li class="empty">No artifacts registered yet</li>'
+
+    return "".join(
+        f'<li><a href="{escape(artifact["download_url"])}">{escape(artifact["display_name"])}</a>'
+        f'<span>{escape(artifact["artifact_type"])} | {escape(artifact["media_type"])} | '
+        f'{artifact["byte_size"]} bytes</span></li>'
+        for artifact in artifacts
     )
 
 

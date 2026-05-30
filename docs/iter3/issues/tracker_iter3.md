@@ -25,7 +25,7 @@ triage label.
 | BESS-ITER3-003 | Preserve Immutable Version History From Paste Or Upload | AFK | ready-for-agent | Done | BESS-ITER3-002 | [BESS-ITER3-003-preserve-immutable-version-history-from-paste-or-upload.md](BESS-ITER3-003-preserve-immutable-version-history-from-paste-or-upload.md) |
 | BESS-ITER3-004 | Launch Manual Runs And Track Success State | AFK | ready-for-agent | Done | BESS-ITER3-003 | [BESS-ITER3-004-launch-manual-runs-and-track-success-state.md](BESS-ITER3-004-launch-manual-runs-and-track-success-state.md) |
 | BESS-ITER3-005 | Capture Failed Runs Logs And Input Snapshots | AFK | ready-for-agent | Done | BESS-ITER3-004 | [BESS-ITER3-005-capture-failed-runs-logs-and-input-snapshots.md](BESS-ITER3-005-capture-failed-runs-logs-and-input-snapshots.md) |
-| BESS-ITER3-006 | Register And Download Auditable Artifacts | AFK | ready-for-agent | Todo | BESS-ITER3-004, BESS-ITER3-005 | [BESS-ITER3-006-register-and-download-auditable-artifacts.md](BESS-ITER3-006-register-and-download-auditable-artifacts.md) |
+| BESS-ITER3-006 | Register And Download Auditable Artifacts | AFK | ready-for-agent | Done | BESS-ITER3-004, BESS-ITER3-005 | [BESS-ITER3-006-register-and-download-auditable-artifacts.md](BESS-ITER3-006-register-and-download-auditable-artifacts.md) |
 | BESS-ITER3-007 | Review Run Summary And Result Tables | AFK | ready-for-agent | Todo | BESS-ITER3-006 | [BESS-ITER3-007-review-run-summary-and-result-tables.md](BESS-ITER3-007-review-run-summary-and-result-tables.md) |
 | BESS-ITER3-008 | Add Basic Result Charts | AFK | ready-for-agent | Todo | BESS-ITER3-007 | [BESS-ITER3-008-add-basic-result-charts.md](BESS-ITER3-008-add-basic-result-charts.md) |
 | BESS-ITER3-009 | Finalize Iteration 3 Acceptance Suite And Docs | AFK | ready-for-agent | Todo | BESS-ITER3-001 through BESS-ITER3-008 | [BESS-ITER3-009-finalize-iteration-3-acceptance-suite-and-docs.md](BESS-ITER3-009-finalize-iteration-3-acceptance-suite-and-docs.md) |
@@ -59,6 +59,8 @@ triage label.
 | 2026-05-29 | BESS-ITER3-004 | In Progress -> Done | Added run persistence, single-worker local queue, Julia execution runner, API/UI launch, status polling, input snapshots, and success payload recording. Verified Python web tests with 22 tests, real backend runner sample success, and full Julia suite with 351 tests. |
 | 2026-05-30 | BESS-ITER3-005 | Todo -> In Progress | Started failed-run auditability using TDD after rechecking the BESS-ITER3-004 run flow. |
 | 2026-05-30 | BESS-ITER3-005 | In Progress -> Done | Added execution-time snapshot revalidation, failed-run structured errors, stdout/stderr log files, persisted error messages, and failure display in API/UI. Verified Python web tests with 25 tests, browser failure-page check, and full Julia suite with 351 tests. |
+| 2026-05-30 | BESS-ITER3-006 | Todo -> In Progress | Started auditable artifact registration and download workflow using TDD after reviewing the BESS-ITER3-005 failure audit path. |
+| 2026-05-30 | BESS-ITER3-006 | In Progress -> Done | Added run artifact metadata, artifact-root safety checks, runner registration for success/failure audit files, API listing/download endpoints, and run-page download links. Verified Python web tests with 29 tests, real local run artifact download check, and full Julia suite with 351 tests. |
 
 ## Regression Guard
 

@@ -217,6 +217,115 @@ class ManualRunPollingTests(unittest.TestCase):
             store.close()
 
 
+class RunArtifactApiTests(unittest.TestCase):
+    def test_artifact_api_lists_safe_metadata_and_downloads_existing_files(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            artifact_root.mkdir()
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                scenario_version = create_persisted_scenario_version(store)
+                run = store.create_run(scenario_version_id=scenario_version["id"])
+                store.mark_run_running(
+                    run["id"],
+                    workspace_path=str(artifact_root / "runs" / str(run["id"])),
+                    input_snapshot_path=str(artifact_root / "runs" / str(run["id"]) / "input" / "system_case.json"),
+                )
+                safe_path = artifact_root / "runs" / str(run["id"]) / "outputs" / "summary.json"
+                safe_path.parent.mkdir(parents=True)
+                safe_path.write_bytes(b'{"termination_status":"OPTIMAL"}\n')
+                missing_path = artifact_root / "runs" / str(run["id"]) / "outputs" / "dispatch.csv"
+                outside_path = Path(temp_dir) / "outside.txt"
+                outside_path.write_text("not safe", encoding="utf-8")
+                safe_artifact = store.register_run_artifact(
+                    run_id=run["id"],
+                    artifact_type="summary_json",
+                    path=str(safe_path),
+                    display_name="summary.json",
+                    media_type="application/json",
+                )
+                missing_artifact = store.register_run_artifact(
+                    run_id=run["id"],
+                    artifact_type="dispatch_csv",
+                    path=str(missing_path),
+                    display_name="dispatch.csv",
+                    media_type="text/csv",
+                    byte_size=0,
+                )
+                store.register_run_artifact(
+                    run_id=run["id"],
+                    artifact_type="unsafe",
+                    path=str(outside_path),
+                    display_name="outside.txt",
+                    media_type="text/plain",
+                )
+
+                client = TestClient(
+                    create_app(
+                        validation_service=StubValidationService(),
+                        store=store,
+                        run_queue=RecordingRunQueue(),
+                        artifact_root=artifact_root,
+                    )
+                )
+
+                list_response = client.get(f"/api/runs/{run['id']}/artifacts")
+                self.assertEqual(list_response.status_code, 200)
+                artifacts = list_response.json()["artifacts"]
+                self.assertEqual([artifact["artifact_type"] for artifact in artifacts], ["summary_json", "dispatch_csv"])
+                self.assertEqual(artifacts[0]["display_name"], "summary.json")
+                self.assertEqual(artifacts[0]["path"], str(safe_path))
+                self.assertNotIn("outside.txt", json.dumps(artifacts))
+
+                download_response = client.get(f"/api/run-artifacts/{safe_artifact['id']}/download")
+                self.assertEqual(download_response.status_code, 200)
+                self.assertEqual(download_response.headers["content-type"], "application/json")
+                self.assertIn("attachment", download_response.headers["content-disposition"])
+                self.assertEqual(download_response.content, b'{"termination_status":"OPTIMAL"}\n')
+
+                missing_response = client.get(f"/api/run-artifacts/{missing_artifact['id']}/download")
+                self.assertEqual(missing_response.status_code, 404)
+                self.assertIn("not found", missing_response.json()["detail"])
+            finally:
+                store.close()
+
+    def test_run_detail_page_lists_downloadable_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            artifact_root.mkdir()
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                scenario_version = create_persisted_scenario_version(store)
+                run = store.create_run(scenario_version_id=scenario_version["id"])
+                artifact_path = artifact_root / "runs" / str(run["id"]) / "outputs" / "summary.json"
+                artifact_path.parent.mkdir(parents=True)
+                artifact_path.write_bytes(b"{}\n")
+                artifact = store.register_run_artifact(
+                    run_id=run["id"],
+                    artifact_type="summary_json",
+                    path=str(artifact_path),
+                    display_name="summary.json",
+                    media_type="application/json",
+                )
+                client = TestClient(
+                    create_app(
+                        validation_service=StubValidationService(),
+                        store=store,
+                        run_queue=RecordingRunQueue(),
+                        artifact_root=artifact_root,
+                    )
+                )
+
+                response = client.get(f"/runs/{run['id']}")
+
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("Artifacts", response.text)
+                self.assertIn("summary.json", response.text)
+                self.assertIn(f"/api/run-artifacts/{artifact['id']}/download", response.text)
+            finally:
+                store.close()
+
+
 class JuliaRunExecutorTests(unittest.TestCase):
     def test_runner_revalidates_input_snapshot_and_fails_before_solving_when_invalid(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -338,6 +447,116 @@ class JuliaRunExecutorTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_runner_registers_success_artifacts_for_download(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                scenario_version = create_persisted_scenario_version(store)
+                run = store.create_run(scenario_version_id=scenario_version["id"])
+
+                def fake_runner(command, **kwargs):
+                    output_root = Path(command[command.index("--output-root") + 1])
+                    output_dir = output_root / "hybrid_system" / "run-001"
+                    output_dir.mkdir(parents=True)
+                    (output_dir / "summary.json").write_text('{"termination_status":"OPTIMAL"}\n', encoding="utf-8")
+                    (output_dir / "dispatch.csv").write_text("timestamp,grid_import_mw\n2026-01-01T00:00:00,0\n", encoding="utf-8")
+                    (output_dir / "asset_dispatch.csv").write_text("timestamp,asset_id,asset_type\n2026-01-01T00:00:00,grid_1,grid\n", encoding="utf-8")
+                    (output_dir / "model_metadata.json").write_text('{"model_name":"one_bus_system_dispatch"}\n', encoding="utf-8")
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        stdout=json.dumps(
+                            {
+                                "case_name": "hybrid_system",
+                                "run_timestamp": "run-001",
+                                "output_dir": str(output_dir),
+                                "summary_path": str(output_dir / "summary.json"),
+                                "termination_status": "OPTIMAL",
+                            }
+                        ),
+                        stderr="solver warning\n",
+                    )
+
+                executor = JuliaRunExecutor(
+                    store=store,
+                    repo_root=REPO_ROOT,
+                    artifact_root=Path(temp_dir),
+                    julia_executable="julia",
+                    runner=fake_runner,
+                    validation_service=AcceptingRunValidationService(),
+                )
+
+                completed = executor.execute(run["id"])
+
+                self.assertEqual(completed["status"], "succeeded")
+                artifacts = store.list_run_artifacts(run["id"])
+                artifacts_by_type = {artifact["artifact_type"]: artifact for artifact in artifacts}
+                self.assertEqual(
+                    set(artifacts_by_type),
+                    {
+                        "input_snapshot",
+                        "stdout_log",
+                        "stderr_log",
+                        "summary_json",
+                        "dispatch_csv",
+                        "asset_dispatch_csv",
+                        "model_metadata_json",
+                    },
+                )
+                self.assertEqual(artifacts_by_type["summary_json"]["display_name"], "summary.json")
+                self.assertEqual(artifacts_by_type["dispatch_csv"]["media_type"], "text/csv")
+                self.assertGreater(artifacts_by_type["stdout_log"]["byte_size"], 0)
+                self.assertGreater(artifacts_by_type["stderr_log"]["byte_size"], 0)
+                for artifact in artifacts:
+                    self.assertTrue(Path(artifact["path"]).is_file(), artifact)
+            finally:
+                store.close()
+
+    def test_runner_rejects_success_artifacts_outside_artifact_root(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                artifact_root = Path(temp_dir) / "artifacts"
+                outside_output_dir = Path(temp_dir) / "outside" / "hybrid_system" / "run-001"
+                outside_output_dir.mkdir(parents=True)
+                (outside_output_dir / "summary.json").write_text('{"termination_status":"OPTIMAL"}\n', encoding="utf-8")
+                scenario_version = create_persisted_scenario_version(store)
+                run = store.create_run(scenario_version_id=scenario_version["id"])
+
+                def unsafe_runner(command, **kwargs):
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        stdout=json.dumps(
+                            {
+                                "case_name": "hybrid_system",
+                                "run_timestamp": "run-001",
+                                "output_dir": str(outside_output_dir),
+                                "summary_path": str(outside_output_dir / "summary.json"),
+                                "termination_status": "OPTIMAL",
+                            }
+                        ),
+                        stderr="",
+                    )
+
+                executor = JuliaRunExecutor(
+                    store=store,
+                    repo_root=REPO_ROOT,
+                    artifact_root=artifact_root,
+                    julia_executable="julia",
+                    runner=unsafe_runner,
+                    validation_service=AcceptingRunValidationService(),
+                )
+
+                completed = executor.execute(run["id"])
+
+                self.assertEqual(completed["status"], "failed")
+                self.assertIn("outside artifact root", completed["error_message"])
+                artifact_types = {artifact["artifact_type"] for artifact in store.list_run_artifacts(run["id"])}
+                self.assertEqual(artifact_types, {"input_snapshot", "stdout_log", "stderr_log"})
+            finally:
+                store.close()
+
     def test_runner_records_process_failure_with_structured_error_and_log_files(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = AnalystStore("sqlite:///:memory:")
@@ -382,6 +601,8 @@ class JuliaRunExecutorTests(unittest.TestCase):
                     stderr_log_path.read_text(encoding="utf-8"),
                     '{"status":"error","message":"optimization failed before solve"}\n',
                 )
+                artifact_types = {artifact["artifact_type"] for artifact in store.list_run_artifacts(run["id"])}
+                self.assertEqual(artifact_types, {"input_snapshot", "stdout_log", "stderr_log"})
             finally:
                 store.close()
 

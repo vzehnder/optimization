@@ -107,7 +107,7 @@ class JuliaRunExecutor:
                 validation_result.raw_stdout,
                 validation_result.raw_stderr,
             )
-            return self.store.mark_run_failed(
+            failed = self.store.mark_run_failed(
                 run_id,
                 exit_code=validation_result.exit_code,
                 stdout=validation_result.raw_stdout,
@@ -117,33 +117,46 @@ class JuliaRunExecutor:
                 stdout_log_path=str(stdout_log_path),
                 stderr_log_path=str(stderr_log_path),
             )
+            self._register_audit_artifacts(
+                run_id,
+                input_snapshot_path=input_snapshot_path,
+                stdout_log_path=stdout_log_path,
+                stderr_log_path=stderr_log_path,
+            )
+            return failed
 
         try:
             completed = self._run_julia(input_snapshot_path, workspace_path / "outputs")
         except subprocess.TimeoutExpired:
-            return self.store.mark_run_failed(
+            failed = self.store.mark_run_failed(
                 run_id,
                 exit_code=None,
                 stdout="",
                 stderr="",
                 error_payload={"status": "error", "message": f"Julia run timed out after {self.timeout_seconds:g} seconds"},
             )
+            self._register_audit_artifacts(run_id, input_snapshot_path=input_snapshot_path)
+            return failed
         except FileNotFoundError:
-            return self.store.mark_run_failed(
+            failed = self.store.mark_run_failed(
                 run_id,
                 exit_code=None,
                 stdout="",
                 stderr="",
                 error_payload={"status": "error", "message": f"Julia executable not found: {self.julia_executable}"},
             )
+            self._register_audit_artifacts(run_id, input_snapshot_path=input_snapshot_path)
+            return failed
         except OSError as error:
-            return self.store.mark_run_failed(
+            failed = self.store.mark_run_failed(
                 run_id,
                 exit_code=None,
                 stdout="",
                 stderr="",
                 error_payload={"status": "error", "message": f"Julia run could not start: {error}"},
             )
+            self._register_audit_artifacts(run_id, input_snapshot_path=input_snapshot_path)
+            return failed
 
         stdout = completed.stdout or ""
         stderr = completed.stderr or ""
@@ -151,19 +164,56 @@ class JuliaRunExecutor:
         if completed.returncode == 0:
             payload = parse_json_payload(stdout)
             if payload:
-                return self.store.mark_run_succeeded(
+                output_dir = string_or_none(payload.get("output_dir"))
+                summary_path = string_or_none(payload.get("summary_path"))
+                try:
+                    self._ensure_under_artifact_root(input_snapshot_path)
+                    self._ensure_under_artifact_root(stdout_log_path)
+                    self._ensure_under_artifact_root(stderr_log_path)
+                    if output_dir is not None:
+                        self._ensure_under_artifact_root(Path(output_dir))
+                    if summary_path is not None:
+                        self._ensure_under_artifact_root(Path(summary_path))
+                except ValueError as error:
+                    self._register_audit_artifacts(
+                        run_id,
+                        input_snapshot_path=input_snapshot_path,
+                        stdout_log_path=stdout_log_path,
+                        stderr_log_path=stderr_log_path,
+                    )
+                    failed = self.store.mark_run_failed(
+                        run_id,
+                        exit_code=completed.returncode,
+                        stdout=stdout,
+                        stderr=stderr,
+                        error_payload={"status": "error", "message": str(error)},
+                        error_message=str(error),
+                        stdout_log_path=str(stdout_log_path),
+                        stderr_log_path=str(stderr_log_path),
+                    )
+                    return failed
+
+                succeeded = self.store.mark_run_succeeded(
                     run_id,
                     exit_code=completed.returncode,
                     stdout=stdout,
                     stderr=stderr,
                     success_payload=payload,
-                    output_dir=string_or_none(payload.get("output_dir")),
-                    summary_path=string_or_none(payload.get("summary_path")),
+                    output_dir=output_dir,
+                    summary_path=summary_path,
                     stdout_log_path=str(stdout_log_path),
                     stderr_log_path=str(stderr_log_path),
                 )
+                self._register_audit_artifacts(
+                    run_id,
+                    input_snapshot_path=input_snapshot_path,
+                    stdout_log_path=stdout_log_path,
+                    stderr_log_path=stderr_log_path,
+                    output_dir=output_dir,
+                )
+                return succeeded
 
-            return self.store.mark_run_failed(
+            failed = self.store.mark_run_failed(
                 run_id,
                 exit_code=completed.returncode,
                 stdout=stdout,
@@ -173,10 +223,17 @@ class JuliaRunExecutor:
                 stdout_log_path=str(stdout_log_path),
                 stderr_log_path=str(stderr_log_path),
             )
+            self._register_audit_artifacts(
+                run_id,
+                input_snapshot_path=input_snapshot_path,
+                stdout_log_path=stdout_log_path,
+                stderr_log_path=stderr_log_path,
+            )
+            return failed
 
         payload = parse_json_payload(stderr)
         message = str(payload.get("message") or stderr.strip() or "Julia run failed")
-        return self.store.mark_run_failed(
+        failed = self.store.mark_run_failed(
             run_id,
             exit_code=completed.returncode,
             stdout=stdout,
@@ -186,6 +243,13 @@ class JuliaRunExecutor:
             stdout_log_path=str(stdout_log_path),
             stderr_log_path=str(stderr_log_path),
         )
+        self._register_audit_artifacts(
+            run_id,
+            input_snapshot_path=input_snapshot_path,
+            stdout_log_path=stdout_log_path,
+            stderr_log_path=stderr_log_path,
+        )
+        return failed
 
     def _workspace_path(self, run_id: int) -> Path:
         return self.artifact_root / "runs" / str(run_id)
@@ -223,6 +287,83 @@ class JuliaRunExecutor:
             text=True,
             timeout=self.timeout_seconds,
         )
+
+    def _register_audit_artifacts(
+        self,
+        run_id: int,
+        *,
+        input_snapshot_path: Path,
+        stdout_log_path: Path | None = None,
+        stderr_log_path: Path | None = None,
+        output_dir: str | None = None,
+    ) -> None:
+        self._register_artifact_if_file(
+            run_id,
+            "input_snapshot",
+            input_snapshot_path,
+            display_name="system_case.json",
+            media_type="application/json",
+        )
+        self._register_artifact_if_file(
+            run_id,
+            "stdout_log",
+            stdout_log_path,
+            display_name="stdout.log",
+            media_type="text/plain",
+        )
+        self._register_artifact_if_file(
+            run_id,
+            "stderr_log",
+            stderr_log_path,
+            display_name="stderr.log",
+            media_type="text/plain",
+        )
+
+        if output_dir is None:
+            return
+
+        output_path = Path(output_dir)
+        for artifact_type, filename, media_type in [
+            ("summary_json", "summary.json", "application/json"),
+            ("dispatch_csv", "dispatch.csv", "text/csv"),
+            ("asset_dispatch_csv", "asset_dispatch.csv", "text/csv"),
+            ("model_metadata_json", "model_metadata.json", "application/json"),
+        ]:
+            self._register_artifact_if_file(
+                run_id,
+                artifact_type,
+                output_path / filename,
+                display_name=filename,
+                media_type=media_type,
+            )
+
+    def _register_artifact_if_file(
+        self,
+        run_id: int,
+        artifact_type: str,
+        path: Path | None,
+        *,
+        display_name: str,
+        media_type: str,
+    ) -> None:
+        if path is None or not path.is_file():
+            return
+        self._ensure_under_artifact_root(path)
+        self.store.register_run_artifact(
+            run_id=run_id,
+            artifact_type=artifact_type,
+            path=str(path),
+            display_name=display_name,
+            media_type=media_type,
+        )
+
+    def _ensure_under_artifact_root(self, path: Path) -> None:
+        root = self.artifact_root.resolve(strict=False)
+        resolved_path = path.resolve(strict=False)
+        try:
+            resolved_path.relative_to(root)
+        except ValueError as error:
+            raise ValueError(f"artifact path is outside artifact root: {path}") from error
 
 
 def parse_json_payload(text: str) -> dict[str, Any]:
