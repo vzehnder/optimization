@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from pydantic import BaseModel, Field
 
 from app.persistence import AnalystStore
+from app.results import ResultReadError, read_run_results
 from app.runner import JuliaRunExecutor, LocalRunQueue
 from app.validation import JuliaValidationService, ValidationResult
 
@@ -192,14 +193,23 @@ def create_app(
     async def run_page(run_id: int):
         try:
             run = analyst_store.get_run(run_id)
+            stored_artifacts = analyst_store.list_run_artifacts(run_id)
             artifacts = [
                 artifact_response_body(artifact)
-                for artifact in analyst_store.list_run_artifacts(run_id)
+                for artifact in stored_artifacts
                 if artifact_path_is_safe(artifact["path"], configured_artifact_root)
             ]
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        return HTMLResponse(render_run_page(run, artifacts))
+
+        results = None
+        results_error = ""
+        if run["status"] == "succeeded":
+            try:
+                results = read_run_results(run, stored_artifacts, configured_artifact_root)
+            except ResultReadError as error:
+                results_error = error.message
+        return HTMLResponse(render_run_page(run, artifacts, results, results_error))
 
     @app.get("/system-cases/validate", response_class=HTMLResponse)
     async def validation_page():
@@ -332,6 +342,21 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"run": run}
+
+    @app.get("/api/runs/{run_id}/results")
+    async def get_run_results(run_id: int):
+        try:
+            run = analyst_store.get_run(run_id)
+            artifacts = analyst_store.list_run_artifacts(run_id)
+            results = read_run_results(run, artifacts, configured_artifact_root)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ResultReadError as error:
+            return JSONResponse(
+                {"status": "error", "message": error.message},
+                status_code=error.status_code,
+            )
+        return {"results": results}
 
     @app.get("/api/runs/{run_id}/artifacts")
     async def list_run_artifacts(run_id: int):
@@ -812,6 +837,36 @@ def render_app_page(title: str, content: str) -> str:
       margin: 0;
       overflow-wrap: anywhere;
     }}
+    .results-section {{
+      margin-top: 26px;
+    }}
+    .table-scroll {{
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      overflow-x: auto;
+      margin-bottom: 24px;
+    }}
+    table {{
+      width: 100%;
+      min-width: 760px;
+      border-collapse: collapse;
+      font-size: 13px;
+    }}
+    th,
+    td {{
+      border-bottom: 1px solid var(--line);
+      padding: 8px 10px;
+      text-align: left;
+      white-space: nowrap;
+    }}
+    thead th {{
+      background: var(--surface);
+      color: var(--muted);
+      font-weight: 700;
+    }}
+    tbody tr:last-child td {{
+      border-bottom: 0;
+    }}
     @media (max-width: 760px) {{
       .split,
       .split.wide {{
@@ -831,8 +886,14 @@ def render_app_page(title: str, content: str) -> str:
 </html>"""
 
 
-def render_run_page(run: dict, artifacts: list[dict] | None = None) -> str:
+def render_run_page(
+    run: dict,
+    artifacts: list[dict] | None = None,
+    results: dict | None = None,
+    results_error: str = "",
+) -> str:
     artifact_items = render_artifact_items(artifacts or [])
+    results_markup = render_results_section(results, results_error)
     return render_app_page(
         f"Run {run['id']}",
         f"""
@@ -854,6 +915,7 @@ def render_run_page(run: dict, artifacts: list[dict] | None = None) -> str:
           <h2>Artifacts</h2>
           <ul class="entity-list" id="artifact-list">{artifact_items}</ul>
         </section>
+        {results_markup}
         <script>
           async function pollRun() {{
             const response = await fetch("/api/runs/{run["id"]}");
@@ -873,6 +935,61 @@ def render_run_page(run: dict, artifacts: list[dict] | None = None) -> str:
         </script>
         """,
     )
+
+
+def render_results_section(results: dict | None, results_error: str = "") -> str:
+    if results_error:
+        return (
+            '<section class="notice error results-section">'
+            "<h2>Results Error</h2>"
+            f"<p>{escape(results_error)}</p>"
+            "</section>"
+        )
+    if results is None:
+        return ""
+
+    return f"""
+        <section class="results-section">
+          <h2>Run Summary</h2>
+          {render_summary_details(results["summary"])}
+          <h2>System Dispatch</h2>
+          {render_result_table(results["dispatch_table"])}
+          <h2>Asset Dispatch</h2>
+          {render_result_table(results["asset_dispatch_table"])}
+        </section>
+    """
+
+
+def render_summary_details(summary: dict) -> str:
+    fields = [
+        ("case_name", "Case Name"),
+        ("run_timestamp", "Run Timestamp"),
+        ("solver_name", "Solver"),
+        ("solver_status", "Solver Status"),
+        ("termination_status", "Termination Status"),
+        ("objective_value_usd", "Objective Value"),
+        ("model_version", "Model Version"),
+    ]
+    rows = "".join(
+        f"<dt>{escape(label)}</dt><dd>{escape(str(summary.get(key, '')))}</dd>"
+        for key, label in fields
+        if key in summary
+    )
+    return f'<div class="details"><dl>{rows}</dl></div>'
+
+
+def render_result_table(table: dict) -> str:
+    columns = table["columns"]
+    header = "".join(f"<th>{escape(column)}</th>" for column in columns)
+    body = "".join(
+        "<tr>"
+        + "".join(f"<td>{escape(str(row.get(column) or ''))}</td>" for column in columns)
+        + "</tr>"
+        for row in table["rows"]
+    )
+    if not body:
+        body = f'<tr><td colspan="{len(columns)}">No rows</td></tr>'
+    return f'<div class="table-scroll"><table><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table></div>'
 
 
 def render_artifact_items(artifacts: list[dict]) -> str:
