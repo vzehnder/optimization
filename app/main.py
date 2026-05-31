@@ -7,10 +7,16 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
+from app.draft_editor import (
+    DraftGenerationError,
+    generate_system_case_from_draft,
+    structured_draft_document_from_system_case,
+    structured_draft_document_from_form,
+)
 from app.persistence import AnalystStore
 from app.results import ResultReadError, read_run_results
 from app.runner import JuliaRunExecutor, LocalRunQueue
@@ -105,6 +111,10 @@ def create_app(
     async def root():
         return RedirectResponse("/projects")
 
+    @app.get("/favicon.ico")
+    async def favicon():
+        return Response(status_code=204)
+
     @app.get("/projects", response_class=HTMLResponse)
     async def projects_page():
         return HTMLResponse(render_projects_page(analyst_store.list_projects()))
@@ -194,6 +204,32 @@ def create_app(
                     candidate_text,
                     source_version_id=source_version_id,
                     error_message=message,
+                )
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return RedirectResponse(f"/scenarios/{scenario_id}/draft", status_code=303)
+
+    @app.post("/scenarios/{scenario_id}/draft/structure")
+    async def save_structured_scenario_draft_from_page(scenario_id: int, request: Request):
+        form = await request.form()
+        try:
+            draft_document = structured_draft_document_from_form(form)
+            analyst_store.create_or_replace_scenario_draft(
+                scenario_id=scenario_id,
+                document=draft_document,
+            )
+        except DraftGenerationError as error:
+            try:
+                scenario = analyst_store.get_scenario(scenario_id)
+            except KeyError as not_found:
+                raise HTTPException(status_code=404, detail=str(not_found)) from not_found
+            return HTMLResponse(
+                render_scenario_draft_page(
+                    scenario,
+                    None,
+                    empty_scenario_draft_document(scenario["name"]),
+                    error_message=str(error),
                 )
             )
         except KeyError as error:
@@ -371,6 +407,17 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"draft": draft}
+
+    @app.get("/api/scenarios/{scenario_id}/draft/generated-system-case")
+    async def get_generated_system_case_preview(scenario_id: int):
+        try:
+            draft = analyst_store.get_scenario_draft(scenario_id)
+            system_case = generate_system_case_from_draft(draft["document"])
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except DraftGenerationError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return {"system_case": system_case}
 
     @app.put("/api/scenarios/{scenario_id}/draft")
     async def update_scenario_draft(scenario_id: int, payload: ScenarioDraftWriteRequest):
@@ -560,6 +607,13 @@ def empty_scenario_draft_document(case_name: str) -> dict[str, Any]:
         "schema_version": "bess_editor_draft.v1",
         "case": {"name": case_name},
         "source": None,
+        "pcc": {"id": "bus_1", "type": "bus"},
+        "grid": {
+            "id": "grid_1",
+            "import_power_max_mw": None,
+            "export_power_max_mw": None,
+            "prevent_simultaneous_grid_import_export": True,
+        },
         "assets": [],
         "time_series": {"sources": []},
         "solver": {"name": "HiGHS", "options": {}},
@@ -568,27 +622,14 @@ def empty_scenario_draft_document(case_name: str) -> dict[str, Any]:
 
 def scenario_draft_document_from_version(source_version: dict[str, Any]) -> dict[str, Any]:
     system_case = source_version["system_case_json"]
-    solver = system_case.get("solver") if isinstance(system_case, dict) else None
-    solver_name = "HiGHS"
-    solver_options: dict[str, Any] = {}
-    if isinstance(solver, dict):
-        solver_name = str(solver.get("name") or solver_name)
-        if isinstance(solver.get("options"), dict):
-            solver_options = solver["options"]
-
-    return {
-        "schema_version": "bess_editor_draft.v1",
-        "case": {"name": str(system_case.get("case_name") or source_version["case_name"])},
-        "source": {
+    return structured_draft_document_from_system_case(
+        system_case,
+        source={
             "kind": "scenario_version",
             "scenario_version_id": source_version["id"],
             "version_number": source_version["version_number"],
         },
-        "assets": [],
-        "time_series": {"sources": []},
-        "solver": {"name": solver_name, "options": solver_options},
-        "system_case_seed": system_case,
-    }
+    )
 
 
 def render_validation_page(candidate_text: str = "", result: ValidationResult | None = None) -> str:
@@ -880,6 +921,8 @@ def render_scenario_draft_page(
             f"<p>{escape(error_message)}</p>"
             "</section>"
         )
+    structured_form = render_structured_draft_form(scenario, draft_document if isinstance(draft_document, dict) else {})
+    preview_markup = render_generated_preview(draft_document if isinstance(draft_document, dict) else None)
 
     return render_app_page(
         "Structured Draft",
@@ -890,6 +933,8 @@ def render_scenario_draft_page(
           <p>{escape(scenario["name"])} | {escape(status_text)}</p>
         </section>
         {error_markup}
+        {structured_form}
+        {preview_markup}
         <form method="post" action="/scenarios/{scenario["id"]}/draft">
           <h2>Draft Document</h2>
           <label for="structured_draft_json">structured_draft_json</label>
@@ -899,6 +944,129 @@ def render_scenario_draft_page(
         </form>
         """,
     )
+
+
+def render_structured_draft_form(scenario: dict, document: dict) -> str:
+    case = document.get("case") if isinstance(document.get("case"), dict) else {}
+    pcc = document.get("pcc") if isinstance(document.get("pcc"), dict) else {}
+    grid = document.get("grid") if isinstance(document.get("grid"), dict) else {}
+    solver = document.get("solver") if isinstance(document.get("solver"), dict) else {}
+    assets = document.get("assets") if isinstance(document.get("assets"), list) else []
+    battery = first_asset_of_type(assets, "battery")
+    renewable = first_asset_of_type(assets, "renewable")
+    load = first_asset_of_type(assets, "load")
+    solver_options = solver.get("options") if isinstance(solver.get("options"), dict) else {}
+
+    return f"""
+        <form method="post" action="/scenarios/{scenario["id"]}/draft/structure" class="structured-form">
+          <h2>Case Metadata</h2>
+          <label for="case_name">case_name</label>
+          <input id="case_name" name="case_name" value="{html_value(case.get("name") or scenario["name"])}">
+          <label for="case_description">case_description</label>
+          <textarea id="case_description" name="case_description">{escape(str(case.get("description") or ""))}</textarea>
+
+          <h2>PCC And Grid</h2>
+          <div class="form-grid">
+            <label for="pcc_id">pcc_id</label>
+            <input id="pcc_id" name="pcc_id" value="{html_value(pcc.get("id") or "bus_1")}">
+            <label for="grid_id">grid_id</label>
+            <input id="grid_id" name="grid_id" value="{html_value(grid.get("id") or "grid_1")}">
+            <label for="grid_import_power_max_mw">grid_import_power_max_mw</label>
+            <input id="grid_import_power_max_mw" name="grid_import_power_max_mw" value="{html_value(grid.get("import_power_max_mw"))}">
+            <label for="grid_export_power_max_mw">grid_export_power_max_mw</label>
+            <input id="grid_export_power_max_mw" name="grid_export_power_max_mw" value="{html_value(grid.get("export_power_max_mw"))}">
+          </div>
+          <label class="checkbox-row">
+            <input type="checkbox" name="grid_prevent_simultaneous_grid_import_export" {checked_attr(grid.get("prevent_simultaneous_grid_import_export", True))}>
+            prevent_simultaneous_grid_import_export
+          </label>
+
+          <h2>Battery Asset</h2>
+          <div class="form-grid">
+            <label for="battery_id">battery_id</label>
+            <input id="battery_id" name="battery_id" value="{html_value(battery.get("id") or "battery_1")}">
+            <label for="battery_charge_power_max_mw">charge_power_max_mw</label>
+            <input id="battery_charge_power_max_mw" name="battery_charge_power_max_mw" value="{html_value(battery.get("charge_power_max_mw") or 4.0)}">
+            <label for="battery_discharge_power_max_mw">discharge_power_max_mw</label>
+            <input id="battery_discharge_power_max_mw" name="battery_discharge_power_max_mw" value="{html_value(battery.get("discharge_power_max_mw") or 4.0)}">
+            <label for="battery_energy_min_mwh">energy_min_mwh</label>
+            <input id="battery_energy_min_mwh" name="battery_energy_min_mwh" value="{html_value(battery.get("energy_min_mwh") if "energy_min_mwh" in battery else 0.0)}">
+            <label for="battery_energy_max_mwh">energy_max_mwh</label>
+            <input id="battery_energy_max_mwh" name="battery_energy_max_mwh" value="{html_value(battery.get("energy_max_mwh") or 8.0)}">
+            <label for="battery_initial_energy_mwh">initial_energy_mwh</label>
+            <input id="battery_initial_energy_mwh" name="battery_initial_energy_mwh" value="{html_value(battery.get("initial_energy_mwh") or 4.0)}">
+            <label for="battery_charge_efficiency">charge_efficiency</label>
+            <input id="battery_charge_efficiency" name="battery_charge_efficiency" value="{html_value(battery.get("charge_efficiency") or 0.95)}">
+            <label for="battery_discharge_efficiency">discharge_efficiency</label>
+            <input id="battery_discharge_efficiency" name="battery_discharge_efficiency" value="{html_value(battery.get("discharge_efficiency") or 0.95)}">
+            <label for="battery_degradation_cost_per_mwh_delta_soc">degradation_cost_per_mwh_delta_soc</label>
+            <input id="battery_degradation_cost_per_mwh_delta_soc" name="battery_degradation_cost_per_mwh_delta_soc" value="{html_value(battery.get("degradation_cost_per_mwh_delta_soc") if "degradation_cost_per_mwh_delta_soc" in battery else 0.0)}">
+            <label for="battery_terminal_condition">terminal_condition</label>
+            <input id="battery_terminal_condition" name="battery_terminal_condition" value="{html_value(battery.get("terminal_condition") or "equal_initial")}">
+            <label for="battery_terminal_energy_min_mwh">terminal_energy_min_mwh</label>
+            <input id="battery_terminal_energy_min_mwh" name="battery_terminal_energy_min_mwh" value="{html_value(battery.get("terminal_energy_min_mwh"))}">
+          </div>
+          <label class="checkbox-row">
+            <input type="checkbox" name="battery_prevent_simultaneous_charge_discharge" {checked_attr(battery.get("prevent_simultaneous_charge_discharge", True))}>
+            prevent_simultaneous_charge_discharge
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" name="battery_degradation_linear_delta_soc" {checked_attr(battery.get("degradation_linear_delta_soc", True))}>
+            degradation_linear_delta_soc
+          </label>
+
+          <h2>Renewable And Load Assets</h2>
+          <div class="form-grid">
+            <label for="renewable_id">renewable_id</label>
+            <input id="renewable_id" name="renewable_id" value="{html_value(renewable.get("id") or "solar_1")}">
+            <label for="renewable_category">renewable_category</label>
+            <input id="renewable_category" name="renewable_category" value="{html_value(renewable.get("category") or renewable.get("display_category") or "solar")}">
+            <label for="renewable_curtailment_penalty_usd_per_mwh">curtailment_penalty_usd_per_mwh</label>
+            <input id="renewable_curtailment_penalty_usd_per_mwh" name="renewable_curtailment_penalty_usd_per_mwh" value="{html_value(renewable.get("curtailment_penalty_usd_per_mwh") if "curtailment_penalty_usd_per_mwh" in renewable else 0.0)}">
+            <label for="load_id">load_id</label>
+            <input id="load_id" name="load_id" value="{html_value(load.get("id") or "load_1")}">
+          </div>
+
+          <h2>Solver</h2>
+          <label for="solver_name">solver_name</label>
+          <input id="solver_name" name="solver_name" value="{html_value(solver.get("name") or "HiGHS")}">
+          <label for="solver_options_json">solver_options_json</label>
+          <textarea id="solver_options_json" name="solver_options_json" spellcheck="false">{escape(json.dumps(solver_options, sort_keys=True))}</textarea>
+          <button type="submit">Save Structured Draft</button>
+        </form>
+    """
+
+
+def render_generated_preview(document: dict | None) -> str:
+    if document is None:
+        return ""
+    try:
+        preview_text = json.dumps(generate_system_case_from_draft(document), indent=2, sort_keys=True)
+    except DraftGenerationError:
+        return ""
+    return (
+        '<section class="preview-block">'
+        "<h2>Generated System Case Preview</h2>"
+        f'<textarea id="generated_system_case_preview" readonly spellcheck="false">{escape(preview_text)}</textarea>'
+        "</section>"
+    )
+
+
+def first_asset_of_type(assets: list, asset_type: str) -> dict[str, Any]:
+    for asset in assets:
+        if isinstance(asset, dict) and asset.get("type") == asset_type:
+            return asset
+    return {}
+
+
+def html_value(value: Any) -> str:
+    if value is None:
+        return ""
+    return escape(str(value), quote=True)
+
+
+def checked_attr(value: Any) -> str:
+    return "checked" if bool(value) else ""
 
 
 def render_app_page(title: str, content: str) -> str:
@@ -989,6 +1157,15 @@ def render_app_page(title: str, content: str) -> str:
       padding: 16px;
       background: var(--surface);
     }}
+    .structured-form {{
+      margin-bottom: 18px;
+    }}
+    .form-grid {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(180px, 1fr));
+      gap: 10px 14px;
+      align-items: end;
+    }}
     .inline-form {{
       display: block;
       border: 0;
@@ -1009,6 +1186,14 @@ def render_app_page(title: str, content: str) -> str:
       padding: 10px;
       color: var(--ink);
       background: white;
+    }}
+    input[type="checkbox"] {{
+      width: auto;
+    }}
+    .checkbox-row {{
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }}
     textarea {{
       min-height: 116px;
@@ -1034,6 +1219,13 @@ def render_app_page(title: str, content: str) -> str:
       background: #effcf8;
       margin-bottom: 18px;
       padding: 12px 14px;
+    }}
+    .preview-block {{
+      margin-bottom: 18px;
+    }}
+    .preview-block textarea {{
+      min-height: 260px;
+      font: 13px/1.45 Consolas, "Liberation Mono", monospace;
     }}
     .notice.error {{
       border-left-color: var(--error);
@@ -1132,6 +1324,9 @@ def render_app_page(title: str, content: str) -> str:
     @media (max-width: 760px) {{
       .split,
       .split.wide {{
+        grid-template-columns: 1fr;
+      }}
+      .form-grid {{
         grid-template-columns: 1fr;
       }}
       .details dl {{
