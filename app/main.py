@@ -20,6 +20,12 @@ from app.draft_editor import (
 from app.persistence import AnalystStore
 from app.results import ResultReadError, read_run_results
 from app.runner import JuliaRunExecutor, LocalRunQueue
+from app.time_series_ingestion import (
+    TimeSeriesIngestionError,
+    attach_time_series_source,
+    apply_time_series_mapping,
+    ingest_csv_source,
+)
 from app.validation import JuliaValidationService, ValidationResult
 
 
@@ -46,6 +52,10 @@ class ScenarioDraftWriteRequest(BaseModel):
     source_version_id: int | None = None
 
 
+class TimeSeriesMappingRequest(BaseModel):
+    mapping: dict[str, Any]
+
+
 def create_app(
     validation_service: JuliaValidationService | None = None,
     *,
@@ -53,6 +63,7 @@ def create_app(
     store: AnalystStore | None = None,
     run_queue=None,
     artifact_root: Path | str | None = None,
+    input_source_root: Path | str | None = None,
 ) -> FastAPI:
     service = validation_service or JuliaValidationService()
     analyst_store = store or AnalystStore(database_url)
@@ -60,6 +71,11 @@ def create_app(
         artifact_root
         or os.environ.get("ARTIFACT_ROOT")
         or Path(__file__).resolve().parents[1] / ".tmp" / "artifacts"
+    )
+    configured_input_source_root = Path(
+        input_source_root
+        or os.environ.get("INPUT_SOURCE_ROOT")
+        or Path(__file__).resolve().parents[1] / ".tmp" / "input_sources"
     )
     local_run_queue = run_queue or LocalRunQueue(
         executor=JuliaRunExecutor(store=analyst_store, artifact_root=configured_artifact_root)
@@ -234,6 +250,77 @@ def create_app(
             )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
+        return RedirectResponse(f"/scenarios/{scenario_id}/draft", status_code=303)
+
+    @app.post("/scenarios/{scenario_id}/draft/time-series-sources/upload")
+    async def upload_draft_time_series_source_from_page(scenario_id: int, source_file: UploadFile = File(...)):
+        try:
+            draft = analyst_store.get_scenario_draft(scenario_id)
+            content = await source_file.read()
+            source = ingest_csv_source(
+                draft_document=draft["document"],
+                original_filename=source_file.filename or "source.csv",
+                content_type=source_file.content_type,
+                content=content,
+                input_source_root=configured_input_source_root,
+            )
+            updated_document = attach_time_series_source(draft["document"], source)
+            analyst_store.update_scenario_draft(
+                scenario_id=scenario_id,
+                document=updated_document,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except TimeSeriesIngestionError as error:
+            try:
+                scenario = analyst_store.get_scenario(scenario_id)
+                draft = analyst_store.get_scenario_draft(scenario_id)
+            except KeyError as not_found:
+                raise HTTPException(status_code=404, detail=str(not_found)) from not_found
+            return HTMLResponse(
+                render_scenario_draft_page(
+                    scenario,
+                    draft,
+                    draft["document"],
+                    error_message=str(error),
+                )
+            )
+        finally:
+            await source_file.close()
+        return RedirectResponse(f"/scenarios/{scenario_id}/draft", status_code=303)
+
+    @app.post("/scenarios/{scenario_id}/draft/time-series-sources/{source_id}/mapping")
+    async def save_draft_time_series_mapping_from_page(scenario_id: int, source_id: str, request: Request):
+        form = await request.form()
+        try:
+            draft = analyst_store.get_scenario_draft(scenario_id)
+            mapping = time_series_mapping_from_form(form)
+            updated_document, _source = apply_time_series_mapping(
+                document=draft["document"],
+                source_id=source_id,
+                mapping=mapping,
+                input_source_root=configured_input_source_root,
+            )
+            analyst_store.update_scenario_draft(
+                scenario_id=scenario_id,
+                document=updated_document,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except TimeSeriesIngestionError as error:
+            try:
+                scenario = analyst_store.get_scenario(scenario_id)
+                draft = analyst_store.get_scenario_draft(scenario_id)
+            except KeyError as not_found:
+                raise HTTPException(status_code=404, detail=str(not_found)) from not_found
+            return HTMLResponse(
+                render_scenario_draft_page(
+                    scenario,
+                    draft,
+                    draft["document"],
+                    error_message=str(error),
+                )
+            )
         return RedirectResponse(f"/scenarios/{scenario_id}/draft", status_code=303)
 
     @app.get("/scenarios/{scenario_id}", response_class=HTMLResponse)
@@ -419,6 +506,55 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(error)) from error
         return {"system_case": system_case}
 
+    @app.post("/api/scenarios/{scenario_id}/draft/time-series-sources/upload", status_code=201)
+    async def upload_draft_time_series_source(scenario_id: int, source_file: UploadFile = File(...)):
+        try:
+            draft = analyst_store.get_scenario_draft(scenario_id)
+            content = await source_file.read()
+            source = ingest_csv_source(
+                draft_document=draft["document"],
+                original_filename=source_file.filename or "source.csv",
+                content_type=source_file.content_type,
+                content=content,
+                input_source_root=configured_input_source_root,
+            )
+            updated_document = attach_time_series_source(draft["document"], source)
+            analyst_store.update_scenario_draft(
+                scenario_id=scenario_id,
+                document=updated_document,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except TimeSeriesIngestionError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        finally:
+            await source_file.close()
+        return {"source": source}
+
+    @app.put("/api/scenarios/{scenario_id}/draft/time-series-sources/{source_id}/mapping")
+    async def save_draft_time_series_mapping(
+        scenario_id: int,
+        source_id: str,
+        payload: TimeSeriesMappingRequest,
+    ):
+        try:
+            draft = analyst_store.get_scenario_draft(scenario_id)
+            updated_document, source = apply_time_series_mapping(
+                document=draft["document"],
+                source_id=source_id,
+                mapping=payload.mapping,
+                input_source_root=configured_input_source_root,
+            )
+            analyst_store.update_scenario_draft(
+                scenario_id=scenario_id,
+                document=updated_document,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except TimeSeriesIngestionError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return {"source": source}
+
     @app.put("/api/scenarios/{scenario_id}/draft")
     async def update_scenario_draft(scenario_id: int, payload: ScenarioDraftWriteRequest):
         if payload.document is None:
@@ -585,6 +721,27 @@ def artifact_path_is_safe(path: str, artifact_root: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def time_series_mapping_from_form(form) -> dict[str, Any]:
+    mapping: dict[str, Any] = {
+        "timestamp": str(form.get("mapping_timestamp", "")).strip() or None,
+        "duration_hours": str(form.get("mapping_duration_hours", "")).strip() or None,
+        "price_usd_per_mwh": str(form.get("mapping_price_usd_per_mwh", "")).strip() or None,
+        "import_price_usd_per_mwh": str(form.get("mapping_import_price_usd_per_mwh", "")).strip() or None,
+        "export_price_usd_per_mwh": str(form.get("mapping_export_price_usd_per_mwh", "")).strip() or None,
+        "renewable_available_power_mw": {},
+        "load_demand_mw": {},
+    }
+    for key, value in form.items():
+        text_value = str(value).strip()
+        if key.startswith("mapping_renewable_available_power_mw__") and text_value:
+            asset_id = key.removeprefix("mapping_renewable_available_power_mw__")
+            mapping["renewable_available_power_mw"][asset_id] = text_value
+        if key.startswith("mapping_load_demand_mw__") and text_value:
+            asset_id = key.removeprefix("mapping_load_demand_mw__")
+            mapping["load_demand_mw"][asset_id] = text_value
+    return mapping
 
 
 def create_initial_draft_document(
@@ -921,7 +1078,9 @@ def render_scenario_draft_page(
             f"<p>{escape(error_message)}</p>"
             "</section>"
         )
-    structured_form = render_structured_draft_form(scenario, draft_document if isinstance(draft_document, dict) else {})
+    document_for_sections = draft_document if isinstance(draft_document, dict) else {}
+    structured_form = render_structured_draft_form(scenario, document_for_sections)
+    time_series_section = render_time_series_source_section(scenario, document_for_sections)
     preview_markup = render_generated_preview(draft_document if isinstance(draft_document, dict) else None)
 
     return render_app_page(
@@ -934,6 +1093,7 @@ def render_scenario_draft_page(
         </section>
         {error_markup}
         {structured_form}
+        {time_series_section}
         {preview_markup}
         <form method="post" action="/scenarios/{scenario["id"]}/draft">
           <h2>Draft Document</h2>
@@ -1035,6 +1195,128 @@ def render_structured_draft_form(scenario: dict, document: dict) -> str:
           <button type="submit">Save Structured Draft</button>
         </form>
     """
+
+
+def render_time_series_source_section(scenario: dict, document: dict) -> str:
+    source = active_time_series_source(document)
+    source_markup = ""
+    if source is not None:
+        source_markup = render_time_series_source_detail(scenario, document, source)
+    return f"""
+        <section class="time-series-source">
+          <form method="post" action="/scenarios/{scenario["id"]}/draft/time-series-sources/upload" enctype="multipart/form-data">
+            <h2>CSV Time-Series Source</h2>
+            <label for="source_file">source_file</label>
+            <input id="source_file" name="source_file" type="file" accept="text/csv,.csv">
+            <button type="submit">Upload CSV</button>
+          </form>
+          {source_markup}
+        </section>
+    """
+
+
+def render_time_series_source_detail(scenario: dict, document: dict, source: dict) -> str:
+    columns = source.get("columns") if isinstance(source.get("columns"), list) else []
+    source_id = html_value(source.get("id") or "")
+    mapping = source.get("mapping") if isinstance(source.get("mapping"), dict) else {}
+    suggestions = source.get("mapping_suggestions") if isinstance(source.get("mapping_suggestions"), dict) else {}
+    validation_markup = render_time_series_validation(source)
+    renewable_inputs = render_asset_mapping_inputs(document, source, "renewable", "renewable_available_power_mw")
+    load_inputs = render_asset_mapping_inputs(document, source, "load", "load_demand_mw")
+    return f"""
+          <div class="source-detail">
+            <h2>CSV Time-Series Source</h2>
+            <p>{escape(str(source.get("original_filename") or "source.csv"))}</p>
+            <p>Columns: {escape(", ".join(str(column) for column in columns))}</p>
+            {render_preview_rows(source)}
+            <form method="post" action="/scenarios/{scenario["id"]}/draft/time-series-sources/{source_id}/mapping">
+              <h2>Column Mapping</h2>
+              <div class="form-grid">
+                <label for="mapping_timestamp">timestamp</label>
+                <input id="mapping_timestamp" name="mapping_timestamp" value="{html_value(mapping.get("timestamp") or suggestions.get("timestamp"))}">
+                <label for="mapping_duration_hours">duration_hours</label>
+                <input id="mapping_duration_hours" name="mapping_duration_hours" value="{html_value(mapping.get("duration_hours") or suggestions.get("duration_hours"))}">
+                <label for="mapping_price_usd_per_mwh">price_usd_per_mwh</label>
+                <input id="mapping_price_usd_per_mwh" name="mapping_price_usd_per_mwh" value="{html_value(mapping.get("price_usd_per_mwh") or suggestions.get("price_usd_per_mwh"))}">
+                <label for="mapping_import_price_usd_per_mwh">import_price_usd_per_mwh</label>
+                <input id="mapping_import_price_usd_per_mwh" name="mapping_import_price_usd_per_mwh" value="{html_value(mapping.get("import_price_usd_per_mwh") or suggestions.get("import_price_usd_per_mwh"))}">
+                <label for="mapping_export_price_usd_per_mwh">export_price_usd_per_mwh</label>
+                <input id="mapping_export_price_usd_per_mwh" name="mapping_export_price_usd_per_mwh" value="{html_value(mapping.get("export_price_usd_per_mwh") or suggestions.get("export_price_usd_per_mwh"))}">
+                {renewable_inputs}
+                {load_inputs}
+              </div>
+              <button type="submit">Save Mapping</button>
+            </form>
+            {validation_markup}
+          </div>
+    """
+
+
+def active_time_series_source(document: dict) -> dict | None:
+    time_series = document.get("time_series") if isinstance(document.get("time_series"), dict) else {}
+    sources = time_series.get("sources") if isinstance(time_series.get("sources"), list) else []
+    active_source_id = time_series.get("active_source_id")
+    for source in sources:
+        if isinstance(source, dict) and source.get("id") == active_source_id:
+            return source
+    for source in sources:
+        if isinstance(source, dict):
+            return source
+    return None
+
+
+def render_preview_rows(source: dict) -> str:
+    rows = source.get("preview_rows") if isinstance(source.get("preview_rows"), list) else []
+    columns = source.get("columns") if isinstance(source.get("columns"), list) else []
+    if not rows or not columns:
+        return ""
+    table = {
+        "columns": columns,
+        "rows": rows,
+    }
+    return render_result_table(table)
+
+
+def render_asset_mapping_inputs(document: dict, source: dict, asset_type: str, mapping_key: str) -> str:
+    assets = document.get("assets") if isinstance(document.get("assets"), list) else []
+    mapping = source.get("mapping") if isinstance(source.get("mapping"), dict) else {}
+    suggestions = source.get("mapping_suggestions") if isinstance(source.get("mapping_suggestions"), dict) else {}
+    mapped_assets = mapping.get(mapping_key) if isinstance(mapping.get(mapping_key), dict) else {}
+    suggested_assets = suggestions.get(mapping_key) if isinstance(suggestions.get(mapping_key), dict) else {}
+    pieces: list[str] = []
+    for asset in assets:
+        if not isinstance(asset, dict) or asset.get("type") != asset_type:
+            continue
+        asset_id = str(asset.get("id") or "")
+        input_name = f"mapping_{mapping_key}__{asset_id}"
+        value = mapped_assets.get(asset_id) or suggested_assets.get(asset_id)
+        pieces.append(
+            f'<label for="{html_value(input_name)}">{escape(mapping_key)}.{escape(asset_id)}</label>'
+            f'<input id="{html_value(input_name)}" name="{html_value(input_name)}" value="{html_value(value)}">'
+        )
+    return "".join(pieces)
+
+
+def render_time_series_validation(source: dict) -> str:
+    validation = source.get("validation") if isinstance(source.get("validation"), dict) else None
+    if validation is None:
+        return ""
+    if validation.get("ok"):
+        row_count = len(source.get("validated_rows") if isinstance(source.get("validated_rows"), list) else [])
+        return (
+            '<section class="notice">'
+            "<h2>Time-Series Validation</h2>"
+            f"<p>Valid mapped rows: {row_count}</p>"
+            "</section>"
+        )
+    errors = validation.get("errors") if isinstance(validation.get("errors"), list) else []
+    items = "".join(f"<li>{escape(str(error))}</li>" for error in errors)
+    return (
+        '<section class="notice error">'
+        "<h2>Time-Series Validation</h2>"
+        f"<ul>{items}</ul>"
+        "</section>"
+    )
 
 
 def render_generated_preview(document: dict | None) -> str:

@@ -1,0 +1,271 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from app.main import create_app
+from app.validation import ValidationResult
+
+
+class CsvTimeSeriesIngestionTests(unittest.TestCase):
+    def make_client_and_scenario(self, input_source_root):
+        client = TestClient(
+            create_app(
+                validation_service=StubValidationService(),
+                database_url="sqlite:///:memory:",
+                input_source_root=input_source_root,
+            )
+        )
+        project = client.post("/api/projects", json={"name": "Hybrid PMGD"}).json()
+        scenario = client.post(
+            f"/api/projects/{project['id']}/scenarios",
+            json={"name": "Base case"},
+        ).json()
+        client.post(
+            f"/api/scenarios/{scenario['id']}/draft",
+            json={
+                "document": {
+                    "schema_version": "bess_editor_draft.v1",
+                    "case": {"name": "csv_case"},
+                    "pcc": {"id": "bus_1", "type": "bus"},
+                    "grid": {"id": "grid_1"},
+                    "assets": [
+                        {"id": "solar_1", "type": "renewable"},
+                        {"id": "load_1", "type": "load"},
+                    ],
+                    "time_series": {"sources": []},
+                    "solver": {"name": "HiGHS", "options": {}},
+                }
+            },
+        )
+        return client, scenario
+
+    def test_csv_upload_is_stored_previewed_and_mapped_for_a_draft(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, scenario = self.make_client_and_scenario(input_source_root)
+            csv_text = (
+                "timestamp,duration_hours,price_usd_per_mwh,import_price_usd_per_mwh,export_price_usd_per_mwh,"
+                "solar_1_available_mw,load_1_demand_mw\n"
+                "2026-01-01T00:00:00,1.0,50.0,55.0,42.0,3.5,2.0\n"
+                "2026-01-01T01:00:00,1.0,52.0,60.0,48.0,4.0,2.5\n"
+            )
+
+            response = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                files={"source_file": ("../source.csv", csv_text, "text/csv")},
+            )
+
+            self.assertEqual(response.status_code, 201)
+            source = response.json()["source"]
+            stored_path = Path(source["stored_path"])
+            self.assertTrue(stored_path.is_file())
+            self.assertEqual(stored_path.read_text(encoding="utf-8"), csv_text)
+            self.assertEqual(stored_path.resolve().relative_to(input_source_root.resolve()), Path(stored_path.name))
+            self.assertEqual(source["original_filename"], "source.csv")
+            self.assertEqual(
+                source["columns"],
+                [
+                    "timestamp",
+                    "duration_hours",
+                    "price_usd_per_mwh",
+                    "import_price_usd_per_mwh",
+                    "export_price_usd_per_mwh",
+                    "solar_1_available_mw",
+                    "load_1_demand_mw",
+                ],
+            )
+            self.assertEqual(len(source["preview_rows"]), 2)
+            self.assertEqual(source["preview_rows"][0]["timestamp"], "2026-01-01T00:00:00")
+            self.assertEqual(source["mapping_suggestions"]["timestamp"], "timestamp")
+            self.assertEqual(source["mapping_suggestions"]["duration_hours"], "duration_hours")
+            self.assertEqual(source["mapping_suggestions"]["price_usd_per_mwh"], "price_usd_per_mwh")
+            self.assertEqual(
+                source["mapping_suggestions"]["import_price_usd_per_mwh"],
+                "import_price_usd_per_mwh",
+            )
+            self.assertEqual(
+                source["mapping_suggestions"]["export_price_usd_per_mwh"],
+                "export_price_usd_per_mwh",
+            )
+            self.assertEqual(
+                source["mapping_suggestions"]["renewable_available_power_mw"],
+                {"solar_1": "solar_1_available_mw"},
+            )
+            self.assertEqual(
+                source["mapping_suggestions"]["load_demand_mw"],
+                {"load_1": "load_1_demand_mw"},
+            )
+
+            draft = client.get(f"/api/scenarios/{scenario['id']}/draft").json()["draft"]["document"]
+            self.assertEqual(draft["time_series"]["active_source_id"], source["id"])
+            self.assertEqual(draft["time_series"]["sources"][0]["id"], source["id"])
+
+    def test_manual_mapping_override_is_saved_and_validates_csv_rows(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, scenario = self.make_client_and_scenario(input_source_root)
+            csv_text = (
+                "period_start,hours,buy,sell,pv_available,site_demand\n"
+                "2026-01-01T00:00:00,0.5,55.0,42.0,3.5,2.0\n"
+                "2026-01-01T00:30:00,0.5,60.0,48.0,4.0,2.5\n"
+            )
+            upload = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                files={"source_file": ("source.csv", csv_text, "text/csv")},
+            ).json()["source"]
+            mapping = {
+                "timestamp": "period_start",
+                "duration_hours": "hours",
+                "import_price_usd_per_mwh": "buy",
+                "export_price_usd_per_mwh": "sell",
+                "renewable_available_power_mw": {"solar_1": "pv_available"},
+                "load_demand_mw": {"load_1": "site_demand"},
+            }
+
+            response = client.put(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/{upload['id']}/mapping",
+                json={"mapping": mapping},
+            )
+
+            self.assertEqual(response.status_code, 200)
+            source = response.json()["source"]
+            self.assertEqual(source["mapping"], mapping)
+            self.assertEqual(source["validation"], {"ok": True, "errors": []})
+            self.assertEqual(source["validated_rows"][0]["duration_hours"], 0.5)
+            self.assertEqual(source["validated_rows"][0]["renewable_available_power_mw"], {"solar_1": 3.5})
+            self.assertEqual(source["validated_rows"][1]["load_demand_mw"], {"load_1": 2.5})
+
+            draft = client.get(f"/api/scenarios/{scenario['id']}/draft").json()["draft"]["document"]
+            stored_source = draft["time_series"]["sources"][0]
+            self.assertEqual(stored_source["mapping"], mapping)
+            self.assertTrue(stored_source["validation"]["ok"])
+
+    def test_mapping_validation_reports_missing_mappings_and_bad_csv_values(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, scenario = self.make_client_and_scenario(input_source_root)
+            csv_text = (
+                "timestamp,duration_hours,import_price_usd_per_mwh,export_price_usd_per_mwh,"
+                "solar_1_available_mw,load_1_demand_mw\n"
+                "2026-01-01T01:00:00,-1.0,55.0,42.0,-3.5,-2.0\n"
+                "2026-01-01T00:00:00,abc,bad,48.0,4.0,not-a-number\n"
+                "2026-01-01T00:00:00,1.0,60.0,50.0,5.0,2.5\n"
+            )
+            upload = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                files={"source_file": ("source.csv", csv_text, "text/csv")},
+            ).json()["source"]
+
+            missing_response = client.put(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/{upload['id']}/mapping",
+                json={
+                    "mapping": {
+                        "timestamp": "timestamp",
+                        "import_price_usd_per_mwh": "import_price_usd_per_mwh",
+                    }
+                },
+            )
+            self.assertEqual(missing_response.status_code, 200)
+            missing_errors = missing_response.json()["source"]["validation"]["errors"]
+            self.assertIn("duration_hours mapping is required", missing_errors)
+            self.assertIn(
+                "price mapping requires price_usd_per_mwh or both import_price_usd_per_mwh and export_price_usd_per_mwh",
+                missing_errors,
+            )
+            self.assertIn("renewable_available_power_mw mapping is required for solar_1", missing_errors)
+            self.assertIn("load_demand_mw mapping is required for load_1", missing_errors)
+
+            bad_values_response = client.put(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/{upload['id']}/mapping",
+                json={
+                    "mapping": {
+                        "timestamp": "timestamp",
+                        "duration_hours": "duration_hours",
+                        "import_price_usd_per_mwh": "import_price_usd_per_mwh",
+                        "export_price_usd_per_mwh": "export_price_usd_per_mwh",
+                        "renewable_available_power_mw": {"solar_1": "solar_1_available_mw"},
+                        "load_demand_mw": {"load_1": "load_1_demand_mw"},
+                    }
+                },
+            )
+
+            self.assertEqual(bad_values_response.status_code, 200)
+            validation = bad_values_response.json()["source"]["validation"]
+            self.assertFalse(validation["ok"])
+            errors = validation["errors"]
+            self.assertIn("row 2: duration_hours must be positive", errors)
+            self.assertIn("row 2: renewable solar_1 availability must be nonnegative", errors)
+            self.assertIn("row 2: load load_1 demand must be nonnegative", errors)
+            self.assertIn("row 3: timestamps must be sorted ascending", errors)
+            self.assertIn("row 3: duration_hours must be numeric", errors)
+            self.assertIn("row 3: import_price_usd_per_mwh must be numeric", errors)
+            self.assertIn("row 3: load load_1 must be numeric", errors)
+            self.assertIn("row 4: duplicate timestamp 2026-01-01T00:00:00", errors)
+            self.assertEqual(bad_values_response.json()["source"]["validated_rows"], [])
+
+    def test_draft_page_uploads_previews_maps_and_validates_csv_source(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, scenario = self.make_client_and_scenario(input_source_root)
+
+            draft_page = client.get(f"/scenarios/{scenario['id']}/draft")
+            self.assertEqual(draft_page.status_code, 200)
+            self.assertIn('name="source_file"', draft_page.text)
+            self.assertIn(f'action="/scenarios/{scenario["id"]}/draft/time-series-sources/upload"', draft_page.text)
+
+            csv_text = (
+                "period_start,hours,buy,sell,pv_available,site_demand\n"
+                "2026-01-01T00:00:00,1.0,55.0,42.0,3.5,2.0\n"
+            )
+            upload_response = client.post(
+                f"/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                files={"source_file": ("source.csv", csv_text, "text/csv")},
+                follow_redirects=False,
+            )
+            self.assertEqual(upload_response.status_code, 303)
+            self.assertEqual(upload_response.headers["location"], f"/scenarios/{scenario['id']}/draft")
+
+            uploaded_page = client.get(f"/scenarios/{scenario['id']}/draft")
+            self.assertEqual(uploaded_page.status_code, 200)
+            self.assertIn("CSV Time-Series Source", uploaded_page.text)
+            self.assertIn("period_start", uploaded_page.text)
+            self.assertIn("pv_available", uploaded_page.text)
+            self.assertIn('name="mapping_timestamp"', uploaded_page.text)
+            self.assertIn('name="mapping_renewable_available_power_mw__solar_1"', uploaded_page.text)
+
+            source_id = client.get(f"/api/scenarios/{scenario['id']}/draft").json()["draft"]["document"][
+                "time_series"
+            ]["active_source_id"]
+            mapping_response = client.post(
+                f"/scenarios/{scenario['id']}/draft/time-series-sources/{source_id}/mapping",
+                data={
+                    "mapping_timestamp": "period_start",
+                    "mapping_duration_hours": "hours",
+                    "mapping_import_price_usd_per_mwh": "buy",
+                    "mapping_export_price_usd_per_mwh": "sell",
+                    "mapping_renewable_available_power_mw__solar_1": "pv_available",
+                    "mapping_load_demand_mw__load_1": "site_demand",
+                },
+                follow_redirects=False,
+            )
+            self.assertEqual(mapping_response.status_code, 303)
+
+            validated_page = client.get(f"/scenarios/{scenario['id']}/draft")
+            self.assertIn("Time-Series Validation", validated_page.text)
+            self.assertIn("Valid mapped rows: 1", validated_page.text)
+
+
+class StubValidationService:
+    def validate_text(self, candidate_text):
+        return ValidationResult(
+            ok=True,
+            phase="julia",
+            message="Validation succeeded",
+            payload={"status": "ok"},
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -24,7 +24,7 @@ triage label.
 | BESS-ITER4-001 | Run A Separate Import Export Price Case End To End | AFK | ready-for-agent | Done | BESS-ITER4-000 | [BESS-ITER4-001-run-a-separate-import-export-price-case-end-to-end.md](BESS-ITER4-001-run-a-separate-import-export-price-case-end-to-end.md) |
 | BESS-ITER4-002 | Create And Edit One Active Scenario Draft | AFK | ready-for-agent | Done | BESS-ITER4-000 | [BESS-ITER4-002-create-and-edit-one-active-scenario-draft.md](BESS-ITER4-002-create-and-edit-one-active-scenario-draft.md) |
 | BESS-ITER4-003 | Define One-Bus Assets In The Draft Editor | AFK | ready-for-agent | Done | BESS-ITER4-002 | [BESS-ITER4-003-define-one-bus-assets-in-the-draft-editor.md](BESS-ITER4-003-define-one-bus-assets-in-the-draft-editor.md) |
-| BESS-ITER4-004 | Upload And Preview A CSV Time-Series Source | AFK | ready-for-agent | Todo | BESS-ITER4-002 | [BESS-ITER4-004-upload-and-preview-a-csv-time-series-source.md](BESS-ITER4-004-upload-and-preview-a-csv-time-series-source.md) |
+| BESS-ITER4-004 | Upload And Preview A CSV Time-Series Source | AFK | ready-for-agent | Done | BESS-ITER4-002 | [BESS-ITER4-004-upload-and-preview-a-csv-time-series-source.md](BESS-ITER4-004-upload-and-preview-a-csv-time-series-source.md) |
 | BESS-ITER4-005 | Generate And Validate A System Case From Draft Plus CSV | AFK | ready-for-agent | Todo | BESS-ITER4-001, BESS-ITER4-003, BESS-ITER4-004 | [BESS-ITER4-005-generate-and-validate-a-system-case-from-draft-plus-csv.md](BESS-ITER4-005-generate-and-validate-a-system-case-from-draft-plus-csv.md) |
 | BESS-ITER4-006 | Promote A Validated Draft And Run It Manually | AFK | ready-for-agent | Todo | BESS-ITER4-005 | [BESS-ITER4-006-promote-a-validated-draft-and-run-it-manually.md](BESS-ITER4-006-promote-a-validated-draft-and-run-it-manually.md) |
 | BESS-ITER4-007 | Add Basic XLSX Time-Series Ingestion | AFK | ready-for-agent | Todo | BESS-ITER4-004, BESS-ITER4-005 | [BESS-ITER4-007-add-basic-xlsx-time-series-ingestion.md](BESS-ITER4-007-add-basic-xlsx-time-series-ingestion.md) |
@@ -57,6 +57,8 @@ triage label.
 | 2026-05-30 | BESS-ITER4-002 | In Progress -> Done | Added `scenario_drafts` persistence, API read/create/update endpoints, initialization from immutable scenario versions, and a basic SSR draft view/save flow. Verified 44 Python tests and Chrome DevTools page inspection. |
 | 2026-05-31 | BESS-ITER4-003 | Todo -> In Progress | Started structured one-bus asset editing with TDD, using the generated system-case preview endpoint as the first API tracer bullet. |
 | 2026-05-31 | BESS-ITER4-003 | In Progress -> Done | Added structured draft editor generation for PCC, grid, battery, renewable, load, and solver settings; added SSR form editing, duplicate ID and solver-options errors, source-version asset prefill, and Chrome DevTools UI verification. Verified 48 Python tests and 372 Julia tests. |
+| 2026-06-01 | BESS-ITER4-004 | Todo -> In Progress | Started CSV time-series source ingestion using TDD, with API upload, safe source-file storage, preview, and mapping suggestions as the first tracer bullet. |
+| 2026-06-01 | BESS-ITER4-004 | In Progress -> Done | Added CSV source storage under configured input-source root, preview rows and columns, mapping suggestions, manual mapping save, mapped-row validation, SSR upload/mapping UI, and draft-stored ingestion metadata. Verified 52 Python tests, 372 Julia tests, and Chrome DevTools MCP page inspection. |
 
 ## Regression Guard
 
