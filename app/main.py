@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import os
 from contextlib import asynccontextmanager
@@ -323,6 +324,47 @@ def create_app(
             )
         return RedirectResponse(f"/scenarios/{scenario_id}/draft", status_code=303)
 
+    @app.post("/scenarios/{scenario_id}/draft/generated-system-case/validate")
+    async def validate_generated_system_case_from_page(scenario_id: int):
+        try:
+            scenario = analyst_store.get_scenario(scenario_id)
+            draft = analyst_store.get_scenario_draft(scenario_id)
+            system_case = generate_system_case_from_draft(draft["document"])
+            result = service.validate_text(json.dumps(system_case, sort_keys=True))
+            updated_document = draft_document_with_generated_validation(
+                draft["document"],
+                system_case,
+                result,
+            )
+            draft = analyst_store.update_scenario_draft(
+                scenario_id=scenario_id,
+                document=updated_document,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except DraftGenerationError as error:
+            try:
+                scenario = analyst_store.get_scenario(scenario_id)
+                draft = analyst_store.get_scenario_draft(scenario_id)
+            except KeyError as not_found:
+                raise HTTPException(status_code=404, detail=str(not_found)) from not_found
+            return HTMLResponse(
+                render_scenario_draft_page(
+                    scenario,
+                    draft,
+                    draft["document"],
+                    error_message=str(error),
+                )
+            )
+        return HTMLResponse(
+            render_scenario_draft_page(
+                scenario,
+                draft,
+                draft["document"],
+                generated_validation_result=result,
+            )
+        )
+
     @app.get("/scenarios/{scenario_id}", response_class=HTMLResponse)
     async def scenario_page(scenario_id: int, from_version_id: int | None = None):
         try:
@@ -506,6 +548,33 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(error)) from error
         return {"system_case": system_case}
 
+    @app.post("/api/scenarios/{scenario_id}/draft/generated-system-case/validate")
+    async def validate_generated_system_case(scenario_id: int):
+        try:
+            draft = analyst_store.get_scenario_draft(scenario_id)
+            system_case = generate_system_case_from_draft(draft["document"])
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except DraftGenerationError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+        result = service.validate_text(json.dumps(system_case, sort_keys=True))
+        updated_document = draft_document_with_generated_validation(
+            draft["document"],
+            system_case,
+            result,
+        )
+        analyst_store.update_scenario_draft(
+            scenario_id=scenario_id,
+            document=updated_document,
+        )
+        body = validation_response_body(result)
+        body["system_case"] = system_case
+        body["generated_system_case"] = generated_system_case_snapshot(system_case, result)
+        if result.ok:
+            return body
+        return JSONResponse(body, status_code=400)
+
     @app.post("/api/scenarios/{scenario_id}/draft/time-series-sources/upload", status_code=201)
     async def upload_draft_time_series_source(scenario_id: int, source_file: UploadFile = File(...)):
         try:
@@ -687,6 +756,7 @@ def validation_response_body(result: ValidationResult) -> dict:
     if result.ok:
         return {
             "status": "ok",
+            "phase": result.phase,
             "message": result.message,
             "validation": result.payload,
         }
@@ -696,6 +766,28 @@ def validation_response_body(result: ValidationResult) -> dict:
         "phase": result.phase,
         "message": result.message,
         "validation": result.payload,
+    }
+
+
+def draft_document_with_generated_validation(
+    document: dict[str, Any],
+    system_case: dict[str, Any],
+    result: ValidationResult,
+) -> dict[str, Any]:
+    updated = copy.deepcopy(document)
+    updated["generated_system_case"] = generated_system_case_snapshot(system_case, result)
+    return updated
+
+
+def generated_system_case_snapshot(system_case: dict[str, Any], result: ValidationResult) -> dict[str, Any]:
+    return {
+        "system_case": copy.deepcopy(system_case),
+        "validation": {
+            "ok": result.ok,
+            "phase": result.phase,
+            "message": result.message,
+            "payload": copy.deepcopy(result.payload),
+        },
     }
 
 
@@ -1053,6 +1145,7 @@ def render_scenario_draft_page(
     *,
     source_version_id: int | None = None,
     error_message: str = "",
+    generated_validation_result: ValidationResult | None = None,
 ) -> str:
     if isinstance(draft_document, str):
         draft_text = draft_document
@@ -1082,6 +1175,11 @@ def render_scenario_draft_page(
     structured_form = render_structured_draft_form(scenario, document_for_sections)
     time_series_section = render_time_series_source_section(scenario, document_for_sections)
     preview_markup = render_generated_preview(draft_document if isinstance(draft_document, dict) else None)
+    generated_validation_markup = render_generated_validation_section(
+        scenario,
+        draft_document if isinstance(draft_document, dict) else None,
+        generated_validation_result,
+    )
 
     return render_app_page(
         "Structured Draft",
@@ -1095,6 +1193,7 @@ def render_scenario_draft_page(
         {structured_form}
         {time_series_section}
         {preview_markup}
+        {generated_validation_markup}
         <form method="post" action="/scenarios/{scenario["id"]}/draft">
           <h2>Draft Document</h2>
           <label for="structured_draft_json">structured_draft_json</label>
@@ -1331,6 +1430,38 @@ def render_generated_preview(document: dict | None) -> str:
         "<h2>Generated System Case Preview</h2>"
         f'<textarea id="generated_system_case_preview" readonly spellcheck="false">{escape(preview_text)}</textarea>'
         "</section>"
+    )
+
+
+def render_generated_validation_section(
+    scenario: dict,
+    document: dict | None,
+    result: ValidationResult | None = None,
+) -> str:
+    if document is None:
+        return ""
+    try:
+        generate_system_case_from_draft(document)
+    except DraftGenerationError:
+        return ""
+
+    result_markup = ""
+    if result is not None:
+        status = "Valid" if result.ok else "Invalid"
+        css_class = "notice" if result.ok else "notice error"
+        result_markup = (
+            f'<section class="{css_class}">'
+            "<h2>Generated System Case Validation</h2>"
+            f"<p>{status}: {escape(result.message)}</p>"
+            "</section>"
+        )
+    return (
+        f'<form method="post" action="/scenarios/{scenario["id"]}/draft/generated-system-case/validate" '
+        'class="inline-form">'
+        "<h2>Generated System Case Validation</h2>"
+        '<button type="submit">Validate Generated System Case</button>'
+        "</form>"
+        f"{result_markup}"
     )
 
 

@@ -235,10 +235,72 @@ def _periods(document: dict[str, Any]) -> list[dict[str, Any]]:
         periods = []
     if not isinstance(periods, list):
         raise DraftGenerationError("time_series.periods must be an array")
-    for index, period in enumerate(periods):
-        if not isinstance(period, dict):
-            raise DraftGenerationError(f"time_series.periods[{index}] must be an object")
-    return periods
+    if periods:
+        for index, period in enumerate(periods):
+            if not isinstance(period, dict):
+                raise DraftGenerationError(f"time_series.periods[{index}] must be an object")
+        return periods
+
+    source = _active_time_series_source(time_series)
+    if source is None:
+        return []
+
+    validation = source.get("validation")
+    if not isinstance(validation, dict) or not validation.get("ok"):
+        errors = (
+            validation.get("errors")
+            if isinstance(validation, dict) and isinstance(validation.get("errors"), list)
+            else []
+        )
+        message = (
+            "; ".join(str(error) for error in errors)
+            or "time-series source must be mapped and validated before generation"
+        )
+        raise DraftGenerationError(f"Python time-series validation failed: {message}")
+
+    validated_rows = source.get("validated_rows")
+    if not isinstance(validated_rows, list) or not validated_rows:
+        raise DraftGenerationError("time-series source has no validated rows")
+
+    return [_period_from_validated_row(row, index) for index, row in enumerate(validated_rows)]
+
+
+def _active_time_series_source(time_series: dict[str, Any]) -> dict[str, Any] | None:
+    sources = time_series.get("sources")
+    if not isinstance(sources, list):
+        return None
+    active_source_id = time_series.get("active_source_id")
+    for source in sources:
+        if isinstance(source, dict) and source.get("id") == active_source_id:
+            return source
+    for source in sources:
+        if isinstance(source, dict):
+            return source
+    return None
+
+
+def _period_from_validated_row(row: Any, index: int) -> dict[str, Any]:
+    if not isinstance(row, dict):
+        raise DraftGenerationError(f"time-series validated row {index} must be an object")
+    period = {
+        "timestamp": row.get("timestamp"),
+        "duration_hours": row.get("duration_hours"),
+    }
+    if row.get("price_usd_per_mwh") is not None:
+        period["price_usd_per_mwh"] = row.get("price_usd_per_mwh")
+    else:
+        period["import_price_usd_per_mwh"] = row.get("import_price_usd_per_mwh")
+        period["export_price_usd_per_mwh"] = row.get("export_price_usd_per_mwh")
+    period["renewable_available_power_mw"] = _validated_series_map(row, "renewable_available_power_mw", index)
+    period["load_demand_mw"] = _validated_series_map(row, "load_demand_mw", index)
+    return period
+
+
+def _validated_series_map(row: dict[str, Any], key: str, index: int) -> dict[str, Any]:
+    value = row.get(key, {})
+    if not isinstance(value, dict):
+        raise DraftGenerationError(f"time-series validated row {index}.{key} must be an object")
+    return dict(value)
 
 
 def _asset_list(raw_assets: Any) -> list[dict[str, Any]]:
