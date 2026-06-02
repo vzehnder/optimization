@@ -218,3 +218,149 @@ The Iteration 3 acceptance test covers project creation, scenario creation,
 validated scenario version creation, manual run launch, successful completion,
 artifact registration, summary/table review, chart payloads, artifact
 downloads, malformed JSON rejection, and failed-run logs/errors.
+
+## Use The Structured Draft Editor
+
+Iteration 4 adds a structured editor path beside the paste/upload
+`system_case_json` path. Create a project, create a scenario, then open
+`/scenarios/{scenario_id}/draft` or use the `Open Draft` link on the scenario
+page.
+
+The draft is mutable and may be incomplete. Saving the draft does not create an
+executable version. Execution still starts only from an immutable
+`ScenarioVersion`.
+
+The draft page supports:
+
+- Structured case, PCC, grid, battery, renewable, load, and solver form fields.
+- A raw `structured_draft_json` textarea for advanced edits.
+- CSV/XLSX source upload, preview, mapping, and mapped-row validation.
+- Read-only generated `system_case` preview.
+- Julia-backed generated-case validation.
+- Promotion of a current valid generated case to a new immutable scenario
+  version.
+
+### Supported Assets And One-Bus Assumptions
+
+Generated cases remain `bess_system_dispatch.v1` one-bus cases. The editor
+creates exactly one PCC or bus and automatically connects every modeled asset to
+that PCC with logical edges. These edges express connectivity for the one-bus
+optimizer; they are not physical lines and do not carry losses, impedance,
+direction, or network-flow constraints.
+
+Supported structured assets in Iteration 4:
+
+- `grid`: import/export limits and import/export anti-simultaneity.
+- `battery`: charge/discharge power, energy bounds, initial energy,
+  efficiencies, degradation cost, terminal condition, and charge/discharge
+  anti-simultaneity.
+- `renewable`: solar or wind display metadata, exogenous availability, and
+  optional curtailment penalty.
+- `load`: fixed demand by period.
+
+Hydropower, multiple physical buses, manual edge editing, scheduling, auth,
+customer portals, and configurable dashboards remain out of scope for this
+iteration.
+
+### CSV And XLSX Source Files
+
+Upload time-series data from the draft page. The app stores the original file
+under `INPUT_SOURCE_ROOT` and keeps only safe source identifiers in exposed
+editor-promoted metadata.
+
+Local startup can set the source-file root explicitly:
+
+```powershell
+$env:INPUT_SOURCE_ROOT = ".tmp/input-sources"
+```
+
+CSV files must be UTF-8 with a single header row. XLSX files use a selected
+sheet when provided or the first sheet by default. Basic XLSX workbooks are
+supported; formulas, merged cells, Excel tables, missing sheets, empty headers,
+duplicate headers, named ranges, unit conversion, and advanced ETL are rejected
+or out of scope.
+
+### Column Mapping Rules And Units
+
+Source columns can be auto-suggested and manually corrected before generation.
+Expected units match the optimizer contract:
+
+- `timestamp`: period start timestamp, unique and sorted ascending.
+- `duration_hours`: positive duration in hours.
+- `price_usd_per_mwh`: legacy single energy price in USD/MWh.
+- `import_price_usd_per_mwh`: import/buy price in USD/MWh.
+- `export_price_usd_per_mwh`: export/sell price in USD/MWh.
+- `renewable_available_power_mw`: nonnegative MW by renewable asset ID.
+- `load_demand_mw`: nonnegative MW by load asset ID.
+
+Each source must map `timestamp`, `duration_hours`, a complete price mode, every
+renewable availability series, and every load demand series. Use either
+`price_usd_per_mwh` or both `import_price_usd_per_mwh` and
+`export_price_usd_per_mwh`; mapping only one separate price is invalid. Numeric
+columns must contain numeric values for every mapped row.
+
+### Legacy Single Price And Separate Import/Export Prices
+
+Legacy cases use one `price_usd_per_mwh` value per period for both grid import
+cost and grid export revenue. Those cases remain valid and keep the legacy
+price column in `dispatch.csv` and `asset_dispatch.csv`.
+
+Structured editor cases can map separate buy/sell prices. Generated periods use
+`import_price_usd_per_mwh` and `export_price_usd_per_mwh`; Julia uses import
+price for grid import cost and export price for grid export revenue. Separate
+price outputs include:
+
+- `import_price_usd_per_mwh`
+- `export_price_usd_per_mwh`
+- `import_cost_usd`
+- `export_revenue_usd`
+- `net_market_value_usd`
+
+Result tables show those columns and the price chart prefers import/export
+price series. Legacy runs fall back to a single price series.
+
+### Draft Validation, Preview, And Promotion
+
+The generated preview is read-only because the structured draft remains the
+editor source. The validation sequence is:
+
+```text
+structured draft + mapped source rows
+-> Python editor and ingestion validation
+-> generated system_case preview
+-> Julia contract validation
+-> promote to immutable ScenarioVersion
+-> launch manual run
+-> result tables, charts, and downloads
+```
+
+Error phases are separated for supportability: source-file parsing, mapping,
+Python data validation, Julia validation, and run execution failures. Promoted
+versions retain safe generation metadata with source filename, media type,
+stored source identifier, accepted mapping, and generation timestamp.
+
+### Iteration 4 Acceptance Verification
+
+Run the final Iteration 4 Python acceptance test:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_iter4_acceptance -v
+```
+
+Run the full Python web acceptance suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Run the Julia optimizer regression suite:
+
+```powershell
+julia --project=. -e "import Pkg; Pkg.test()"
+```
+
+The Iteration 4 acceptance test proves CSV and XLSX structured draft flows from
+draft creation through source mapping, generated preview, Julia-backed
+validation, promotion, manual run, artifact registration, result tables, price
+charts, and downloads. It also proves the Iteration 3 paste/upload JSON path and
+legacy single-price result behavior remain intact.

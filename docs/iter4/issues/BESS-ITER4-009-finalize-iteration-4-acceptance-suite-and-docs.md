@@ -1,6 +1,6 @@
 # BESS-ITER4-009: Finalize Iteration 4 Acceptance Suite And Docs
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/iter4/prd_structured_editor_flow.md`
@@ -20,25 +20,59 @@ This is the closing proof issue, not the first implementation of core behavior.
 
 ## Acceptance criteria
 
-- [ ] Documentation explains how to use the structured draft editor.
-- [ ] Documentation explains supported asset types and one-bus assumptions.
-- [ ] Documentation explains CSV and XLSX source-file requirements.
-- [ ] Documentation explains column mapping rules and expected units.
-- [ ] Documentation explains legacy single price versus separate import/export
+- [x] Documentation explains how to use the structured draft editor.
+- [x] Documentation explains supported asset types and one-bus assumptions.
+- [x] Documentation explains CSV and XLSX source-file requirements.
+- [x] Documentation explains column mapping rules and expected units.
+- [x] Documentation explains legacy single price versus separate import/export
       prices.
-- [ ] Documentation explains draft validation, generated preview, and promotion
+- [x] Documentation explains draft validation, generated preview, and promotion
       to immutable scenario version.
-- [ ] Final acceptance coverage proves the CSV flow end to end from draft to
+- [x] Final acceptance coverage proves the CSV flow end to end from draft to
       run results.
-- [ ] Final acceptance coverage proves the XLSX flow end to end from draft to
+- [x] Final acceptance coverage proves the XLSX flow end to end from draft to
       run results.
-- [ ] Final acceptance coverage proves paste/upload JSON still works.
-- [ ] Final acceptance coverage proves legacy single-price cases still work.
-- [ ] Final acceptance coverage proves separate-price economics appear in
+- [x] Final acceptance coverage proves paste/upload JSON still works.
+- [x] Final acceptance coverage proves legacy single-price cases still work.
+- [x] Final acceptance coverage proves separate-price economics appear in
       outputs, result tables, and charts.
-- [ ] Full Python tests pass.
-- [ ] Full Julia regression tests pass.
-- [ ] The Iteration 4 tracker includes final verification instructions.
+- [x] Full Python tests pass.
+- [x] Full Julia regression tests pass.
+- [x] The Iteration 4 tracker includes final verification instructions.
+
+## Implementation notes
+
+- Added `tests/test_iter4_acceptance.py` as the final Iteration 4 acceptance
+  suite. It exercises CSV and XLSX structured draft flows through draft
+  creation, source upload, mapping, generated-case preview, Julia-backed
+  validation, promotion to immutable scenario version, manual run launch,
+  artifact registration, result tables, separate-price charts, and artifact
+  downloads.
+- The final acceptance suite also proves the Iteration 3 paste JSON path, JSON
+  upload path, and legacy single-price result chart fallback still work.
+- Extended `README.md` with structured draft editor usage, supported one-bus
+  assets, CSV/XLSX source requirements, mapping units, legacy versus separate
+  price behavior, validation/promotion workflow, error phases, provenance
+  metadata, and final Iteration 4 verification commands.
+- Updated the Iteration 4 tracker so the closing issue is marked done and the
+  final verification checklist stays visible for future regression work.
+
+## Verification
+
+Passed:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_iter4_acceptance -v
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+julia --project=. -e "import Pkg; Pkg.test()"
+```
+
+Chrome DevTools MCP loaded the local structured draft page, confirmed the
+rendered editor fields and read-only generated preview, saw HTTP 200 for the
+document request, found no console messages, and saved a screenshot under
+`.tmp`. The in-app Browser workflow was attempted twice but the local
+`node_repl` browser-control runtime failed with `windows sandbox failed: spawn
+setup refresh`.
 
 ## Blocked by
 
