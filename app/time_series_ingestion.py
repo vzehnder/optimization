@@ -6,13 +6,50 @@ import io
 import math
 import re
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+
+from openpyxl import load_workbook
+from openpyxl.utils.exceptions import InvalidFileException
 
 
 class TimeSeriesIngestionError(ValueError):
     pass
+
+
+XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def ingest_time_series_source(
+    *,
+    draft_document: dict[str, Any],
+    original_filename: str,
+    content_type: str | None,
+    content: bytes,
+    input_source_root: Path,
+    preview_limit: int = 5,
+    sheet_name: str | None = None,
+) -> dict[str, Any]:
+    safe_filename = safe_source_filename(original_filename)
+    if is_xlsx_source(safe_filename, content_type):
+        return ingest_xlsx_source(
+            draft_document=draft_document,
+            original_filename=safe_filename,
+            content_type=content_type,
+            content=content,
+            input_source_root=input_source_root,
+            preview_limit=preview_limit,
+            sheet_name=sheet_name,
+        )
+    return ingest_csv_source(
+        draft_document=draft_document,
+        original_filename=safe_filename,
+        content_type=content_type,
+        content=content,
+        input_source_root=input_source_root,
+        preview_limit=preview_limit,
+    )
 
 
 def ingest_csv_source(
@@ -40,6 +77,43 @@ def ingest_csv_source(
         "original_filename": safe_filename,
         "media_type": content_type or "text/csv",
         "stored_path": str(stored_path),
+        "columns": columns,
+        "preview_rows": rows,
+        "mapping_suggestions": mapping_suggestions,
+        "mapping": copy.deepcopy(mapping_suggestions),
+    }
+
+
+def ingest_xlsx_source(
+    *,
+    draft_document: dict[str, Any],
+    original_filename: str,
+    content_type: str | None,
+    content: bytes,
+    input_source_root: Path,
+    preview_limit: int = 5,
+    sheet_name: str | None = None,
+) -> dict[str, Any]:
+    safe_filename = safe_source_filename(original_filename)
+    source_id = f"xlsx_{uuid.uuid4().hex[:12]}"
+    stored_path = input_source_root / f"{source_id}_{safe_filename}"
+    stored_path.parent.mkdir(parents=True, exist_ok=True)
+    stored_path.write_bytes(content)
+
+    selected_sheet, columns, rows = parse_xlsx_preview(
+        content,
+        preview_limit=preview_limit,
+        sheet_name=sheet_name,
+    )
+    mapping_suggestions = suggest_mappings(columns, draft_document)
+
+    return {
+        "id": source_id,
+        "kind": "xlsx",
+        "original_filename": safe_filename,
+        "media_type": content_type or XLSX_MEDIA_TYPE,
+        "stored_path": str(stored_path),
+        "selected_sheet": selected_sheet,
         "columns": columns,
         "preview_rows": rows,
         "mapping_suggestions": mapping_suggestions,
@@ -75,8 +149,14 @@ def apply_time_series_mapping(
     updated = copy.deepcopy(document)
     source = find_source(updated, source_id)
     stored_path = safe_stored_source_path(source, input_source_root)
-    text = decode_csv_content(stored_path.read_bytes())
-    columns, rows = parse_csv_rows(text)
+    if source.get("kind") == "xlsx":
+        _, columns, rows = parse_xlsx_rows(
+            stored_path.read_bytes(),
+            sheet_name=source.get("selected_sheet"),
+        )
+    else:
+        text = decode_csv_content(stored_path.read_bytes())
+        columns, rows = parse_csv_rows(text)
     validation, validated_rows = validate_mapping(
         columns=columns,
         rows=rows,
@@ -112,6 +192,10 @@ def safe_stored_source_path(source: dict[str, Any], input_source_root: Path) -> 
     return path
 
 
+def is_xlsx_source(filename: str, content_type: str | None) -> bool:
+    return filename.lower().endswith(".xlsx") or (content_type or "").lower() == XLSX_MEDIA_TYPE
+
+
 def safe_source_filename(filename: str) -> str:
     basename = Path(filename or "source.csv").name.strip()
     if not basename:
@@ -142,6 +226,77 @@ def parse_csv_rows(text: str) -> tuple[list[str], list[dict[str, str]]]:
     for row in reader:
         rows.append({column: str(row.get(column) or "") for column in columns})
     return columns, rows
+
+
+def parse_xlsx_preview(
+    content: bytes,
+    *,
+    preview_limit: int,
+    sheet_name: str | None = None,
+) -> tuple[str, list[str], list[dict[str, str]]]:
+    selected_sheet, columns, rows = parse_xlsx_rows(content, sheet_name=sheet_name)
+    return selected_sheet, columns, rows[:preview_limit]
+
+
+def parse_xlsx_rows(content: bytes, *, sheet_name: str | None = None) -> tuple[str, list[str], list[dict[str, str]]]:
+    try:
+        workbook = load_workbook(io.BytesIO(content), read_only=False, data_only=False)
+    except (InvalidFileException, OSError, KeyError, ValueError) as error:
+        raise TimeSeriesIngestionError("XLSX source file could not be read") from error
+
+    if not workbook.sheetnames:
+        raise TimeSeriesIngestionError("XLSX source file must include at least one sheet")
+    requested_sheet = str(sheet_name or "").strip()
+    selected_sheet = requested_sheet or workbook.sheetnames[0]
+    if selected_sheet not in workbook.sheetnames:
+        raise TimeSeriesIngestionError(f"XLSX sheet {selected_sheet!r} was not found")
+
+    sheet = workbook[selected_sheet]
+    if sheet.merged_cells.ranges:
+        raise TimeSeriesIngestionError("XLSX source file uses merged cells, which are not supported")
+    if sheet.tables:
+        raise TimeSeriesIngestionError("XLSX source file uses Excel tables, which are not supported")
+
+    parsed_rows: list[list[str]] = []
+    for row in sheet.iter_rows():
+        values = [xlsx_cell_to_text(cell) for cell in row]
+        parsed_rows.append(values)
+
+    while parsed_rows and all(value == "" for value in parsed_rows[-1]):
+        parsed_rows.pop()
+    if not parsed_rows:
+        raise TimeSeriesIngestionError("XLSX source file must include a header row")
+
+    header = parsed_rows[0]
+    while header and header[-1] == "":
+        header.pop()
+    columns = [str(value).strip() for value in header]
+    if not columns or any(column == "" for column in columns):
+        raise TimeSeriesIngestionError("XLSX source file must include nonempty column headers")
+    if len(set(columns)) != len(columns):
+        raise TimeSeriesIngestionError("XLSX source file contains duplicate column headers")
+
+    rows: list[dict[str, str]] = []
+    for raw_row in parsed_rows[1:]:
+        values = raw_row[: len(columns)]
+        values.extend([""] * (len(columns) - len(values)))
+        rows.append({column: values[index] for index, column in enumerate(columns)})
+    return selected_sheet, columns, rows
+
+
+def xlsx_cell_to_text(cell) -> str:
+    if cell.data_type == "f":
+        raise TimeSeriesIngestionError("XLSX source file contains formulas, which are not supported")
+    value = cell.value
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
 
 
 def validate_mapping(

@@ -2,9 +2,11 @@ import json
 import subprocess
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from openpyxl import Workbook
 
 from app.main import create_app
 from app.persistence import AnalystStore
@@ -209,6 +211,31 @@ class DraftGeneratedSystemCaseTests(unittest.TestCase):
                     "payload": {"status": "ok", "case_name": "csv_generated_case"},
                 },
             )
+
+    def test_api_generates_and_validates_system_case_from_xlsx_mapping(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            validation_service = RecordingValidationService()
+            client, scenario = make_client_and_scenario(Path(temp_dir), validation_service)
+            upload_mapped_xlsx(client, scenario["id"])
+
+            preview_response = client.get(
+                f"/api/scenarios/{scenario['id']}/draft/generated-system-case",
+            )
+
+            self.assertEqual(preview_response.status_code, 200)
+            system_case = preview_response.json()["system_case"]
+            self.assertEqual(system_case["case_name"], "csv_generated_case")
+            self.assertEqual(len(system_case["time_series"]), 2)
+            self.assertEqual(system_case["time_series"][0]["import_price_usd_per_mwh"], 55.0)
+            self.assertEqual(system_case["time_series"][0]["renewable_available_power_mw"], {"solar_1": 3.5})
+
+            validation_response = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/generated-system-case/validate",
+            )
+
+            self.assertEqual(validation_response.status_code, 200)
+            self.assertEqual(validation_response.json()["status"], "ok")
+            self.assertEqual(json.loads(validation_service.candidate_text), system_case)
 
     def test_python_mapping_errors_stop_generated_case_validation_before_julia(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -515,6 +542,40 @@ def upload_mapped_csv(client: TestClient, scenario_id: int) -> None:
         raise AssertionError(mapping_response.text)
 
 
+def upload_mapped_xlsx(client: TestClient, scenario_id: int) -> None:
+    upload = client.post(
+        f"/api/scenarios/{scenario_id}/draft/time-series-sources/upload",
+        files={
+            "source_file": (
+                "source.xlsx",
+                make_xlsx_bytes(
+                    [
+                        ["period_start", "hours", "buy", "sell", "pv_available", "site_demand"],
+                        ["2026-01-01T00:00:00", 0.5, 55.0, 42.0, 3.5, 2.0],
+                        ["2026-01-01T00:30:00", 0.5, 60.0, 48.0, 4.0, 2.5],
+                    ]
+                ),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    ).json()["source"]
+    mapping_response = client.put(
+        f"/api/scenarios/{scenario_id}/draft/time-series-sources/{upload['id']}/mapping",
+        json={
+            "mapping": {
+                "timestamp": "period_start",
+                "duration_hours": "hours",
+                "import_price_usd_per_mwh": "buy",
+                "export_price_usd_per_mwh": "sell",
+                "renewable_available_power_mw": {"solar_1": "pv_available"},
+                "load_demand_mw": {"load_1": "site_demand"},
+            }
+        },
+    )
+    if mapping_response.status_code != 200:
+        raise AssertionError(mapping_response.text)
+
+
 def upload_bad_mapping(client: TestClient, scenario_id: int) -> None:
     csv_text = (
         "period_start,hours,buy,sell,pv_available,site_demand\n"
@@ -536,6 +597,17 @@ def upload_bad_mapping(client: TestClient, scenario_id: int) -> None:
     )
     if mapping_response.status_code != 200:
         raise AssertionError(mapping_response.text)
+
+
+def make_xlsx_bytes(rows):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Inputs"
+    for row in rows:
+        sheet.append(row)
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
 
 
 if __name__ == "__main__":

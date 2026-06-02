@@ -8,7 +8,7 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
@@ -25,7 +25,7 @@ from app.time_series_ingestion import (
     TimeSeriesIngestionError,
     attach_time_series_source,
     apply_time_series_mapping,
-    ingest_csv_source,
+    ingest_time_series_source,
 )
 from app.validation import JuliaValidationService, ValidationResult
 
@@ -258,16 +258,21 @@ def create_app(
         return RedirectResponse(f"/scenarios/{scenario_id}/draft", status_code=303)
 
     @app.post("/scenarios/{scenario_id}/draft/time-series-sources/upload")
-    async def upload_draft_time_series_source_from_page(scenario_id: int, source_file: UploadFile = File(...)):
+    async def upload_draft_time_series_source_from_page(
+        scenario_id: int,
+        source_file: UploadFile = File(...),
+        sheet_name: str | None = Form(None),
+    ):
         try:
             draft = analyst_store.get_scenario_draft(scenario_id)
             content = await source_file.read()
-            source = ingest_csv_source(
+            source = ingest_time_series_source(
                 draft_document=draft["document"],
                 original_filename=source_file.filename or "source.csv",
                 content_type=source_file.content_type,
                 content=content,
                 input_source_root=configured_input_source_root,
+                sheet_name=sheet_name,
             )
             updated_document = attach_time_series_source(draft["document"], source)
             analyst_store.update_scenario_draft(
@@ -647,16 +652,21 @@ def create_app(
         return scenario_version
 
     @app.post("/api/scenarios/{scenario_id}/draft/time-series-sources/upload", status_code=201)
-    async def upload_draft_time_series_source(scenario_id: int, source_file: UploadFile = File(...)):
+    async def upload_draft_time_series_source(
+        scenario_id: int,
+        source_file: UploadFile = File(...),
+        sheet_name: str | None = Form(None),
+    ):
         try:
             draft = analyst_store.get_scenario_draft(scenario_id)
             content = await source_file.read()
-            source = ingest_csv_source(
+            source = ingest_time_series_source(
                 draft_document=draft["document"],
                 original_filename=source_file.filename or "source.csv",
                 content_type=source_file.content_type,
                 content=content,
                 input_source_root=configured_input_source_root,
+                sheet_name=sheet_name,
             )
             updated_document = attach_time_series_source(draft["document"], source)
             analyst_store.update_scenario_draft(
@@ -1406,8 +1416,10 @@ def render_time_series_source_section(scenario: dict, document: dict) -> str:
           <form method="post" action="/scenarios/{scenario["id"]}/draft/time-series-sources/upload" enctype="multipart/form-data">
             <h2>CSV Time-Series Source</h2>
             <label for="source_file">source_file</label>
-            <input id="source_file" name="source_file" type="file" accept="text/csv,.csv">
-            <button type="submit">Upload CSV</button>
+            <input id="source_file" name="source_file" type="file" accept="text/csv,.csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+            <label for="sheet_name">xlsx_sheet_name</label>
+            <input id="sheet_name" name="sheet_name" placeholder="First sheet by default">
+            <button type="submit">Upload Source</button>
           </form>
           {source_markup}
         </section>
@@ -1417,6 +1429,10 @@ def render_time_series_source_section(scenario: dict, document: dict) -> str:
 def render_time_series_source_detail(scenario: dict, document: dict, source: dict) -> str:
     columns = source.get("columns") if isinstance(source.get("columns"), list) else []
     source_id = html_value(source.get("id") or "")
+    source_title = "XLSX Time-Series Source" if source.get("kind") == "xlsx" else "CSV Time-Series Source"
+    selected_sheet_markup = ""
+    if source.get("kind") == "xlsx" and source.get("selected_sheet"):
+        selected_sheet_markup = f'<p>Sheet: {escape(str(source.get("selected_sheet")))}</p>'
     mapping = source.get("mapping") if isinstance(source.get("mapping"), dict) else {}
     suggestions = source.get("mapping_suggestions") if isinstance(source.get("mapping_suggestions"), dict) else {}
     validation_markup = render_time_series_validation(source)
@@ -1424,8 +1440,9 @@ def render_time_series_source_detail(scenario: dict, document: dict, source: dic
     load_inputs = render_asset_mapping_inputs(document, source, "load", "load_demand_mw")
     return f"""
           <div class="source-detail">
-            <h2>CSV Time-Series Source</h2>
+            <h2>{source_title}</h2>
             <p>{escape(str(source.get("original_filename") or "source.csv"))}</p>
+            {selected_sheet_markup}
             <p>Columns: {escape(", ".join(str(column) for column in columns))}</p>
             {render_preview_rows(source)}
             <form method="post" action="/scenarios/{scenario["id"]}/draft/time-series-sources/{source_id}/mapping">

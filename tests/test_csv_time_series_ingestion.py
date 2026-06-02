@@ -1,8 +1,10 @@
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from openpyxl import Workbook
 
 from app.main import create_app
 from app.validation import ValidationResult
@@ -101,6 +103,128 @@ class CsvTimeSeriesIngestionTests(unittest.TestCase):
             draft = client.get(f"/api/scenarios/{scenario['id']}/draft").json()["draft"]["document"]
             self.assertEqual(draft["time_series"]["active_source_id"], source["id"])
             self.assertEqual(draft["time_series"]["sources"][0]["id"], source["id"])
+
+    def test_xlsx_upload_uses_first_sheet_and_reuses_mapping_validation(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, scenario = self.make_client_and_scenario(input_source_root)
+            workbook_bytes = make_xlsx_bytes(
+                [
+                    [
+                        "period_start",
+                        "hours",
+                        "buy",
+                        "sell",
+                        "solar_1_available_mw",
+                        "load_1_demand_mw",
+                    ],
+                    ["2026-01-01T00:00:00", 0.5, 55.0, 42.0, 3.5, 2.0],
+                    ["2026-01-01T00:30:00", 0.5, 60.0, 48.0, 4.0, 2.5],
+                ],
+                extra_sheet_rows=[["ignored"], ["not active"]],
+            )
+
+            response = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                files={
+                    "source_file": (
+                        "source.xlsx",
+                        workbook_bytes,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+                },
+            )
+
+            self.assertEqual(response.status_code, 201)
+            source = response.json()["source"]
+            self.assertEqual(source["kind"], "xlsx")
+            self.assertEqual(source["selected_sheet"], "Sheet")
+            self.assertEqual(
+                source["columns"],
+                ["period_start", "hours", "buy", "sell", "solar_1_available_mw", "load_1_demand_mw"],
+            )
+            self.assertEqual(source["preview_rows"][0]["period_start"], "2026-01-01T00:00:00")
+            self.assertEqual(source["mapping_suggestions"]["timestamp"], "period_start")
+            self.assertEqual(
+                source["mapping_suggestions"]["renewable_available_power_mw"],
+                {"solar_1": "solar_1_available_mw"},
+            )
+
+            mapping_response = client.put(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/{source['id']}/mapping",
+                json={
+                    "mapping": {
+                        "timestamp": "period_start",
+                        "duration_hours": "hours",
+                        "import_price_usd_per_mwh": "buy",
+                        "export_price_usd_per_mwh": "sell",
+                        "renewable_available_power_mw": {"solar_1": "solar_1_available_mw"},
+                        "load_demand_mw": {"load_1": "load_1_demand_mw"},
+                    }
+                },
+            )
+
+            self.assertEqual(mapping_response.status_code, 200)
+            mapped_source = mapping_response.json()["source"]
+            self.assertEqual(mapped_source["validation"], {"ok": True, "errors": []})
+            self.assertEqual(mapped_source["validated_rows"][1]["load_demand_mw"], {"load_1": 2.5})
+
+    def test_xlsx_upload_can_read_selected_sheet(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, scenario = self.make_client_and_scenario(input_source_root)
+            workbook_bytes = make_xlsx_bytes(
+                [["ignored"], ["not active"]],
+                extra_sheet_name="Inputs",
+                extra_sheet_rows=[
+                    ["period_start", "hours", "buy", "sell", "solar_1_available_mw", "load_1_demand_mw"],
+                    ["2026-01-01T00:00:00", 1.0, 55.0, 42.0, 3.5, 2.0],
+                ],
+            )
+
+            response = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                data={"sheet_name": "Inputs"},
+                files={
+                    "source_file": (
+                        "source.xlsx",
+                        workbook_bytes,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+                },
+            )
+
+            self.assertEqual(response.status_code, 201)
+            source = response.json()["source"]
+            self.assertEqual(source["selected_sheet"], "Inputs")
+            self.assertEqual(source["columns"][0], "period_start")
+            self.assertEqual(source["preview_rows"][0]["load_1_demand_mw"], "2")
+
+    def test_xlsx_upload_rejects_unsupported_formulas_with_clear_error(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, scenario = self.make_client_and_scenario(input_source_root)
+            workbook_bytes = make_xlsx_bytes(
+                [
+                    ["period_start", "hours", "buy", "sell", "solar_1_available_mw", "load_1_demand_mw"],
+                    ["2026-01-01T00:00:00", 1.0, "=50+5", 42.0, 3.5, 2.0],
+                ],
+            )
+
+            response = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                files={
+                    "source_file": (
+                        "source.xlsx",
+                        workbook_bytes,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+                },
+            )
+
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("formulas", response.json()["detail"])
+            self.assertIn("not supported", response.json()["detail"])
 
     def test_manual_mapping_override_is_saved_and_validates_csv_rows(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -265,6 +389,21 @@ class StubValidationService:
             message="Validation succeeded",
             payload={"status": "ok"},
         )
+
+
+def make_xlsx_bytes(rows, *, extra_sheet_name="Extra", extra_sheet_rows=None):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Sheet"
+    for row in rows:
+        sheet.append(row)
+    if extra_sheet_rows:
+        extra = workbook.create_sheet(extra_sheet_name)
+        for row in extra_sheet_rows:
+            extra.append(row)
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
 
 
 if __name__ == "__main__":

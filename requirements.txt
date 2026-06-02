@@ -1,4 +1,5 @@
 fastapi
 httpx
+openpyxl
 python-multipart
 uvicorn[standard]
