@@ -186,9 +186,9 @@ def safe_stored_source_path(source: dict[str, Any], input_source_root: Path) -> 
     try:
         path.relative_to(root)
     except ValueError as error:
-        raise TimeSeriesIngestionError("CSV source file path is outside the configured source root") from error
+        raise TimeSeriesIngestionError("time-series source file path is outside the configured source root") from error
     if not path.is_file():
-        raise TimeSeriesIngestionError("CSV source file is missing")
+        raise TimeSeriesIngestionError("time-series source file is missing")
     return path
 
 
@@ -312,7 +312,7 @@ def validate_mapping(
         if column not in columns:
             errors.append(f"{label} mapping references missing column {column!r}")
     if errors:
-        return {"ok": False, "errors": errors}, []
+        return validation_error("mapping", errors), []
 
     validated_rows: list[dict[str, Any]] = []
     seen_timestamps: set[datetime] = set()
@@ -385,8 +385,16 @@ def validate_mapping(
         validated_rows.append(normalized_row)
 
     if errors:
-        return {"ok": False, "errors": errors}, []
+        return validation_error("python_validation", errors), []
     return {"ok": True, "errors": []}, validated_rows
+
+
+def validation_error(error_category: str, errors: list[str]) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "error_category": error_category,
+        "errors": errors,
+    }
 
 
 def required_mapping_columns(

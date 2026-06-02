@@ -28,7 +28,7 @@ triage label.
 | BESS-ITER4-005 | Generate And Validate A System Case From Draft Plus CSV | AFK | ready-for-agent | Done | BESS-ITER4-001, BESS-ITER4-003, BESS-ITER4-004 | [BESS-ITER4-005-generate-and-validate-a-system-case-from-draft-plus-csv.md](BESS-ITER4-005-generate-and-validate-a-system-case-from-draft-plus-csv.md) |
 | BESS-ITER4-006 | Promote A Validated Draft And Run It Manually | AFK | ready-for-agent | Done | BESS-ITER4-005 | [BESS-ITER4-006-promote-a-validated-draft-and-run-it-manually.md](BESS-ITER4-006-promote-a-validated-draft-and-run-it-manually.md) |
 | BESS-ITER4-007 | Add Basic XLSX Time-Series Ingestion | AFK | ready-for-agent | Done | BESS-ITER4-004, BESS-ITER4-005 | [BESS-ITER4-007-add-basic-xlsx-time-series-ingestion.md](BESS-ITER4-007-add-basic-xlsx-time-series-ingestion.md) |
-| BESS-ITER4-008 | Harden Draft Ingestion Errors And Audit Metadata | AFK | ready-for-agent | Todo | BESS-ITER4-005, BESS-ITER4-007 | [BESS-ITER4-008-harden-draft-ingestion-errors-and-audit-metadata.md](BESS-ITER4-008-harden-draft-ingestion-errors-and-audit-metadata.md) |
+| BESS-ITER4-008 | Harden Draft Ingestion Errors And Audit Metadata | AFK | ready-for-agent | Done | BESS-ITER4-005, BESS-ITER4-007 | [BESS-ITER4-008-harden-draft-ingestion-errors-and-audit-metadata.md](BESS-ITER4-008-harden-draft-ingestion-errors-and-audit-metadata.md) |
 | BESS-ITER4-009 | Finalize Iteration 4 Acceptance Suite And Docs | AFK | ready-for-agent | Todo | BESS-ITER4-001 through BESS-ITER4-008 | [BESS-ITER4-009-finalize-iteration-4-acceptance-suite-and-docs.md](BESS-ITER4-009-finalize-iteration-4-acceptance-suite-and-docs.md) |
 
 ## Recommended Execution Order
@@ -65,6 +65,8 @@ triage label.
 | 2026-06-02 | BESS-ITER4-006 | In Progress -> Done | Added API and SSR promotion from current successful generated-case validation snapshots, reused immutable scenario-version persistence and manual run flow, preserved editable drafts and paste/upload JSON regression coverage. Verified 59 Python tests, local Julia-backed smoke run success, and Chrome DevTools MCP console inspection. In-app Browser was attempted but blocked by local `node_repl` sandbox startup failure. |
 | 2026-06-02 | BESS-ITER4-007 | Todo -> In Progress | Started basic XLSX ingestion using TDD, with API upload/default-sheet preview and mapping validation as the first tracer bullet. |
 | 2026-06-02 | BESS-ITER4-007 | In Progress -> Done | Added XLSX upload storage, first-sheet/default and selected-sheet parsing, preview rows and columns, CSV-shared mapping/validation, generated-case reuse, unsupported workbook errors, and SSR upload support. Verified 63 Python tests, 372 Julia tests, and Chrome DevTools MCP page inspection. In-app Browser was attempted but blocked by local `node_repl` sandbox startup failure. |
+| 2026-06-02 | BESS-ITER4-008 | Todo -> In Progress | Started draft ingestion hardening using TDD, with source-file error taxonomy as the first API tracer bullet. |
+| 2026-06-02 | BESS-ITER4-008 | In Progress -> Done | Added source-file, mapping, Python validation, and Julia validation error categories; added safe editor-promotion provenance metadata on scenario versions; preserved the Iteration 3 execution failure audit path. Verified 65 Python tests, 372 Julia tests, and Chrome DevTools MCP API/UI inspection. In-app Browser was attempted but blocked by local `node_repl` sandbox startup failure. |
 
 ## Regression Guard
 

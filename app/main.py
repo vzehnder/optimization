@@ -18,7 +18,7 @@ from app.draft_editor import (
     structured_draft_document_from_system_case,
     structured_draft_document_from_form,
 )
-from app.persistence import AnalystStore
+from app.persistence import AnalystStore, utc_now_iso
 from app.results import ResultReadError, read_run_results
 from app.runner import JuliaRunExecutor, LocalRunQueue
 from app.time_series_ingestion import (
@@ -101,6 +101,7 @@ def create_app(
     def save_validated_scenario_version(
         scenario_id: int,
         candidate_text: str,
+        generation_metadata: dict[str, Any] | None = None,
     ) -> tuple[dict | None, ValidationResult | None]:
         result = service.validate_text(candidate_text)
         if not result.ok:
@@ -120,6 +121,7 @@ def create_app(
             scenario_id=scenario_id,
             system_case_json=document,
             validation_payload=result.payload,
+            generation_metadata=generation_metadata,
         )
         return version, None
 
@@ -292,7 +294,7 @@ def create_app(
                     scenario,
                     draft,
                     draft["document"],
-                    error_message=str(error),
+                    error_message=f"Source-file error: {error}",
                 )
             )
         finally:
@@ -328,7 +330,7 @@ def create_app(
                     scenario,
                     draft,
                     draft["document"],
-                    error_message=str(error),
+                    error_message=f"Source-file error: {error}",
                 )
             )
         return RedirectResponse(f"/scenarios/{scenario_id}/draft", status_code=303)
@@ -383,6 +385,7 @@ def create_app(
             version, error = save_validated_scenario_version(
                 scenario_id,
                 json.dumps(system_case, sort_keys=True),
+                generation_metadata_from_draft(draft["document"]),
             )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
@@ -595,7 +598,14 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         except DraftGenerationError as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
+            return JSONResponse(
+                error_response_body(
+                    draft_error_category(draft["document"], error),
+                    str(error),
+                    phase="python_validation",
+                ),
+                status_code=400,
+            )
         return {"system_case": system_case}
 
     @app.post("/api/scenarios/{scenario_id}/draft/generated-system-case/validate")
@@ -606,7 +616,14 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         except DraftGenerationError as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
+            return JSONResponse(
+                error_response_body(
+                    draft_error_category(draft["document"], error),
+                    str(error),
+                    phase="python_validation",
+                ),
+                status_code=400,
+            )
 
         result = service.validate_text(json.dumps(system_case, sort_keys=True))
         updated_document = draft_document_with_generated_validation(
@@ -633,11 +650,17 @@ def create_app(
             scenario_version, error = save_validated_scenario_version(
                 scenario_id,
                 json.dumps(system_case, sort_keys=True),
+                generation_metadata_from_draft(draft["document"]),
             )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         except (DraftGenerationError, DraftPromotionError) as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
+            category = (
+                draft_error_category(draft["document"], error)
+                if isinstance(error, DraftGenerationError)
+                else "promotion"
+            )
+            return JSONResponse(error_response_body(category, str(error), phase="python_validation"), status_code=400)
         if error is not None:
             updated_document = draft_document_with_generated_validation(
                 draft["document"],
@@ -676,7 +699,7 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         except TimeSeriesIngestionError as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
+            return JSONResponse(error_response_body("source_file", str(error)), status_code=400)
         finally:
             await source_file.close()
         return {"source": source}
@@ -702,7 +725,7 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         except TimeSeriesIngestionError as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
+            return JSONResponse(error_response_body("source_file", str(error)), status_code=400)
         return {"source": source}
 
     @app.put("/api/scenarios/{scenario_id}/draft")
@@ -845,9 +868,92 @@ def validation_response_body(result: ValidationResult) -> dict:
     return {
         "status": "error",
         "phase": result.phase,
+        "error_category": validation_error_category(result),
         "message": result.message,
         "validation": result.payload,
     }
+
+
+def validation_error_category(result: ValidationResult) -> str:
+    if result.phase == "julia":
+        return "julia_validation"
+    return result.phase or "validation"
+
+
+def error_response_body(error_category: str, detail: str, *, phase: str | None = None) -> dict:
+    return {
+        "status": "error",
+        "phase": phase or error_category,
+        "error_category": error_category,
+        "detail": detail,
+    }
+
+
+def draft_error_category(document: dict[str, Any], error: Exception) -> str:
+    source_category = active_source_validation_category(document)
+    if source_category:
+        return source_category
+    message = str(error)
+    if message.startswith("Python time-series validation failed"):
+        return "python_validation"
+    return "python_validation"
+
+
+def active_source_validation_category(document: dict[str, Any]) -> str:
+    active_source = active_time_series_source(document)
+    validation = active_source.get("validation") if isinstance(active_source, dict) else None
+    if not isinstance(validation, dict):
+        return ""
+    category = validation.get("error_category")
+    return str(category) if category else ""
+
+
+def generation_metadata_from_draft(document: dict[str, Any]) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "kind": "structured_draft",
+        "generated_at": utc_now_iso(),
+    }
+    source = active_time_series_source(document)
+    if not isinstance(source, dict):
+        return metadata
+
+    source_metadata: dict[str, Any] = {
+        "source_id": str(source.get("id") or ""),
+        "kind": str(source.get("kind") or ""),
+        "original_filename": str(source.get("original_filename") or ""),
+        "media_type": str(source.get("media_type") or ""),
+    }
+    stored_path = source.get("stored_path")
+    if stored_path:
+        source_metadata["stored_filename"] = Path(str(stored_path)).name
+    if source.get("selected_sheet"):
+        source_metadata["selected_sheet"] = str(source.get("selected_sheet"))
+
+    mapping = source.get("mapping") if isinstance(source.get("mapping"), dict) else {}
+    metadata["source"] = source_metadata
+    metadata["mapping"] = copy.deepcopy(mapping)
+    return metadata
+
+
+def active_time_series_source(document: dict[str, Any]) -> dict[str, Any] | None:
+    time_series = document.get("time_series")
+    if not isinstance(time_series, dict):
+        return None
+    sources = time_series.get("sources")
+    if not isinstance(sources, list):
+        return None
+    active_source_id = time_series.get("active_source_id")
+    active_source = None
+    for source in sources:
+        if isinstance(source, dict) and source.get("id") == active_source_id:
+            active_source = source
+            break
+    if active_source is None:
+        for source in sources:
+            if isinstance(source, dict):
+                active_source = source
+                break
+    return active_source
 
 
 def draft_document_with_generated_validation(
@@ -861,14 +967,17 @@ def draft_document_with_generated_validation(
 
 
 def generated_system_case_snapshot(system_case: dict[str, Any], result: ValidationResult) -> dict[str, Any]:
+    validation = {
+        "ok": result.ok,
+        "phase": result.phase,
+        "message": result.message,
+        "payload": copy.deepcopy(result.payload),
+    }
+    if not result.ok:
+        validation["error_category"] = validation_error_category(result)
     return {
         "system_case": copy.deepcopy(system_case),
-        "validation": {
-            "ok": result.ok,
-            "phase": result.phase,
-            "message": result.message,
-            "payload": copy.deepcopy(result.payload),
-        },
+        "validation": validation,
     }
 
 
@@ -1527,12 +1636,23 @@ def render_time_series_validation(source: dict) -> str:
         )
     errors = validation.get("errors") if isinstance(validation.get("errors"), list) else []
     items = "".join(f"<li>{escape(str(error))}</li>" for error in errors)
+    category = human_error_category(str(validation.get("error_category") or "python_validation"))
     return (
         '<section class="notice error">'
-        "<h2>Time-Series Validation</h2>"
+        f"<h2>Time-Series Validation: {escape(category)}</h2>"
         f"<ul>{items}</ul>"
         "</section>"
     )
+
+
+def human_error_category(error_category: str) -> str:
+    labels = {
+        "source_file": "Source-file Error",
+        "mapping": "Mapping Error",
+        "python_validation": "Python Validation Error",
+        "julia_validation": "Julia Validation Error",
+    }
+    return labels.get(error_category, "Validation Error")
 
 
 def render_generated_preview(document: dict | None) -> str:

@@ -223,8 +223,41 @@ class CsvTimeSeriesIngestionTests(unittest.TestCase):
             )
 
             self.assertEqual(response.status_code, 400)
-            self.assertIn("formulas", response.json()["detail"])
-            self.assertIn("not supported", response.json()["detail"])
+            payload = response.json()
+            self.assertEqual(payload["error_category"], "source_file")
+            self.assertIn("formulas", payload["detail"])
+            self.assertIn("not supported", payload["detail"])
+
+    def test_csv_upload_parse_failure_is_reported_as_source_file_error(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, scenario = self.make_client_and_scenario(input_source_root)
+
+            response = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                files={"source_file": ("source.csv", b"\xff\xfe\x00", "text/csv")},
+            )
+
+            self.assertEqual(response.status_code, 400)
+            payload = response.json()
+            self.assertEqual(payload["status"], "error")
+            self.assertEqual(payload["error_category"], "source_file")
+            self.assertEqual(payload["phase"], "source_file")
+            self.assertIn("UTF-8", payload["detail"])
+
+    def test_draft_page_shows_source_file_error_category_for_bad_upload(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, scenario = self.make_client_and_scenario(input_source_root)
+
+            response = client.post(
+                f"/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                files={"source_file": ("source.csv", b"\xff\xfe\x00", "text/csv")},
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("Source-file error", response.text)
+            self.assertIn("UTF-8", response.text)
 
     def test_manual_mapping_override_is_saved_and_validates_csv_rows(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -292,7 +325,9 @@ class CsvTimeSeriesIngestionTests(unittest.TestCase):
                 },
             )
             self.assertEqual(missing_response.status_code, 200)
-            missing_errors = missing_response.json()["source"]["validation"]["errors"]
+            missing_validation = missing_response.json()["source"]["validation"]
+            self.assertEqual(missing_validation["error_category"], "mapping")
+            missing_errors = missing_validation["errors"]
             self.assertIn("duration_hours mapping is required", missing_errors)
             self.assertIn(
                 "price mapping requires price_usd_per_mwh or both import_price_usd_per_mwh and export_price_usd_per_mwh",
@@ -318,6 +353,7 @@ class CsvTimeSeriesIngestionTests(unittest.TestCase):
             self.assertEqual(bad_values_response.status_code, 200)
             validation = bad_values_response.json()["source"]["validation"]
             self.assertFalse(validation["ok"])
+            self.assertEqual(validation["error_category"], "python_validation")
             errors = validation["errors"]
             self.assertIn("row 2: duration_hours must be positive", errors)
             self.assertIn("row 2: renewable solar_1 availability must be nonnegative", errors)

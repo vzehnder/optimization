@@ -73,6 +73,14 @@ class DraftGeneratedSystemCaseTests(unittest.TestCase):
                 ]
                 self.assertEqual(stored_version["system_case_json"], generated_case)
                 self.assertEqual(json.loads(validation_service.text_candidates[-1]), generated_case)
+                generation_metadata = stored_version["generation_metadata"]
+                self.assertEqual(generation_metadata["kind"], "structured_draft")
+                self.assertEqual(generation_metadata["source"]["original_filename"], "source.csv")
+                self.assertEqual(generation_metadata["source"]["media_type"], "text/csv")
+                self.assertEqual(generation_metadata["mapping"]["duration_hours"], "hours")
+                self.assertIn("generated_at", generation_metadata)
+                self.assertNotIn("stored_path", generation_metadata["source"])
+                self.assertNotIn(str(temp_root), json.dumps(generation_metadata))
 
                 draft_document = client.get(f"/api/scenarios/{scenario['id']}/draft").json()["draft"]["document"]
                 draft_document["case"]["name"] = "still_editable_after_promotion"
@@ -248,8 +256,12 @@ class DraftGeneratedSystemCaseTests(unittest.TestCase):
             )
 
             self.assertEqual(response.status_code, 400)
-            self.assertIn("Python time-series validation failed", response.json()["detail"])
-            self.assertIn("duration_hours mapping is required", response.json()["detail"])
+            payload = response.json()
+            self.assertEqual(payload["status"], "error")
+            self.assertEqual(payload["phase"], "python_validation")
+            self.assertEqual(payload["error_category"], "mapping")
+            self.assertIn("Python time-series validation failed", payload["detail"])
+            self.assertIn("duration_hours mapping is required", payload["detail"])
             self.assertEqual(validation_service.candidate_text, "")
 
     def test_api_surfaces_julia_validation_failure_for_generated_case(self):
@@ -266,6 +278,7 @@ class DraftGeneratedSystemCaseTests(unittest.TestCase):
             payload = response.json()
             self.assertEqual(payload["status"], "error")
             self.assertEqual(payload["phase"], "julia")
+            self.assertEqual(payload["error_category"], "julia_validation")
             self.assertEqual(payload["message"], "Julia rejected generated case")
             self.assertEqual(payload["validation"]["status"], "error")
             self.assertNotEqual(validation_service.candidate_text, "")

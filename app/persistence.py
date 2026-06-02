@@ -74,6 +74,7 @@ class AnalystStore:
                 period_count INTEGER NOT NULL,
                 asset_counts_json TEXT NOT NULL,
                 validation_payload_json TEXT NOT NULL,
+                generation_metadata_json TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL,
                 created_by TEXT NOT NULL,
                 FOREIGN KEY (scenario_id) REFERENCES scenarios(id) ON DELETE CASCADE,
@@ -142,6 +143,7 @@ class AnalystStore:
         self._ensure_column("runs", "stdout_log_path", "TEXT")
         self._ensure_column("runs", "stderr_log_path", "TEXT")
         self._ensure_column("runs", "error_message", "TEXT NOT NULL DEFAULT ''")
+        self._ensure_column("scenario_versions", "generation_metadata_json", "TEXT NOT NULL DEFAULT '{}'")
         self.connection.commit()
 
     def _ensure_column(self, table_name: str, column_name: str, definition: str) -> None:
@@ -239,6 +241,7 @@ class AnalystStore:
         scenario_id: int,
         system_case_json: dict[str, Any],
         validation_payload: dict[str, Any],
+        generation_metadata: dict[str, Any] | None = None,
         created_by: str = "internal_analyst",
     ) -> dict[str, Any]:
         self.get_scenario(scenario_id)
@@ -256,10 +259,11 @@ class AnalystStore:
                 period_count,
                 asset_counts_json,
                 validation_payload_json,
+                generation_metadata_json,
                 created_at,
                 created_by
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 scenario_id,
@@ -270,6 +274,7 @@ class AnalystStore:
                 metadata["period_count"],
                 json.dumps(metadata["asset_counts"], sort_keys=True),
                 json.dumps(validation_payload, sort_keys=True),
+                json.dumps(generation_metadata or {}, sort_keys=True),
                 created_at,
                 created_by,
             ),
@@ -289,6 +294,7 @@ class AnalystStore:
                 schema_version,
                 period_count,
                 asset_counts_json,
+                generation_metadata_json,
                 created_at,
                 created_by
             FROM scenario_versions
@@ -311,6 +317,7 @@ class AnalystStore:
                 schema_version,
                 period_count,
                 asset_counts_json,
+                generation_metadata_json,
                 created_at,
                 created_by
                 {document_column}
@@ -776,6 +783,7 @@ def extract_system_case_metadata(document: dict[str, Any]) -> dict[str, Any]:
 def scenario_version_row_to_dict(row: sqlite3.Row, *, include_document: bool) -> dict[str, Any]:
     value = row_to_dict(row)
     value["asset_counts"] = json.loads(value.pop("asset_counts_json"))
+    value["generation_metadata"] = json.loads(value.pop("generation_metadata_json") or "{}")
     if include_document:
         value["system_case_json"] = json.loads(value.pop("system_case_json"))
         value["validation_payload"] = json.loads(value.pop("validation_payload_json"))
