@@ -1,6 +1,6 @@
 # BESS-ITER4-006: Promote A Validated Draft And Run It Manually
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/iter4/prd_structured_editor_flow.md`
@@ -21,19 +21,61 @@ download behavior should work without a second execution path.
 
 ## Acceptance criteria
 
-- [ ] A successfully validated generated case can be promoted to a new
+- [x] A successfully validated generated case can be promoted to a new
       immutable scenario version.
-- [ ] The promoted version stores the exact generated `system_case_json`.
-- [ ] The source draft remains editable after promotion.
-- [ ] The promoted scenario version can launch a manual run through the existing
+- [x] The promoted version stores the exact generated `system_case_json`.
+- [x] The source draft remains editable after promotion.
+- [x] The promoted scenario version can launch a manual run through the existing
       run endpoint and UI.
-- [ ] The run executes through the existing Julia process boundary.
-- [ ] Success and failure artifacts are registered through the existing artifact
+- [x] The run executes through the existing Julia process boundary.
+- [x] Success and failure artifacts are registered through the existing artifact
       mechanism.
-- [ ] Results for an editor-created version render summary, tables, charts, and
+- [x] Results for an editor-created version render summary, tables, charts, and
       downloads.
-- [ ] The paste/upload JSON path can still promote and run a scenario version.
-- [ ] Acceptance tests cover draft-to-version-to-run behavior end to end.
+- [x] The paste/upload JSON path can still promote and run a scenario version.
+- [x] Acceptance tests cover draft-to-version-to-run behavior end to end.
+
+## Implementation notes
+
+- Added generated-case promotion endpoints:
+  `/api/scenarios/{scenario_id}/draft/generated-system-case/promote` and
+  `/scenarios/{scenario_id}/draft/generated-system-case/promote`.
+- Promotion requires the draft's stored `generated_system_case` snapshot to be
+  successfully validated and still match the current generated draft output.
+- Promoted versions reuse the existing scenario-version persistence path, so the
+  stored `system_case_json` is the exact generated case and remains immutable.
+- The source draft remains mutable after promotion; later draft edits do not
+  mutate the promoted scenario version.
+- The draft page shows `Promote To Scenario Version` only after successful
+  generated-case validation, then redirects to the scenario version list.
+- Runs for editor-created versions continue through the existing manual run
+  endpoint, Julia runner, artifact registry, result reader, charts, tables, and
+  downloads.
+
+## Verification
+
+Passed:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_draft_generated_system_case
+.\.venv\Scripts\python.exe -m unittest tests.test_draft_generated_system_case tests.test_manual_runs tests.test_iter3_acceptance tests.test_structured_draft_editor tests.test_csv_time_series_ingestion tests.test_results_review
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Results:
+
+- Focused draft-generation/promotion tests: 7 passed.
+- Relevant Iteration 3 and Iteration 4 web tests: 39 passed.
+- Full Python web suite: 59 passed. First full run hit a Julia validation
+  timeout during warmup; the isolated failing test and rerun passed.
+- Local smoke promoted a real validated draft to scenario version 4, launched a
+  manual run through the real Julia process boundary, and completed run 4 with
+  status `succeeded`, exit code 0, and registered result artifacts.
+- Chrome DevTools MCP console inspection reported no console messages.
+
+Browser note: attempted the requested in-app Browser workflow twice, but the
+`node_repl` runtime failed locally with `windows sandbox failed: spawn setup
+refresh`. HTTP and Chrome DevTools MCP fallback verification was completed.
 
 ## Blocked by
 

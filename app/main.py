@@ -57,6 +57,10 @@ class TimeSeriesMappingRequest(BaseModel):
     mapping: dict[str, Any]
 
 
+class DraftPromotionError(ValueError):
+    pass
+
+
 def create_app(
     validation_service: JuliaValidationService | None = None,
     *,
@@ -365,6 +369,47 @@ def create_app(
             )
         )
 
+    @app.post("/scenarios/{scenario_id}/draft/generated-system-case/promote")
+    async def promote_generated_system_case_from_page(scenario_id: int):
+        try:
+            scenario = analyst_store.get_scenario(scenario_id)
+            draft = analyst_store.get_scenario_draft(scenario_id)
+            system_case = validated_generated_system_case_from_draft(draft["document"])
+            version, error = save_validated_scenario_version(
+                scenario_id,
+                json.dumps(system_case, sort_keys=True),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except (DraftGenerationError, DraftPromotionError) as error:
+            return HTMLResponse(
+                render_scenario_draft_page(
+                    scenario,
+                    draft,
+                    draft["document"],
+                    error_message=str(error),
+                )
+            )
+        if error is not None:
+            updated_document = draft_document_with_generated_validation(
+                draft["document"],
+                system_case,
+                error,
+            )
+            draft = analyst_store.update_scenario_draft(
+                scenario_id=scenario_id,
+                document=updated_document,
+            )
+            return HTMLResponse(
+                render_scenario_draft_page(
+                    scenario,
+                    draft,
+                    draft["document"],
+                    generated_validation_result=error,
+                )
+            )
+        return RedirectResponse(f"/scenarios/{scenario_id}#version-{version['id']}", status_code=303)
+
     @app.get("/scenarios/{scenario_id}", response_class=HTMLResponse)
     async def scenario_page(scenario_id: int, from_version_id: int | None = None):
         try:
@@ -574,6 +619,32 @@ def create_app(
         if result.ok:
             return body
         return JSONResponse(body, status_code=400)
+
+    @app.post("/api/scenarios/{scenario_id}/draft/generated-system-case/promote", status_code=201)
+    async def promote_generated_system_case(scenario_id: int):
+        try:
+            draft = analyst_store.get_scenario_draft(scenario_id)
+            system_case = validated_generated_system_case_from_draft(draft["document"])
+            scenario_version, error = save_validated_scenario_version(
+                scenario_id,
+                json.dumps(system_case, sort_keys=True),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except (DraftGenerationError, DraftPromotionError) as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        if error is not None:
+            updated_document = draft_document_with_generated_validation(
+                draft["document"],
+                system_case,
+                error,
+            )
+            analyst_store.update_scenario_draft(
+                scenario_id=scenario_id,
+                document=updated_document,
+            )
+            return JSONResponse(validation_response_body(error), status_code=400)
+        return scenario_version
 
     @app.post("/api/scenarios/{scenario_id}/draft/time-series-sources/upload", status_code=201)
     async def upload_draft_time_series_source(scenario_id: int, source_file: UploadFile = File(...)):
@@ -789,6 +860,35 @@ def generated_system_case_snapshot(system_case: dict[str, Any], result: Validati
             "payload": copy.deepcopy(result.payload),
         },
     }
+
+
+def validated_generated_system_case_from_draft(document: dict[str, Any]) -> dict[str, Any]:
+    system_case = generate_system_case_from_draft(document)
+    if draft_has_current_successful_generated_validation(document, system_case):
+        return system_case
+
+    snapshot = document.get("generated_system_case")
+    if not isinstance(snapshot, dict):
+        raise DraftPromotionError("generated system case must be validated before promotion")
+
+    validation = snapshot.get("validation")
+    if not isinstance(validation, dict) or not validation.get("ok"):
+        raise DraftPromotionError("generated system case validation must succeed before promotion")
+
+    raise DraftPromotionError("generated system case validation is stale; validate again before promotion")
+
+
+def draft_has_current_successful_generated_validation(
+    document: dict[str, Any],
+    system_case: dict[str, Any],
+) -> bool:
+    snapshot = document.get("generated_system_case")
+    if not isinstance(snapshot, dict):
+        return False
+    validation = snapshot.get("validation")
+    if not isinstance(validation, dict) or not validation.get("ok"):
+        return False
+    return snapshot.get("system_case") == system_case
 
 
 def artifact_response_body(artifact: dict) -> dict:
@@ -1441,7 +1541,7 @@ def render_generated_validation_section(
     if document is None:
         return ""
     try:
-        generate_system_case_from_draft(document)
+        current_system_case = generate_system_case_from_draft(document)
     except DraftGenerationError:
         return ""
 
@@ -1455,6 +1555,14 @@ def render_generated_validation_section(
             f"<p>{status}: {escape(result.message)}</p>"
             "</section>"
         )
+    promote_markup = ""
+    if draft_has_current_successful_generated_validation(document, current_system_case):
+        promote_markup = (
+            f'<form method="post" action="/scenarios/{scenario["id"]}/draft/generated-system-case/promote" '
+            'class="inline-form">'
+            '<button type="submit">Promote To Scenario Version</button>'
+            "</form>"
+        )
     return (
         f'<form method="post" action="/scenarios/{scenario["id"]}/draft/generated-system-case/validate" '
         'class="inline-form">'
@@ -1462,6 +1570,7 @@ def render_generated_validation_section(
         '<button type="submit">Validate Generated System Case</button>'
         "</form>"
         f"{result_markup}"
+        f"{promote_markup}"
     )
 
 

@@ -1,4 +1,5 @@
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -6,6 +7,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.persistence import AnalystStore
+from app.runner import JuliaRunExecutor
 from app.validation import ValidationResult
 
 
@@ -13,6 +16,147 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class DraftGeneratedSystemCaseTests(unittest.TestCase):
+    def test_validated_draft_promotes_to_version_and_runs_through_existing_flow(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            artifact_root = temp_root / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            validation_service = DraftPromotionValidationService()
+            run_process = DraftPromotionRunProcess()
+            executor = JuliaRunExecutor(
+                store=store,
+                repo_root=REPO_ROOT,
+                artifact_root=artifact_root,
+                julia_executable="julia",
+                runner=run_process,
+                validation_service=validation_service,
+            )
+            client = TestClient(
+                create_app(
+                    validation_service=validation_service,
+                    store=store,
+                    run_queue=SynchronousRunQueue(executor),
+                    artifact_root=artifact_root,
+                    input_source_root=temp_root / "input-sources",
+                )
+            )
+            try:
+                project = client.post("/api/projects", json={"name": "Hybrid PMGD"}).json()
+                scenario = client.post(
+                    f"/api/projects/{project['id']}/scenarios",
+                    json={"name": "Structured case"},
+                ).json()
+                client.post(
+                    f"/api/scenarios/{scenario['id']}/draft",
+                    json={"document": valid_draft_document()},
+                )
+                upload_mapped_csv(client, scenario["id"])
+
+                validation_response = client.post(
+                    f"/api/scenarios/{scenario['id']}/draft/generated-system-case/validate",
+                )
+                self.assertEqual(validation_response.status_code, 200)
+                generated_case = validation_response.json()["system_case"]
+
+                promote_response = client.post(
+                    f"/api/scenarios/{scenario['id']}/draft/generated-system-case/promote",
+                )
+
+                self.assertEqual(promote_response.status_code, 201)
+                version = promote_response.json()
+                self.assertEqual(version["version_number"], 1)
+                self.assertEqual(version["case_name"], "csv_generated_case")
+                stored_version = client.get(f"/api/scenario-versions/{version['id']}").json()[
+                    "scenario_version"
+                ]
+                self.assertEqual(stored_version["system_case_json"], generated_case)
+                self.assertEqual(json.loads(validation_service.text_candidates[-1]), generated_case)
+
+                draft_document = client.get(f"/api/scenarios/{scenario['id']}/draft").json()["draft"]["document"]
+                draft_document["case"]["name"] = "still_editable_after_promotion"
+                edit_response = client.put(
+                    f"/api/scenarios/{scenario['id']}/draft",
+                    json={"document": draft_document},
+                )
+                self.assertEqual(edit_response.status_code, 200)
+                stored_version_after_edit = client.get(f"/api/scenario-versions/{version['id']}").json()[
+                    "scenario_version"
+                ]
+                self.assertEqual(stored_version_after_edit["system_case_json"], generated_case)
+
+                run_response = client.post(f"/api/scenario-versions/{version['id']}/runs")
+                self.assertEqual(run_response.status_code, 201)
+                run = client.get(f"/api/runs/{run_response.json()['id']}").json()["run"]
+                self.assertEqual(run["status"], "succeeded")
+                self.assertEqual(validation_service.file_validation_count, 1)
+                self.assertTrue(run_process.completed_commands)
+
+                artifacts = client.get(f"/api/runs/{run['id']}/artifacts").json()["artifacts"]
+                artifact_types = {artifact["artifact_type"] for artifact in artifacts}
+                self.assertEqual(
+                    artifact_types,
+                    {
+                        "input_snapshot",
+                        "stdout_log",
+                        "stderr_log",
+                        "summary_json",
+                        "dispatch_csv",
+                        "asset_dispatch_csv",
+                        "model_metadata_json",
+                    },
+                )
+                results_response = client.get(f"/api/runs/{run['id']}/results")
+                self.assertEqual(results_response.status_code, 200)
+                self.assertEqual(results_response.json()["results"]["summary"]["case_name"], "csv_generated_case")
+
+                run_page = client.get(f"/runs/{run['id']}")
+                self.assertEqual(run_page.status_code, 200)
+                self.assertIn("Run Summary", run_page.text)
+                self.assertIn("Basic Charts", run_page.text)
+                self.assertIn("System Dispatch", run_page.text)
+            finally:
+                store.close()
+
+    def test_draft_page_promotes_only_after_successful_generated_validation(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            validation_service = RecordingValidationService()
+            client, scenario = make_client_and_scenario(Path(temp_dir), validation_service)
+            upload_mapped_csv(client, scenario["id"])
+
+            unvalidated_page = client.get(f"/scenarios/{scenario['id']}/draft")
+            self.assertEqual(unvalidated_page.status_code, 200)
+            self.assertNotIn("Promote To Scenario Version", unvalidated_page.text)
+
+            blocked_response = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/generated-system-case/promote",
+            )
+            self.assertEqual(blocked_response.status_code, 400)
+            self.assertIn("must be validated before promotion", blocked_response.json()["detail"])
+
+            validation_page = client.post(
+                f"/scenarios/{scenario['id']}/draft/generated-system-case/validate",
+            )
+            self.assertEqual(validation_page.status_code, 200)
+            self.assertIn("Valid: Validation succeeded", validation_page.text)
+            self.assertIn("Promote To Scenario Version", validation_page.text)
+            self.assertIn(
+                f'action="/scenarios/{scenario["id"]}/draft/generated-system-case/promote"',
+                validation_page.text,
+            )
+
+            promote_response = client.post(
+                f"/scenarios/{scenario['id']}/draft/generated-system-case/promote",
+                follow_redirects=False,
+            )
+            self.assertEqual(promote_response.status_code, 303)
+            self.assertRegex(promote_response.headers["location"], rf"^/scenarios/{scenario['id']}#version-\d+$")
+
+            scenario_page = client.get(f"/scenarios/{scenario['id']}")
+            self.assertEqual(scenario_page.status_code, 200)
+            self.assertIn("Version 1", scenario_page.text)
+            self.assertIn("csv_generated_case", scenario_page.text)
+            self.assertIn("Launch Run", scenario_page.text)
+
     def test_api_generates_and_validates_system_case_from_csv_mapping(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             validation_service = RecordingValidationService()
@@ -161,6 +305,117 @@ class RecordingValidationService:
             phase="julia",
             message="Validation succeeded",
             payload={"status": "ok", "case_name": "csv_generated_case"},
+        )
+
+
+class DraftPromotionValidationService:
+    def __init__(self):
+        self.text_candidates = []
+        self.file_validation_count = 0
+
+    def validate_text(self, candidate_text):
+        self.text_candidates.append(candidate_text)
+        document = json.loads(candidate_text)
+        return ValidationResult(
+            ok=True,
+            phase="julia",
+            message="Validation succeeded",
+            payload={
+                "status": "ok",
+                "case_name": document["case_name"],
+                "schema_version": document["schema_version"],
+            },
+            exit_code=0,
+            raw_stdout='{"status":"ok"}\n',
+            raw_stderr="",
+        )
+
+    def validate_file(self, candidate_path):
+        self.file_validation_count += 1
+        return ValidationResult(
+            ok=True,
+            phase="julia",
+            message="Validation succeeded",
+            payload={"status": "ok"},
+            exit_code=0,
+            raw_stdout='{"status":"ok"}\n',
+            raw_stderr="",
+        )
+
+
+class SynchronousRunQueue:
+    def __init__(self, executor):
+        self.executor = executor
+
+    def enqueue(self, run_id):
+        self.executor.execute(run_id)
+
+    def stop(self):
+        pass
+
+
+class DraftPromotionRunProcess:
+    def __init__(self):
+        self.completed_commands = []
+
+    def __call__(self, command, **kwargs):
+        self.completed_commands.append((command, kwargs))
+        output_root = Path(command[command.index("--output-root") + 1])
+        output_dir = output_root / "csv_generated_case" / "draft-promotion-run"
+        output_dir.mkdir(parents=True)
+        summary_path = output_dir / "summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "case_name": "csv_generated_case",
+                    "solver_name": "HiGHS",
+                    "solver_status": "OPTIMAL",
+                    "termination_status": "OPTIMAL",
+                    "objective_value_usd": 10.0,
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (output_dir / "dispatch.csv").write_text(
+            "timestamp,duration_hours,import_price_usd_per_mwh,export_price_usd_per_mwh,"
+            "grid_import_mw,grid_export_mw,net_grid_export_mw,renewable_used_mw,renewable_curtailed_mw,"
+            "load_demand_mw,battery_charge_mw,battery_discharge_mw,battery_net_discharge_mw,"
+            "battery_energy_mwh,battery_delta_soc_abs_mwh,import_cost_usd,export_revenue_usd,"
+            "net_market_value_usd,market_value_usd,battery_degradation_cost_usd,curtailment_penalty_usd,"
+            "period_profit_usd\n"
+            "2026-01-01T00:00:00,0.5,55.0,42.0,2.0,0.0,-2.0,3.5,0.0,2.0,"
+            "1.5,0.0,-1.5,5.425,1.425,55.0,0.0,-55.0,-55.0,0.0,0.0,-55.0\n",
+            encoding="utf-8",
+        )
+        (output_dir / "asset_dispatch.csv").write_text(
+            "timestamp,duration_hours,import_price_usd_per_mwh,export_price_usd_per_mwh,"
+            "asset_id,asset_type,grid_import_mw,grid_export_mw,renewable_used_mw,renewable_curtailed_mw,"
+            "load_demand_mw,battery_charge_mw,battery_discharge_mw,battery_energy_mwh,"
+            "battery_delta_soc_abs_mwh\n"
+            "2026-01-01T00:00:00,0.5,55.0,42.0,grid_1,grid,2.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0\n"
+            "2026-01-01T00:00:00,0.5,55.0,42.0,solar_1,renewable,0.0,0.0,3.5,0.0,0.0,0.0,0.0,0.0,0.0\n"
+            "2026-01-01T00:00:00,0.5,55.0,42.0,battery_1,battery,0.0,0.0,0.0,0.0,0.0,1.5,0.0,5.425,1.425\n",
+            encoding="utf-8",
+        )
+        (output_dir / "model_metadata.json").write_text(
+            json.dumps({"model_name": "one_bus_system_dispatch"}) + "\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps(
+                {
+                    "case_name": "csv_generated_case",
+                    "run_timestamp": "draft-promotion-run",
+                    "output_dir": str(output_dir),
+                    "summary_path": str(summary_path),
+                    "termination_status": "OPTIMAL",
+                }
+            ),
+            stderr="",
         )
 
 
