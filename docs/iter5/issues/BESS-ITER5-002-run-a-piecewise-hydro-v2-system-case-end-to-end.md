@@ -1,6 +1,6 @@
 # BESS-ITER5-002: Run A Piecewise Hydro v2 System Case End To End
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/iter5/prd_hydro_simple_dispatch.md`
@@ -22,23 +22,31 @@ linear hydro path.
 
 ## Acceptance criteria
 
-- [ ] `PiecewiseLinearOpt` is added as an explicit Julia dependency.
-- [ ] Piecewise generation uses `PiecewiseLinearOpt.piecewiselinear` with the
+- [x] `PiecewiseLinearOpt` is added as an explicit Julia dependency.
+- [x] Piecewise generation uses `PiecewiseLinearOpt.piecewiselinear` with the
       package default method.
-- [ ] Generation breakpoints are accepted as explicit `(flow_m3s, power_mw)`
+- [x] Generation breakpoints are accepted as explicit `(flow_m3s, power_mw)`
       pairs.
-- [ ] Flow breakpoints must be strictly increasing and nonnegative.
-- [ ] Power breakpoints must be finite and nonnegative.
-- [ ] Nonconvex and nonmonotone power breakpoints are accepted.
-- [ ] Optional turbine flow min/max limits must stay inside the breakpoint
+- [x] Flow breakpoints must be strictly increasing and nonnegative.
+- [x] Power breakpoints must be finite and nonnegative.
+- [x] Nonconvex and nonmonotone power breakpoints are accepted.
+- [x] Optional turbine flow min/max limits must stay inside the breakpoint
       domain.
-- [ ] Optional `power_max_mw` is enforced in piecewise mode.
-- [ ] Reservoir storage-elevation breakpoints are modeled/reported with
+- [x] Optional `power_max_mw` is enforced in piecewise mode.
+- [x] Reservoir storage-elevation breakpoints are modeled/reported with
       `PiecewiseLinearOpt.piecewiselinear`.
-- [ ] A sample piecewise hydro case validates, solves, and writes outputs.
-- [ ] Tests prove the piecewise hydro path and the linear hydro path both keep
+- [x] A sample piecewise hydro case validates, solves, and writes outputs.
+- [x] Tests prove the piecewise hydro path and the linear hydro path both keep
       working.
-- [ ] The full Julia regression suite remains green.
+- [x] The full Julia regression suite remains green.
+
+## Verification
+
+```powershell
+julia --project=. -e "import Pkg; Pkg.test()"
+```
+
+Result: 442 Julia tests passed.
 
 ## Blocked by
 

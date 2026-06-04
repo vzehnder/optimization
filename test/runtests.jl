@@ -280,6 +280,26 @@ function linear_hydro_system_case_document()
     return document
 end
 
+function piecewise_hydro_system_case_document()
+    document = linear_hydro_system_case_document()
+    document["case_name"] = "piecewise_hydro_system"
+
+    hydro = system_case_node(document, "hydro_1")
+    hydro["generation_mode"] = "piecewise_linear"
+    delete!(hydro, "power_per_flow_mw_per_m3s")
+    hydro["turbine_flow_min_m3s"] = 0.0
+    hydro["turbine_flow_max_m3s"] = 12.0
+    hydro["power_max_mw"] = 0.9
+    hydro["generation_curve"] = [
+        Dict{String,Any}("flow_m3s" => 0.0, "power_mw" => 0.0),
+        Dict{String,Any}("flow_m3s" => 4.0, "power_mw" => 0.75),
+        Dict{String,Any}("flow_m3s" => 8.0, "power_mw" => 0.55),
+        Dict{String,Any}("flow_m3s" => 12.0, "power_mw" => 0.9),
+    ]
+
+    return document
+end
+
 function local_load_system_case_document()
     document = minimal_system_case_document()
     document["case_name"] = "local_load_system"
@@ -356,6 +376,10 @@ end
 
 function sample_linear_hydro_system_case_path()
     return joinpath(@__DIR__, "..", "data", "cases", "linear_hydro_system", "system_case.json")
+end
+
+function sample_piecewise_hydro_system_case_path()
+    return joinpath(@__DIR__, "..", "data", "cases", "piecewise_hydro_system", "system_case.json")
 end
 
 function system_case_node(document, node_id::AbstractString)
@@ -964,6 +988,62 @@ end
         end
     end
 
+    @testset "sample piecewise hydro v2 case solves through API and CLI" begin
+        sample_path = sample_piecewise_hydro_system_case_path()
+        @test isfile(sample_path)
+
+        system_case = BESSDispatch.load_system_case(sample_path)
+        @test system_case.case_name == "piecewise_hydro_system"
+        @test system_case.schema_version == "bess_system_dispatch.v2"
+
+        optimization_case = BESSDispatch.normalize_system_case(system_case)
+        @test [asset.id for asset in optimization_case.hydros] == ["hydro_1"]
+        @test optimization_case.hydros[1].generation_mode == "piecewise_linear"
+        @test optimization_case.hydros[1].generation_curve == [
+            (0.0, 0.0),
+            (4.0, 0.75),
+            (8.0, 0.55),
+            (12.0, 0.9),
+        ]
+
+        result = BESSDispatch.solve_system_dispatch(optimization_case)
+        @test result.termination_status == "OPTIMAL"
+        @test all(result.hydro_turbine_flow_m3s .>= -POWER_TOLERANCE_MW)
+        @test all(result.hydro_turbine_flow_m3s .<= 12.0 + POWER_TOLERANCE_MW)
+        @test any(result.hydro_power_mw .> POWER_TOLERANCE_MW)
+        @test all(result.hydro_power_mw .<= 0.9 + POWER_TOLERANCE_MW)
+        @test all(result.hydro_reservoir_elevation_masl .>= 700.0 - ENERGY_TOLERANCE_MWH)
+        @test all(result.hydro_reservoir_elevation_masl .<= 720.0 + ENERGY_TOLERANCE_MWH)
+
+        mktempdir() do output_root
+            run_output = BESSDispatch.run_system_case(
+                sample_path;
+                output_root = output_root,
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+            @test isfile(run_output.dispatch_path)
+            @test isfile(run_output.asset_dispatch_path)
+            @test isfile(run_output.model_metadata_path)
+            @test any(row -> string(row.asset_type) == "hydro", CSV.File(run_output.asset_dispatch_path))
+
+            metadata = JSON3.read(read(run_output.model_metadata_path, String))
+            @test string(metadata.hydro_generation_modes.hydro_1) == "piecewise_linear"
+            @test metadata.active_constraint_flags.hydro_piecewise_generation == true
+            @test metadata.active_constraint_flags.hydro_reservoir_elevation_curve == true
+            @test string(metadata.piecewise_linear_library) == "PiecewiseLinearOpt"
+        end
+
+        mktempdir() do output_root
+            script_path = normpath(joinpath(@__DIR__, "..", "scripts", "run_system_case.jl"))
+            stdout = read(system_cli_command(script_path, sample_path, output_root), String)
+            payload = JSON3.read(stdout)
+
+            @test string(payload.case_name) == "piecewise_hydro_system"
+            @test string(payload.termination_status) == "OPTIMAL"
+            @test isfile(string(payload.summary_path))
+        end
+    end
+
     @testset "curtails excess renewable generation and applies configured penalty" begin
         mktempdir() do case_dir
             case_path = write_minimal_system_case_json(case_dir; document = curtailment_system_case_document())
@@ -1402,6 +1482,30 @@ end
             begin
                 document = linear_hydro_system_case_document()
                 document["time_series"][1]["hydro_inflow_m3s"] = Dict{String,Any}("hydro_1" => -1.0)
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 generation_curve flow_m3s must be strictly increasing", system_case_validation_message(
+            begin
+                document = piecewise_hydro_system_case_document()
+                hydro = system_case_node(document, "hydro_1")
+                hydro["generation_curve"][2]["flow_m3s"] = 0.0
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 generation_curve power_mw must be nonnegative and finite", system_case_validation_message(
+            begin
+                document = piecewise_hydro_system_case_document()
+                hydro = system_case_node(document, "hydro_1")
+                hydro["generation_curve"][2]["power_mw"] = -1.0
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 turbine_flow_max_m3s must lie within generation_curve domain", system_case_validation_message(
+            begin
+                document = piecewise_hydro_system_case_document()
+                hydro = system_case_node(document, "hydro_1")
+                hydro["turbine_flow_max_m3s"] = 13.0
                 document
             end,
         ))

@@ -22,7 +22,7 @@ triage label.
 | --- | --- | --- | --- | --- | --- | --- |
 | BESS-ITER5-000 | Review Hydro PRD And Mathematical Formulation | HITL | ready-for-agent | Done | None | [BESS-ITER5-000-review-hydro-prd-and-mathematical-formulation.md](BESS-ITER5-000-review-hydro-prd-and-mathematical-formulation.md) |
 | BESS-ITER5-001 | Run A Linear Hydro v2 System Case End To End | AFK | ready-for-agent | Done | BESS-ITER5-000 | [BESS-ITER5-001-run-a-linear-hydro-v2-system-case-end-to-end.md](BESS-ITER5-001-run-a-linear-hydro-v2-system-case-end-to-end.md) |
-| BESS-ITER5-002 | Run A Piecewise Hydro v2 System Case End To End | AFK | ready-for-agent | Todo | BESS-ITER5-001 | [BESS-ITER5-002-run-a-piecewise-hydro-v2-system-case-end-to-end.md](BESS-ITER5-002-run-a-piecewise-hydro-v2-system-case-end-to-end.md) |
+| BESS-ITER5-002 | Run A Piecewise Hydro v2 System Case End To End | AFK | ready-for-agent | Done | BESS-ITER5-001 | [BESS-ITER5-002-run-a-piecewise-hydro-v2-system-case-end-to-end.md](BESS-ITER5-002-run-a-piecewise-hydro-v2-system-case-end-to-end.md) |
 | BESS-ITER5-003 | Harden Hydro Contract Validation And v1 Regression | AFK | ready-for-agent | Todo | BESS-ITER5-001, BESS-ITER5-002 | [BESS-ITER5-003-harden-hydro-contract-validation-and-v1-regression.md](BESS-ITER5-003-harden-hydro-contract-validation-and-v1-regression.md) |
 | BESS-ITER5-004 | Create And Edit Hydro Assets In Structured Drafts | AFK | ready-for-agent | Todo | BESS-ITER5-003 | [BESS-ITER5-004-create-and-edit-hydro-assets-in-structured-drafts.md](BESS-ITER5-004-create-and-edit-hydro-assets-in-structured-drafts.md) |
 | BESS-ITER5-005 | Map Hydro Inflows From CSV And XLSX | AFK | ready-for-agent | Todo | BESS-ITER5-004 | [BESS-ITER5-005-map-hydro-inflows-from-csv-and-xlsx.md](BESS-ITER5-005-map-hydro-inflows-from-csv-and-xlsx.md) |
@@ -50,6 +50,7 @@ triage label.
 | --- | --- | --- | --- |
 | 2026-06-03 | BESS-ITER5-000 | Todo -> Done | Reviewed and accepted the hydro PRD and mathematical formulation against the final objective, completed Iteration 2 optimizer contract, completed Iteration 3 analyst workflow, and completed Iteration 4 structured editor workflow. No corrections were required. |
 | 2026-06-03 | BESS-ITER5-001 | Todo -> Done | Added the first `bess_system_dispatch.v2` linear hydro path in Julia: loader validation, normalization, reservoir balance, linear generation, spill/release/terminal economics, hydro outputs, sample case, API/CLI coverage, full Julia verification with 415 tests, and Python web regression verification with 67 tests. |
+| 2026-06-04 | BESS-ITER5-002 | Todo -> Done | Added explicit `PiecewiseLinearOpt` dependency, piecewise hydro generation curves with default `piecewiselinear` method, reservoir elevation modeled through `piecewiselinear`, nonmonotone sample case, API/CLI/output coverage, and full Julia verification with 442 tests. |
 
 ## Regression Guard
 

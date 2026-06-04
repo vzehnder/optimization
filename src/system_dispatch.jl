@@ -4,6 +4,7 @@ using Dates
 using HiGHS
 using JSON3
 using JuMP
+using PiecewiseLinearOpt
 
 const SYSTEM_SCHEMA_VERSION = "bess_system_dispatch.v1"
 const SYSTEM_SCHEMA_VERSION_V2 = "bess_system_dispatch.v2"
@@ -79,10 +80,11 @@ struct HydroAssetParameters
     spill_penalty_usd_per_hm3::Float64
     minimum_release_m3s::Float64
     generation_mode::String
-    power_per_flow_mw_per_m3s::Float64
+    power_per_flow_mw_per_m3s::Union{Float64,Nothing}
     power_max_mw::Union{Float64,Nothing}
     turbine_flow_min_m3s::Union{Float64,Nothing}
-    turbine_flow_max_m3s::Float64
+    turbine_flow_max_m3s::Union{Float64,Nothing}
+    generation_curve::Vector{Tuple{Float64,Float64}}
     reservoir_curve::Vector{Tuple{Float64,Float64}}
 end
 
@@ -124,6 +126,7 @@ struct SystemDispatchModel
     hydro_spill_flow_m3s::Matrix{JuMP.VariableRef}
     hydro_power_mw::Matrix{JuMP.VariableRef}
     hydro_storage_hm3::Matrix{JuMP.VariableRef}
+    hydro_reservoir_elevation_masl::Matrix{JuMP.VariableRef}
 end
 
 struct SystemDispatchResult
@@ -424,10 +427,16 @@ function parse_system_hydro_asset(node::SystemNode)::HydroAssetParameters
     )
     minimum_release = optional_float(get(node.attributes, "minimum_release_m3s", 0.0), "minimum_release_m3s")
     generation_mode = required_string(node.attributes, "generation_mode")
-    power_per_flow = required_float(node.attributes, "power_per_flow_mw_per_m3s")
+    power_per_flow = optional_float(
+        get(node.attributes, "power_per_flow_mw_per_m3s", nothing),
+        "power_per_flow_mw_per_m3s",
+    )
     power_max = optional_float(get(node.attributes, "power_max_mw", nothing), "power_max_mw")
     turbine_flow_min = optional_float(get(node.attributes, "turbine_flow_min_m3s", nothing), "turbine_flow_min_m3s")
-    turbine_flow_max = required_float(node.attributes, "turbine_flow_max_m3s")
+    turbine_flow_max = optional_float(get(node.attributes, "turbine_flow_max_m3s", nothing), "turbine_flow_max_m3s")
+    generation_curve = generation_mode == "piecewise_linear" ?
+                       parse_hydro_generation_curve(required_vector(node.attributes, "generation_curve"), node.id) :
+                       Tuple{Float64,Float64}[]
     reservoir_curve = parse_hydro_reservoir_curve(required_vector(node.attributes, "reservoir_curve"), node.id)
 
     hydro = HydroAssetParameters(
@@ -445,6 +454,7 @@ function parse_system_hydro_asset(node::SystemNode)::HydroAssetParameters
         power_max,
         turbine_flow_min,
         turbine_flow_max,
+        generation_curve,
         reservoir_curve,
     )
 
@@ -484,11 +494,19 @@ function validate_system_hydro(hydro::HydroAssetParameters)
     if !isfinite(hydro.minimum_release_m3s) || hydro.minimum_release_m3s < 0
         throw(ArgumentError("hydro $(hydro.id) minimum_release_m3s must be nonnegative"))
     end
-    if hydro.generation_mode != "linear"
-        throw(ArgumentError("hydro $(hydro.id) generation_mode must be linear for this slice"))
+    if !(hydro.generation_mode in ("linear", "piecewise_linear"))
+        throw(ArgumentError("hydro $(hydro.id) generation_mode must be one of linear, piecewise_linear"))
     end
-    if !isfinite(hydro.power_per_flow_mw_per_m3s) || hydro.power_per_flow_mw_per_m3s < 0
-        throw(ArgumentError("hydro $(hydro.id) power_per_flow_mw_per_m3s must be nonnegative"))
+    if hydro.generation_mode == "linear"
+        if hydro.power_per_flow_mw_per_m3s === nothing
+            throw(ArgumentError("hydro $(hydro.id) power_per_flow_mw_per_m3s is required for linear generation"))
+        end
+        if !isfinite(hydro.power_per_flow_mw_per_m3s) || hydro.power_per_flow_mw_per_m3s < 0
+            throw(ArgumentError("hydro $(hydro.id) power_per_flow_mw_per_m3s must be nonnegative"))
+        end
+        if hydro.turbine_flow_max_m3s === nothing
+            throw(ArgumentError("hydro $(hydro.id) turbine_flow_max_m3s is required for linear generation"))
+        end
     end
     if hydro.power_max_mw !== nothing && (!isfinite(hydro.power_max_mw) || hydro.power_max_mw < 0)
         throw(ArgumentError("hydro $(hydro.id) power_max_mw must be nonnegative"))
@@ -497,11 +515,26 @@ function validate_system_hydro(hydro::HydroAssetParameters)
        (!isfinite(hydro.turbine_flow_min_m3s) || hydro.turbine_flow_min_m3s < 0)
         throw(ArgumentError("hydro $(hydro.id) turbine_flow_min_m3s must be nonnegative"))
     end
-    if !isfinite(hydro.turbine_flow_max_m3s) || hydro.turbine_flow_max_m3s < 0
+    if hydro.turbine_flow_max_m3s !== nothing &&
+       (!isfinite(hydro.turbine_flow_max_m3s) || hydro.turbine_flow_max_m3s < 0)
         throw(ArgumentError("hydro $(hydro.id) turbine_flow_max_m3s must be nonnegative"))
     end
-    if hydro.turbine_flow_min_m3s !== nothing && hydro.turbine_flow_min_m3s > hydro.turbine_flow_max_m3s
+    if hydro.turbine_flow_min_m3s !== nothing &&
+       hydro.turbine_flow_max_m3s !== nothing &&
+       hydro.turbine_flow_min_m3s > hydro.turbine_flow_max_m3s
         throw(ArgumentError("hydro $(hydro.id) turbine_flow_min_m3s must not exceed turbine_flow_max_m3s"))
+    end
+    if hydro.generation_mode == "piecewise_linear"
+        curve_min = first(hydro.generation_curve)[1]
+        curve_max = last(hydro.generation_curve)[1]
+        for (name, value) in (
+            ("turbine_flow_min_m3s", hydro.turbine_flow_min_m3s),
+            ("turbine_flow_max_m3s", hydro.turbine_flow_max_m3s),
+        )
+            if value !== nothing && (value < curve_min || value > curve_max)
+                throw(ArgumentError("hydro $(hydro.id) $name must lie within generation_curve domain"))
+            end
+        end
     end
 
     curve_min = first(hydro.reservoir_curve)[1]
@@ -519,6 +552,39 @@ function validate_system_hydro(hydro::HydroAssetParameters)
             throw(ArgumentError("hydro $(hydro.id) storage values must lie within reservoir_curve domain"))
         end
     end
+end
+
+function parse_hydro_generation_curve(curve_values, hydro_id::String)::Vector{Tuple{Float64,Float64}}
+    if length(curve_values) < 2
+        throw(ArgumentError("hydro $hydro_id generation_curve must contain at least two breakpoints"))
+    end
+
+    curve = Tuple{Float64,Float64}[]
+    previous_flow = nothing
+    for (index, point) in enumerate(curve_values)
+        point_dict = to_string_key_dict(point)
+        flow = parse_required_float(
+            required_value(point_dict, "flow_m3s"),
+            "generation_curve[$index].flow_m3s",
+        )
+        power = parse_required_float(
+            required_value(point_dict, "power_mw"),
+            "generation_curve[$index].power_mw",
+        )
+        if !isfinite(flow) || flow < 0
+            throw(ArgumentError("hydro $hydro_id generation_curve flow_m3s must be nonnegative and finite"))
+        end
+        if previous_flow !== nothing && !(previous_flow < flow)
+            throw(ArgumentError("hydro $hydro_id generation_curve flow_m3s must be strictly increasing"))
+        end
+        if !isfinite(power) || power < 0
+            throw(ArgumentError("hydro $hydro_id generation_curve power_mw must be nonnegative and finite"))
+        end
+        push!(curve, (flow, power))
+        previous_flow = flow
+    end
+
+    return curve
 end
 
 function parse_hydro_reservoir_curve(curve_values, hydro_id::String)::Vector{Tuple{Float64,Float64}}
@@ -587,6 +653,7 @@ function build_system_dispatch_model(data::SystemOptimizationData)::SystemDispat
     @variable(model, hydro_spill_flow_m3s[1:n_hydros, 1:n_periods] >= 0)
     @variable(model, hydro_power_mw[1:n_hydros, 1:n_periods] >= 0)
     @variable(model, hydro_storage_hm3[1:n_hydros, 1:n_periods])
+    @variable(model, hydro_reservoir_elevation_masl[1:n_hydros, 1:n_periods])
 
     grid_import_bounds = system_grid_import_bounds(data)
     grid_export_bounds = system_grid_export_bounds(data)
@@ -723,13 +790,14 @@ function build_system_dispatch_model(data::SystemOptimizationData)::SystemDispat
         @constraint(
             model,
             [period in 1:n_periods],
-            hydro_turbine_flow_m3s[hydro_index, period] <= hydro.turbine_flow_max_m3s
+            hydro_turbine_flow_m3s[hydro_index, period] <= hydro_turbine_flow_upper_bound(hydro)
         )
-        if hydro.turbine_flow_min_m3s !== nothing
+        turbine_flow_lower_bound = hydro_turbine_flow_lower_bound(hydro)
+        if turbine_flow_lower_bound > 0.0
             @constraint(
                 model,
                 [period in 1:n_periods],
-                hydro_turbine_flow_m3s[hydro_index, period] >= hydro.turbine_flow_min_m3s
+                hydro_turbine_flow_m3s[hydro_index, period] >= turbine_flow_lower_bound
             )
         end
         @constraint(
@@ -738,18 +806,43 @@ function build_system_dispatch_model(data::SystemOptimizationData)::SystemDispat
             hydro_turbine_flow_m3s[hydro_index, period] + hydro_spill_flow_m3s[hydro_index, period] >=
             hydro.minimum_release_m3s
         )
-        @constraint(
-            model,
-            [period in 1:n_periods],
-            hydro_power_mw[hydro_index, period] ==
-            hydro.power_per_flow_mw_per_m3s * hydro_turbine_flow_m3s[hydro_index, period]
-        )
+        if hydro.generation_mode == "linear"
+            @constraint(
+                model,
+                [period in 1:n_periods],
+                hydro_power_mw[hydro_index, period] ==
+                hydro.power_per_flow_mw_per_m3s * hydro_turbine_flow_m3s[hydro_index, period]
+            )
+        else
+            flow_breakpoints = hydro_generation_flow_breakpoints(hydro)
+            power_breakpoints = hydro_generation_power_breakpoints(hydro)
+            for period in 1:n_periods
+                piecewise_power = PiecewiseLinearOpt.piecewiselinear(
+                    model,
+                    hydro_turbine_flow_m3s[hydro_index, period],
+                    flow_breakpoints,
+                    power_breakpoints,
+                )
+                @constraint(model, hydro_power_mw[hydro_index, period] == piecewise_power)
+            end
+        end
         if hydro.power_max_mw !== nothing
             @constraint(
                 model,
                 [period in 1:n_periods],
                 hydro_power_mw[hydro_index, period] <= hydro.power_max_mw
             )
+        end
+        storage_breakpoints = hydro_reservoir_storage_breakpoints(hydro)
+        elevation_breakpoints = hydro_reservoir_elevation_breakpoints(hydro)
+        for period in 1:n_periods
+            piecewise_elevation = PiecewiseLinearOpt.piecewiselinear(
+                model,
+                hydro_storage_hm3[hydro_index, period],
+                storage_breakpoints,
+                elevation_breakpoints,
+            )
+            @constraint(model, hydro_reservoir_elevation_masl[hydro_index, period] == piecewise_elevation)
         end
 
         @constraint(
@@ -859,6 +952,7 @@ function build_system_dispatch_model(data::SystemOptimizationData)::SystemDispat
         hydro_spill_flow_m3s,
         hydro_power_mw,
         hydro_storage_hm3,
+        hydro_reservoir_elevation_masl,
     )
 end
 
@@ -887,6 +981,7 @@ function solve_system_dispatch(data::SystemOptimizationData)::SystemDispatchResu
     hydro_spill_flow = value.(dispatch_model.hydro_spill_flow_m3s)
     hydro_power = value.(dispatch_model.hydro_power_mw)
     hydro_storage = value.(dispatch_model.hydro_storage_hm3)
+    hydro_elevation = value.(dispatch_model.hydro_reservoir_elevation_masl)
 
     battery_delta_soc_abs = realized_system_delta_soc_abs(data, battery_energy)
     grid_import = period_sum(p_grid_import, length(data.timestamp))
@@ -911,17 +1006,12 @@ function solve_system_dispatch(data::SystemOptimizationData)::SystemDispatchResu
     hydro_turbine_volume = hydro_volume_matrix(hydro_turbine_flow, data.duration_hours)
     hydro_spill_volume = hydro_volume_matrix(hydro_spill_flow, data.duration_hours)
     hydro_spill_penalty = zeros(size(hydro_spill_volume))
-    hydro_elevation = zeros(size(hydro_storage))
     hydro_terminal_value = zeros(length(data.hydros))
     for (hydro_index, hydro) in enumerate(data.hydros)
         hydro_spill_penalty[hydro_index, :] .=
             hydro.spill_penalty_usd_per_hm3 .* hydro_spill_volume[hydro_index, :]
         hydro_terminal_value[hydro_index] =
             hydro.terminal_water_value_usd_per_hm3 * hydro_storage[hydro_index, end]
-        for period in axes(hydro_storage, 2)
-            hydro_elevation[hydro_index, period] =
-                reservoir_elevation_masl(hydro, hydro_storage[hydro_index, period])
-        end
     end
 
     return SystemDispatchResult(
@@ -1308,9 +1398,7 @@ function derived_system_grid_bound(data::SystemOptimizationData)::Float64
     renewable_power = isempty(data.renewable_available_power_mw) ? 0.0 : maximum(data.renewable_available_power_mw)
     load_power = isempty(data.load_demand_mw) ? 0.0 : maximum(data.load_demand_mw)
     hydro_power = sum(
-        hydro.power_max_mw === nothing ?
-        hydro.power_per_flow_mw_per_m3s * hydro.turbine_flow_max_m3s :
-        hydro.power_max_mw for hydro in data.hydros;
+        hydro_power_upper_bound(hydro) for hydro in data.hydros;
         init = 0.0,
     )
 
@@ -1345,6 +1433,49 @@ function hydro_volume_matrix(flow_m3s::Matrix{Float64}, duration_hours::Vector{F
     end
 
     return volumes
+end
+
+function hydro_generation_flow_breakpoints(hydro::HydroAssetParameters)::Vector{Float64}
+    return [point[1] for point in hydro.generation_curve]
+end
+
+function hydro_generation_power_breakpoints(hydro::HydroAssetParameters)::Vector{Float64}
+    return [point[2] for point in hydro.generation_curve]
+end
+
+function hydro_reservoir_storage_breakpoints(hydro::HydroAssetParameters)::Vector{Float64}
+    return [point[1] for point in hydro.reservoir_curve]
+end
+
+function hydro_reservoir_elevation_breakpoints(hydro::HydroAssetParameters)::Vector{Float64}
+    return [point[2] for point in hydro.reservoir_curve]
+end
+
+function hydro_turbine_flow_lower_bound(hydro::HydroAssetParameters)::Float64
+    if hydro.turbine_flow_min_m3s !== nothing
+        return hydro.turbine_flow_min_m3s
+    end
+    if hydro.generation_mode == "piecewise_linear"
+        return first(hydro.generation_curve)[1]
+    end
+    return 0.0
+end
+
+function hydro_turbine_flow_upper_bound(hydro::HydroAssetParameters)::Float64
+    if hydro.turbine_flow_max_m3s !== nothing
+        return hydro.turbine_flow_max_m3s
+    end
+    return last(hydro.generation_curve)[1]
+end
+
+function hydro_power_upper_bound(hydro::HydroAssetParameters)::Float64
+    if hydro.power_max_mw !== nothing
+        return hydro.power_max_mw
+    end
+    if hydro.generation_mode == "piecewise_linear"
+        return maximum(hydro_generation_power_breakpoints(hydro))
+    end
+    return hydro.power_per_flow_mw_per_m3s * hydro_turbine_flow_upper_bound(hydro)
 end
 
 function reservoir_elevation_masl(hydro::HydroAssetParameters, storage_hm3::Float64)::Float64
@@ -1867,6 +1998,11 @@ function system_model_metadata_dict(data::SystemOptimizationData)::Dict{String,A
             ),
             "hydro_storage_balance" => !isempty(data.hydros),
             "hydro_linear_generation" => any(hydro.generation_mode == "linear" for hydro in data.hydros),
+            "hydro_piecewise_generation" => any(
+                hydro.generation_mode == "piecewise_linear" for hydro in data.hydros
+            ),
+            "hydro_reservoir_elevation_curve" => !isempty(data.hydros),
+            "hydro_power_max" => any(hydro.power_max_mw !== nothing for hydro in data.hydros),
             "hydro_minimum_release" => any(hydro.minimum_release_m3s > 0 for hydro in data.hydros),
             "hydro_terminal_condition" => any(hydro.terminal_condition != "none" for hydro in data.hydros),
         ),
@@ -1893,6 +2029,7 @@ function system_model_metadata_dict(data::SystemOptimizationData)::Dict{String,A
             "terminal_water_value" => "USD/hm3",
             "spill_penalty" => "USD/hm3",
         )
+        metadata["piecewise_linear_library"] = "PiecewiseLinearOpt"
     end
 
     return metadata

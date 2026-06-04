@@ -1,0 +1,134 @@
+{
+  "schema_version": "bess_system_dispatch.v2",
+  "case_name": "piecewise_hydro_system",
+  "nodes": [
+    {
+      "id": "bus_1",
+      "type": "bus"
+    },
+    {
+      "id": "solar_1",
+      "type": "renewable"
+    },
+    {
+      "id": "battery_1",
+      "type": "battery",
+      "charge_power_max_mw": 0.0,
+      "discharge_power_max_mw": 0.0,
+      "energy_min_mwh": 0.0,
+      "energy_max_mwh": 1.0,
+      "initial_energy_mwh": 0.0,
+      "charge_efficiency": 1.0,
+      "discharge_efficiency": 1.0,
+      "degradation_cost_per_mwh_delta_soc": 0.0,
+      "prevent_simultaneous_charge_discharge": true,
+      "terminal_condition": "none",
+      "terminal_energy_min_mwh": null,
+      "degradation_linear_delta_soc": false
+    },
+    {
+      "id": "grid_1",
+      "type": "grid",
+      "import_power_max_mw": 0.0,
+      "export_power_max_mw": 5.0,
+      "prevent_simultaneous_grid_import_export": true
+    },
+    {
+      "id": "hydro_1",
+      "type": "hydro",
+      "storage_min_hm3": 1.0,
+      "storage_max_hm3": 5.0,
+      "initial_storage_hm3": 2.5,
+      "generation_mode": "piecewise_linear",
+      "turbine_flow_min_m3s": 0.0,
+      "turbine_flow_max_m3s": 12.0,
+      "power_max_mw": 0.9,
+      "minimum_release_m3s": 1.0,
+      "spill_penalty_usd_per_hm3": 100.0,
+      "terminal_condition": "min_terminal",
+      "terminal_storage_min_hm3": 2.3,
+      "terminal_water_value_usd_per_hm3": 10.0,
+      "generation_curve": [
+        {
+          "flow_m3s": 0.0,
+          "power_mw": 0.0
+        },
+        {
+          "flow_m3s": 4.0,
+          "power_mw": 0.75
+        },
+        {
+          "flow_m3s": 8.0,
+          "power_mw": 0.55
+        },
+        {
+          "flow_m3s": 12.0,
+          "power_mw": 0.9
+        }
+      ],
+      "reservoir_curve": [
+        {
+          "storage_hm3": 1.0,
+          "elevation_masl": 700.0
+        },
+        {
+          "storage_hm3": 3.0,
+          "elevation_masl": 710.0
+        },
+        {
+          "storage_hm3": 5.0,
+          "elevation_masl": 720.0
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "solar_1",
+      "to": "bus_1"
+    },
+    {
+      "from": "battery_1",
+      "to": "bus_1"
+    },
+    {
+      "from": "grid_1",
+      "to": "bus_1"
+    },
+    {
+      "from": "hydro_1",
+      "to": "bus_1"
+    }
+  ],
+  "time_series": [
+    {
+      "timestamp": "2026-01-01T00:00:00",
+      "duration_hours": 1.0,
+      "import_price_usd_per_mwh": 40.0,
+      "export_price_usd_per_mwh": 60.0,
+      "renewable_available_power_mw": {
+        "solar_1": 0.0
+      },
+      "hydro_inflow_m3s": {
+        "hydro_1": 30.0
+      }
+    },
+    {
+      "timestamp": "2026-01-01T01:00:00",
+      "duration_hours": 1.0,
+      "import_price_usd_per_mwh": 40.0,
+      "export_price_usd_per_mwh": 120.0,
+      "renewable_available_power_mw": {
+        "solar_1": 0.0
+      },
+      "hydro_inflow_m3s": {
+        "hydro_1": 30.0
+      }
+    }
+  ],
+  "constraints": {},
+  "solver": {
+    "name": "HiGHS",
+    "options": {}
+  }
+}
