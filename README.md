@@ -78,20 +78,40 @@ When separate prices are present, import cost and export revenue drive the
 objective and are included in result outputs. Legacy single-price cases remain
 valid and keep the existing `price_usd_per_mwh` output column.
 
+Iteration 5 adds the first `bess_system_dispatch.v2` Julia contract path for a
+linear simple-reservoir hydro asset. The sample lives at
+`data/cases/linear_hydro_system/system_case.json` and can be run through the
+same API or CLI:
+
+```powershell
+julia --project=. scripts/run_system_case.jl data/cases/linear_hydro_system/system_case.json --output-root outputs
+```
+
+The linear hydro node uses `hydro_inflow_m3s` time-series values, reservoir
+storage in `hm3`, turbine and spill flows in `m3/s`, a mandatory reservoir
+storage/elevation curve, terminal storage settings, spill penalty, and terminal
+water value. Legacy `bess_system_dispatch.v1` cases remain accepted.
+
 Each system run folder contains:
 
 - `dispatch.csv`: one row per period with system totals including
   `grid_import_mw`, `grid_export_mw`, `renewable_curtailed_mw`,
   `load_demand_mw`, battery totals, market value, and period profit. Separate
   price runs also include import/export prices, import cost, export revenue,
-  and net market value columns.
+  and net market value columns. Hydro v2 runs also include total hydro power,
+  inflow, turbine flow, spill flow, storage, spill penalty, and terminal water
+  value columns.
 - `asset_dispatch.csv`: long asset-level rows keyed by `asset_id`, with the
   same grid, renewable, load, and battery dispatch fields for dynamic UI tables.
+  Hydro v2 runs include `asset_type = hydro` rows with hydro power, inflow,
+  turbine flow, spill flow, volumes, storage, reservoir elevation, spill
+  penalty, and terminal water value.
 - `summary.json`: compact run status, objective value, source identifiers, and
-  model version.
+  model version. Hydro v2 runs include hydro KPIs by asset and hydro totals.
 - `system_case_resolved.json`: normalized copy of the accepted input contract.
 - `model_metadata.json`: model name, schema version, bus ID, period count,
-  asset IDs, active constraint flags, and unit conventions.
+  asset IDs, active constraint flags, and unit conventions, including hydro
+  unit conventions when hydro assets are present.
 
 ## Generate The Plotly Report
 

@@ -217,6 +217,69 @@ function separate_price_system_case_document()
     return document
 end
 
+function linear_hydro_system_case_document()
+    document = minimal_system_case_document()
+    document["schema_version"] = "bess_system_dispatch.v2"
+    document["case_name"] = "linear_hydro_system"
+
+    battery = system_case_node(document, "battery_1")
+    battery["charge_power_max_mw"] = 0.0
+    battery["discharge_power_max_mw"] = 0.0
+    battery["energy_min_mwh"] = 0.0
+    battery["energy_max_mwh"] = 1.0
+    battery["initial_energy_mwh"] = 0.0
+    battery["terminal_condition"] = "none"
+    battery["degradation_linear_delta_soc"] = false
+
+    grid = system_case_node(document, "grid_1")
+    grid["import_power_max_mw"] = 0.0
+    grid["export_power_max_mw"] = 5.0
+
+    push!(document["nodes"], Dict{String,Any}(
+        "id" => "hydro_1",
+        "type" => "hydro",
+        "storage_min_hm3" => 1.0,
+        "storage_max_hm3" => 5.0,
+        "initial_storage_hm3" => 2.5,
+        "generation_mode" => "linear",
+        "power_per_flow_mw_per_m3s" => 0.1,
+        "turbine_flow_max_m3s" => 10.0,
+        "power_max_mw" => 1.0,
+        "minimum_release_m3s" => 1.0,
+        "spill_penalty_usd_per_hm3" => 100.0,
+        "terminal_condition" => "min_terminal",
+        "terminal_storage_min_hm3" => 2.3,
+        "terminal_water_value_usd_per_hm3" => 10.0,
+        "reservoir_curve" => [
+            Dict{String,Any}("storage_hm3" => 1.0, "elevation_masl" => 700.0),
+            Dict{String,Any}("storage_hm3" => 3.0, "elevation_masl" => 710.0),
+            Dict{String,Any}("storage_hm3" => 5.0, "elevation_masl" => 720.0),
+        ],
+    ))
+    push!(document["edges"], Dict{String,Any}("from" => "hydro_1", "to" => "bus_1"))
+
+    document["time_series"] = [
+        Dict{String,Any}(
+            "timestamp" => "2026-01-01T00:00:00",
+            "duration_hours" => 1.0,
+            "import_price_usd_per_mwh" => 40.0,
+            "export_price_usd_per_mwh" => 60.0,
+            "renewable_available_power_mw" => Dict{String,Any}("solar_1" => 0.0),
+            "hydro_inflow_m3s" => Dict{String,Any}("hydro_1" => 30.0),
+        ),
+        Dict{String,Any}(
+            "timestamp" => "2026-01-01T01:00:00",
+            "duration_hours" => 1.0,
+            "import_price_usd_per_mwh" => 40.0,
+            "export_price_usd_per_mwh" => 120.0,
+            "renewable_available_power_mw" => Dict{String,Any}("solar_1" => 0.0),
+            "hydro_inflow_m3s" => Dict{String,Any}("hydro_1" => 30.0),
+        ),
+    ]
+
+    return document
+end
+
 function local_load_system_case_document()
     document = minimal_system_case_document()
     document["case_name"] = "local_load_system"
@@ -289,6 +352,10 @@ end
 
 function sample_hybrid_system_case_path()
     return joinpath(@__DIR__, "..", "data", "cases", "hybrid_system", "system_case.json")
+end
+
+function sample_linear_hydro_system_case_path()
+    return joinpath(@__DIR__, "..", "data", "cases", "linear_hydro_system", "system_case.json")
 end
 
 function system_case_node(document, node_id::AbstractString)
@@ -801,6 +868,102 @@ end
         end
     end
 
+    @testset "runs linear hydro v2 system case end to end" begin
+        mktempdir() do case_dir
+            case_path = write_minimal_system_case_json(case_dir; document = linear_hydro_system_case_document())
+
+            system_case = BESSDispatch.load_system_case(case_path)
+            @test system_case.schema_version == "bess_system_dispatch.v2"
+
+            optimization_case = BESSDispatch.normalize_system_case(system_case)
+            @test optimization_case.case_name == "linear_hydro_system"
+            @test [asset.id for asset in optimization_case.hydros] == ["hydro_1"]
+            @test optimization_case.hydro_inflow_m3s == [30.0 30.0]
+            @test optimization_case.hydros[1].generation_mode == "linear"
+
+            result = BESSDispatch.solve_system_dispatch(optimization_case)
+            @test result.termination_status == "OPTIMAL"
+            @test all(result.hydro_turbine_flow_m3s .>= 1.0 - POWER_TOLERANCE_MW)
+            @test all(isapprox.(
+                result.hydro_power_mw,
+                result.hydro_turbine_flow_m3s .* 0.1;
+                atol = POWER_TOLERANCE_MW,
+            ))
+            @test all(result.hydro_storage_hm3 .>= 2.3 - ENERGY_TOLERANCE_MWH)
+            @test result.p_grid_export_mw[1, 2] > POWER_TOLERANCE_MW
+            @test result.hydro_terminal_water_value_usd[1] > 0.0
+
+            run_output = BESSDispatch.run_system_case(
+                case_path;
+                output_root = joinpath(case_dir, "outputs"),
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+
+            dispatch_rows = collect(CSV.File(run_output.dispatch_path))
+            @test :total_hydro_power_mw in propertynames(dispatch_rows[1])
+            @test :total_hydro_turbine_flow_m3s in propertynames(dispatch_rows[1])
+            @test :total_hydro_storage_hm3 in propertynames(dispatch_rows[1])
+            @test dispatch_rows[2].total_hydro_power_mw > POWER_TOLERANCE_MW
+
+            asset_rows = collect(CSV.File(run_output.asset_dispatch_path))
+            hydro_rows = [row for row in asset_rows if string(row.asset_id) == "hydro_1"]
+            @test length(hydro_rows) == 2
+            @test all(row -> string(row.asset_type) == "hydro", hydro_rows)
+            @test all(row -> row.hydro_inflow_m3s == 30.0, hydro_rows)
+            @test all(row -> isapprox(row.hydro_power_mw, row.hydro_turbine_flow_m3s * 0.1; atol = POWER_TOLERANCE_MW), hydro_rows)
+            @test all(row -> row.hydro_reservoir_elevation_masl >= 700.0, hydro_rows)
+
+            summary = JSON3.read(read(run_output.summary_path, String))
+            @test haskey(summary, :hydro_kpis_by_asset)
+            @test summary.hydro_totals.total_hydro_generation_mwh > 0.0
+            @test summary.hydro_kpis_by_asset.hydro_1.final_storage_hm3 >= 2.3 - ENERGY_TOLERANCE_MWH
+
+            metadata = JSON3.read(read(run_output.model_metadata_path, String))
+            @test string(metadata.schema_version) == "bess_system_dispatch.v2"
+            @test collect(string.(metadata.asset_ids.hydros)) == ["hydro_1"]
+            @test string(metadata.hydro_generation_modes.hydro_1) == "linear"
+            @test string(metadata.unit_conventions.reservoir_storage) == "hm3"
+        end
+    end
+
+    @testset "sample linear hydro v2 case solves through API and CLI" begin
+        sample_path = sample_linear_hydro_system_case_path()
+        @test isfile(sample_path)
+
+        system_case = BESSDispatch.load_system_case(sample_path)
+        @test system_case.case_name == "linear_hydro_system"
+        @test system_case.schema_version == "bess_system_dispatch.v2"
+
+        optimization_case = BESSDispatch.normalize_system_case(system_case)
+        @test [asset.id for asset in optimization_case.hydros] == ["hydro_1"]
+        @test optimization_case.hydro_inflow_m3s == [30.0 30.0]
+
+        result = BESSDispatch.solve_system_dispatch(optimization_case)
+        @test result.termination_status == "OPTIMAL"
+        @test any(result.hydro_power_mw .> POWER_TOLERANCE_MW)
+
+        mktempdir() do output_root
+            run_output = BESSDispatch.run_system_case(
+                sample_path;
+                output_root = output_root,
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+            @test isfile(run_output.dispatch_path)
+            @test isfile(run_output.asset_dispatch_path)
+            @test any(row -> string(row.asset_type) == "hydro", CSV.File(run_output.asset_dispatch_path))
+        end
+
+        mktempdir() do output_root
+            script_path = normpath(joinpath(@__DIR__, "..", "scripts", "run_system_case.jl"))
+            stdout = read(system_cli_command(script_path, sample_path, output_root), String)
+            payload = JSON3.read(stdout)
+
+            @test string(payload.case_name) == "linear_hydro_system"
+            @test string(payload.termination_status) == "OPTIMAL"
+            @test isfile(string(payload.summary_path))
+        end
+    end
+
     @testset "curtails excess renewable generation and applies configured penalty" begin
         mktempdir() do case_dir
             case_path = write_minimal_system_case_json(case_dir; document = curtailment_system_case_document())
@@ -1021,6 +1184,7 @@ end
         exported_names = Set(names(BESSDispatch))
         required_public_names = [
             :SystemGraphData,
+            :HydroAssetParameters,
             :SystemOptimizationData,
             :SystemDispatchResult,
             :SystemRunOutput,
@@ -1153,8 +1317,8 @@ end
         @test occursin("schema_version is required", invalid_system_case_error_text(
             document -> delete!(document, "schema_version"),
         ))
-        @test occursin("schema_version must be bess_system_dispatch.v1", invalid_system_case_error_text(
-            document -> document["schema_version"] = "bess_system_dispatch.v2",
+        @test occursin("schema_version must be one of", invalid_system_case_error_text(
+            document -> document["schema_version"] = "bess_system_dispatch.v3",
         ))
         @test occursin("node id battery_1 is duplicated", invalid_system_case_error_text(
             document -> system_case_node(document, "solar_1")["id"] = "battery_1",
@@ -1218,6 +1382,28 @@ end
         ))
         @test occursin("load_demand_mw[load_1] at time_series[1] must be nonnegative", invalid_system_case_error_text(
             document -> add_load_node!(document; demands = [-1.0, 1.0]),
+        ))
+
+        @test occursin("hydro nodes require schema_version bess_system_dispatch.v2", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                document["schema_version"] = "bess_system_dispatch.v1"
+                document
+            end,
+        ))
+        @test occursin("hydro_inflow_m3s for asset hydro_1 is required", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                delete!(document["time_series"][1], "hydro_inflow_m3s")
+                document
+            end,
+        ))
+        @test occursin("hydro_inflow_m3s[hydro_1] at time_series[1] must be nonnegative", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                document["time_series"][1]["hydro_inflow_m3s"] = Dict{String,Any}("hydro_1" => -1.0)
+                document
+            end,
         ))
     end
 

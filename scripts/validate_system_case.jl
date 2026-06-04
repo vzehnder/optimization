@@ -25,6 +25,7 @@ function system_validation_success_payload(data::BESSDispatch.SystemOptimization
             "renewable" => length(data.renewables),
             "grid" => length(data.grids),
             "load" => length(data.loads),
+            "hydro" => length(data.hydros),
         ),
     )
 end

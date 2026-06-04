@@ -1,6 +1,6 @@
 # BESS-ITER5-001: Run A Linear Hydro v2 System Case End To End
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/iter5/prd_hydro_simple_dispatch.md`
@@ -23,28 +23,37 @@ system case.
 
 ## Acceptance criteria
 
-- [ ] `bess_system_dispatch.v2` is accepted by the system-case loader.
-- [ ] Legacy `bess_system_dispatch.v1` remains accepted by the loader.
-- [ ] A `hydro` node with linear generation can be parsed, validated, and
+- [x] `bess_system_dispatch.v2` is accepted by the system-case loader.
+- [x] Legacy `bess_system_dispatch.v1` remains accepted by the loader.
+- [x] A `hydro` node with linear generation can be parsed, validated, and
       normalized.
-- [ ] Hydro inflow in `m3/s` is required for every hydro asset and period.
-- [ ] The reservoir balance updates storage in `hm3` using duration-based
+- [x] Hydro inflow in `m3/s` is required for every hydro asset and period.
+- [x] The reservoir balance updates storage in `hm3` using duration-based
       flow-to-volume conversion.
-- [ ] Storage bounds, initial storage, terminal condition, spill, minimum
+- [x] Storage bounds, initial storage, terminal condition, spill, minimum
       release, spill penalty, and terminal water value are enforced.
-- [ ] Linear hydro power equals
+- [x] Linear hydro power equals
       `power_per_flow_mw_per_m3s * turbine_flow_m3s`.
-- [ ] Hydro power enters the one-bus balance as supply.
-- [ ] `dispatch.csv` includes hydro total columns.
-- [ ] `asset_dispatch.csv` includes `asset_type = hydro` rows with hydro
+- [x] Hydro power enters the one-bus balance as supply.
+- [x] `dispatch.csv` includes hydro total columns.
+- [x] `asset_dispatch.csv` includes `asset_type = hydro` rows with hydro
       metrics.
-- [ ] `summary.json` includes hydro KPIs by asset and totals.
-- [ ] `model_metadata.json` includes `v2`, hydro asset IDs, hydro unit
+- [x] `summary.json` includes hydro KPIs by asset and totals.
+- [x] `model_metadata.json` includes `v2`, hydro asset IDs, hydro unit
       conventions, and active hydro constraints.
-- [ ] A sample linear hydro `system_case.json` exists under `data/cases` and
+- [x] A sample linear hydro `system_case.json` exists under `data/cases` and
       solves through the Julia API and CLI.
-- [ ] The full Julia regression suite remains green.
+- [x] The full Julia regression suite remains green.
 
 ## Blocked by
 
 BESS-ITER5-000
+
+## Verification
+
+```powershell
+julia --project=. -e "import Pkg; Pkg.test()"
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Result: 415 Julia tests passed and 67 Python tests passed.
