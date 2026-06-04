@@ -20,7 +20,7 @@ triage label.
 
 | ID | Title | Type | Triage | Status | Blocked by | Issue file |
 | --- | --- | --- | --- | --- | --- | --- |
-| BESS-ITER5-000 | Review Hydro PRD And Mathematical Formulation | HITL | ready-for-agent | Todo | None | [BESS-ITER5-000-review-hydro-prd-and-mathematical-formulation.md](BESS-ITER5-000-review-hydro-prd-and-mathematical-formulation.md) |
+| BESS-ITER5-000 | Review Hydro PRD And Mathematical Formulation | HITL | ready-for-agent | Done | None | [BESS-ITER5-000-review-hydro-prd-and-mathematical-formulation.md](BESS-ITER5-000-review-hydro-prd-and-mathematical-formulation.md) |
 | BESS-ITER5-001 | Run A Linear Hydro v2 System Case End To End | AFK | ready-for-agent | Todo | BESS-ITER5-000 | [BESS-ITER5-001-run-a-linear-hydro-v2-system-case-end-to-end.md](BESS-ITER5-001-run-a-linear-hydro-v2-system-case-end-to-end.md) |
 | BESS-ITER5-002 | Run A Piecewise Hydro v2 System Case End To End | AFK | ready-for-agent | Todo | BESS-ITER5-001 | [BESS-ITER5-002-run-a-piecewise-hydro-v2-system-case-end-to-end.md](BESS-ITER5-002-run-a-piecewise-hydro-v2-system-case-end-to-end.md) |
 | BESS-ITER5-003 | Harden Hydro Contract Validation And v1 Regression | AFK | ready-for-agent | Todo | BESS-ITER5-001, BESS-ITER5-002 | [BESS-ITER5-003-harden-hydro-contract-validation-and-v1-regression.md](BESS-ITER5-003-harden-hydro-contract-validation-and-v1-regression.md) |
@@ -43,6 +43,12 @@ triage label.
 8. BESS-ITER5-007
 9. BESS-ITER5-008
 10. BESS-ITER5-009
+
+## Progress Log
+
+| Date | Issue | Status change | Notes |
+| --- | --- | --- | --- |
+| 2026-06-03 | BESS-ITER5-000 | Todo -> Done | Reviewed and accepted the hydro PRD and mathematical formulation against the final objective, completed Iteration 2 optimizer contract, completed Iteration 3 analyst workflow, and completed Iteration 4 structured editor workflow. No corrections were required. |
 
 ## Regression Guard
 
