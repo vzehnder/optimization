@@ -539,17 +539,17 @@ function validate_system_hydro(hydro::HydroAssetParameters)
 
     curve_min = first(hydro.reservoir_curve)[1]
     curve_max = last(hydro.reservoir_curve)[1]
-    storage_values = [
-        hydro.storage_min_hm3,
-        hydro.storage_max_hm3,
-        hydro.initial_storage_hm3,
+    storage_values = Pair{String,Float64}[
+        "storage_min_hm3" => hydro.storage_min_hm3,
+        "storage_max_hm3" => hydro.storage_max_hm3,
+        "initial_storage_hm3" => hydro.initial_storage_hm3,
     ]
     if hydro.terminal_storage_min_hm3 !== nothing
-        push!(storage_values, hydro.terminal_storage_min_hm3)
+        push!(storage_values, "terminal_storage_min_hm3" => hydro.terminal_storage_min_hm3)
     end
-    for value in storage_values
+    for (name, value) in storage_values
         if value < curve_min || value > curve_max
-            throw(ArgumentError("hydro $(hydro.id) storage values must lie within reservoir_curve domain"))
+            throw(ArgumentError("hydro $(hydro.id) $name must lie within reservoir_curve domain"))
         end
     end
 end

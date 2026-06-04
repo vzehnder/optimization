@@ -1488,6 +1488,145 @@ end
                 document
             end,
         ))
+        @test occursin("asset node hydro_1 is disconnected from bus bus_1", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                filter!(edge -> edge["from"] != "hydro_1" && edge["to"] != "hydro_1", document["edges"])
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 storage_min_hm3 must be less than storage_max_hm3", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                hydro = system_case_node(document, "hydro_1")
+                hydro["storage_min_hm3"] = 5.0
+                hydro["storage_max_hm3"] = 5.0
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 initial_storage_hm3 must be within storage bounds", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["initial_storage_hm3"] = 6.0
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 terminal_storage_min_hm3 must be within storage bounds", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["terminal_storage_min_hm3"] = 6.0
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 storage_min_hm3 must lie within reservoir_curve domain", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["storage_min_hm3"] = 0.5
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 terminal_condition must be one of none, equal_initial, min_terminal", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["terminal_condition"] = "target_storage"
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 terminal_storage_min_hm3 is required when terminal_condition is min_terminal", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                delete!(system_case_node(document, "hydro_1"), "terminal_storage_min_hm3")
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 spill_penalty_usd_per_hm3 must be nonnegative", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["spill_penalty_usd_per_hm3"] = -1.0
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 terminal_water_value_usd_per_hm3 must be nonnegative", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["terminal_water_value_usd_per_hm3"] = -1.0
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 minimum_release_m3s must be nonnegative", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["minimum_release_m3s"] = -1.0
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 turbine_flow_min_m3s must be nonnegative", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["turbine_flow_min_m3s"] = -1.0
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 turbine_flow_min_m3s must not exceed turbine_flow_max_m3s", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                hydro = system_case_node(document, "hydro_1")
+                hydro["turbine_flow_min_m3s"] = 11.0
+                hydro["turbine_flow_max_m3s"] = 10.0
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 generation_mode must be one of linear, piecewise_linear", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["generation_mode"] = "quadratic"
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 power_per_flow_mw_per_m3s is required for linear generation", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                delete!(system_case_node(document, "hydro_1"), "power_per_flow_mw_per_m3s")
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 power_per_flow_mw_per_m3s must be nonnegative", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["power_per_flow_mw_per_m3s"] = -0.1
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 turbine_flow_max_m3s is required for linear generation", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                delete!(system_case_node(document, "hydro_1"), "turbine_flow_max_m3s")
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 power_max_mw must be nonnegative", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["power_max_mw"] = -1.0
+                document
+            end,
+        ))
+        @test occursin("generation_curve is required", system_case_validation_message(
+            begin
+                document = piecewise_hydro_system_case_document()
+                delete!(system_case_node(document, "hydro_1"), "generation_curve")
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 generation_curve must contain at least two breakpoints", system_case_validation_message(
+            begin
+                document = piecewise_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["generation_curve"] = [
+                    Dict{String,Any}("flow_m3s" => 0.0, "power_mw" => 0.0),
+                ]
+                document
+            end,
+        ))
         @test occursin("hydro hydro_1 generation_curve flow_m3s must be strictly increasing", system_case_validation_message(
             begin
                 document = piecewise_hydro_system_case_document()
@@ -1509,6 +1648,52 @@ end
                 document = piecewise_hydro_system_case_document()
                 hydro = system_case_node(document, "hydro_1")
                 hydro["turbine_flow_max_m3s"] = 13.0
+                document
+            end,
+        ))
+        @test isnothing(system_case_validation_message(
+            begin
+                document = piecewise_hydro_system_case_document()
+                hydro = system_case_node(document, "hydro_1")
+                hydro["power_max_mw"] = 2.0
+                hydro["generation_curve"] = [
+                    Dict{String,Any}("flow_m3s" => 0.0, "power_mw" => 0.0),
+                    Dict{String,Any}("flow_m3s" => 4.0, "power_mw" => 0.75),
+                    Dict{String,Any}("flow_m3s" => 8.0, "power_mw" => 0.55),
+                    Dict{String,Any}("flow_m3s" => 12.0, "power_mw" => 1.2),
+                ]
+                document
+            end,
+        ))
+        @test occursin("reservoir_curve is required", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                delete!(system_case_node(document, "hydro_1"), "reservoir_curve")
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 reservoir_curve must contain at least two breakpoints", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["reservoir_curve"] = [
+                    Dict{String,Any}("storage_hm3" => 1.0, "elevation_masl" => 700.0),
+                ]
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 reservoir_curve storage_hm3 must be strictly increasing", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                hydro = system_case_node(document, "hydro_1")
+                hydro["reservoir_curve"][2]["storage_hm3"] = 1.0
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 reservoir_curve elevation_masl must be nondecreasing", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                hydro = system_case_node(document, "hydro_1")
+                hydro["reservoir_curve"][2]["elevation_masl"] = 690.0
                 document
             end,
         ))
