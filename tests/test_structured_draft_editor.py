@@ -75,7 +75,7 @@ class StructuredDraftEditorTests(unittest.TestCase):
 
         self.assertEqual(preview_response.status_code, 200)
         system_case = preview_response.json()["system_case"]
-        self.assertEqual(system_case["schema_version"], "bess_system_dispatch.v1")
+        self.assertEqual(system_case["schema_version"], "bess_system_dispatch.v2")
         self.assertEqual(system_case["case_name"], "structured_case")
         self.assertEqual(
             {node["id"]: node["type"] for node in system_case["nodes"]},
@@ -102,6 +102,64 @@ class StructuredDraftEditorTests(unittest.TestCase):
         renewable = next(node for node in system_case["nodes"] if node["id"] == "solar_north")
         self.assertEqual(renewable["display_category"], "solar")
         self.assertEqual(system_case["solver"], {"name": "HiGHS", "options": {"time_limit": 60}})
+
+    def test_api_generates_v2_hydro_asset_from_structured_draft(self):
+        draft_document = {
+            "schema_version": "bess_editor_draft.v1",
+            "case": {"name": "hydro_structured_case"},
+            "pcc": {"id": "bus_main", "type": "bus"},
+            "grid": {"id": "grid_1"},
+            "assets": [
+                {
+                    "id": "hydro_1",
+                    "type": "hydro",
+                    "storage_min_hm3": 1.0,
+                    "storage_max_hm3": 5.0,
+                    "initial_storage_hm3": 2.5,
+                    "generation_mode": "piecewise_linear",
+                    "turbine_flow_min_m3s": 0.0,
+                    "turbine_flow_max_m3s": 60.0,
+                    "power_max_mw": 4.0,
+                    "minimum_release_m3s": 1.0,
+                    "spill_penalty_usd_per_hm3": 100.0,
+                    "terminal_condition": "min_terminal",
+                    "terminal_storage_min_hm3": 2.0,
+                    "terminal_water_value_usd_per_hm3": 500.0,
+                    "generation_curve": [
+                        {"flow_m3s": 0.0, "power_mw": 0.0},
+                        {"flow_m3s": 30.0, "power_mw": 2.4},
+                        {"flow_m3s": 60.0, "power_mw": 3.8},
+                    ],
+                    "reservoir_curve": [
+                        {"storage_hm3": 1.0, "elevation_masl": 700.0},
+                        {"storage_hm3": 3.0, "elevation_masl": 710.0},
+                        {"storage_hm3": 5.0, "elevation_masl": 720.0},
+                    ],
+                }
+            ],
+            "solver": {"name": "HiGHS", "options": {}},
+        }
+        self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/draft",
+            json={"document": draft_document},
+        )
+
+        preview_response = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/draft/generated-system-case",
+        )
+
+        self.assertEqual(preview_response.status_code, 200)
+        system_case = preview_response.json()["system_case"]
+        self.assertEqual(system_case["schema_version"], "bess_system_dispatch.v2")
+        self.assertEqual(
+            {node["id"]: node["type"] for node in system_case["nodes"]},
+            {"bus_main": "bus", "grid_1": "grid", "hydro_1": "hydro"},
+        )
+        self.assertIn({"from": "hydro_1", "to": "bus_main"}, system_case["edges"])
+        hydro = next(node for node in system_case["nodes"] if node["id"] == "hydro_1")
+        self.assertEqual(hydro["generation_mode"], "piecewise_linear")
+        self.assertEqual(hydro["generation_curve"][2], {"flow_m3s": 60.0, "power_mw": 3.8})
+        self.assertEqual(hydro["reservoir_curve"][1], {"storage_hm3": 3.0, "elevation_masl": 710.0})
 
     def test_generated_preview_rejects_duplicate_asset_ids_and_bad_solver_options(self):
         duplicate_document = {
@@ -203,6 +261,109 @@ class StructuredDraftEditorTests(unittest.TestCase):
         self.assertEqual(preview["case_name"], "ui_structured_case")
         self.assertEqual(preview["edges"][0], {"from": "grid_1", "to": "pcc_1"})
 
+    def test_ssr_structured_form_edits_linear_hydro_asset_and_curves(self):
+        draft_page = self.client.get(f"/scenarios/{self.scenario['id']}/draft")
+        self.assertEqual(draft_page.status_code, 200)
+        for expected in [
+            'name="hydro_id"',
+            'name="hydro_generation_mode"',
+            'name="hydro_power_per_flow_mw_per_m3s"',
+            'name="hydro_generation_curve_json"',
+            'name="hydro_reservoir_curve_json"',
+        ]:
+            self.assertIn(expected, draft_page.text)
+
+        form_response = self.client.post(
+            f"/scenarios/{self.scenario['id']}/draft/structure",
+            data={
+                "case_name": "ui_hydro_case",
+                "pcc_id": "bus_1",
+                "grid_id": "grid_1",
+                "hydro_id": "hydro_1",
+                "hydro_storage_min_hm3": "1.0",
+                "hydro_storage_max_hm3": "5.0",
+                "hydro_initial_storage_hm3": "2.5",
+                "hydro_generation_mode": "linear",
+                "hydro_power_per_flow_mw_per_m3s": "0.08",
+                "hydro_turbine_flow_max_m3s": "40.0",
+                "hydro_power_max_mw": "3.0",
+                "hydro_minimum_release_m3s": "0.0",
+                "hydro_spill_penalty_usd_per_hm3": "100.0",
+                "hydro_terminal_condition": "min_terminal",
+                "hydro_terminal_storage_min_hm3": "2.0",
+                "hydro_terminal_water_value_usd_per_hm3": "500.0",
+                "hydro_reservoir_curve_json": (
+                    '[{"storage_hm3":1.0,"elevation_masl":700.0},'
+                    '{"storage_hm3":3.0,"elevation_masl":710.0},'
+                    '{"storage_hm3":5.0,"elevation_masl":720.0}]'
+                ),
+                "solver_name": "HiGHS",
+                "solver_options_json": "{}",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(form_response.status_code, 303)
+        draft = self.client.get(f"/api/scenarios/{self.scenario['id']}/draft").json()["draft"]["document"]
+        self.assertEqual([(asset["id"], asset["type"]) for asset in draft["assets"]], [("hydro_1", "hydro")])
+        preview = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/draft/generated-system-case",
+        ).json()["system_case"]
+        self.assertEqual(preview["schema_version"], "bess_system_dispatch.v2")
+        hydro = next(node for node in preview["nodes"] if node["type"] == "hydro")
+        self.assertEqual(hydro["power_per_flow_mw_per_m3s"], 0.08)
+        self.assertEqual(hydro["terminal_condition"], "min_terminal")
+        self.assertEqual(hydro["reservoir_curve"][2], {"storage_hm3": 5.0, "elevation_masl": 720.0})
+
+    def test_ssr_structured_form_edits_piecewise_hydro_breakpoints(self):
+        form_response = self.client.post(
+            f"/scenarios/{self.scenario['id']}/draft/structure",
+            data={
+                "case_name": "ui_hydro_piecewise_case",
+                "pcc_id": "bus_1",
+                "grid_id": "grid_1",
+                "hydro_id": "hydro_pw_1",
+                "hydro_storage_min_hm3": "1.0",
+                "hydro_storage_max_hm3": "5.0",
+                "hydro_initial_storage_hm3": "2.5",
+                "hydro_generation_mode": "piecewise_linear",
+                "hydro_turbine_flow_min_m3s": "0.0",
+                "hydro_turbine_flow_max_m3s": "60.0",
+                "hydro_power_max_mw": "5.0",
+                "hydro_minimum_release_m3s": "0.0",
+                "hydro_spill_penalty_usd_per_hm3": "100.0",
+                "hydro_terminal_condition": "none",
+                "hydro_terminal_water_value_usd_per_hm3": "0.0",
+                "hydro_generation_curve_json": (
+                    '[{"flow_m3s":0.0,"power_mw":0.0},'
+                    '{"flow_m3s":30.0,"power_mw":2.4},'
+                    '{"flow_m3s":60.0,"power_mw":3.8}]'
+                ),
+                "hydro_reservoir_curve_json": (
+                    '[{"storage_hm3":1.0,"elevation_masl":700.0},'
+                    '{"storage_hm3":5.0,"elevation_masl":720.0}]'
+                ),
+                "solver_name": "HiGHS",
+                "solver_options_json": "{}",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(form_response.status_code, 303)
+        preview = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/draft/generated-system-case",
+        ).json()["system_case"]
+        hydro = next(node for node in preview["nodes"] if node["type"] == "hydro")
+        self.assertEqual(hydro["generation_mode"], "piecewise_linear")
+        self.assertEqual(
+            hydro["generation_curve"],
+            [
+                {"flow_m3s": 0.0, "power_mw": 0.0},
+                {"flow_m3s": 30.0, "power_mw": 2.4},
+                {"flow_m3s": 60.0, "power_mw": 3.8},
+            ],
+        )
+
     def test_draft_initialized_from_version_prefills_structured_assets(self):
         sample_text = (REPO_ROOT / "data" / "cases" / "hybrid_system" / "system_case.json").read_text()
         version = self.client.post(
@@ -230,6 +391,33 @@ class StructuredDraftEditorTests(unittest.TestCase):
         self.assertEqual(preview_response.status_code, 200)
         preview = preview_response.json()["system_case"]
         self.assertEqual({edge["from"] for edge in preview["edges"]}, {"grid_1", "solar_1", "battery_1", "load_1"})
+
+    def test_draft_initialized_from_v2_version_preserves_hydro_assets(self):
+        sample_text = (REPO_ROOT / "data" / "cases" / "linear_hydro_system" / "system_case.json").read_text()
+        version = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/versions",
+            json={"system_case_json": sample_text},
+        ).json()
+
+        draft_response = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/draft",
+            json={"source_version_id": version["id"]},
+        )
+
+        self.assertEqual(draft_response.status_code, 201)
+        document = draft_response.json()["document"]
+        hydro = next(asset for asset in document["assets"] if asset["type"] == "hydro")
+        self.assertEqual(hydro["id"], "hydro_1")
+        self.assertEqual(hydro["generation_mode"], "linear")
+        self.assertEqual(hydro["power_per_flow_mw_per_m3s"], 0.1)
+        self.assertEqual(hydro["reservoir_curve"][0], {"storage_hm3": 1.0, "elevation_masl": 700.0})
+
+        preview_response = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/draft/generated-system-case",
+        )
+        self.assertEqual(preview_response.status_code, 200)
+        preview_hydro = next(node for node in preview_response.json()["system_case"]["nodes"] if node["type"] == "hydro")
+        self.assertEqual(preview_hydro["terminal_storage_min_hm3"], 2.3)
 
 
 class StubValidationService:

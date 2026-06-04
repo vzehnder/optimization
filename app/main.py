@@ -1433,7 +1433,18 @@ def render_structured_draft_form(scenario: dict, document: dict) -> str:
     battery = first_asset_of_type(assets, "battery")
     renewable = first_asset_of_type(assets, "renewable")
     load = first_asset_of_type(assets, "load")
+    hydro = first_asset_of_type(assets, "hydro")
     solver_options = solver.get("options") if isinstance(solver.get("options"), dict) else {}
+    hydro_generation_curve = hydro.get("generation_curve") if isinstance(hydro.get("generation_curve"), list) else []
+    hydro_reservoir_curve = (
+        hydro.get("reservoir_curve")
+        if isinstance(hydro.get("reservoir_curve"), list)
+        else [
+            {"storage_hm3": 1.0, "elevation_masl": 700.0},
+            {"storage_hm3": 3.0, "elevation_masl": 710.0},
+            {"storage_hm3": 5.0, "elevation_masl": 720.0},
+        ]
+    )
 
     return f"""
         <form method="post" action="/scenarios/{scenario["id"]}/draft/structure" class="structured-form">
@@ -1504,6 +1515,42 @@ def render_structured_draft_form(scenario: dict, document: dict) -> str:
             <label for="load_id">load_id</label>
             <input id="load_id" name="load_id" value="{html_value(load.get("id") or "load_1")}">
           </div>
+
+          <h2>Hydro Asset</h2>
+          <div class="form-grid">
+            <label for="hydro_id">hydro_id</label>
+            <input id="hydro_id" name="hydro_id" value="{html_value(hydro.get("id") or "")}">
+            <label for="hydro_storage_min_hm3">storage_min_hm3</label>
+            <input id="hydro_storage_min_hm3" name="hydro_storage_min_hm3" value="{html_value(hydro.get("storage_min_hm3") if "storage_min_hm3" in hydro else 1.0)}">
+            <label for="hydro_storage_max_hm3">storage_max_hm3</label>
+            <input id="hydro_storage_max_hm3" name="hydro_storage_max_hm3" value="{html_value(hydro.get("storage_max_hm3") if "storage_max_hm3" in hydro else 5.0)}">
+            <label for="hydro_initial_storage_hm3">initial_storage_hm3</label>
+            <input id="hydro_initial_storage_hm3" name="hydro_initial_storage_hm3" value="{html_value(hydro.get("initial_storage_hm3") if "initial_storage_hm3" in hydro else 2.5)}">
+            <label for="hydro_generation_mode">generation_mode</label>
+            <input id="hydro_generation_mode" name="hydro_generation_mode" value="{html_value(hydro.get("generation_mode") or "linear")}">
+            <label for="hydro_power_per_flow_mw_per_m3s">power_per_flow_mw_per_m3s</label>
+            <input id="hydro_power_per_flow_mw_per_m3s" name="hydro_power_per_flow_mw_per_m3s" value="{html_value(hydro.get("power_per_flow_mw_per_m3s") if "power_per_flow_mw_per_m3s" in hydro else 0.08)}">
+            <label for="hydro_turbine_flow_min_m3s">turbine_flow_min_m3s</label>
+            <input id="hydro_turbine_flow_min_m3s" name="hydro_turbine_flow_min_m3s" value="{html_value(hydro.get("turbine_flow_min_m3s"))}">
+            <label for="hydro_turbine_flow_max_m3s">turbine_flow_max_m3s</label>
+            <input id="hydro_turbine_flow_max_m3s" name="hydro_turbine_flow_max_m3s" value="{html_value(hydro.get("turbine_flow_max_m3s") if "turbine_flow_max_m3s" in hydro else 40.0)}">
+            <label for="hydro_power_max_mw">power_max_mw</label>
+            <input id="hydro_power_max_mw" name="hydro_power_max_mw" value="{html_value(hydro.get("power_max_mw") if "power_max_mw" in hydro else 3.0)}">
+            <label for="hydro_minimum_release_m3s">minimum_release_m3s</label>
+            <input id="hydro_minimum_release_m3s" name="hydro_minimum_release_m3s" value="{html_value(hydro.get("minimum_release_m3s") if "minimum_release_m3s" in hydro else 0.0)}">
+            <label for="hydro_spill_penalty_usd_per_hm3">spill_penalty_usd_per_hm3</label>
+            <input id="hydro_spill_penalty_usd_per_hm3" name="hydro_spill_penalty_usd_per_hm3" value="{html_value(hydro.get("spill_penalty_usd_per_hm3") if "spill_penalty_usd_per_hm3" in hydro else 100.0)}">
+            <label for="hydro_terminal_condition">terminal_condition</label>
+            <input id="hydro_terminal_condition" name="hydro_terminal_condition" value="{html_value(hydro.get("terminal_condition") or "none")}">
+            <label for="hydro_terminal_storage_min_hm3">terminal_storage_min_hm3</label>
+            <input id="hydro_terminal_storage_min_hm3" name="hydro_terminal_storage_min_hm3" value="{html_value(hydro.get("terminal_storage_min_hm3"))}">
+            <label for="hydro_terminal_water_value_usd_per_hm3">terminal_water_value_usd_per_hm3</label>
+            <input id="hydro_terminal_water_value_usd_per_hm3" name="hydro_terminal_water_value_usd_per_hm3" value="{html_value(hydro.get("terminal_water_value_usd_per_hm3") if "terminal_water_value_usd_per_hm3" in hydro else 0.0)}">
+          </div>
+          <label for="hydro_generation_curve_json">generation_curve_json</label>
+          <textarea id="hydro_generation_curve_json" name="hydro_generation_curve_json" spellcheck="false">{escape(json.dumps(hydro_generation_curve, sort_keys=True))}</textarea>
+          <label for="hydro_reservoir_curve_json">reservoir_curve_json</label>
+          <textarea id="hydro_reservoir_curve_json" name="hydro_reservoir_curve_json" spellcheck="false">{escape(json.dumps(hydro_reservoir_curve, sort_keys=True))}</textarea>
 
           <h2>Solver</h2>
           <label for="solver_name">solver_name</label>

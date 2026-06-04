@@ -6,7 +6,7 @@ from typing import Any
 
 
 EDITOR_DRAFT_SCHEMA_VERSION = "bess_editor_draft.v1"
-SYSTEM_CASE_SCHEMA_VERSION = "bess_system_dispatch.v1"
+SYSTEM_CASE_SCHEMA_VERSION = "bess_system_dispatch.v2"
 
 
 class DraftGenerationError(ValueError):
@@ -17,6 +17,7 @@ def structured_draft_document_from_form(form: Mapping[str, Any]) -> dict[str, An
     battery_id = _form_text(form, "battery_id")
     renewable_id = _form_text(form, "renewable_id")
     load_id = _form_text(form, "load_id")
+    hydro_id = _form_text(form, "hydro_id")
 
     assets: list[dict[str, Any]] = []
     if battery_id:
@@ -61,6 +62,45 @@ def structured_draft_document_from_form(form: Mapping[str, Any]) -> dict[str, An
 
     if load_id:
         assets.append({"id": load_id, "type": "load"})
+
+    if hydro_id:
+        hydro: dict[str, Any] = {
+            "id": hydro_id,
+            "type": "hydro",
+            "storage_min_hm3": _required_form_float(form, "hydro_storage_min_hm3"),
+            "storage_max_hm3": _required_form_float(form, "hydro_storage_max_hm3"),
+            "initial_storage_hm3": _required_form_float(form, "hydro_initial_storage_hm3"),
+            "generation_mode": _form_text(form, "hydro_generation_mode") or "linear",
+            "power_per_flow_mw_per_m3s": _optional_form_float(
+                form,
+                "hydro_power_per_flow_mw_per_m3s",
+            ),
+            "turbine_flow_min_m3s": _optional_form_float(form, "hydro_turbine_flow_min_m3s"),
+            "turbine_flow_max_m3s": _optional_form_float(form, "hydro_turbine_flow_max_m3s"),
+            "power_max_mw": _optional_form_float(form, "hydro_power_max_mw"),
+            "minimum_release_m3s": _optional_form_float(
+                form,
+                "hydro_minimum_release_m3s",
+                default=0.0,
+            ),
+            "spill_penalty_usd_per_hm3": _optional_form_float(
+                form,
+                "hydro_spill_penalty_usd_per_hm3",
+                default=0.0,
+            ),
+            "terminal_condition": _form_text(form, "hydro_terminal_condition") or "none",
+            "terminal_storage_min_hm3": _optional_form_float(form, "hydro_terminal_storage_min_hm3"),
+            "terminal_water_value_usd_per_hm3": _optional_form_float(
+                form,
+                "hydro_terminal_water_value_usd_per_hm3",
+                default=0.0,
+            ),
+            "reservoir_curve": _required_form_json_array(form, "hydro_reservoir_curve_json"),
+        }
+        generation_curve = _optional_form_json_array(form, "hydro_generation_curve_json")
+        if generation_curve is not None:
+            hydro["generation_curve"] = generation_curve
+        assets.append(hydro)
 
     return {
         "schema_version": EDITOR_DRAFT_SCHEMA_VERSION,
@@ -115,7 +155,7 @@ def structured_draft_document_from_system_case(
         "assets": [
             _copy_node_attributes(node)
             for node in nodes
-            if isinstance(node, dict) and node.get("type") in {"battery", "renewable", "load"}
+            if isinstance(node, dict) and node.get("type") in {"battery", "renewable", "load", "hydro"}
         ],
         "time_series": {"sources": []},
         "solver": {
@@ -164,8 +204,12 @@ def generate_system_case_from_draft(document: dict[str, Any]) -> dict[str, Any]:
             nodes.append(_renewable_node(asset))
         elif asset_type == "load":
             nodes.append(_load_node(asset))
+        elif asset_type == "hydro":
+            nodes.append(_hydro_node(asset))
         else:
-            raise DraftGenerationError(f"asset type must be battery, renewable, or load; got {asset_type!r}")
+            raise DraftGenerationError(
+                f"asset type must be battery, renewable, load, or hydro; got {asset_type!r}"
+            )
 
     _ensure_unique_node_ids(nodes)
     edges = [{"from": node["id"], "to": pcc_id} for node in nodes if node["id"] != pcc_id]
@@ -214,6 +258,31 @@ def _renewable_node(asset: dict[str, Any]) -> dict[str, Any]:
 
 def _load_node(asset: dict[str, Any]) -> dict[str, Any]:
     return _node("id", _required_asset_id(asset), "type", "load")
+
+
+def _hydro_node(asset: dict[str, Any]) -> dict[str, Any]:
+    node = _node("id", _required_asset_id(asset), "type", "hydro")
+    for key in [
+        "storage_min_hm3",
+        "storage_max_hm3",
+        "initial_storage_hm3",
+        "generation_mode",
+        "power_per_flow_mw_per_m3s",
+        "turbine_flow_min_m3s",
+        "turbine_flow_max_m3s",
+        "power_max_mw",
+        "minimum_release_m3s",
+        "spill_penalty_usd_per_hm3",
+        "terminal_condition",
+        "terminal_storage_min_hm3",
+        "terminal_water_value_usd_per_hm3",
+        "generation_curve",
+        "reservoir_curve",
+    ]:
+        _copy_optional(asset, node, key)
+    node["generation_mode"] = str(node.get("generation_mode") or "linear")
+    node["terminal_condition"] = str(node.get("terminal_condition") or "none")
+    return node
 
 
 def _solver_config(raw_solver: Any) -> dict[str, Any]:
@@ -396,4 +465,26 @@ def _form_json_object(form: Mapping[str, Any], key: str) -> dict[str, Any]:
         ) from error
     if not isinstance(value, dict):
         raise DraftGenerationError(f"{key} must be a JSON object")
+    return value
+
+
+def _optional_form_json_array(form: Mapping[str, Any], key: str) -> list[Any] | None:
+    text = _form_text(form, key)
+    if not text:
+        return None
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise DraftGenerationError(
+            f"{key} must be a JSON array: {error.msg} at line {error.lineno}, column {error.colno}"
+        ) from error
+    if not isinstance(value, list):
+        raise DraftGenerationError(f"{key} must be a JSON array")
+    return value
+
+
+def _required_form_json_array(form: Mapping[str, Any], key: str) -> list[Any]:
+    value = _optional_form_json_array(form, key)
+    if value is None:
+        raise DraftGenerationError(f"{key} is required")
     return value
