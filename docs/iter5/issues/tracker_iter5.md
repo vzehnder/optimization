@@ -50,7 +50,7 @@ triage label.
 | --- | --- | --- | --- |
 | 2026-06-03 | BESS-ITER5-000 | Todo -> Done | Reviewed and accepted the hydro PRD and mathematical formulation against the final objective, completed Iteration 2 optimizer contract, completed Iteration 3 analyst workflow, and completed Iteration 4 structured editor workflow. No corrections were required. |
 | 2026-06-03 | BESS-ITER5-001 | Todo -> Done | Added the first `bess_system_dispatch.v2` linear hydro path in Julia: loader validation, normalization, reservoir balance, linear generation, spill/release/terminal economics, hydro outputs, sample case, API/CLI coverage, full Julia verification with 415 tests, and Python web regression verification with 67 tests. |
-| 2026-06-04 | BESS-ITER5-002 | Todo -> Done | Added explicit `PiecewiseLinearOpt` dependency, piecewise hydro generation curves with default `piecewiselinear` method, reservoir elevation modeled through `piecewiselinear`, nonmonotone sample case, API/CLI/output coverage, and full Julia verification with 442 tests. |
+| 2026-06-04 | BESS-ITER5-002 | Todo -> Done | Added explicit `PiecewiseLinearOpt` dependency, piecewise hydro generation curves with default `piecewiselinear` method, reservoir elevation modeled through `piecewiselinear`, nonmonotone sample case, API/CLI/output coverage, and full Julia verification with 444 tests. |
 
 ## Regression Guard
 

@@ -42,7 +42,7 @@
       "generation_mode": "piecewise_linear",
       "turbine_flow_min_m3s": 0.0,
       "turbine_flow_max_m3s": 12.0,
-      "power_max_mw": 0.9,
+      "power_max_mw": 0.8,
       "minimum_release_m3s": 1.0,
       "spill_penalty_usd_per_hm3": 100.0,
       "terminal_condition": "min_terminal",

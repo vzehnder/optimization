@@ -46,7 +46,7 @@ linear hydro path.
 julia --project=. -e "import Pkg; Pkg.test()"
 ```
 
-Result: 442 Julia tests passed.
+Result: 444 Julia tests passed.
 
 ## Blocked by
 

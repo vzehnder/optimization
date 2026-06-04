@@ -289,7 +289,7 @@ function piecewise_hydro_system_case_document()
     delete!(hydro, "power_per_flow_mw_per_m3s")
     hydro["turbine_flow_min_m3s"] = 0.0
     hydro["turbine_flow_max_m3s"] = 12.0
-    hydro["power_max_mw"] = 0.9
+    hydro["power_max_mw"] = 0.8
     hydro["generation_curve"] = [
         Dict{String,Any}("flow_m3s" => 0.0, "power_mw" => 0.0),
         Dict{String,Any}("flow_m3s" => 4.0, "power_mw" => 0.75),
@@ -1005,13 +1005,16 @@ end
             (8.0, 0.55),
             (12.0, 0.9),
         ]
+        @test optimization_case.hydros[1].power_max_mw == 0.8
+        @test maximum(point[2] for point in optimization_case.hydros[1].generation_curve) >
+              optimization_case.hydros[1].power_max_mw
 
         result = BESSDispatch.solve_system_dispatch(optimization_case)
         @test result.termination_status == "OPTIMAL"
         @test all(result.hydro_turbine_flow_m3s .>= -POWER_TOLERANCE_MW)
         @test all(result.hydro_turbine_flow_m3s .<= 12.0 + POWER_TOLERANCE_MW)
         @test any(result.hydro_power_mw .> POWER_TOLERANCE_MW)
-        @test all(result.hydro_power_mw .<= 0.9 + POWER_TOLERANCE_MW)
+        @test all(result.hydro_power_mw .<= 0.8 + POWER_TOLERANCE_MW)
         @test all(result.hydro_reservoir_elevation_masl .>= 700.0 - ENERGY_TOLERANCE_MWH)
         @test all(result.hydro_reservoir_elevation_masl .<= 720.0 + ENERGY_TOLERANCE_MWH)
 
