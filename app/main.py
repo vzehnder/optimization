@@ -2146,7 +2146,62 @@ def render_summary_details(summary: dict) -> str:
         for key, label in fields
         if key in summary
     )
-    return f'<div class="details"><dl>{rows}</dl></div>'
+    return f'<div class="details"><dl>{rows}</dl></div>{render_hydro_summary(summary)}'
+
+
+def render_hydro_summary(summary: dict) -> str:
+    hydro_totals = summary.get("hydro_totals")
+    hydro_kpis_by_asset = summary.get("hydro_kpis_by_asset")
+    if not isinstance(hydro_totals, dict) and not isinstance(hydro_kpis_by_asset, dict):
+        return ""
+
+    totals_markup = ""
+    if isinstance(hydro_totals, dict):
+        totals_markup = (
+            "<h4>Hydro Totals</h4>"
+            f"{render_key_value_table(hydro_totals)}"
+        )
+
+    asset_markup = ""
+    if isinstance(hydro_kpis_by_asset, dict):
+        rows = []
+        for asset_id, kpis in hydro_kpis_by_asset.items():
+            if not isinstance(kpis, dict):
+                continue
+            for key, value in kpis.items():
+                rows.append(
+                    "<tr>"
+                    f"<td>{escape(str(asset_id))}</td>"
+                    f"<td>{escape(str(key))}</td>"
+                    f"<td>{escape(str(value))}</td>"
+                    "</tr>"
+                )
+        if rows:
+            asset_markup = (
+                "<h4>Hydro KPIs By Asset</h4>"
+                '<div class="table-scroll"><table>'
+                "<thead><tr><th>asset_id</th><th>kpi</th><th>value</th></tr></thead>"
+                f"<tbody>{''.join(rows)}</tbody>"
+                "</table></div>"
+            )
+
+    return f'<section class="hydro-summary"><h3>Hydro Summary</h3>{totals_markup}{asset_markup}</section>'
+
+
+def render_key_value_table(values: dict[str, Any]) -> str:
+    rows = "".join(
+        "<tr>"
+        f"<td>{escape(str(key))}</td>"
+        f"<td>{escape(str(value))}</td>"
+        "</tr>"
+        for key, value in values.items()
+    )
+    return (
+        '<div class="table-scroll"><table>'
+        "<thead><tr><th>kpi</th><th>value</th></tr></thead>"
+        f"<tbody>{rows}</tbody>"
+        "</table></div>"
+    )
 
 
 def render_chart_grid(charts: dict) -> str:
@@ -2156,6 +2211,10 @@ def render_chart_grid(charts: dict) -> str:
         "renewable_used_curtailed",
         "bess_charge_discharge_soc",
         "period_profit",
+        "hydro_power",
+        "hydro_flows",
+        "hydro_storage",
+        "hydro_reservoir_elevation",
     ]
     panels = "".join(render_chart_panel(charts[key]) for key in chart_keys if key in charts)
     return f'<div class="chart-grid">{panels}</div>'

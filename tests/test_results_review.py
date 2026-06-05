@@ -149,6 +149,55 @@ class ResultsReaderTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_builds_hydro_chart_data_and_kpis_from_result_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_hydro_result_artifacts(store, artifact_root)
+
+                results = read_run_results(run, store.list_run_artifacts(run["id"]), artifact_root)
+
+                self.assertEqual(results["summary"]["hydro_totals"]["total_hydro_generation_mwh"], 5.0)
+                self.assertEqual(
+                    results["summary"]["hydro_kpis_by_asset"]["hydro_1"]["final_reservoir_elevation_masl"],
+                    711.0,
+                )
+                self.assertIn("total_hydro_power_mw", results["dispatch_table"]["columns"])
+                self.assertEqual(results["dispatch_table"]["rows"][0]["total_hydro_power_mw"], "2.0")
+                self.assertEqual(results["asset_dispatch_table"]["rows"][0]["asset_type"], "hydro")
+                self.assertEqual(results["asset_dispatch_table"]["rows"][0]["hydro_power_mw"], "2.0")
+
+                hydro_power_chart = results["charts"]["hydro_power"]
+                self.assertTrue(hydro_power_chart["available"])
+                self.assertEqual(hydro_power_chart["series"][0]["key"], "total_hydro_power_mw")
+                self.assertEqual(hydro_power_chart["series"][0]["unit"], "MW")
+                self.assertEqual(hydro_power_chart["series"][0]["source"], "dispatch.csv")
+                self.assertEqual(hydro_power_chart["series"][0]["values"], [2.0, 3.0])
+
+                hydro_storage_chart = results["charts"]["hydro_storage"]
+                self.assertTrue(hydro_storage_chart["available"])
+                self.assertEqual(hydro_storage_chart["series"][0]["key"], "total_hydro_storage_hm3")
+                self.assertEqual(hydro_storage_chart["series"][0]["unit"], "hm3")
+                self.assertEqual(hydro_storage_chart["series"][0]["source"], "dispatch.csv")
+
+                hydro_elevation_chart = results["charts"]["hydro_reservoir_elevation"]
+                self.assertTrue(hydro_elevation_chart["available"])
+                self.assertEqual(
+                    [series["key"] for series in hydro_elevation_chart["series"]],
+                    ["hydro_reservoir_elevation_masl"],
+                )
+                self.assertEqual(
+                    [series["unit"] for series in hydro_elevation_chart["series"]],
+                    ["masl"],
+                )
+                self.assertEqual(
+                    [series["source"] for series in hydro_elevation_chart["series"]],
+                    ["asset_dispatch.csv"],
+                )
+            finally:
+                store.close()
+
 
 class ResultsApiTests(unittest.TestCase):
     def test_results_api_returns_summary_and_result_tables_for_completed_run(self):
@@ -179,6 +228,42 @@ class ResultsApiTests(unittest.TestCase):
                 self.assertTrue(payload["results"]["charts"]["renewable_used_curtailed"]["available"])
                 self.assertTrue(payload["results"]["charts"]["bess_charge_discharge_soc"]["available"])
                 self.assertTrue(payload["results"]["charts"]["period_profit"]["available"])
+            finally:
+                store.close()
+
+    def test_results_api_returns_hydro_result_tables_kpis_and_charts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_hydro_result_artifacts(store, artifact_root)
+                client = TestClient(
+                    create_app(
+                        validation_service=StubValidationService(),
+                        store=store,
+                        run_queue=RecordingRunQueue(),
+                        artifact_root=artifact_root,
+                    )
+                )
+
+                response = client.get(f"/api/runs/{run['id']}/results")
+
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                results = payload["results"]
+                self.assertEqual(results["summary"]["hydro_totals"]["terminal_water_value_usd"], 550.0)
+                self.assertIn("total_hydro_turbine_flow_m3s", results["dispatch_table"]["columns"])
+                self.assertIn("hydro_reservoir_elevation_masl", results["asset_dispatch_table"]["columns"])
+                self.assertEqual(results["asset_dispatch_table"]["rows"][0]["asset_type"], "hydro")
+                self.assertTrue(results["charts"]["hydro_power"]["available"])
+                self.assertTrue(results["charts"]["hydro_flows"]["available"])
+                self.assertTrue(results["charts"]["hydro_storage"]["available"])
+                self.assertTrue(results["charts"]["hydro_reservoir_elevation"]["available"])
+                self.assertEqual(
+                    results["charts"]["hydro_flows"]["series"][1]["key"],
+                    "total_hydro_turbine_flow_m3s",
+                )
+                self.assertEqual(results["charts"]["hydro_flows"]["series"][1]["unit"], "m3/s")
             finally:
                 store.close()
 
@@ -311,6 +396,38 @@ class ResultsTemplateTests(unittest.TestCase):
                 self.assertIn('data-chart-id="period-profit"', response.text)
                 self.assertIn('data-value="2.5"', response.text)
                 self.assertIn('data-value="-112.5"', response.text)
+            finally:
+                store.close()
+
+    def test_completed_run_page_renders_hydro_kpis_tables_and_charts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_hydro_result_artifacts(store, artifact_root)
+                client = TestClient(
+                    create_app(
+                        validation_service=StubValidationService(),
+                        store=store,
+                        run_queue=RecordingRunQueue(),
+                        artifact_root=artifact_root,
+                    )
+                )
+
+                response = client.get(f"/runs/{run['id']}")
+
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("Hydro Summary", response.text)
+                self.assertIn("total_hydro_generation_mwh", response.text)
+                self.assertIn("terminal_water_value_usd", response.text)
+                self.assertIn("hydro_1", response.text)
+                self.assertIn("total_hydro_power_mw", response.text)
+                self.assertIn("hydro_reservoir_elevation_masl", response.text)
+                self.assertIn('data-chart-id="hydro-power"', response.text)
+                self.assertIn('data-chart-id="hydro-flows"', response.text)
+                self.assertIn('data-chart-id="hydro-storage"', response.text)
+                self.assertIn('data-chart-id="hydro-reservoir-elevation"', response.text)
+                self.assertIn('data-value="711"', response.text)
             finally:
                 store.close()
 
@@ -617,6 +734,95 @@ def create_completed_run_with_separate_price_result_artifacts(store, artifact_ro
         "grid_import_mw,grid_export_mw,renewable_used_mw,renewable_curtailed_mw,load_demand_mw,"
         "battery_charge_mw,battery_discharge_mw,battery_energy_mwh,battery_delta_soc_abs_mwh\n"
         "2026-01-01T00:00:00,1.0,10.0,100.0,grid_1,grid,5.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0\n",
+        encoding="utf-8",
+    )
+
+    scenario_version = create_persisted_scenario_version(store)
+    run = store.create_run(scenario_version_id=scenario_version["id"])
+    store.mark_run_running(
+        run["id"],
+        workspace_path=str(artifact_root / "runs" / str(run["id"])),
+        input_snapshot_path=str(artifact_root / "runs" / str(run["id"]) / "input" / "system_case.json"),
+    )
+    run = store.mark_run_succeeded(
+        run["id"],
+        exit_code=0,
+        stdout="{}",
+        stderr="",
+        success_payload={"termination_status": "OPTIMAL"},
+        output_dir=str(output_dir),
+        summary_path=str(summary_path),
+    )
+    for artifact_type, path, display_name, media_type in [
+        ("summary_json", summary_path, "summary.json", "application/json"),
+        ("dispatch_csv", dispatch_path, "dispatch.csv", "text/csv"),
+        ("asset_dispatch_csv", asset_dispatch_path, "asset_dispatch.csv", "text/csv"),
+    ]:
+        store.register_run_artifact(
+            run_id=run["id"],
+            artifact_type=artifact_type,
+            path=str(path),
+            display_name=display_name,
+            media_type=media_type,
+        )
+    return run
+
+
+def create_completed_run_with_hydro_result_artifacts(store, artifact_root):
+    output_dir = artifact_root / "runs" / "1" / "outputs"
+    output_dir.mkdir(parents=True)
+    summary_path = output_dir / "summary.json"
+    dispatch_path = output_dir / "dispatch.csv"
+    asset_dispatch_path = output_dir / "asset_dispatch.csv"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "case_name": "hydro_system",
+                "solver_status": "OPTIMAL",
+                "termination_status": "OPTIMAL",
+                "objective_value_usd": 900.0,
+                "hydro_totals": {
+                    "total_hydro_generation_mwh": 5.0,
+                    "total_turbine_volume_hm3": 0.09,
+                    "total_spill_volume_hm3": 0.01,
+                    "total_spill_penalty_usd": 1.0,
+                    "terminal_water_value_usd": 550.0,
+                },
+                "hydro_kpis_by_asset": {
+                    "hydro_1": {
+                        "total_hydro_generation_mwh": 5.0,
+                        "total_turbine_volume_hm3": 0.09,
+                        "total_spill_volume_hm3": 0.01,
+                        "initial_storage_hm3": 2.5,
+                        "final_storage_hm3": 3.2,
+                        "initial_reservoir_elevation_masl": 708.0,
+                        "final_reservoir_elevation_masl": 711.0,
+                        "total_spill_penalty_usd": 1.0,
+                        "terminal_water_value_usd": 550.0,
+                    }
+                },
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    dispatch_path.write_text(
+        "timestamp,duration_hours,export_price_usd_per_mwh,grid_import_mw,grid_export_mw,"
+        "net_grid_export_mw,total_hydro_power_mw,total_hydro_inflow_m3s,"
+        "total_hydro_turbine_flow_m3s,total_hydro_spill_flow_m3s,total_hydro_storage_hm3,"
+        "total_hydro_spill_penalty_usd,total_hydro_terminal_water_value_usd,period_profit_usd\n"
+        "2026-01-01T00:00:00,1.0,80.0,0.0,2.0,2.0,2.0,25.0,25.0,0.0,3.0,0.0,0.0,160.0\n"
+        "2026-01-01T01:00:00,1.0,100.0,0.0,3.0,3.0,3.0,30.0,28.0,2.0,3.2,1.0,550.0,849.0\n",
+        encoding="utf-8",
+    )
+    asset_dispatch_path.write_text(
+        "timestamp,duration_hours,asset_id,asset_type,hydro_power_mw,hydro_inflow_m3s,"
+        "hydro_turbine_flow_m3s,hydro_spill_flow_m3s,hydro_inflow_volume_hm3,"
+        "hydro_turbine_volume_hm3,hydro_spill_volume_hm3,hydro_storage_hm3,"
+        "hydro_reservoir_elevation_masl,hydro_spill_penalty_usd,hydro_terminal_water_value_usd\n"
+        "2026-01-01T00:00:00,1.0,hydro_1,hydro,2.0,25.0,25.0,0.0,0.09,0.09,0.0,3.0,710.0,0.0,0.0\n"
+        "2026-01-01T01:00:00,1.0,hydro_1,hydro,3.0,30.0,28.0,2.0,0.108,0.1008,0.0072,3.2,711.0,1.0,550.0\n",
         encoding="utf-8",
     )
 

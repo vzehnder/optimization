@@ -81,6 +81,35 @@ def build_chart_data(dispatch_table: dict[str, Any], asset_dispatch_table: dict[
             dispatch_table,
             [("period_profit_usd", "Period Profit USD", "USD")],
         ),
+        "hydro_power": build_line_chart(
+            "hydro-power",
+            "Hydro Power",
+            dispatch_table,
+            [("total_hydro_power_mw", "Hydro Power MW", "MW")],
+        ),
+        "hydro_flows": build_line_chart(
+            "hydro-flows",
+            "Hydro Flows",
+            dispatch_table,
+            [
+                ("total_hydro_inflow_m3s", "Hydro Inflow m3/s", "m3/s"),
+                ("total_hydro_turbine_flow_m3s", "Hydro Turbine Flow m3/s", "m3/s"),
+                ("total_hydro_spill_flow_m3s", "Hydro Spill Flow m3/s", "m3/s"),
+            ],
+        ),
+        "hydro_storage": build_line_chart(
+            "hydro-storage",
+            "Hydro Storage",
+            dispatch_table,
+            [("total_hydro_storage_hm3", "Hydro Storage hm3", "hm3")],
+        ),
+        "hydro_reservoir_elevation": build_line_chart(
+            "hydro-reservoir-elevation",
+            "Hydro Reservoir Elevation",
+            asset_dispatch_table,
+            [("hydro_reservoir_elevation_masl", "Hydro Reservoir Elevation masl", "masl")],
+            source="asset_dispatch.csv",
+        ),
         "source_rows": {
             "dispatch": len(dispatch_table["rows"]),
             "asset_dispatch": len(asset_dispatch_table["rows"]),
@@ -114,6 +143,8 @@ def build_line_chart(
     title: str,
     table: dict[str, Any],
     series_columns: list[tuple[str, str, str]],
+    *,
+    source: str = "dispatch.csv",
 ) -> dict[str, Any]:
     required_columns = ["timestamp"] + [column for column, _, _ in series_columns]
     missing_columns = [column for column in required_columns if column not in table["columns"]]
@@ -139,7 +170,7 @@ def build_line_chart(
                 "key": column,
                 "label": label,
                 "unit": unit,
-                "source": "dispatch.csv",
+                "source": source,
                 "values": [parse_chart_value(row.get(column)) for row in rows],
             }
             for column, label, unit in series_columns
