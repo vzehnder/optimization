@@ -245,6 +245,61 @@ class DraftGeneratedSystemCaseTests(unittest.TestCase):
             self.assertEqual(validation_response.json()["status"], "ok")
             self.assertEqual(json.loads(validation_service.candidate_text), system_case)
 
+    def test_api_generates_v2_periods_with_hydro_inflow_from_csv_mapping(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            validation_service = RecordingValidationService()
+            client, scenario = make_hydro_client_and_scenario(Path(temp_dir), validation_service)
+            upload_mapped_hydro_csv(client, scenario["id"])
+
+            preview_response = client.get(
+                f"/api/scenarios/{scenario['id']}/draft/generated-system-case",
+            )
+
+            self.assertEqual(preview_response.status_code, 200)
+            system_case = preview_response.json()["system_case"]
+            self.assertEqual(system_case["schema_version"], "bess_system_dispatch.v2")
+            self.assertEqual(
+                system_case["time_series"][0],
+                {
+                    "timestamp": "2026-01-01T00:00:00",
+                    "duration_hours": 1.0,
+                    "import_price_usd_per_mwh": 55.0,
+                    "export_price_usd_per_mwh": 45.0,
+                    "renewable_available_power_mw": {},
+                    "load_demand_mw": {},
+                    "hydro_inflow_m3s": {"hydro_1": 25.0},
+                },
+            )
+
+    def test_promoted_hydro_generated_version_retains_hydro_mapping_metadata(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            validation_service = RecordingValidationService()
+            client, scenario = make_hydro_client_and_scenario(temp_root, validation_service)
+            upload_mapped_hydro_csv(client, scenario["id"])
+
+            validation_response = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/generated-system-case/validate",
+            )
+            self.assertEqual(validation_response.status_code, 200)
+            promote_response = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/generated-system-case/promote",
+            )
+
+            self.assertEqual(promote_response.status_code, 201)
+            version = promote_response.json()
+            stored_version = client.get(f"/api/scenario-versions/{version['id']}").json()[
+                "scenario_version"
+            ]
+            generation_metadata = stored_version["generation_metadata"]
+            self.assertEqual(
+                generation_metadata["mapping"]["hydro_inflow_m3s"],
+                {"hydro_1": "hydro_inflow_m3s"},
+            )
+            self.assertEqual(generation_metadata["source"]["original_filename"], "source.csv")
+            self.assertNotIn("stored_path", generation_metadata["source"])
+            self.assertNotIn(str(temp_root), json.dumps(generation_metadata))
+
     def test_python_mapping_errors_stop_generated_case_validation_before_julia(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             validation_service = RecordingValidationService()
@@ -493,6 +548,26 @@ def make_client_and_scenario(temp_root: Path, validation_service):
     return client, scenario
 
 
+def make_hydro_client_and_scenario(temp_root: Path, validation_service):
+    client = TestClient(
+        create_app(
+            validation_service=validation_service,
+            database_url="sqlite:///:memory:",
+            input_source_root=temp_root / "input-sources",
+        )
+    )
+    project = client.post("/api/projects", json={"name": "Hydro PMGD"}).json()
+    scenario = client.post(
+        f"/api/projects/{project['id']}/scenarios",
+        json={"name": "Hydro base"},
+    ).json()
+    client.post(
+        f"/api/scenarios/{scenario['id']}/draft",
+        json={"document": valid_hydro_draft_document()},
+    )
+    return client, scenario
+
+
 def valid_draft_document():
     return {
         "schema_version": "bess_editor_draft.v1",
@@ -528,6 +603,45 @@ def valid_draft_document():
     }
 
 
+def valid_hydro_draft_document():
+    return {
+        "schema_version": "bess_editor_draft.v1",
+        "case": {"name": "hydro_generated_case"},
+        "pcc": {"id": "bus_1", "type": "bus"},
+        "grid": {
+            "id": "grid_1",
+            "import_power_max_mw": 20.0,
+            "export_power_max_mw": 20.0,
+            "prevent_simultaneous_grid_import_export": True,
+        },
+        "assets": [
+            {
+                "id": "hydro_1",
+                "type": "hydro",
+                "storage_min_hm3": 1.0,
+                "storage_max_hm3": 5.0,
+                "initial_storage_hm3": 2.5,
+                "generation_mode": "linear",
+                "power_per_flow_mw_per_m3s": 0.08,
+                "turbine_flow_max_m3s": 40.0,
+                "power_max_mw": 3.0,
+                "minimum_release_m3s": 0.0,
+                "spill_penalty_usd_per_hm3": 100.0,
+                "terminal_condition": "min_terminal",
+                "terminal_storage_min_hm3": 2.0,
+                "terminal_water_value_usd_per_hm3": 500.0,
+                "reservoir_curve": [
+                    {"storage_hm3": 1.0, "elevation_masl": 700.0},
+                    {"storage_hm3": 3.0, "elevation_masl": 710.0},
+                    {"storage_hm3": 5.0, "elevation_masl": 720.0},
+                ],
+            }
+        ],
+        "time_series": {"sources": []},
+        "solver": {"name": "HiGHS", "options": {}},
+    }
+
+
 def upload_mapped_csv(client: TestClient, scenario_id: int) -> None:
     csv_text = (
         "period_start,hours,buy,sell,pv_available,site_demand\n"
@@ -548,6 +662,32 @@ def upload_mapped_csv(client: TestClient, scenario_id: int) -> None:
                 "export_price_usd_per_mwh": "sell",
                 "renewable_available_power_mw": {"solar_1": "pv_available"},
                 "load_demand_mw": {"load_1": "site_demand"},
+            }
+        },
+    )
+    if mapping_response.status_code != 200:
+        raise AssertionError(mapping_response.text)
+
+
+def upload_mapped_hydro_csv(client: TestClient, scenario_id: int) -> None:
+    csv_text = (
+        "period_start,hours,buy_price,sell_price,hydro_inflow_m3s\n"
+        "2026-01-01T00:00:00,1.0,55.0,45.0,25.0\n"
+        "2026-01-01T01:00:00,1.0,60.0,80.0,30.0\n"
+    )
+    upload = client.post(
+        f"/api/scenarios/{scenario_id}/draft/time-series-sources/upload",
+        files={"source_file": ("source.csv", csv_text, "text/csv")},
+    ).json()["source"]
+    mapping_response = client.put(
+        f"/api/scenarios/{scenario_id}/draft/time-series-sources/{upload['id']}/mapping",
+        json={
+            "mapping": {
+                "timestamp": "period_start",
+                "duration_hours": "hours",
+                "import_price_usd_per_mwh": "buy_price",
+                "export_price_usd_per_mwh": "sell_price",
+                "hydro_inflow_m3s": {"hydro_1": "hydro_inflow_m3s"},
             }
         },
     )

@@ -362,6 +362,9 @@ def _period_from_validated_row(row: Any, index: int) -> dict[str, Any]:
         period["export_price_usd_per_mwh"] = row.get("export_price_usd_per_mwh")
     period["renewable_available_power_mw"] = _validated_series_map(row, "renewable_available_power_mw", index)
     period["load_demand_mw"] = _validated_series_map(row, "load_demand_mw", index)
+    hydro_inflow = _validated_series_map(row, "hydro_inflow_m3s", index)
+    if hydro_inflow:
+        period["hydro_inflow_m3s"] = hydro_inflow
     return period
 
 

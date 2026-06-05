@@ -1043,6 +1043,7 @@ def time_series_mapping_from_form(form) -> dict[str, Any]:
         "export_price_usd_per_mwh": str(form.get("mapping_export_price_usd_per_mwh", "")).strip() or None,
         "renewable_available_power_mw": {},
         "load_demand_mw": {},
+        "hydro_inflow_m3s": {},
     }
     for key, value in form.items():
         text_value = str(value).strip()
@@ -1052,6 +1053,9 @@ def time_series_mapping_from_form(form) -> dict[str, Any]:
         if key.startswith("mapping_load_demand_mw__") and text_value:
             asset_id = key.removeprefix("mapping_load_demand_mw__")
             mapping["load_demand_mw"][asset_id] = text_value
+        if key.startswith("mapping_hydro_inflow_m3s__") and text_value:
+            asset_id = key.removeprefix("mapping_hydro_inflow_m3s__")
+            mapping["hydro_inflow_m3s"][asset_id] = text_value
     return mapping
 
 
@@ -1594,6 +1598,7 @@ def render_time_series_source_detail(scenario: dict, document: dict, source: dic
     validation_markup = render_time_series_validation(source)
     renewable_inputs = render_asset_mapping_inputs(document, source, "renewable", "renewable_available_power_mw")
     load_inputs = render_asset_mapping_inputs(document, source, "load", "load_demand_mw")
+    hydro_inputs = render_asset_mapping_inputs(document, source, "hydro", "hydro_inflow_m3s")
     return f"""
           <div class="source-detail">
             <h2>{source_title}</h2>
@@ -1616,6 +1621,7 @@ def render_time_series_source_detail(scenario: dict, document: dict, source: dic
                 <input id="mapping_export_price_usd_per_mwh" name="mapping_export_price_usd_per_mwh" value="{html_value(mapping.get("export_price_usd_per_mwh") or suggestions.get("export_price_usd_per_mwh"))}">
                 {renewable_inputs}
                 {load_inputs}
+                {hydro_inputs}
               </div>
               <button type="submit">Save Mapping</button>
             </form>

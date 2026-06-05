@@ -43,6 +43,174 @@ class CsvTimeSeriesIngestionTests(unittest.TestCase):
         )
         return client, scenario
 
+    def make_hydro_client_and_scenario(self, input_source_root):
+        client = TestClient(
+            create_app(
+                validation_service=StubValidationService(),
+                database_url="sqlite:///:memory:",
+                input_source_root=input_source_root,
+            )
+        )
+        project = client.post("/api/projects", json={"name": "Hydro PMGD"}).json()
+        scenario = client.post(
+            f"/api/projects/{project['id']}/scenarios",
+            json={"name": "Hydro base"},
+        ).json()
+        client.post(
+            f"/api/scenarios/{scenario['id']}/draft",
+            json={
+                "document": {
+                    "schema_version": "bess_editor_draft.v1",
+                    "case": {"name": "hydro_csv_case"},
+                    "pcc": {"id": "bus_1", "type": "bus"},
+                    "grid": {"id": "grid_1"},
+                    "assets": [
+                        {
+                            "id": "hydro_1",
+                            "type": "hydro",
+                            "storage_min_hm3": 1.0,
+                            "storage_max_hm3": 5.0,
+                            "initial_storage_hm3": 2.5,
+                            "generation_mode": "linear",
+                            "power_per_flow_mw_per_m3s": 0.08,
+                            "turbine_flow_max_m3s": 40.0,
+                            "reservoir_curve": [
+                                {"storage_hm3": 1.0, "elevation_masl": 700.0},
+                                {"storage_hm3": 5.0, "elevation_masl": 720.0},
+                            ],
+                        }
+                    ],
+                    "time_series": {"sources": []},
+                    "solver": {"name": "HiGHS", "options": {}},
+                }
+            },
+        )
+        return client, scenario
+
+    def test_csv_upload_suggests_and_validates_hydro_inflow_mapping(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, scenario = self.make_hydro_client_and_scenario(input_source_root)
+            csv_text = (
+                "period_start,hours,buy_price,sell_price,hydro_1_inflow_m3s\n"
+                "2026-01-01T00:00:00,1.0,55.0,45.0,25.0\n"
+                "2026-01-01T01:00:00,1.0,60.0,80.0,30.0\n"
+            )
+
+            upload = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                files={"source_file": ("hydro.csv", csv_text, "text/csv")},
+            ).json()["source"]
+
+            self.assertEqual(
+                upload["mapping_suggestions"]["hydro_inflow_m3s"],
+                {"hydro_1": "hydro_1_inflow_m3s"},
+            )
+
+            mapping = {
+                "timestamp": "period_start",
+                "duration_hours": "hours",
+                "import_price_usd_per_mwh": "buy_price",
+                "export_price_usd_per_mwh": "sell_price",
+                "hydro_inflow_m3s": {"hydro_1": "hydro_1_inflow_m3s"},
+            }
+            response = client.put(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/{upload['id']}/mapping",
+                json={"mapping": mapping},
+            )
+
+            self.assertEqual(response.status_code, 200)
+            source = response.json()["source"]
+            self.assertEqual(source["mapping"], mapping)
+            self.assertEqual(source["validation"], {"ok": True, "errors": []})
+            self.assertEqual(source["validated_rows"][0]["hydro_inflow_m3s"], {"hydro_1": 25.0})
+            self.assertEqual(source["validated_rows"][1]["hydro_inflow_m3s"], {"hydro_1": 30.0})
+
+    def test_xlsx_upload_suggests_hydro_inflow_from_generic_single_hydro_column(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, scenario = self.make_hydro_client_and_scenario(input_source_root)
+            workbook_bytes = make_xlsx_bytes(
+                [
+                    ["period_start", "hours", "buy_price", "sell_price", "hydro_inflow_m3s"],
+                    ["2026-01-01T00:00:00", 1.0, 55.0, 45.0, 25.0],
+                    ["2026-01-01T01:00:00", 1.0, 60.0, 80.0, 30.0],
+                ],
+            )
+
+            response = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                files={
+                    "source_file": (
+                        "hydro.xlsx",
+                        workbook_bytes,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+                },
+            )
+
+            self.assertEqual(response.status_code, 201)
+            source = response.json()["source"]
+            self.assertEqual(source["kind"], "xlsx")
+            self.assertEqual(
+                source["mapping_suggestions"]["hydro_inflow_m3s"],
+                {"hydro_1": "hydro_inflow_m3s"},
+            )
+
+    def test_hydro_mapping_validation_requires_inflow_and_rejects_bad_values(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, scenario = self.make_hydro_client_and_scenario(input_source_root)
+            csv_text = (
+                "period_start,hours,buy_price,sell_price,hydro_inflow_m3s\n"
+                "2026-01-01T00:00:00,1.0,55.0,45.0,-1.0\n"
+                "2026-01-01T01:00:00,1.0,60.0,80.0,abc\n"
+                "2026-01-01T02:00:00,1.0,70.0,120.0,\n"
+            )
+            upload = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                files={"source_file": ("hydro.csv", csv_text, "text/csv")},
+            ).json()["source"]
+
+            missing_response = client.put(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/{upload['id']}/mapping",
+                json={
+                    "mapping": {
+                        "timestamp": "period_start",
+                        "duration_hours": "hours",
+                        "import_price_usd_per_mwh": "buy_price",
+                        "export_price_usd_per_mwh": "sell_price",
+                    }
+                },
+            )
+            self.assertEqual(missing_response.status_code, 200)
+            missing_validation = missing_response.json()["source"]["validation"]
+            self.assertEqual(missing_validation["error_category"], "mapping")
+            self.assertIn("hydro_inflow_m3s mapping is required for hydro_1", missing_validation["errors"])
+
+            bad_values_response = client.put(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/{upload['id']}/mapping",
+                json={
+                    "mapping": {
+                        "timestamp": "period_start",
+                        "duration_hours": "hours",
+                        "import_price_usd_per_mwh": "buy_price",
+                        "export_price_usd_per_mwh": "sell_price",
+                        "hydro_inflow_m3s": {"hydro_1": "hydro_inflow_m3s"},
+                    }
+                },
+            )
+
+            self.assertEqual(bad_values_response.status_code, 200)
+            validation = bad_values_response.json()["source"]["validation"]
+            self.assertFalse(validation["ok"])
+            self.assertEqual(validation["error_category"], "python_validation")
+            errors = validation["errors"]
+            self.assertIn("row 2: hydro hydro_1 inflow must be nonnegative", errors)
+            self.assertIn("row 3: hydro hydro_1 inflow must be numeric", errors)
+            self.assertIn("row 4: hydro hydro_1 inflow must be numeric", errors)
+            self.assertEqual(bad_values_response.json()["source"]["validated_rows"], [])
+
     def test_csv_upload_is_stored_previewed_and_mapped_for_a_draft(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             input_source_root = Path(temp_dir) / "input-sources"
@@ -412,6 +580,45 @@ class CsvTimeSeriesIngestionTests(unittest.TestCase):
             )
             self.assertEqual(mapping_response.status_code, 303)
 
+            validated_page = client.get(f"/scenarios/{scenario['id']}/draft")
+            self.assertIn("Time-Series Validation", validated_page.text)
+            self.assertIn("Valid mapped rows: 1", validated_page.text)
+
+    def test_draft_page_maps_hydro_inflow_source_from_form(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, scenario = self.make_hydro_client_and_scenario(input_source_root)
+            csv_text = (
+                "period_start,hours,buy_price,sell_price,hydro_inflow_m3s\n"
+                "2026-01-01T00:00:00,1.0,55.0,45.0,25.0\n"
+            )
+            upload_response = client.post(
+                f"/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                files={"source_file": ("hydro.csv", csv_text, "text/csv")},
+                follow_redirects=False,
+            )
+            self.assertEqual(upload_response.status_code, 303)
+
+            uploaded_page = client.get(f"/scenarios/{scenario['id']}/draft")
+            self.assertEqual(uploaded_page.status_code, 200)
+            self.assertIn('name="mapping_hydro_inflow_m3s__hydro_1"', uploaded_page.text)
+
+            source_id = client.get(f"/api/scenarios/{scenario['id']}/draft").json()["draft"]["document"][
+                "time_series"
+            ]["active_source_id"]
+            mapping_response = client.post(
+                f"/scenarios/{scenario['id']}/draft/time-series-sources/{source_id}/mapping",
+                data={
+                    "mapping_timestamp": "period_start",
+                    "mapping_duration_hours": "hours",
+                    "mapping_import_price_usd_per_mwh": "buy_price",
+                    "mapping_export_price_usd_per_mwh": "sell_price",
+                    "mapping_hydro_inflow_m3s__hydro_1": "hydro_inflow_m3s",
+                },
+                follow_redirects=False,
+            )
+
+            self.assertEqual(mapping_response.status_code, 303)
             validated_page = client.get(f"/scenarios/{scenario['id']}/draft")
             self.assertIn("Time-Series Validation", validated_page.text)
             self.assertIn("Valid mapped rows: 1", validated_page.text)

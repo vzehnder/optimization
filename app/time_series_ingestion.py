@@ -382,6 +382,16 @@ def validate_mapping(
                 load_values[str(asset_id)] = value
         normalized_row["load_demand_mw"] = load_values
 
+        hydro_values: dict[str, float | None] = {}
+        hydro_mapping = mapping.get("hydro_inflow_m3s")
+        if isinstance(hydro_mapping, dict):
+            for asset_id, column in hydro_mapping.items():
+                value = parse_mapped_float(row, column, row_index, f"hydro {asset_id} inflow", errors)
+                if value is not None and value < 0:
+                    errors.append(f"row {row_index}: hydro {asset_id} inflow must be nonnegative")
+                hydro_values[str(asset_id)] = value
+        normalized_row["hydro_inflow_m3s"] = hydro_values
+
         validated_rows.append(normalized_row)
 
     if errors:
@@ -443,6 +453,17 @@ def required_mapping_columns(
         else:
             required.append((f"load_demand_mw.{asset_id}", str(column)))
 
+    hydro_mapping = mapping.get("hydro_inflow_m3s")
+    if not isinstance(hydro_mapping, dict):
+        hydro_mapping = {}
+    for asset in draft_assets(draft_document, "hydro"):
+        asset_id = str(asset.get("id") or "")
+        column = hydro_mapping.get(asset_id)
+        if not column:
+            errors.append(f"hydro_inflow_m3s mapping is required for {asset_id}")
+        else:
+            required.append((f"hydro_inflow_m3s.{asset_id}", str(column)))
+
     return required
 
 
@@ -496,6 +517,7 @@ def suggest_mappings(columns: list[str], draft_document: dict[str, Any]) -> dict
         ),
         "renewable_available_power_mw": {},
         "load_demand_mw": {},
+        "hydro_inflow_m3s": {},
     }
 
     for asset in draft_assets(draft_document, "renewable"):
@@ -517,6 +539,24 @@ def suggest_mappings(columns: list[str], draft_document: dict[str, Any]) -> dict
         )
         if matched:
             suggestions["load_demand_mw"][asset_id] = matched
+
+    hydro_assets = draft_assets(draft_document, "hydro")
+    generic_hydro_inflow = None
+    if len(hydro_assets) == 1:
+        generic_hydro_inflow = find_first_column(
+            normalized_columns,
+            ["hydro_inflow_m3s", "inflow_m3s", "inflow"],
+        )
+
+    for asset in hydro_assets:
+        asset_id = str(asset.get("id") or "")
+        matched = find_asset_column(
+            columns,
+            asset_id,
+            ["inflow", "inflow_m3s", "hydro_inflow_m3s"],
+        ) or generic_hydro_inflow
+        if matched:
+            suggestions["hydro_inflow_m3s"][asset_id] = matched
 
     return suggestions
 
