@@ -78,19 +78,23 @@ When separate prices are present, import cost and export revenue drive the
 objective and are included in result outputs. Legacy single-price cases remain
 valid and keep the existing `price_usd_per_mwh` output column.
 
-Iteration 5 adds the first `bess_system_dispatch.v2` Julia contract path for a
-linear simple-reservoir hydro asset. The sample lives at
-`data/cases/linear_hydro_system/system_case.json` and can be run through the
-same API or CLI:
+Iteration 5 adds `bess_system_dispatch.v2` Julia contract paths for
+simple-reservoir hydro assets. The linear sample lives at
+`data/cases/linear_hydro_system/system_case.json` and the piecewise sample lives
+at `data/cases/piecewise_hydro_system/system_case.json`. Both can be run through
+the same API or CLI:
 
 ```powershell
 julia --project=. scripts/run_system_case.jl data/cases/linear_hydro_system/system_case.json --output-root outputs
+julia --project=. scripts/run_system_case.jl data/cases/piecewise_hydro_system/system_case.json --output-root outputs
 ```
 
-The linear hydro node uses `hydro_inflow_m3s` time-series values, reservoir
-storage in `hm3`, turbine and spill flows in `m3/s`, a mandatory reservoir
+Hydro nodes use `hydro_inflow_m3s` time-series values, reservoir storage in
+`hm3`, turbine and spill flows in `m3/s`, a mandatory reservoir
 storage/elevation curve, terminal storage settings, spill penalty, and terminal
-water value. Legacy `bess_system_dispatch.v1` cases remain accepted.
+water value. Linear hydro uses `power_per_flow_mw_per_m3s`; piecewise hydro
+uses explicit nonconvex or nonmonotone `(flow_m3s, power_mw)` breakpoints through
+`PiecewiseLinearOpt`. Legacy `bess_system_dispatch.v1` cases remain accepted.
 
 Each system run folder contains:
 
@@ -268,7 +272,7 @@ that PCC with logical edges. These edges express connectivity for the one-bus
 optimizer; they are not physical lines and do not carry losses, impedance,
 direction, or network-flow constraints.
 
-Supported structured assets in Iteration 4:
+Supported structured assets:
 
 - `grid`: import/export limits and import/export anti-simultaneity.
 - `battery`: charge/discharge power, energy bounds, initial energy,
@@ -277,8 +281,12 @@ Supported structured assets in Iteration 4:
 - `renewable`: solar or wind display metadata, exogenous availability, and
   optional curtailment penalty.
 - `load`: fixed demand by period.
+- `hydro`: simple independent reservoir assets with linear or piecewise
+  generation curves, reservoir storage/elevation curves, inflow mapping,
+  spill/terminal economics, and hydro result tables/charts.
 
-Hydropower, multiple physical buses, manual edge editing, scheduling, auth,
+Iteration 5 structured editor cases generate `bess_system_dispatch.v2` by
+default. Multiple physical buses, manual edge editing, scheduling, auth,
 customer portals, and configurable dashboards remain out of scope for this
 iteration.
 
@@ -312,12 +320,14 @@ Expected units match the optimizer contract:
 - `export_price_usd_per_mwh`: export/sell price in USD/MWh.
 - `renewable_available_power_mw`: nonnegative MW by renewable asset ID.
 - `load_demand_mw`: nonnegative MW by load asset ID.
+- `hydro_inflow_m3s`: nonnegative `m3/s` by hydro asset ID.
 
 Each source must map `timestamp`, `duration_hours`, a complete price mode, every
-renewable availability series, and every load demand series. Use either
-`price_usd_per_mwh` or both `import_price_usd_per_mwh` and
-`export_price_usd_per_mwh`; mapping only one separate price is invalid. Numeric
-columns must contain numeric values for every mapped row.
+renewable availability series, every load demand series, and every hydro inflow
+series present in the draft. Use either `price_usd_per_mwh` or both
+`import_price_usd_per_mwh` and `export_price_usd_per_mwh`; mapping only one
+separate price is invalid. Numeric columns must contain numeric values for every
+mapped row.
 
 ### Legacy Single Price And Separate Import/Export Prices
 
@@ -384,3 +394,18 @@ draft creation through source mapping, generated preview, Julia-backed
 validation, promotion, manual run, artifact registration, result tables, price
 charts, and downloads. It also proves the Iteration 3 paste/upload JSON path and
 legacy single-price result behavior remain intact.
+
+### Iteration 5 Acceptance Verification
+
+Run the focused Iteration 5 acceptance test:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_iter5_acceptance -v
+```
+
+The current Iteration 5 acceptance coverage proves a piecewise hydro structured
+editor flow from UI/API draft save through CSV and XLSX hydro inflow mapping,
+generated `bess_system_dispatch.v2` preview, Julia-backed validation,
+promotion, manual run, resolved-case and metadata artifacts, hydro result
+tables, and hydro charts. It also proves invalid piecewise breakpoints are
+reported before promotion.

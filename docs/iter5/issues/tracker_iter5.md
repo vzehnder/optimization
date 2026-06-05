@@ -28,7 +28,7 @@ triage label.
 | BESS-ITER5-005 | Map Hydro Inflows From CSV And XLSX | AFK | ready-for-agent | Done | BESS-ITER5-004 | [BESS-ITER5-005-map-hydro-inflows-from-csv-and-xlsx.md](BESS-ITER5-005-map-hydro-inflows-from-csv-and-xlsx.md) |
 | BESS-ITER5-006 | Promote And Run A Linear Hydro Draft | AFK | ready-for-agent | Done | BESS-ITER5-005 | [BESS-ITER5-006-promote-and-run-a-linear-hydro-draft.md](BESS-ITER5-006-promote-and-run-a-linear-hydro-draft.md) |
 | BESS-ITER5-007 | Render Hydro Results Tables And Charts | AFK | ready-for-agent | Done | BESS-ITER5-006 | [BESS-ITER5-007-render-hydro-results-tables-and-charts.md](BESS-ITER5-007-render-hydro-results-tables-and-charts.md) |
-| BESS-ITER5-008 | Prove Piecewise Hydro From Editor End To End | AFK | ready-for-agent | Todo | BESS-ITER5-002, BESS-ITER5-005, BESS-ITER5-007 | [BESS-ITER5-008-prove-piecewise-hydro-from-editor-end-to-end.md](BESS-ITER5-008-prove-piecewise-hydro-from-editor-end-to-end.md) |
+| BESS-ITER5-008 | Prove Piecewise Hydro From Editor End To End | AFK | ready-for-agent | Done | BESS-ITER5-002, BESS-ITER5-005, BESS-ITER5-007 | [BESS-ITER5-008-prove-piecewise-hydro-from-editor-end-to-end.md](BESS-ITER5-008-prove-piecewise-hydro-from-editor-end-to-end.md) |
 | BESS-ITER5-009 | Finalize Iteration 5 Acceptance Suite And Docs | AFK | ready-for-agent | Todo | BESS-ITER5-001 through BESS-ITER5-008 | [BESS-ITER5-009-finalize-iteration-5-acceptance-suite-and-docs.md](BESS-ITER5-009-finalize-iteration-5-acceptance-suite-and-docs.md) |
 
 ## Recommended Execution Order
@@ -56,6 +56,7 @@ triage label.
 | 2026-06-05 | BESS-ITER5-005 | Todo -> Done | Added CSV/XLSX hydro inflow mapping suggestions, manual `hydro_inflow_m3s.<hydro_id>` mapping, missing/negative/nonnumeric validation, generated `v2` period inflow maps, and provenance metadata coverage; verified 77 Python web tests and Chrome DevTools local UI inspection. |
 | 2026-06-05 | BESS-ITER5-006 | Todo -> Done | Connected promoted linear hydro generated drafts to the manual run artifact contract by registering `system_case_resolved.json`, added end-to-end promoted hydro draft/run coverage with safe source and mapping provenance, aligned the hydro test fixture with the current Julia one-bus normalizer, verified 78 Python web tests, and completed a Chrome DevTools real-Julia local smoke. |
 | 2026-06-05 | BESS-ITER5-007 | Todo -> Done | Added hydro result API/chart payloads for dispatch totals and asset reservoir elevation, rendered `summary.json` hydro KPIs in the run page, preserved legacy missing-column fallbacks, verified 81 Python tests, and completed Chrome DevTools local UI inspection. |
+| 2026-06-05 | BESS-ITER5-008 | Todo -> Done | Added focused Iteration 5 acceptance coverage for a piecewise hydro structured editor flow through UI/API draft save, CSV and XLSX inflow mapping, generated `v2` preview preserving nonmonotone breakpoints, Julia validation, promotion, manual run, resolved-case and metadata artifacts, result tables/charts, and invalid breakpoint rejection before promotion. |
 
 ## Regression Guard
 
