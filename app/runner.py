@@ -327,6 +327,7 @@ class JuliaRunExecutor:
             ("summary_json", "summary.json", "application/json"),
             ("dispatch_csv", "dispatch.csv", "text/csv"),
             ("asset_dispatch_csv", "asset_dispatch.csv", "text/csv"),
+            ("system_case_resolved_json", "system_case_resolved.json", "application/json"),
             ("model_metadata_json", "model_metadata.json", "application/json"),
         ]:
             self._register_artifact_if_file(

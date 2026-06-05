@@ -265,7 +265,7 @@ class DraftGeneratedSystemCaseTests(unittest.TestCase):
                     "duration_hours": 1.0,
                     "import_price_usd_per_mwh": 55.0,
                     "export_price_usd_per_mwh": 45.0,
-                    "renewable_available_power_mw": {},
+                    "renewable_available_power_mw": {"solar_1": 0.0},
                     "load_demand_mw": {},
                     "hydro_inflow_m3s": {"hydro_1": 25.0},
                 },
@@ -299,6 +299,96 @@ class DraftGeneratedSystemCaseTests(unittest.TestCase):
             self.assertEqual(generation_metadata["source"]["original_filename"], "source.csv")
             self.assertNotIn("stored_path", generation_metadata["source"])
             self.assertNotIn(str(temp_root), json.dumps(generation_metadata))
+
+    def test_promoted_linear_hydro_generated_version_runs_and_registers_hydro_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            artifact_root = temp_root / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            validation_service = DraftPromotionValidationService()
+            run_process = HydroDraftPromotionRunProcess()
+            executor = JuliaRunExecutor(
+                store=store,
+                repo_root=REPO_ROOT,
+                artifact_root=artifact_root,
+                julia_executable="julia",
+                runner=run_process,
+                validation_service=validation_service,
+            )
+            client = TestClient(
+                create_app(
+                    validation_service=validation_service,
+                    store=store,
+                    run_queue=SynchronousRunQueue(executor),
+                    artifact_root=artifact_root,
+                    input_source_root=temp_root / "input-sources",
+                )
+            )
+            try:
+                project = client.post("/api/projects", json={"name": "Hydro PMGD"}).json()
+                scenario = client.post(
+                    f"/api/projects/{project['id']}/scenarios",
+                    json={"name": "Linear hydro"},
+                ).json()
+                client.post(
+                    f"/api/scenarios/{scenario['id']}/draft",
+                    json={"document": valid_hydro_draft_document()},
+                )
+                upload_mapped_hydro_csv(client, scenario["id"])
+
+                validation_response = client.post(
+                    f"/api/scenarios/{scenario['id']}/draft/generated-system-case/validate",
+                )
+                self.assertEqual(validation_response.status_code, 200)
+                generated_case = validation_response.json()["system_case"]
+                self.assertEqual(generated_case["case_name"], "hydro_generated_case")
+
+                promote_response = client.post(
+                    f"/api/scenarios/{scenario['id']}/draft/generated-system-case/promote",
+                )
+                self.assertEqual(promote_response.status_code, 201)
+                version = promote_response.json()
+                stored_version = client.get(f"/api/scenario-versions/{version['id']}").json()[
+                    "scenario_version"
+                ]
+                self.assertEqual(stored_version["system_case_json"], generated_case)
+                self.assertEqual(
+                    stored_version["generation_metadata"]["mapping"]["hydro_inflow_m3s"],
+                    {"hydro_1": "hydro_inflow_m3s"},
+                )
+
+                run_response = client.post(f"/api/scenario-versions/{version['id']}/runs")
+                self.assertEqual(run_response.status_code, 201)
+                run = client.get(f"/api/runs/{run_response.json()['id']}").json()["run"]
+                self.assertEqual(run["status"], "succeeded")
+                self.assertTrue(run_process.completed_commands)
+
+                artifacts = client.get(f"/api/runs/{run['id']}/artifacts").json()["artifacts"]
+                artifacts_by_type = {artifact["artifact_type"]: artifact for artifact in artifacts}
+                self.assertEqual(
+                    set(artifacts_by_type),
+                    {
+                        "input_snapshot",
+                        "stdout_log",
+                        "stderr_log",
+                        "summary_json",
+                        "dispatch_csv",
+                        "asset_dispatch_csv",
+                        "system_case_resolved_json",
+                        "model_metadata_json",
+                    },
+                )
+                resolved_case = json.loads(Path(artifacts_by_type["system_case_resolved_json"]["path"]).read_text())
+                self.assertEqual(resolved_case["case_name"], "hydro_generated_case")
+                self.assertEqual(resolved_case["schema_version"], "bess_system_dispatch.v2")
+
+                results_response = client.get(f"/api/runs/{run['id']}/results")
+                self.assertEqual(results_response.status_code, 200)
+                results = results_response.json()["results"]
+                self.assertEqual(results["summary"]["hydro_totals"]["total_hydro_generation_mwh"], 5.0)
+                self.assertEqual(results["asset_dispatch_table"]["rows"][0]["asset_type"], "hydro")
+            finally:
+                store.close()
 
     def test_python_mapping_errors_stop_generated_case_validation_before_julia(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -514,6 +604,80 @@ class DraftPromotionRunProcess:
         )
 
 
+class HydroDraftPromotionRunProcess:
+    def __init__(self):
+        self.completed_commands = []
+
+    def __call__(self, command, **kwargs):
+        self.completed_commands.append((command, kwargs))
+        input_path = next(Path(item) for item in command if str(item).endswith("system_case.json"))
+        system_case = json.loads(input_path.read_text(encoding="utf-8"))
+        output_root = Path(command[command.index("--output-root") + 1])
+        output_dir = output_root / "hydro_generated_case" / "hydro-draft-run"
+        output_dir.mkdir(parents=True)
+        summary_path = output_dir / "summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "case_name": "hydro_generated_case",
+                    "schema_version": "bess_system_dispatch.v2",
+                    "solver_name": "HiGHS",
+                    "solver_status": "OPTIMAL",
+                    "termination_status": "OPTIMAL",
+                    "objective_value_usd": 100.0,
+                    "hydro_totals": {"total_hydro_generation_mwh": 5.0, "total_spill_volume_hm3": 0.0},
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (output_dir / "dispatch.csv").write_text(
+            "timestamp,duration_hours,import_price_usd_per_mwh,export_price_usd_per_mwh,"
+            "grid_import_mw,grid_export_mw,net_grid_export_mw,hydro_power_mw,hydro_turbine_flow_m3s,"
+            "hydro_spill_flow_m3s,hydro_storage_hm3,hydro_inflow_m3s,period_profit_usd\n"
+            "2026-01-01T00:00:00,1.0,55.0,45.0,0.0,2.0,2.0,2.0,25.0,0.0,2.41,25.0,90.0\n",
+            encoding="utf-8",
+        )
+        (output_dir / "asset_dispatch.csv").write_text(
+            "timestamp,duration_hours,import_price_usd_per_mwh,export_price_usd_per_mwh,"
+            "asset_id,asset_type,hydro_power_mw,hydro_turbine_flow_m3s,hydro_spill_flow_m3s,"
+            "hydro_storage_hm3,hydro_inflow_m3s\n"
+            "2026-01-01T00:00:00,1.0,55.0,45.0,hydro_1,hydro,2.0,25.0,0.0,2.41,25.0\n",
+            encoding="utf-8",
+        )
+        (output_dir / "system_case_resolved.json").write_text(
+            json.dumps(system_case, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (output_dir / "model_metadata.json").write_text(
+            json.dumps(
+                {
+                    "model_name": "one_bus_system_dispatch",
+                    "schema_version": "bess_system_dispatch.v2",
+                    "hydro_asset_ids": ["hydro_1"],
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps(
+                {
+                    "case_name": "hydro_generated_case",
+                    "run_timestamp": "hydro-draft-run",
+                    "output_dir": str(output_dir),
+                    "summary_path": str(summary_path),
+                    "termination_status": "OPTIMAL",
+                }
+            ),
+            stderr="",
+        )
+
+
 class RejectingValidationService:
     def __init__(self):
         self.candidate_text = ""
@@ -616,6 +780,22 @@ def valid_hydro_draft_document():
         },
         "assets": [
             {
+                "id": "battery_1",
+                "type": "battery",
+                "charge_power_max_mw": 0.0,
+                "discharge_power_max_mw": 0.0,
+                "energy_min_mwh": 0.0,
+                "energy_max_mwh": 1.0,
+                "initial_energy_mwh": 0.0,
+                "charge_efficiency": 1.0,
+                "discharge_efficiency": 1.0,
+                "degradation_cost_per_mwh_delta_soc": 0.0,
+                "terminal_condition": "none",
+                "prevent_simultaneous_charge_discharge": True,
+                "degradation_linear_delta_soc": False,
+            },
+            {"id": "solar_1", "type": "renewable", "category": "solar"},
+            {
                 "id": "hydro_1",
                 "type": "hydro",
                 "storage_min_hm3": 1.0,
@@ -671,9 +851,9 @@ def upload_mapped_csv(client: TestClient, scenario_id: int) -> None:
 
 def upload_mapped_hydro_csv(client: TestClient, scenario_id: int) -> None:
     csv_text = (
-        "period_start,hours,buy_price,sell_price,hydro_inflow_m3s\n"
-        "2026-01-01T00:00:00,1.0,55.0,45.0,25.0\n"
-        "2026-01-01T01:00:00,1.0,60.0,80.0,30.0\n"
+        "period_start,hours,buy_price,sell_price,solar_available_mw,hydro_inflow_m3s\n"
+        "2026-01-01T00:00:00,1.0,55.0,45.0,0.0,25.0\n"
+        "2026-01-01T01:00:00,1.0,60.0,80.0,0.0,30.0\n"
     )
     upload = client.post(
         f"/api/scenarios/{scenario_id}/draft/time-series-sources/upload",
@@ -687,6 +867,7 @@ def upload_mapped_hydro_csv(client: TestClient, scenario_id: int) -> None:
                 "duration_hours": "hours",
                 "import_price_usd_per_mwh": "buy_price",
                 "export_price_usd_per_mwh": "sell_price",
+                "renewable_available_power_mw": {"solar_1": "solar_available_mw"},
                 "hydro_inflow_m3s": {"hydro_1": "hydro_inflow_m3s"},
             }
         },
