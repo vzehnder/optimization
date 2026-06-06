@@ -1,6 +1,6 @@
 # BESS-ITER5-009: Finalize Iteration 5 Acceptance Suite And Docs
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/iter5/prd_hydro_simple_dispatch.md`
@@ -21,27 +21,65 @@ This is the closing proof issue, not the first implementation of core behavior.
 
 ## Acceptance criteria
 
-- [ ] Documentation explains `bess_system_dispatch.v2` and `v1` compatibility.
-- [ ] Documentation explains simple reservoir hydro scope and exclusions.
-- [ ] Documentation explains hydro units and flow-to-volume conversion.
-- [ ] Documentation explains linear and piecewise generation modes.
-- [ ] Documentation explains reservoir curves, spill penalty, minimum release,
+- [x] Documentation explains `bess_system_dispatch.v2` and `v1` compatibility.
+- [x] Documentation explains simple reservoir hydro scope and exclusions.
+- [x] Documentation explains hydro units and flow-to-volume conversion.
+- [x] Documentation explains linear and piecewise generation modes.
+- [x] Documentation explains reservoir curves, spill penalty, minimum release,
       terminal condition, and terminal water value.
-- [ ] Documentation explains structured editor hydro usage and CSV/XLSX inflow
+- [x] Documentation explains structured editor hydro usage and CSV/XLSX inflow
       mapping.
-- [ ] Documentation explains hydro result tables, charts, and artifacts.
-- [ ] A final Iteration 5 acceptance suite proves the linear hydro flow end to
+- [x] Documentation explains hydro result tables, charts, and artifacts.
+- [x] A final Iteration 5 acceptance suite proves the linear hydro flow end to
       end.
-- [ ] A final Iteration 5 acceptance suite proves the piecewise hydro flow end
+- [x] A final Iteration 5 acceptance suite proves the piecewise hydro flow end
       to end.
-- [ ] Acceptance coverage proves paste/upload `v1` JSON still works.
-- [ ] Acceptance coverage proves structured editor cases without hydro still
+- [x] Acceptance coverage proves paste/upload `v1` JSON still works.
+- [x] Acceptance coverage proves structured editor cases without hydro still
       work as `v2`.
-- [ ] Acceptance coverage proves malformed hydro inputs fail clearly.
-- [ ] Manual test checklist is updated and aligned with implemented behavior.
-- [ ] Full Python tests pass.
-- [ ] Full Julia regression tests pass.
-- [ ] The Iteration 5 tracker includes final verification instructions.
+- [x] Acceptance coverage proves malformed hydro inputs fail clearly.
+- [x] Manual test checklist is updated and aligned with implemented behavior.
+- [x] Full Python tests pass.
+- [x] Full Julia regression tests pass.
+- [x] The Iteration 5 tracker includes final verification instructions.
+
+## Implementation notes
+
+Completed on 2026-06-05.
+
+- Extended `tests.test_iter5_acceptance` with the final Iteration 5 closing
+  proof. The suite now covers a linear hydro structured draft through mapped
+  inflow, generated `v2` preview, Julia-backed validation, promotion, manual
+  run, registered resolved-case artifact, hydro result tables, and hydro
+  charts.
+- Kept the existing piecewise hydro acceptance path for CSV and XLSX mapping,
+  nonmonotone breakpoints, promotion, run results, and invalid breakpoint
+  rejection.
+- Added final regression coverage for paste/upload legacy
+  `bess_system_dispatch.v1` JSON, structured editor cases without hydro
+  generated as `bess_system_dispatch.v2`, and negative hydro inflow failures
+  reported before promotion.
+- Expanded `README.md` with `v2`/`v1` compatibility, simple reservoir hydro
+  scope, units and flow conversion, linear and piecewise generation modes,
+  reservoir curves, spill/minimum-release/terminal economics, structured
+  editor inflow mapping, and hydro result artifacts.
+- Updated the manual Iteration 5 checklist with a closing automation note.
+
+## Verification
+
+Passed:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_iter5_acceptance -v
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+julia --project=. -e "import Pkg; Pkg.test()"
+```
+
+Results:
+
+- Final Iteration 5 acceptance suite: 4 passed.
+- Full Python web/API/template/results suite: passed.
+- Full Julia optimizer regression suite: passed.
 
 ## Blocked by
 

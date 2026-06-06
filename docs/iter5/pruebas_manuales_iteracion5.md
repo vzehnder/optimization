@@ -191,6 +191,19 @@ Usar CSV o XLSX equivalente con columna `hydro_inflow_m3s`.
 julia --project=. -e "import Pkg; Pkg.test()"
 ```
 
+## Cierre Iteracion 5
+
+La suite final automatizada cubre el flujo linear hydro desde draft estructurado
+hasta corrida y resultados, el flujo piecewise hydro con CSV/XLSX, preview
+`bess_system_dispatch.v2`, validacion Julia, promocion, artefactos, tablas y
+charts. Tambien cubre compatibilidad paste/upload `bess_system_dispatch.v1`,
+casos estructurados sin hydro generados como `v2`, y errores claros para
+afluentes hydro invalidos antes de promocion.
+
+La revision manual debe usar esta checklist para inspeccion visual y operativa
+final; la automatizacion anterior es la evidencia minima esperada antes de
+marcar la iteracion como aceptada.
+
 ## Cierre
 
 | Area | Resultado | Evidencia / notas |

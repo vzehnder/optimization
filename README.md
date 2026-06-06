@@ -96,6 +96,72 @@ water value. Linear hydro uses `power_per_flow_mw_per_m3s`; piecewise hydro
 uses explicit nonconvex or nonmonotone `(flow_m3s, power_mw)` breakpoints through
 `PiecewiseLinearOpt`. Legacy `bess_system_dispatch.v1` cases remain accepted.
 
+### Simple Reservoir Hydro Scope
+
+`bess_system_dispatch.v2` adds one `hydro` node type. One hydro node represents
+one independent reservoir and one associated plant connected to the common
+one-bus PCC. Multiple hydro nodes are allowed, but they are independent and
+share only the electrical bus balance.
+
+The hydro scope excludes hydraulic cascades, hydraulic network routing,
+travel-time delays, pumped storage, multiple reservoirs coupled to one plant,
+multiple plants sharing one reservoir, and generation curves that depend on
+reservoir elevation or head. Electrical modeling remains one-bus; graph edges
+are logical connectivity only.
+
+### Hydro Units And Flow Conversion
+
+Hydro storage uses `hm3`. Inflow, turbine flow, spill flow, and minimum release
+use `m3/s`. Power uses `MW`, period duration uses hours, and hydro water
+economics use `USD/hm3`.
+
+The reservoir balance converts any flow over a period into volume as:
+
+```text
+volume_hm3 = flow_m3s * duration_hours * 3600 / 1_000_000
+```
+
+That conversion is used for inflow volume, turbine volume, spill volume, spill
+penalty, and storage updates.
+
+### Hydro Generation Modes
+
+Linear hydro uses:
+
+```text
+hydro_power_mw = power_per_flow_mw_per_m3s * turbine_flow_m3s
+```
+
+Linear mode requires `power_per_flow_mw_per_m3s` and
+`turbine_flow_max_m3s`. Optional `power_max_mw` can cap generated power.
+
+Piecewise hydro uses explicit `generation_curve` breakpoints:
+
+```json
+{"flow_m3s": 30.0, "power_mw": 2.4}
+```
+
+Flow breakpoints must be nonnegative and strictly increasing. Power values must
+be finite and nonnegative, but may be nonconvex or nonmonotone. The model uses
+`PiecewiseLinearOpt.piecewiselinear` with the package default method. Optional
+turbine-flow bounds in piecewise mode must lie inside the curve domain.
+
+### Reservoir Curves And Water Economics
+
+Every hydro asset requires a `reservoir_curve` of
+`(storage_hm3, elevation_masl)` breakpoints. Storage breakpoints must be
+strictly increasing and elevation values must be finite and nondecreasing.
+Storage bounds, initial storage, and terminal storage values must lie inside
+the reservoir curve domain. The reservoir curve reports elevation; it does not
+affect generation in Iteration 5.
+
+`minimum_release_m3s` is met by turbine flow plus spill flow. Spill is always
+allowed and may be penalized with `spill_penalty_usd_per_hm3`. Terminal storage
+modes are `none`, `equal_initial`, and `min_terminal`.
+`terminal_water_value_usd_per_hm3` adds value for final stored water and can be
+used with any terminal mode; when `equal_initial` fixes final storage, that
+terminal value is reported but normally not dispatch-decisional.
+
 Each system run folder contains:
 
 - `dispatch.csv`: one row per period with system totals including
@@ -266,11 +332,14 @@ The draft page supports:
 
 ### Supported Assets And One-Bus Assumptions
 
-Generated cases remain `bess_system_dispatch.v1` one-bus cases. The editor
+Structured editor cases generate one-bus `system_case` documents. Iteration 4
+generated `bess_system_dispatch.v1`; Iteration 5 generates
+`bess_system_dispatch.v2` by default, including cases without hydro. The editor
 creates exactly one PCC or bus and automatically connects every modeled asset to
 that PCC with logical edges. These edges express connectivity for the one-bus
 optimizer; they are not physical lines and do not carry losses, impedance,
-direction, or network-flow constraints.
+direction, or network-flow constraints. Paste/upload JSON still accepts legacy
+`bess_system_dispatch.v1` cases.
 
 Supported structured assets:
 
@@ -289,6 +358,19 @@ Iteration 5 structured editor cases generate `bess_system_dispatch.v2` by
 default. Multiple physical buses, manual edge editing, scheduling, auth,
 customer portals, and configurable dashboards remain out of scope for this
 iteration.
+
+### Hydro Structured Editor And Inflow Mapping
+
+The draft editor can define hydro storage settings, terminal mode, spill
+penalty, minimum release, terminal water value, linear parameters, piecewise
+generation breakpoints, and reservoir storage/elevation breakpoints. Generated
+previews include hydro nodes, hydro curves, and automatic hydro-to-PCC edges.
+
+CSV and XLSX mapping supports `hydro_inflow_m3s.<hydro_id>` for every hydro
+asset in the draft. Missing, nonnumeric, negative, or unmapped hydro inflow
+values fail in Python validation before Julia validation or promotion. Promoted
+versions retain safe source-file and mapping metadata without exposing absolute
+local source paths.
 
 ### CSV And XLSX Source Files
 
@@ -349,6 +431,18 @@ price outputs include:
 Result tables show those columns and the price chart prefers import/export
 price series. Legacy runs fall back to a single price series.
 
+### Hydro Results And Artifacts
+
+Hydro runs preserve the same audit boundary as earlier iterations: input
+snapshot, stdout/stderr logs, `summary.json`, `dispatch.csv`,
+`asset_dispatch.csv`, `system_case_resolved.json`, and `model_metadata.json`.
+
+Hydro result tables expose total hydro columns from `dispatch.csv` and hydro
+asset rows from `asset_dispatch.csv`. Hydro charts cover power, inflow, turbine
+flow, spill flow, storage, and reservoir elevation. Runs without hydro continue
+to render price, grid, renewable, BESS, load, and profit charts; hydro chart
+panels degrade through missing-column messages instead of breaking legacy pages.
+
 ### Draft Validation, Preview, And Promotion
 
 The generated preview is read-only because the structured draft remains the
@@ -403,9 +497,10 @@ Run the focused Iteration 5 acceptance test:
 .\.venv\Scripts\python.exe -m unittest tests.test_iter5_acceptance -v
 ```
 
-The current Iteration 5 acceptance coverage proves a piecewise hydro structured
-editor flow from UI/API draft save through CSV and XLSX hydro inflow mapping,
-generated `bess_system_dispatch.v2` preview, Julia-backed validation,
-promotion, manual run, resolved-case and metadata artifacts, hydro result
-tables, and hydro charts. It also proves invalid piecewise breakpoints are
+The current Iteration 5 acceptance coverage proves linear hydro and piecewise
+hydro structured editor flows, CSV and XLSX hydro inflow mapping, generated
+`bess_system_dispatch.v2` previews, Julia-backed validation, promotion, manual
+run execution, resolved-case and metadata artifacts, hydro result tables and
+charts, paste/upload `bess_system_dispatch.v1` compatibility, structured
+editor cases without hydro still generated as `v2`, and malformed hydro inputs
 reported before promotion.
