@@ -130,6 +130,16 @@ def create_app(
         local_run_queue.enqueue(run["id"])
         return run
 
+    def get_or_create_scenario_draft(scenario_id: int) -> dict:
+        try:
+            return analyst_store.get_scenario_draft(scenario_id)
+        except KeyError:
+            draft_document = create_initial_draft_document(analyst_store, scenario_id, None)
+            return analyst_store.create_or_replace_scenario_draft(
+                scenario_id=scenario_id,
+                document=draft_document,
+            )
+
     @app.get("/")
     async def root():
         return RedirectResponse("/projects")
@@ -266,7 +276,7 @@ def create_app(
         sheet_name: str | None = Form(None),
     ):
         try:
-            draft = analyst_store.get_scenario_draft(scenario_id)
+            draft = get_or_create_scenario_draft(scenario_id)
             content = await source_file.read()
             source = ingest_time_series_source(
                 draft_document=draft["document"],
@@ -681,7 +691,7 @@ def create_app(
         sheet_name: str | None = Form(None),
     ):
         try:
-            draft = analyst_store.get_scenario_draft(scenario_id)
+            draft = get_or_create_scenario_draft(scenario_id)
             content = await source_file.read()
             source = ingest_time_series_source(
                 draft_document=draft["document"],

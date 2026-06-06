@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from openpyxl import Workbook
 
 from app.main import create_app
+from app.persistence import AnalystStore
 from app.validation import ValidationResult
 
 
@@ -584,6 +585,52 @@ class CsvTimeSeriesIngestionTests(unittest.TestCase):
             self.assertIn("Time-Series Validation", validated_page.text)
             self.assertIn("Valid mapped rows: 1", validated_page.text)
 
+    def test_draft_page_upload_creates_initial_draft_when_none_is_saved(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client = TestClient(
+                create_app(
+                    validation_service=StubValidationService(),
+                    store=AnalystStore("sqlite:///:memory:"),
+                    run_queue=NoopRunQueue(),
+                    input_source_root=input_source_root,
+                )
+            )
+            project = client.post("/api/projects", json={"name": "Unsaved Draft Upload"}).json()
+            scenario = client.post(
+                f"/api/projects/{project['id']}/scenarios",
+                json={"name": "Upload before explicit save"},
+            ).json()
+
+            draft_page = client.get(f"/scenarios/{scenario['id']}/draft")
+            self.assertEqual(draft_page.status_code, 200)
+            self.assertIn("No active draft saved yet", draft_page.text)
+
+            upload_response = client.post(
+                f"/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                files={
+                    "source_file": (
+                        "time_series_20h.csv",
+                        (
+                            "period_start,hours,buy_price,sell_price\n"
+                            "2026-01-01T00:00:00,1.0,55.0,45.0\n"
+                        ),
+                        "text/csv",
+                    )
+                },
+                follow_redirects=False,
+            )
+
+            self.assertEqual(upload_response.status_code, 303)
+            saved_draft = client.get(f"/api/scenarios/{scenario['id']}/draft").json()["draft"]
+            self.assertEqual(saved_draft["document"]["case"]["name"], scenario["name"])
+            self.assertEqual(
+                saved_draft["document"]["time_series"]["sources"][0]["original_filename"],
+                "time_series_20h.csv",
+            )
+            uploaded_page = client.get(f"/scenarios/{scenario['id']}/draft")
+            self.assertIn("time_series_20h.csv", uploaded_page.text)
+
     def test_draft_page_maps_hydro_inflow_source_from_form(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             input_source_root = Path(temp_dir) / "input-sources"
@@ -632,6 +679,14 @@ class StubValidationService:
             message="Validation succeeded",
             payload={"status": "ok"},
         )
+
+
+class NoopRunQueue:
+    def enqueue(self, run_id):
+        pass
+
+    def stop(self):
+        pass
 
 
 def make_xlsx_bytes(rows, *, extra_sheet_name="Extra", extra_sheet_rows=None):
