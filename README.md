@@ -404,12 +404,13 @@ Expected units match the optimizer contract:
 - `load_demand_mw`: nonnegative MW by load asset ID.
 - `hydro_inflow_m3s`: nonnegative `m3/s` by hydro asset ID.
 
-Each source must map `timestamp`, `duration_hours`, a complete price mode, every
-renewable availability series, every load demand series, and every hydro inflow
-series present in the draft. Use either `price_usd_per_mwh` or both
-`import_price_usd_per_mwh` and `export_price_usd_per_mwh`; mapping only one
-separate price is invalid. Numeric columns must contain numeric values for every
-mapped row.
+Each source must map `timestamp` and `duration_hours`. Blank numeric mappings
+are treated as zero values, including price fields, renewable availability,
+load demand, and hydro inflow series present in the draft. Use
+`price_usd_per_mwh` for legacy single-price cases, or map either/both
+`import_price_usd_per_mwh` and `export_price_usd_per_mwh` for separate pricing;
+an unmapped side defaults to `0.0`. Numeric columns must contain numeric values
+for every mapped row.
 
 ### Legacy Single Price And Separate Import/Export Prices
 

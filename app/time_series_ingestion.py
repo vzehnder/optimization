@@ -338,58 +338,59 @@ def validate_mapping(
             errors.append(f"row {row_index}: duration_hours must be positive")
         normalized_row["duration_hours"] = duration
 
-        if mapping.get("price_usd_per_mwh"):
-            normalized_row["price_usd_per_mwh"] = parse_mapped_float(
+        legacy_price_column = mapped_column(mapping, "price_usd_per_mwh")
+        import_price_column = mapped_column(mapping, "import_price_usd_per_mwh")
+        export_price_column = mapped_column(mapping, "export_price_usd_per_mwh")
+        normalized_row["price_usd_per_mwh"] = parse_mapped_float_or_zero(
+            row,
+            legacy_price_column,
+            row_index,
+            "price_usd_per_mwh",
+            errors,
+        )
+        if import_price_column or export_price_column:
+            normalized_row["import_price_usd_per_mwh"] = parse_mapped_float_or_zero(
                 row,
-                mapping["price_usd_per_mwh"],
-                row_index,
-                "price_usd_per_mwh",
-                errors,
-            )
-        else:
-            normalized_row["import_price_usd_per_mwh"] = parse_mapped_float(
-                row,
-                mapping["import_price_usd_per_mwh"],
+                import_price_column,
                 row_index,
                 "import_price_usd_per_mwh",
                 errors,
             )
-            normalized_row["export_price_usd_per_mwh"] = parse_mapped_float(
+            normalized_row["export_price_usd_per_mwh"] = parse_mapped_float_or_zero(
                 row,
-                mapping["export_price_usd_per_mwh"],
+                export_price_column,
                 row_index,
                 "export_price_usd_per_mwh",
                 errors,
             )
 
         renewable_values: dict[str, float | None] = {}
-        renewable_mapping = mapping.get("renewable_available_power_mw")
-        if isinstance(renewable_mapping, dict):
-            for asset_id, column in renewable_mapping.items():
-                value = parse_mapped_float(row, column, row_index, f"renewable {asset_id}", errors)
-                if value is not None and value < 0:
-                    errors.append(f"row {row_index}: renewable {asset_id} availability must be nonnegative")
-                renewable_values[str(asset_id)] = value
+        for asset_id, column in mapped_asset_columns(
+            mapping,
+            draft_document,
+            "renewable",
+            "renewable_available_power_mw",
+        ):
+            value = parse_mapped_float_or_zero(row, column, row_index, f"renewable {asset_id}", errors)
+            if value is not None and value < 0:
+                errors.append(f"row {row_index}: renewable {asset_id} availability must be nonnegative")
+            renewable_values[str(asset_id)] = value
         normalized_row["renewable_available_power_mw"] = renewable_values
 
         load_values: dict[str, float | None] = {}
-        load_mapping = mapping.get("load_demand_mw")
-        if isinstance(load_mapping, dict):
-            for asset_id, column in load_mapping.items():
-                value = parse_mapped_float(row, column, row_index, f"load {asset_id}", errors)
-                if value is not None and value < 0:
-                    errors.append(f"row {row_index}: load {asset_id} demand must be nonnegative")
-                load_values[str(asset_id)] = value
+        for asset_id, column in mapped_asset_columns(mapping, draft_document, "load", "load_demand_mw"):
+            value = parse_mapped_float_or_zero(row, column, row_index, f"load {asset_id}", errors)
+            if value is not None and value < 0:
+                errors.append(f"row {row_index}: load {asset_id} demand must be nonnegative")
+            load_values[str(asset_id)] = value
         normalized_row["load_demand_mw"] = load_values
 
         hydro_values: dict[str, float | None] = {}
-        hydro_mapping = mapping.get("hydro_inflow_m3s")
-        if isinstance(hydro_mapping, dict):
-            for asset_id, column in hydro_mapping.items():
-                value = parse_mapped_float(row, column, row_index, f"hydro {asset_id} inflow", errors)
-                if value is not None and value < 0:
-                    errors.append(f"row {row_index}: hydro {asset_id} inflow must be nonnegative")
-                hydro_values[str(asset_id)] = value
+        for asset_id, column in mapped_asset_columns(mapping, draft_document, "hydro", "hydro_inflow_m3s"):
+            value = parse_mapped_float_or_zero(row, column, row_index, f"hydro {asset_id} inflow", errors)
+            if value is not None and value < 0:
+                errors.append(f"row {row_index}: hydro {asset_id} inflow must be nonnegative")
+            hydro_values[str(asset_id)] = value
         normalized_row["hydro_inflow_m3s"] = hydro_values
 
         validated_rows.append(normalized_row)
@@ -420,51 +421,60 @@ def required_mapping_columns(
         else:
             required.append((key, str(column)))
 
-    legacy_price = mapping.get("price_usd_per_mwh")
-    import_price = mapping.get("import_price_usd_per_mwh")
-    export_price = mapping.get("export_price_usd_per_mwh")
+    legacy_price = mapped_column(mapping, "price_usd_per_mwh")
+    import_price = mapped_column(mapping, "import_price_usd_per_mwh")
+    export_price = mapped_column(mapping, "export_price_usd_per_mwh")
     if legacy_price:
         required.append(("price_usd_per_mwh", str(legacy_price)))
-    elif import_price and export_price:
-        required.append(("import_price_usd_per_mwh", str(import_price)))
-        required.append(("export_price_usd_per_mwh", str(export_price)))
-    else:
-        errors.append("price mapping requires price_usd_per_mwh or both import_price_usd_per_mwh and export_price_usd_per_mwh")
+    elif import_price or export_price:
+        if import_price:
+            required.append(("import_price_usd_per_mwh", str(import_price)))
+        if export_price:
+            required.append(("export_price_usd_per_mwh", str(export_price)))
 
-    renewable_mapping = mapping.get("renewable_available_power_mw")
-    if not isinstance(renewable_mapping, dict):
-        renewable_mapping = {}
-    for asset in draft_assets(draft_document, "renewable"):
-        asset_id = str(asset.get("id") or "")
-        column = renewable_mapping.get(asset_id)
-        if not column:
-            errors.append(f"renewable_available_power_mw mapping is required for {asset_id}")
-        else:
+    for asset_id, column in mapped_asset_columns(
+        mapping,
+        draft_document,
+        "renewable",
+        "renewable_available_power_mw",
+    ):
+        if column:
             required.append((f"renewable_available_power_mw.{asset_id}", str(column)))
 
-    load_mapping = mapping.get("load_demand_mw")
-    if not isinstance(load_mapping, dict):
-        load_mapping = {}
-    for asset in draft_assets(draft_document, "load"):
-        asset_id = str(asset.get("id") or "")
-        column = load_mapping.get(asset_id)
-        if not column:
-            errors.append(f"load_demand_mw mapping is required for {asset_id}")
-        else:
+    for asset_id, column in mapped_asset_columns(mapping, draft_document, "load", "load_demand_mw"):
+        if column:
             required.append((f"load_demand_mw.{asset_id}", str(column)))
 
-    hydro_mapping = mapping.get("hydro_inflow_m3s")
-    if not isinstance(hydro_mapping, dict):
-        hydro_mapping = {}
-    for asset in draft_assets(draft_document, "hydro"):
-        asset_id = str(asset.get("id") or "")
-        column = hydro_mapping.get(asset_id)
-        if not column:
-            errors.append(f"hydro_inflow_m3s mapping is required for {asset_id}")
-        else:
+    for asset_id, column in mapped_asset_columns(mapping, draft_document, "hydro", "hydro_inflow_m3s"):
+        if column:
             required.append((f"hydro_inflow_m3s.{asset_id}", str(column)))
 
     return required
+
+
+def mapped_column(mapping: dict[str, Any], key: str) -> str | None:
+    value = mapping.get(key)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def mapped_asset_columns(
+    mapping: dict[str, Any],
+    draft_document: dict[str, Any],
+    asset_type: str,
+    mapping_key: str,
+) -> list[tuple[str, str | None]]:
+    raw_asset_mapping = mapping.get(mapping_key)
+    if isinstance(raw_asset_mapping, dict):
+        asset_mapping = {str(asset_id): column for asset_id, column in raw_asset_mapping.items()}
+    else:
+        asset_mapping = {}
+
+    asset_ids = [str(asset.get("id") or "") for asset in draft_assets(draft_document, asset_type)]
+    extra_asset_ids = [asset_id for asset_id in asset_mapping if asset_id not in asset_ids]
+    return [(asset_id, mapped_column(asset_mapping, asset_id)) for asset_id in asset_ids + extra_asset_ids]
 
 
 def parse_timestamp(value: str) -> datetime:
@@ -490,6 +500,18 @@ def parse_mapped_float(
         errors.append(f"row {row_index}: {label} must be finite")
         return None
     return number
+
+
+def parse_mapped_float_or_zero(
+    row: dict[str, str],
+    column: str | None,
+    row_index: int,
+    label: str,
+    errors: list[str],
+) -> float | None:
+    if not column:
+        return 0.0
+    return parse_mapped_float(row, column, row_index, label, errors)
 
 
 def suggest_mappings(columns: list[str], draft_document: dict[str, Any]) -> dict[str, Any]:

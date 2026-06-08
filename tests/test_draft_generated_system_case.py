@@ -186,6 +186,7 @@ class DraftGeneratedSystemCaseTests(unittest.TestCase):
                 {
                     "timestamp": "2026-01-01T00:00:00",
                     "duration_hours": 0.5,
+                    "price_usd_per_mwh": 0.0,
                     "import_price_usd_per_mwh": 55.0,
                     "export_price_usd_per_mwh": 42.0,
                     "renewable_available_power_mw": {"solar_1": 3.5},
@@ -263,6 +264,7 @@ class DraftGeneratedSystemCaseTests(unittest.TestCase):
                 {
                     "timestamp": "2026-01-01T00:00:00",
                     "duration_hours": 1.0,
+                    "price_usd_per_mwh": 0.0,
                     "import_price_usd_per_mwh": 55.0,
                     "export_price_usd_per_mwh": 45.0,
                     "renewable_available_power_mw": {"solar_1": 0.0},

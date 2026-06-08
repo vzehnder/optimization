@@ -158,7 +158,7 @@ class CsvTimeSeriesIngestionTests(unittest.TestCase):
                 {"hydro_1": "hydro_inflow_m3s"},
             )
 
-    def test_hydro_mapping_validation_requires_inflow_and_rejects_bad_values(self):
+    def test_hydro_mapping_validation_defaults_missing_inflow_and_rejects_bad_values(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             input_source_root = Path(temp_dir) / "input-sources"
             client, scenario = self.make_hydro_client_and_scenario(input_source_root)
@@ -185,9 +185,9 @@ class CsvTimeSeriesIngestionTests(unittest.TestCase):
                 },
             )
             self.assertEqual(missing_response.status_code, 200)
-            missing_validation = missing_response.json()["source"]["validation"]
-            self.assertEqual(missing_validation["error_category"], "mapping")
-            self.assertIn("hydro_inflow_m3s mapping is required for hydro_1", missing_validation["errors"])
+            missing_source = missing_response.json()["source"]
+            self.assertEqual(missing_source["validation"], {"ok": True, "errors": []})
+            self.assertEqual(missing_source["validated_rows"][0]["hydro_inflow_m3s"], {"hydro_1": 0.0})
 
             bad_values_response = client.put(
                 f"/api/scenarios/{scenario['id']}/draft/time-series-sources/{upload['id']}/mapping",
@@ -468,6 +468,43 @@ class CsvTimeSeriesIngestionTests(unittest.TestCase):
             self.assertEqual(stored_source["mapping"], mapping)
             self.assertTrue(stored_source["validation"]["ok"])
 
+    def test_blank_numeric_mappings_default_to_zero(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, scenario = self.make_client_and_scenario(input_source_root)
+            csv_text = (
+                "period_start,hours,sell\n"
+                "2026-01-01T00:00:00,0.5,42.0\n"
+                "2026-01-01T00:30:00,0.5,48.0\n"
+            )
+            upload = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                files={"source_file": ("source.csv", csv_text, "text/csv")},
+            ).json()["source"]
+            mapping = {
+                "timestamp": "period_start",
+                "duration_hours": "hours",
+                "import_price_usd_per_mwh": None,
+                "export_price_usd_per_mwh": "sell",
+                "renewable_available_power_mw": {"solar_1": None},
+                "load_demand_mw": {"load_1": ""},
+            }
+
+            response = client.put(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/{upload['id']}/mapping",
+                json={"mapping": mapping},
+            )
+
+            self.assertEqual(response.status_code, 200)
+            source = response.json()["source"]
+            self.assertEqual(source["validation"], {"ok": True, "errors": []})
+            self.assertEqual(source["mapping"], mapping)
+            self.assertEqual(source["validated_rows"][0]["price_usd_per_mwh"], 0.0)
+            self.assertEqual(source["validated_rows"][0]["import_price_usd_per_mwh"], 0.0)
+            self.assertEqual(source["validated_rows"][0]["export_price_usd_per_mwh"], 42.0)
+            self.assertEqual(source["validated_rows"][0]["renewable_available_power_mw"], {"solar_1": 0.0})
+            self.assertEqual(source["validated_rows"][0]["load_demand_mw"], {"load_1": 0.0})
+
     def test_mapping_validation_reports_missing_mappings_and_bad_csv_values(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             input_source_root = Path(temp_dir) / "input-sources"
@@ -498,12 +535,8 @@ class CsvTimeSeriesIngestionTests(unittest.TestCase):
             self.assertEqual(missing_validation["error_category"], "mapping")
             missing_errors = missing_validation["errors"]
             self.assertIn("duration_hours mapping is required", missing_errors)
-            self.assertIn(
-                "price mapping requires price_usd_per_mwh or both import_price_usd_per_mwh and export_price_usd_per_mwh",
-                missing_errors,
-            )
-            self.assertIn("renewable_available_power_mw mapping is required for solar_1", missing_errors)
-            self.assertIn("load_demand_mw mapping is required for load_1", missing_errors)
+            self.assertNotIn("renewable_available_power_mw mapping is required for solar_1", missing_errors)
+            self.assertNotIn("load_demand_mw mapping is required for load_1", missing_errors)
 
             bad_values_response = client.put(
                 f"/api/scenarios/{scenario['id']}/draft/time-series-sources/{upload['id']}/mapping",

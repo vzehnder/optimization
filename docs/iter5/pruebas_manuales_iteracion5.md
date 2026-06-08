@@ -47,6 +47,27 @@ Abrir:
 http://127.0.0.1:8000/projects
 ```
 
+Para reabrir resultados de una corrida manual existente, iniciar la app con la
+misma base de datos y raiz de artefactos usada para crear la corrida. Si
+`DATABASE_URL` o `ARTIFACT_ROOT` apuntan a otro lugar, la pagina puede mostrar
+`succeeded` pero sin artefactos ni charts.
+
+```powershell
+$env:DATABASE_URL = "sqlite:///.tmp/manual_iter5.sqlite3"
+$env:ARTIFACT_ROOT = ".tmp/manual-artifacts"
+$env:INPUT_SOURCE_ROOT = ".tmp/manual-input-sources"
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+```
+
+Luego abrir la corrida con:
+
+```text
+http://127.0.0.1:8000/runs/<run_id>
+```
+
+Si el puerto `8000` ya esta ocupado, usar otro puerto, por ejemplo
+`--port 8766`, y abrir `http://127.0.0.1:8766/runs/<run_id>`.
+
 ## Datos De Prueba Lineal
 
 Usar estos valores para un caso hidro lineal.

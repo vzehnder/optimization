@@ -1057,15 +1057,15 @@ def time_series_mapping_from_form(form) -> dict[str, Any]:
     }
     for key, value in form.items():
         text_value = str(value).strip()
-        if key.startswith("mapping_renewable_available_power_mw__") and text_value:
+        if key.startswith("mapping_renewable_available_power_mw__"):
             asset_id = key.removeprefix("mapping_renewable_available_power_mw__")
-            mapping["renewable_available_power_mw"][asset_id] = text_value
-        if key.startswith("mapping_load_demand_mw__") and text_value:
+            mapping["renewable_available_power_mw"][asset_id] = text_value or None
+        if key.startswith("mapping_load_demand_mw__"):
             asset_id = key.removeprefix("mapping_load_demand_mw__")
-            mapping["load_demand_mw"][asset_id] = text_value
-        if key.startswith("mapping_hydro_inflow_m3s__") and text_value:
+            mapping["load_demand_mw"][asset_id] = text_value or None
+        if key.startswith("mapping_hydro_inflow_m3s__"):
             asset_id = key.removeprefix("mapping_hydro_inflow_m3s__")
-            mapping["hydro_inflow_m3s"][asset_id] = text_value
+            mapping["hydro_inflow_m3s"][asset_id] = text_value or None
     return mapping
 
 
@@ -1620,15 +1620,15 @@ def render_time_series_source_detail(scenario: dict, document: dict, source: dic
               <h2>Column Mapping</h2>
               <div class="form-grid">
                 <label for="mapping_timestamp">timestamp</label>
-                <input id="mapping_timestamp" name="mapping_timestamp" value="{html_value(mapping.get("timestamp") or suggestions.get("timestamp"))}">
+                <input id="mapping_timestamp" name="mapping_timestamp" value="{html_value(mapping_input_value(mapping, suggestions, "timestamp"))}">
                 <label for="mapping_duration_hours">duration_hours</label>
-                <input id="mapping_duration_hours" name="mapping_duration_hours" value="{html_value(mapping.get("duration_hours") or suggestions.get("duration_hours"))}">
+                <input id="mapping_duration_hours" name="mapping_duration_hours" value="{html_value(mapping_input_value(mapping, suggestions, "duration_hours"))}">
                 <label for="mapping_price_usd_per_mwh">price_usd_per_mwh</label>
-                <input id="mapping_price_usd_per_mwh" name="mapping_price_usd_per_mwh" value="{html_value(mapping.get("price_usd_per_mwh") or suggestions.get("price_usd_per_mwh"))}">
+                <input id="mapping_price_usd_per_mwh" name="mapping_price_usd_per_mwh" value="{html_value(mapping_input_value(mapping, suggestions, "price_usd_per_mwh"))}">
                 <label for="mapping_import_price_usd_per_mwh">import_price_usd_per_mwh</label>
-                <input id="mapping_import_price_usd_per_mwh" name="mapping_import_price_usd_per_mwh" value="{html_value(mapping.get("import_price_usd_per_mwh") or suggestions.get("import_price_usd_per_mwh"))}">
+                <input id="mapping_import_price_usd_per_mwh" name="mapping_import_price_usd_per_mwh" value="{html_value(mapping_input_value(mapping, suggestions, "import_price_usd_per_mwh"))}">
                 <label for="mapping_export_price_usd_per_mwh">export_price_usd_per_mwh</label>
-                <input id="mapping_export_price_usd_per_mwh" name="mapping_export_price_usd_per_mwh" value="{html_value(mapping.get("export_price_usd_per_mwh") or suggestions.get("export_price_usd_per_mwh"))}">
+                <input id="mapping_export_price_usd_per_mwh" name="mapping_export_price_usd_per_mwh" value="{html_value(mapping_input_value(mapping, suggestions, "export_price_usd_per_mwh"))}">
                 {renewable_inputs}
                 {load_inputs}
                 {hydro_inputs}
@@ -1651,6 +1651,12 @@ def active_time_series_source(document: dict) -> dict | None:
         if isinstance(source, dict):
             return source
     return None
+
+
+def mapping_input_value(mapping: dict, suggestions: dict, key: str) -> Any:
+    if key in mapping:
+        return mapping.get(key) or ""
+    return suggestions.get(key) or ""
 
 
 def render_preview_rows(source: dict) -> str:
@@ -1677,7 +1683,7 @@ def render_asset_mapping_inputs(document: dict, source: dict, asset_type: str, m
             continue
         asset_id = str(asset.get("id") or "")
         input_name = f"mapping_{mapping_key}__{asset_id}"
-        value = mapped_assets.get(asset_id) or suggested_assets.get(asset_id)
+        value = mapping_input_value(mapped_assets, suggested_assets, asset_id)
         pieces.append(
             f'<label for="{html_value(input_name)}">{escape(mapping_key)}.{escape(asset_id)}</label>'
             f'<input id="{html_value(input_name)}" name="{html_value(input_name)}" value="{html_value(value)}">'
