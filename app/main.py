@@ -7,11 +7,20 @@ from contextlib import asynccontextmanager
 from html import escape
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
+from app.auth import (
+    INTERNAL_USER_ROLES,
+    hash_password,
+    hash_session_token,
+    new_session_token,
+    session_expires_at,
+    verify_password,
+)
 from app.draft_editor import (
     DraftGenerationError,
     generate_system_case_from_draft,
@@ -69,9 +78,13 @@ def create_app(
     run_queue=None,
     artifact_root: Path | str | None = None,
     input_source_root: Path | str | None = None,
+    auth_enabled: bool | None = None,
+    session_cookie_name: str = "bess_session",
+    session_hours: int = 12,
 ) -> FastAPI:
     service = validation_service or JuliaValidationService()
     analyst_store = store or AnalystStore(database_url)
+    auth_required = auth_enabled_from_env(False) if auth_enabled is None else bool(auth_enabled)
     configured_artifact_root = Path(
         artifact_root
         or os.environ.get("ARTIFACT_ROOT")
@@ -97,6 +110,73 @@ def create_app(
 
     app = FastAPI(title="BESS Analyst App", lifespan=lifespan)
     app.state.analyst_store = analyst_store
+    app.state.auth_enabled = auth_required
+
+    def current_user_from_request(request: Request) -> dict[str, Any] | None:
+        token = request.cookies.get(session_cookie_name)
+        if not token:
+            return None
+        return analyst_store.get_user_for_session(hash_session_token(token))
+
+    def auth_redirect(request: Request) -> RedirectResponse:
+        target = request.url.path
+        if request.url.query:
+            target = f"{target}?{request.url.query}"
+        return RedirectResponse(f"/login?next={quote(target, safe='/')}", status_code=303)
+
+    def auth_required_response(request: Request) -> Response:
+        if request.url.path.startswith("/api/"):
+            return JSONResponse({"detail": "authentication required"}, status_code=401)
+        return auth_redirect(request)
+
+    def forbidden_response(request: Request) -> Response:
+        if request.url.path.startswith("/api/"):
+            return JSONResponse({"detail": "forbidden"}, status_code=403)
+        return HTMLResponse(render_forbidden_page(), status_code=403)
+
+    def set_session_cookie(response: Response, token: str) -> None:
+        response.set_cookie(
+            session_cookie_name,
+            token,
+            max_age=session_hours * 60 * 60,
+            httponly=True,
+            samesite="lax",
+        )
+
+    def authenticated_landing_path(user: dict[str, Any], next_path: str = "") -> str:
+        safe_next = safe_internal_next_path(next_path)
+        if user["role"] == "client":
+            return safe_next if safe_next.startswith("/client") else "/client"
+        if safe_next and not safe_next.startswith("/client"):
+            return safe_next
+        return "/projects"
+
+    @app.middleware("http")
+    async def require_authenticated_app_boundary(request: Request, call_next):
+        request.state.current_user = None
+        if not auth_required:
+            return await call_next(request)
+
+        path = request.url.path
+        if path in {"/favicon.ico", "/login", "/bootstrap", "/logout"}:
+            return await call_next(request)
+
+        user = current_user_from_request(request)
+        request.state.current_user = user
+        if user is None:
+            if analyst_store.count_users() == 0 and not path.startswith("/api/"):
+                return RedirectResponse("/bootstrap", status_code=303)
+            return auth_required_response(request)
+
+        if path == "/":
+            return await call_next(request)
+        if path.startswith("/client"):
+            if user["role"] != "client":
+                return forbidden_response(request)
+            return await call_next(request)
+        if user["role"] not in INTERNAL_USER_ROLES:
+            return forbidden_response(request)
+        return await call_next(request)
 
     def save_validated_scenario_version(
         scenario_id: int,
@@ -141,12 +221,120 @@ def create_app(
             )
 
     @app.get("/")
-    async def root():
+    async def root(request: Request):
+        if auth_required:
+            user = request.state.current_user
+            if user is not None and user["role"] == "client":
+                return RedirectResponse("/client")
         return RedirectResponse("/projects")
 
     @app.get("/favicon.ico")
     async def favicon():
         return Response(status_code=204)
+
+    @app.get("/bootstrap", response_class=HTMLResponse)
+    async def bootstrap_page():
+        if auth_required and analyst_store.count_users() > 0:
+            return RedirectResponse("/login", status_code=303)
+        return HTMLResponse(render_bootstrap_page())
+
+    @app.post("/bootstrap")
+    async def bootstrap_first_admin(request: Request):
+        if not auth_required:
+            return RedirectResponse("/projects", status_code=303)
+        if analyst_store.count_users() > 0:
+            return HTMLResponse(render_forbidden_page("Bootstrap is closed after the first user exists."), status_code=403)
+
+        form = await request.form()
+        email = str(form.get("email", "")).strip().lower()
+        password = str(form.get("password", ""))
+        display_name = str(form.get("display_name", "")).strip()
+        if not email or not password:
+            return HTMLResponse(render_bootstrap_page("Email and password are required."), status_code=400)
+
+        user = analyst_store.create_user(
+            email=email,
+            display_name=display_name,
+            role="admin",
+            password_hash=hash_password(password),
+            created_by="bootstrap",
+        )
+        token = new_session_token()
+        analyst_store.create_auth_session(
+            user_id=user["id"],
+            token_hash=hash_session_token(token),
+            expires_at=session_expires_at(hours=session_hours),
+        )
+        response = RedirectResponse("/projects", status_code=303)
+        set_session_cookie(response, token)
+        return response
+
+    @app.get("/login", response_class=HTMLResponse)
+    async def login_page(request: Request, next: str = ""):
+        if auth_required:
+            user = current_user_from_request(request)
+            if user is not None:
+                return RedirectResponse(authenticated_landing_path(user, next), status_code=303)
+        return HTMLResponse(render_login_page(next_path=next))
+
+    @app.post("/login")
+    async def login(request: Request):
+        if not auth_required:
+            return RedirectResponse("/projects", status_code=303)
+
+        form = await request.form()
+        email = str(form.get("email", "")).strip().lower()
+        password = str(form.get("password", ""))
+        next_path = str(form.get("next", ""))
+        user = None
+        try:
+            user = analyst_store.get_user_by_email(email)
+        except KeyError:
+            pass
+
+        if user is None or not user["is_active"] or not verify_password(password, user["password_hash"]):
+            return HTMLResponse(
+                render_login_page("Invalid email or password.", next_path=next_path, email=email),
+                status_code=401,
+            )
+
+        token = new_session_token()
+        analyst_store.create_auth_session(
+            user_id=user["id"],
+            token_hash=hash_session_token(token),
+            expires_at=session_expires_at(hours=session_hours),
+        )
+        response = RedirectResponse(authenticated_landing_path(user, next_path), status_code=303)
+        set_session_cookie(response, token)
+        return response
+
+    @app.post("/logout")
+    async def logout(request: Request):
+        token = request.cookies.get(session_cookie_name)
+        if token:
+            analyst_store.revoke_auth_session(hash_session_token(token))
+        response = RedirectResponse("/login", status_code=303)
+        response.delete_cookie(session_cookie_name)
+        return response
+
+    @app.get("/client", response_class=HTMLResponse)
+    async def client_home(request: Request):
+        return HTMLResponse(render_client_home_page(request.state.current_user))
+
+    @app.get("/api/auth/me")
+    async def current_auth_user(request: Request):
+        user = request.state.current_user
+        if user is None:
+            return {"user": None}
+        return {
+            "user": {
+                "id": user["id"],
+                "email": user["email"],
+                "display_name": user["display_name"],
+                "role": user["role"],
+                "is_active": user["is_active"],
+            }
+        }
 
     @app.get("/projects", response_class=HTMLResponse)
     async def projects_page():
@@ -1797,6 +1985,171 @@ def checked_attr(value: Any) -> str:
     return "checked" if bool(value) else ""
 
 
+def auth_enabled_from_env(default: bool) -> bool:
+    raw_value = os.environ.get("BESS_AUTH_ENABLED")
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def safe_internal_next_path(next_path: str) -> str:
+    if not next_path:
+        return ""
+    if not next_path.startswith("/") or next_path.startswith("//"):
+        return ""
+    if next_path in {"/login", "/bootstrap", "/logout"}:
+        return ""
+    return next_path
+
+
+def render_auth_shell(title: str, content: str) -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{escape(title)} - BESS</title>
+  <style>
+    :root {{
+      color-scheme: light;
+      font-family: Arial, sans-serif;
+      --ink: #18212f;
+      --muted: #606a78;
+      --line: #d7dde6;
+      --surface: #f6f8fb;
+      --accent: #0f766e;
+      --error: #b42318;
+    }}
+    body {{
+      margin: 0;
+      color: var(--ink);
+      background: white;
+    }}
+    main {{
+      width: min(440px, calc(100vw - 32px));
+      margin: 12vh auto 0;
+    }}
+    h1 {{
+      font-size: 28px;
+      line-height: 1.2;
+      margin: 0 0 8px;
+    }}
+    p {{
+      color: var(--muted);
+      margin: 0 0 18px;
+    }}
+    form {{
+      display: grid;
+      gap: 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 16px;
+      background: var(--surface);
+    }}
+    label {{
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }}
+    input {{
+      box-sizing: border-box;
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px;
+      color: var(--ink);
+      background: white;
+    }}
+    button {{
+      justify-self: start;
+      border: 0;
+      border-radius: 6px;
+      padding: 10px 14px;
+      background: var(--accent);
+      color: white;
+      font-weight: 700;
+      cursor: pointer;
+    }}
+    .notice {{
+      border-left: 4px solid var(--error);
+      background: #fff4f2;
+      margin-bottom: 14px;
+      padding: 12px 14px;
+    }}
+  </style>
+</head>
+<body>
+  <main>{content}</main>
+</body>
+</html>"""
+
+
+def render_login_page(error_message: str = "", *, next_path: str = "", email: str = "") -> str:
+    error_markup = f'<section class="notice">{escape(error_message)}</section>' if error_message else ""
+    safe_next = html_value(safe_internal_next_path(next_path))
+    return render_auth_shell(
+        "Login",
+        f"""
+        <h1>Sign In</h1>
+        <p>Use a local account to enter the application.</p>
+        {error_markup}
+        <form method="post" action="/login">
+          <input type="hidden" name="next" value="{safe_next}">
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" autocomplete="username" value="{html_value(email)}" required>
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required>
+          <button type="submit">Sign In</button>
+        </form>
+        """,
+    )
+
+
+def render_bootstrap_page(error_message: str = "") -> str:
+    error_markup = f'<section class="notice">{escape(error_message)}</section>' if error_message else ""
+    return render_auth_shell(
+        "Bootstrap Admin",
+        f"""
+        <h1>Bootstrap Admin</h1>
+        <p>Create the first internal admin. This path closes after the first user exists.</p>
+        {error_markup}
+        <form method="post" action="/bootstrap">
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" autocomplete="username" required>
+          <label for="display_name">Display Name</label>
+          <input id="display_name" name="display_name" type="text" autocomplete="name">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="new-password" required>
+          <button type="submit">Create Admin</button>
+        </form>
+        """,
+    )
+
+
+def render_forbidden_page(message: str = "You do not have access to this page.") -> str:
+    return render_auth_shell(
+        "Forbidden",
+        f"""
+        <h1>Forbidden</h1>
+        <p>{escape(message)}</p>
+        """,
+    )
+
+
+def render_client_home_page(user: dict[str, Any] | None) -> str:
+    email = user["email"] if user else ""
+    return render_auth_shell(
+        "Client Portal",
+        f"""
+        <h1>Client Portal</h1>
+        <p>Signed in as {escape(email)}.</p>
+        <form method="post" action="/logout">
+          <button type="submit">Log Out</button>
+        </form>
+        """,
+    )
+
+
 def render_app_page(title: str, content: str) -> str:
     return f"""<!doctype html>
 <html lang="en">
@@ -2379,4 +2732,4 @@ def format_asset_counts(asset_counts: dict) -> str:
     return ", ".join(f"{count} {kind}" for kind, count in asset_counts.items() if count)
 
 
-app = create_app()
+app = create_app(auth_enabled=auth_enabled_from_env(True))

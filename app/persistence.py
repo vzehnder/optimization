@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.auth import VALID_USER_ROLES
+
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -138,6 +140,30 @@ class AnalystStore:
                 FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
                 UNIQUE (run_id, artifact_type)
             );
+
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                display_name TEXT NOT NULL DEFAULT '',
+                role TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                deactivated_at TEXT,
+                CHECK (role IN ('admin', 'analyst', 'client'))
+            );
+
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token_hash TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                revoked_at TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
             """
         )
         self._ensure_column("runs", "stdout_log_path", "TEXT")
@@ -153,6 +179,177 @@ class AnalystStore:
         }
         if column_name not in columns:
             self.connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
+    def count_users(self) -> int:
+        row = self.connection.execute("SELECT COUNT(*) AS user_count FROM users").fetchone()
+        return int(row["user_count"])
+
+    def create_user(
+        self,
+        *,
+        email: str,
+        password_hash: str,
+        role: str,
+        display_name: str = "",
+        is_active: bool = True,
+        created_by: str = "system",
+    ) -> dict[str, Any]:
+        normalized_email = email.strip().lower()
+        if not normalized_email:
+            raise ValueError("email is required")
+        if role not in VALID_USER_ROLES:
+            raise ValueError(f"unsupported user role: {role}")
+        now = utc_now_iso()
+        with self._lock:
+            cursor = self.connection.execute(
+                """
+                INSERT INTO users (
+                    email,
+                    display_name,
+                    role,
+                    password_hash,
+                    is_active,
+                    created_at,
+                    updated_at,
+                    created_by,
+                    deactivated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    normalized_email,
+                    display_name.strip(),
+                    role,
+                    password_hash,
+                    1 if is_active else 0,
+                    now,
+                    now,
+                    created_by,
+                    None if is_active else now,
+                ),
+            )
+            self.connection.commit()
+            return self.get_user(cursor.lastrowid)
+
+    def list_users(self) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            """
+            SELECT id, email, display_name, role, password_hash, is_active,
+                   created_at, updated_at, created_by, deactivated_at
+            FROM users
+            ORDER BY id
+            """
+        ).fetchall()
+        return [user_row_to_dict(row) for row in rows]
+
+    def get_user(self, user_id: int) -> dict[str, Any]:
+        row = self.connection.execute(
+            """
+            SELECT id, email, display_name, role, password_hash, is_active,
+                   created_at, updated_at, created_by, deactivated_at
+            FROM users
+            WHERE id = ?
+            """,
+            (user_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"user {user_id} not found")
+        return user_row_to_dict(row)
+
+    def get_user_by_email(self, email: str) -> dict[str, Any]:
+        row = self.connection.execute(
+            """
+            SELECT id, email, display_name, role, password_hash, is_active,
+                   created_at, updated_at, created_by, deactivated_at
+            FROM users
+            WHERE email = ?
+            """,
+            (email.strip().lower(),),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"user {email} not found")
+        return user_row_to_dict(row)
+
+    def set_user_active(self, user_id: int, is_active: bool, *, updated_by: str = "system") -> dict[str, Any]:
+        now = utc_now_iso()
+        with self._lock:
+            cursor = self.connection.execute(
+                """
+                UPDATE users
+                SET is_active = ?,
+                    updated_at = ?,
+                    deactivated_at = ?
+                WHERE id = ?
+                """,
+                (1 if is_active else 0, now, None if is_active else now, user_id),
+            )
+            if cursor.rowcount == 0:
+                raise KeyError(f"user {user_id} not found")
+            self.connection.commit()
+            return self.get_user(user_id)
+
+    def create_auth_session(self, *, user_id: int, token_hash: str, expires_at: str) -> dict[str, Any]:
+        self.get_user(user_id)
+        now = utc_now_iso()
+        with self._lock:
+            cursor = self.connection.execute(
+                """
+                INSERT INTO auth_sessions (user_id, token_hash, created_at, expires_at, revoked_at)
+                VALUES (?, ?, ?, ?, NULL)
+                """,
+                (user_id, token_hash, now, expires_at),
+            )
+            self.connection.commit()
+            return row_to_dict(
+                self.connection.execute(
+                    """
+                    SELECT id, user_id, token_hash, created_at, expires_at, revoked_at
+                    FROM auth_sessions
+                    WHERE id = ?
+                    """,
+                    (cursor.lastrowid,),
+                ).fetchone()
+            )
+
+    def get_user_for_session(self, token_hash: str, *, now: str | None = None) -> dict[str, Any] | None:
+        current_time = now or utc_now_iso()
+        row = self.connection.execute(
+            """
+            SELECT
+                users.id,
+                users.email,
+                users.display_name,
+                users.role,
+                users.password_hash,
+                users.is_active,
+                users.created_at,
+                users.updated_at,
+                users.created_by,
+                users.deactivated_at
+            FROM auth_sessions
+            JOIN users ON users.id = auth_sessions.user_id
+            WHERE auth_sessions.token_hash = ?
+              AND auth_sessions.revoked_at IS NULL
+              AND auth_sessions.expires_at > ?
+              AND users.is_active = 1
+            """,
+            (token_hash, current_time),
+        ).fetchone()
+        if row is None:
+            return None
+        return user_row_to_dict(row)
+
+    def revoke_auth_session(self, token_hash: str) -> None:
+        with self._lock:
+            self.connection.execute(
+                """
+                UPDATE auth_sessions
+                SET revoked_at = ?
+                WHERE token_hash = ? AND revoked_at IS NULL
+                """,
+                (utc_now_iso(), token_hash),
+            )
+            self.connection.commit()
 
     def create_project(self, *, name: str, description: str = "", created_by: str = "internal_analyst") -> dict[str, Any]:
         created_at = utc_now_iso()
@@ -763,6 +960,12 @@ def sqlite_path_from_url(database_url: str) -> str:
 
 def row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     return {key: row[key] for key in row.keys()}
+
+
+def user_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    value = row_to_dict(row)
+    value["is_active"] = bool(value["is_active"])
+    return value
 
 
 def extract_system_case_metadata(document: dict[str, Any]) -> dict[str, Any]:

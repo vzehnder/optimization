@@ -214,8 +214,16 @@ $env:JULIA = "julia"
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
-Open `http://127.0.0.1:8000/projects`. The first screen is the internal
-project list and project creation form.
+Open `http://127.0.0.1:8000/`. Iteration 6 enables local authentication for
+the `app.main:app` entrypoint. On a fresh database the app redirects to
+`/bootstrap`, where the first internal `admin` account is created. After that,
+users sign in through `/login`; `admin` and `analyst` users enter the internal
+analyst app, while `client` users enter `/client`.
+
+Passwords are stored as PBKDF2-SHA256 hashes. Sessions use opaque server-side
+tokens in an HTTP-only cookie. Programmatic tests can still instantiate
+`create_app()` without auth by default, or pass `auth_enabled=True` to exercise
+the Iteration 6 boundary.
 
 ### Database Configuration
 
