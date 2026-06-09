@@ -20,7 +20,7 @@ triage label.
 
 | ID | Title | Type | Triage | Status | Blocked by | Issue file |
 | --- | --- | --- | --- | --- | --- | --- |
-| BESS-ITER6-000 | Review Client Publication Portal PRD | HITL | ready-for-agent | Todo | None | [BESS-ITER6-000-review-client-publication-portal-prd.md](BESS-ITER6-000-review-client-publication-portal-prd.md) |
+| BESS-ITER6-000 | Review Client Publication Portal PRD | HITL | ready-for-agent | Done | None | [BESS-ITER6-000-review-client-publication-portal-prd.md](BESS-ITER6-000-review-client-publication-portal-prd.md) |
 | BESS-ITER6-001 | Add Local Auth And Role-Gated App Entry | AFK | ready-for-agent | Todo | BESS-ITER6-000 | [BESS-ITER6-001-add-local-auth-and-role-gated-app-entry.md](BESS-ITER6-001-add-local-auth-and-role-gated-app-entry.md) |
 | BESS-ITER6-002 | Manage Users And Client Project Access | AFK | ready-for-agent | Todo | BESS-ITER6-001 | [BESS-ITER6-002-manage-users-and-client-project-access.md](BESS-ITER6-002-manage-users-and-client-project-access.md) |
 | BESS-ITER6-003 | Create Minimal Dashboard Templates | AFK | ready-for-agent | Todo | BESS-ITER6-001 | [BESS-ITER6-003-create-minimal-dashboard-templates.md](BESS-ITER6-003-create-minimal-dashboard-templates.md) |
@@ -50,6 +50,7 @@ triage label.
 | Date | Issue | Status change | Notes |
 | --- | --- | --- | --- |
 | 2026-06-09 | All | Created | Initial local issue set generated from the Iteration 6 PRD and approved vertical-slice breakdown. |
+| 2026-06-09 | BESS-ITER6-000 | Todo -> Done | Reviewed and accepted the client publication and read-only portal PRD against the final objective, completed Iteration 2 optimizer contract, completed Iteration 3 analyst workflow, completed Iteration 4 structured editor workflow, and completed Iteration 5 hydro workflow. No PRD corrections were required. |
 
 ## Regression Guard
 
