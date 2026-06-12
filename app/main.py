@@ -28,7 +28,7 @@ from app.draft_editor import (
     structured_draft_document_from_system_case,
     structured_draft_document_from_form,
 )
-from app.persistence import AnalystStore, utc_now_iso
+from app.persistence import AnalystStore, DEFAULT_PUBLICATION_ARTIFACT_TYPES, utc_now_iso
 from app.results import ResultReadError, apply_dashboard_template, read_run_results
 from app.runner import JuliaRunExecutor, LocalRunQueue
 from app.time_series_ingestion import (
@@ -77,6 +77,13 @@ class DashboardTemplateWriteRequest(BaseModel):
     show_system_dispatch_table: bool = True
     show_asset_dispatch_table: bool = True
     table_preview_limit: int = Field(default=10, ge=1)
+
+
+class PublicationDraftWriteRequest(BaseModel):
+    dashboard_template_id: int
+    public_title: str = Field(min_length=1)
+    analyst_notes: str = ""
+    allowed_artifact_types: list[str] | None = None
 
 
 class ScenarioVersionCreateRequest(BaseModel):
@@ -688,6 +695,42 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(error)) from error
         return RedirectResponse(f"/projects/{existing['project_id']}", status_code=303)
 
+    @app.post("/runs/{run_id}/publications")
+    async def create_publication_draft_from_page(run_id: int, request: Request):
+        form = await request.form()
+        try:
+            analyst_store.create_publication_draft(
+                run_id=run_id,
+                dashboard_template_id=int(str(form.get("dashboard_template_id", "0"))),
+                public_title=str(form.get("public_title", "")).strip(),
+                analyst_notes=str(form.get("analyst_notes", "")).strip(),
+                allowed_artifact_types=form.getlist("allowed_artifact_types"),
+                created_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except (TypeError, ValueError) as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return RedirectResponse(f"/runs/{run_id}", status_code=303)
+
+    @app.post("/publications/{publication_id}")
+    async def update_publication_draft_from_page(publication_id: int, request: Request):
+        form = await request.form()
+        try:
+            publication = analyst_store.update_publication_draft(
+                publication_id,
+                dashboard_template_id=int(str(form.get("dashboard_template_id", "0"))),
+                public_title=str(form.get("public_title", "")).strip(),
+                analyst_notes=str(form.get("analyst_notes", "")).strip(),
+                allowed_artifact_types=form.getlist("allowed_artifact_types"),
+                updated_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except (TypeError, ValueError) as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return RedirectResponse(f"/runs/{publication['run_id']}", status_code=303)
+
     @app.post("/projects/{project_id}/client-access")
     async def assign_client_access_from_page(project_id: int, request: Request):
         require_admin_user(request)
@@ -1034,6 +1077,11 @@ def create_app(
                 for artifact in stored_artifacts
                 if artifact_path_is_safe(artifact["path"], configured_artifact_root)
             ]
+            publications = analyst_store.list_run_publications(run_id)
+            dashboard_templates = []
+            if run["status"] == "succeeded":
+                project_id = analyst_store.get_run_project_id(run_id)
+                dashboard_templates = analyst_store.list_dashboard_templates(project_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
@@ -1044,7 +1092,17 @@ def create_app(
                 results = read_run_results(run, stored_artifacts, configured_artifact_root)
             except ResultReadError as error:
                 results_error = error.message
-        return HTMLResponse(render_run_page(run, artifacts, results, results_error))
+        return HTMLResponse(
+            render_run_page(
+                run,
+                artifacts,
+                results,
+                results_error,
+                publications=publications,
+                dashboard_templates=dashboard_templates,
+                publication_artifacts=stored_artifacts,
+            )
+        )
 
     @app.get("/system-cases/validate", response_class=HTMLResponse)
     async def validation_page():
@@ -1370,6 +1428,56 @@ def create_app(
                 status_code=error.status_code,
             )
         return {"results": results}
+
+    @app.get("/api/runs/{run_id}/publications")
+    async def list_run_publications(run_id: int):
+        try:
+            publications = analyst_store.list_run_publications(run_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"publications": publications}
+
+    @app.post("/api/runs/{run_id}/publications", status_code=201)
+    async def create_run_publication_draft(
+        run_id: int,
+        request: Request,
+        payload: PublicationDraftWriteRequest,
+    ):
+        try:
+            publication = analyst_store.create_publication_draft(
+                run_id=run_id,
+                dashboard_template_id=payload.dashboard_template_id,
+                public_title=payload.public_title,
+                analyst_notes=payload.analyst_notes,
+                allowed_artifact_types=payload.allowed_artifact_types,
+                created_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return {"publication": publication}
+
+    @app.put("/api/publications/{publication_id}")
+    async def update_publication_draft(
+        publication_id: int,
+        request: Request,
+        payload: PublicationDraftWriteRequest,
+    ):
+        try:
+            publication = analyst_store.update_publication_draft(
+                publication_id,
+                dashboard_template_id=payload.dashboard_template_id,
+                public_title=payload.public_title,
+                analyst_notes=payload.analyst_notes,
+                allowed_artifact_types=payload.allowed_artifact_types,
+                updated_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return {"publication": publication}
 
     @app.get("/api/runs/{run_id}/artifacts")
     async def list_run_artifacts(run_id: int):
@@ -2468,6 +2576,10 @@ def checked_attr(value: Any) -> str:
     return "checked" if bool(value) else ""
 
 
+def selected_attr(value: Any) -> str:
+    return "selected" if bool(value) else ""
+
+
 def form_checkbox(form: Any, name: str) -> bool:
     return name in form
 
@@ -3016,8 +3128,17 @@ def render_run_page(
     artifacts: list[dict] | None = None,
     results: dict | None = None,
     results_error: str = "",
+    publications: list[dict] | None = None,
+    dashboard_templates: list[dict[str, Any]] | None = None,
+    publication_artifacts: list[dict] | None = None,
 ) -> str:
     artifact_items = render_artifact_items(artifacts or [])
+    publication_markup = render_publications_section(
+        run,
+        publications or [],
+        dashboard_templates or [],
+        publication_artifacts or [],
+    )
     results_markup = render_results_section(results, results_error)
     return render_app_page(
         f"Run {run['id']}",
@@ -3040,6 +3161,7 @@ def render_run_page(
           <h2>Artifacts</h2>
           <ul class="entity-list" id="artifact-list">{artifact_items}</ul>
         </section>
+        {publication_markup}
         {results_markup}
         <script>
           async function pollRun() {{
@@ -3059,6 +3181,127 @@ def render_run_page(
           window.setTimeout(pollRun, 1000);
         </script>
         """,
+    )
+
+
+def render_publications_section(
+    run: dict,
+    publications: list[dict],
+    dashboard_templates: list[dict[str, Any]],
+    artifacts: list[dict],
+) -> str:
+    if run["status"] != "succeeded" and not publications:
+        return ""
+
+    publication_items = "".join(
+        render_publication_item(publication, dashboard_templates, artifacts)
+        for publication in publications
+    )
+    if not publication_items:
+        publication_items = '<li class="empty">No publication drafts yet</li>'
+
+    create_form = ""
+    if run["status"] == "succeeded":
+        create_form = render_publication_form(
+            f"/runs/{run['id']}/publications",
+            dashboard_templates,
+            artifacts,
+        )
+
+    return f"""
+        <section class="split results-section">
+          <div>
+            <h2>Publication Drafts</h2>
+            <ul class="entity-list">{publication_items}</ul>
+          </div>
+          {create_form}
+        </section>
+    """
+
+
+def render_publication_item(
+    publication: dict,
+    dashboard_templates: list[dict[str, Any]],
+    artifacts: list[dict],
+) -> str:
+    allowed_text = ", ".join(publication["allowed_artifact_types"]) or "no downloads"
+    edit_form = ""
+    if publication["status"] == "draft":
+        edit_form = render_publication_form(
+            f"/publications/{publication['id']}",
+            dashboard_templates,
+            artifacts,
+            publication,
+        )
+    return (
+        "<li>"
+        f"<strong>{escape(publication['public_title'])}</strong>"
+        f"<span>{escape(publication['status'])} | {escape(allowed_text)}</span>"
+        f"<span>{escape(publication['analyst_notes'])}</span>"
+        f"{edit_form}"
+        "</li>"
+    )
+
+
+def render_publication_form(
+    action: str,
+    dashboard_templates: list[dict[str, Any]],
+    artifacts: list[dict],
+    publication: dict | None = None,
+) -> str:
+    publication = publication or {}
+    title = "Edit Publication Draft" if publication.get("id") else "New Publication Draft"
+    button = "Update Publication" if publication.get("id") else "Create Publication"
+    selected_template_id = publication.get("dashboard_template_id")
+    template_options = "".join(
+        f'<option value="{template["id"]}" {selected_attr(template["id"] == selected_template_id)}>'
+        f'{escape(template["name"])}</option>'
+        for template in dashboard_templates
+    )
+    if not template_options:
+        template_options = '<option value="">No dashboard templates available</option>'
+
+    selected_artifacts = set(
+        publication.get("allowed_artifact_types")
+        if publication.get("allowed_artifact_types") is not None
+        else DEFAULT_PUBLICATION_ARTIFACT_TYPES
+    )
+    artifact_rows = "".join(
+        render_artifact_allowlist_row(artifact["artifact_type"], artifact["display_name"], selected_artifacts)
+        for artifact in artifacts
+    )
+    if not artifact_rows:
+        artifact_rows = '<p>No run artifacts registered yet.</p>'
+
+    return f"""
+          <form method="post" action="{escape(action, quote=True)}">
+            <h2>{title}</h2>
+            <label for="publication_template_{publication.get('id', 'new')}">Dashboard Template</label>
+            <select id="publication_template_{publication.get('id', 'new')}" name="dashboard_template_id" required>
+              {template_options}
+            </select>
+            <label for="publication_title_{publication.get('id', 'new')}">Public Title</label>
+            <input id="publication_title_{publication.get('id', 'new')}" name="public_title" value="{html_value(publication.get('public_title', ''))}" required>
+            <label for="publication_notes_{publication.get('id', 'new')}">Analyst Notes</label>
+            <textarea id="publication_notes_{publication.get('id', 'new')}" name="analyst_notes">{escape(str(publication.get('analyst_notes') or ''))}</textarea>
+            <h2>Allowed Downloads</h2>
+            {artifact_rows}
+            <button type="submit">{button}</button>
+          </form>
+    """
+
+
+def render_artifact_allowlist_row(
+    artifact_type: str,
+    display_name: str,
+    selected_artifacts: set[str],
+) -> str:
+    return (
+        '<label class="checkbox-row">'
+        f'<input type="checkbox" name="allowed_artifact_types" value="{html_value(artifact_type)}" '
+        f'{checked_attr(artifact_type in selected_artifacts)}>'
+        f"{escape(artifact_type)} ({escape(display_name)})"
+        "</label>"
     )
 
 

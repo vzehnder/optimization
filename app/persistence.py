@@ -25,6 +25,12 @@ DASHBOARD_TEMPLATE_FLAGS = [
 
 DEFAULT_TABLE_PREVIEW_LIMIT = 10
 
+DEFAULT_PUBLICATION_ARTIFACT_TYPES = [
+    "summary_json",
+    "dispatch_csv",
+    "asset_dispatch_csv",
+]
+
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -210,6 +216,32 @@ class AnalystStore:
                 updated_by TEXT NOT NULL,
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
                 CHECK (table_preview_limit >= 1)
+            );
+
+            CREATE TABLE IF NOT EXISTS publications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                scenario_id INTEGER NOT NULL,
+                scenario_version_id INTEGER NOT NULL,
+                run_id INTEGER NOT NULL,
+                dashboard_template_id INTEGER NOT NULL,
+                public_title TEXT NOT NULL,
+                analyst_notes TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'draft',
+                allowed_artifact_types_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                published_at TEXT,
+                unpublished_at TEXT,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                published_by TEXT,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                FOREIGN KEY (scenario_id) REFERENCES scenarios(id) ON DELETE CASCADE,
+                FOREIGN KEY (scenario_version_id) REFERENCES scenario_versions(id) ON DELETE CASCADE,
+                FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
+                FOREIGN KEY (dashboard_template_id) REFERENCES dashboard_templates(id),
+                CHECK (status IN ('draft', 'published', 'unpublished'))
             );
             """
         )
@@ -720,6 +752,148 @@ class AnalystStore:
             self.connection.commit()
             return self.get_dashboard_template(template_id)
 
+    def create_publication_draft(
+        self,
+        *,
+        run_id: int,
+        dashboard_template_id: int,
+        public_title: str,
+        analyst_notes: str = "",
+        allowed_artifact_types: list[str] | None = None,
+        created_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        lineage = self.get_run_lineage(run_id)
+        if lineage["run_status"] != "succeeded":
+            raise ValueError("only succeeded runs can be published")
+        template = self.get_dashboard_template(dashboard_template_id)
+        if template["project_id"] != lineage["project_id"]:
+            raise KeyError(f"dashboard template {dashboard_template_id} not found for run {run_id}")
+        clean_title = public_title.strip()
+        if not clean_title:
+            raise ValueError("publication title is required")
+        resolved_artifact_types = self._resolve_publication_artifact_types(run_id, allowed_artifact_types)
+        now = utc_now_iso()
+        with self._lock:
+            cursor = self.connection.execute(
+                """
+                INSERT INTO publications (
+                    project_id,
+                    scenario_id,
+                    scenario_version_id,
+                    run_id,
+                    dashboard_template_id,
+                    public_title,
+                    analyst_notes,
+                    status,
+                    allowed_artifact_types_json,
+                    created_at,
+                    updated_at,
+                    created_by,
+                    updated_by
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?)
+                """,
+                (
+                    lineage["project_id"],
+                    lineage["scenario_id"],
+                    lineage["scenario_version_id"],
+                    run_id,
+                    dashboard_template_id,
+                    clean_title,
+                    analyst_notes.strip(),
+                    json.dumps(resolved_artifact_types),
+                    now,
+                    now,
+                    created_by,
+                    created_by,
+                ),
+            )
+            self.connection.commit()
+            return self.get_publication(cursor.lastrowid)
+
+    def list_run_publications(self, run_id: int) -> list[dict[str, Any]]:
+        self.get_run(run_id)
+        rows = self.connection.execute(
+            """
+            SELECT id, project_id, scenario_id, scenario_version_id, run_id,
+                   dashboard_template_id, public_title, analyst_notes, status,
+                   allowed_artifact_types_json, created_at, updated_at,
+                   published_at, unpublished_at, created_by, updated_by,
+                   published_by
+            FROM publications
+            WHERE run_id = ?
+            ORDER BY id
+            """,
+            (run_id,),
+        ).fetchall()
+        return [publication_row_to_dict(row) for row in rows]
+
+    def get_publication(self, publication_id: int) -> dict[str, Any]:
+        row = self.connection.execute(
+            """
+            SELECT id, project_id, scenario_id, scenario_version_id, run_id,
+                   dashboard_template_id, public_title, analyst_notes, status,
+                   allowed_artifact_types_json, created_at, updated_at,
+                   published_at, unpublished_at, created_by, updated_by,
+                   published_by
+            FROM publications
+            WHERE id = ?
+            """,
+            (publication_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"publication {publication_id} not found")
+        return publication_row_to_dict(row)
+
+    def update_publication_draft(
+        self,
+        publication_id: int,
+        *,
+        dashboard_template_id: int,
+        public_title: str,
+        analyst_notes: str = "",
+        allowed_artifact_types: list[str] | None = None,
+        updated_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        publication = self.get_publication(publication_id)
+        if publication["status"] != "draft":
+            raise ValueError("only draft publications can be edited")
+        template = self.get_dashboard_template(dashboard_template_id)
+        if template["project_id"] != publication["project_id"]:
+            raise KeyError(f"dashboard template {dashboard_template_id} not found for publication {publication_id}")
+        clean_title = public_title.strip()
+        if not clean_title:
+            raise ValueError("publication title is required")
+        resolved_artifact_types = self._resolve_publication_artifact_types(
+            publication["run_id"],
+            allowed_artifact_types,
+        )
+        now = utc_now_iso()
+        with self._lock:
+            self.connection.execute(
+                """
+                UPDATE publications
+                SET dashboard_template_id = ?,
+                    public_title = ?,
+                    analyst_notes = ?,
+                    allowed_artifact_types_json = ?,
+                    updated_at = ?,
+                    updated_by = ?
+                WHERE id = ?
+                """,
+                (
+                    dashboard_template_id,
+                    clean_title,
+                    analyst_notes.strip(),
+                    json.dumps(resolved_artifact_types),
+                    now,
+                    updated_by,
+                    publication_id,
+                ),
+            )
+            self.connection.commit()
+            return self.get_publication(publication_id)
+
     def create_scenario(
         self,
         *,
@@ -1056,6 +1230,26 @@ class AnalystStore:
             raise KeyError(f"run {run_id} not found")
         return int(row["project_id"])
 
+    def get_run_lineage(self, run_id: int) -> dict[str, Any]:
+        row = self.connection.execute(
+            """
+            SELECT runs.id AS run_id,
+                   runs.status AS run_status,
+                   scenario_versions.id AS scenario_version_id,
+                   scenarios.id AS scenario_id,
+                   projects.id AS project_id
+            FROM runs
+            JOIN scenario_versions ON scenario_versions.id = runs.scenario_version_id
+            JOIN scenarios ON scenarios.id = scenario_versions.scenario_id
+            JOIN projects ON projects.id = scenarios.project_id
+            WHERE runs.id = ?
+            """,
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"run {run_id} not found")
+        return row_to_dict(row)
+
     def mark_run_running(
         self,
         run_id: int,
@@ -1291,6 +1485,30 @@ class AnalystStore:
         if source_version["scenario_id"] != scenario_id:
             raise KeyError(f"scenario version {source_version_id} not found for scenario {scenario_id}")
 
+    def _resolve_publication_artifact_types(
+        self,
+        run_id: int,
+        requested_artifact_types: list[str] | None,
+    ) -> list[str]:
+        registered_types = {artifact["artifact_type"] for artifact in self.list_run_artifacts(run_id)}
+        if requested_artifact_types is None:
+            return [
+                artifact_type
+                for artifact_type in DEFAULT_PUBLICATION_ARTIFACT_TYPES
+                if artifact_type in registered_types
+            ]
+
+        resolved: list[str] = []
+        for artifact_type in requested_artifact_types:
+            clean_type = str(artifact_type).strip()
+            if not clean_type:
+                continue
+            if clean_type not in registered_types:
+                raise ValueError(f"artifact type {clean_type} is not registered for run {run_id}")
+            if clean_type not in resolved:
+                resolved.append(clean_type)
+        return resolved
+
 
 def sqlite_path_from_url(database_url: str) -> str:
     if database_url == "sqlite:///:memory:":
@@ -1321,6 +1539,12 @@ def dashboard_template_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     value = row_to_dict(row)
     for field in DASHBOARD_TEMPLATE_FLAGS:
         value[field] = bool(value[field])
+    return value
+
+
+def publication_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    value = row_to_dict(row)
+    value["allowed_artifact_types"] = json.loads(value.pop("allowed_artifact_types_json") or "[]")
     return value
 
 

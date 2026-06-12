@@ -24,7 +24,7 @@ triage label.
 | BESS-ITER6-001 | Add Local Auth And Role-Gated App Entry | AFK | ready-for-agent | Done | BESS-ITER6-000 | [BESS-ITER6-001-add-local-auth-and-role-gated-app-entry.md](BESS-ITER6-001-add-local-auth-and-role-gated-app-entry.md) |
 | BESS-ITER6-002 | Manage Users And Client Project Access | AFK | ready-for-agent | Done | BESS-ITER6-001 | [BESS-ITER6-002-manage-users-and-client-project-access.md](BESS-ITER6-002-manage-users-and-client-project-access.md) |
 | BESS-ITER6-003 | Create Minimal Dashboard Templates | AFK | ready-for-agent | Done | BESS-ITER6-001 | [BESS-ITER6-003-create-minimal-dashboard-templates.md](BESS-ITER6-003-create-minimal-dashboard-templates.md) |
-| BESS-ITER6-004 | Create Publication Drafts From Succeeded Runs | AFK | ready-for-agent | Todo | BESS-ITER6-003 | [BESS-ITER6-004-create-publication-drafts-from-succeeded-runs.md](BESS-ITER6-004-create-publication-drafts-from-succeeded-runs.md) |
+| BESS-ITER6-004 | Create Publication Drafts From Succeeded Runs | AFK | ready-for-agent | Done | BESS-ITER6-003 | [BESS-ITER6-004-create-publication-drafts-from-succeeded-runs.md](BESS-ITER6-004-create-publication-drafts-from-succeeded-runs.md) |
 | BESS-ITER6-005 | Publish And Preview Client-Visible Results | AFK | ready-for-agent | Todo | BESS-ITER6-002, BESS-ITER6-004 | [BESS-ITER6-005-publish-and-preview-client-visible-results.md](BESS-ITER6-005-publish-and-preview-client-visible-results.md) |
 | BESS-ITER6-006 | Allowlist Client Artifact Downloads | AFK | ready-for-agent | Todo | BESS-ITER6-005 | [BESS-ITER6-006-allowlist-client-artifact-downloads.md](BESS-ITER6-006-allowlist-client-artifact-downloads.md) |
 | BESS-ITER6-007 | Harden Authorization And Revocation | AFK | ready-for-agent | Todo | BESS-ITER6-002, BESS-ITER6-005, BESS-ITER6-006 | [BESS-ITER6-007-harden-authorization-and-revocation.md](BESS-ITER6-007-harden-authorization-and-revocation.md) |
@@ -54,6 +54,7 @@ triage label.
 | 2026-06-09 | BESS-ITER6-001 | Todo -> Done | Added local users, hashed passwords, bootstrap first-admin flow, login/logout, server-side sessions, reusable auth helpers, role-gated internal/client routing, and focused auth acceptance coverage while preserving previous analyst regression suites. |
 | 2026-06-12 | BESS-ITER6-002 | Todo -> Done | Added admin user management, deactivation-immediate session blocking, many-to-many client-project assignments, filtered client project portal pages, and focused authorization/project-access coverage. |
 | 2026-06-12 | BESS-ITER6-003 | Todo -> Done | Added project-scoped dashboard templates with section toggles, table preview limits, SSR project-page controls, internal APIs, template-filtered result rendering over existing result readers, missing-column fallbacks, and focused dashboard-template acceptance coverage. |
+| 2026-06-12 | BESS-ITER6-004 | Todo -> Done | Added publication draft persistence above succeeded runs, internal API and SSR run-page controls for creating/editing draft title, notes, template, and artifact allowlist, default business artifact selection, project-template scoping, incomplete-run rejection, and focused publication draft coverage. |
 
 ## Regression Guard
 
