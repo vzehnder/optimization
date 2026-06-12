@@ -894,6 +894,76 @@ class AnalystStore:
             self.connection.commit()
             return self.get_publication(publication_id)
 
+    def publish_publication(
+        self,
+        publication_id: int,
+        *,
+        published_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        publication = self.get_publication(publication_id)
+        if publication["status"] == "published":
+            return publication
+        now = utc_now_iso()
+        with self._lock:
+            self.connection.execute(
+                """
+                UPDATE publications
+                SET status = 'published',
+                    updated_at = ?,
+                    published_at = ?,
+                    unpublished_at = NULL,
+                    updated_by = ?,
+                    published_by = ?
+                WHERE id = ?
+                """,
+                (now, now, published_by, published_by, publication_id),
+            )
+            self.connection.commit()
+            return self.get_publication(publication_id)
+
+    def unpublish_publication(
+        self,
+        publication_id: int,
+        *,
+        unpublished_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        publication = self.get_publication(publication_id)
+        if publication["status"] != "published":
+            raise ValueError("only published publications can be unpublished")
+        now = utc_now_iso()
+        with self._lock:
+            self.connection.execute(
+                """
+                UPDATE publications
+                SET status = 'unpublished',
+                    updated_at = ?,
+                    unpublished_at = ?,
+                    updated_by = ?
+                WHERE id = ?
+                """,
+                (now, now, unpublished_by, publication_id),
+            )
+            self.connection.commit()
+            return self.get_publication(publication_id)
+
+    def list_published_project_publications(self, project_id: int) -> list[dict[str, Any]]:
+        self.get_project(project_id)
+        rows = self.connection.execute(
+            """
+            SELECT id, project_id, scenario_id, scenario_version_id, run_id,
+                   dashboard_template_id, public_title, analyst_notes, status,
+                   allowed_artifact_types_json, created_at, updated_at,
+                   published_at, unpublished_at, created_by, updated_by,
+                   published_by
+            FROM publications
+            WHERE project_id = ?
+              AND status = 'published'
+            ORDER BY published_at DESC, id DESC
+            """,
+            (project_id,),
+        ).fetchall()
+        return [publication_row_to_dict(row) for row in rows]
+
     def create_scenario(
         self,
         *,

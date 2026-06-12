@@ -370,9 +370,50 @@ def create_app(
             raise HTTPException(status_code=404, detail="project not found")
         try:
             project = analyst_store.get_project(project_id)
+            publications = analyst_store.list_published_project_publications(project_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        return HTMLResponse(render_client_project_page(project))
+        return HTMLResponse(render_client_project_page(project, publications))
+
+    @app.get("/client/projects/{project_id}/publications/{publication_id}", response_class=HTMLResponse)
+    async def client_publication_detail(project_id: int, publication_id: int, request: Request):
+        user = request.state.current_user
+        if not analyst_store.client_has_project_access(user_id=user["id"], project_id=project_id):
+            raise HTTPException(status_code=404, detail="project not found")
+        try:
+            project = analyst_store.get_project(project_id)
+            publication = analyst_store.get_publication(publication_id)
+            if publication["project_id"] != project_id or publication["status"] != "published":
+                raise KeyError(f"publication {publication_id} not found")
+            scenario = analyst_store.get_scenario(publication["scenario_id"])
+            version = analyst_store.get_scenario_version(
+                publication["scenario_version_id"],
+                include_document=False,
+            )
+            run = analyst_store.get_run(publication["run_id"])
+            template = analyst_store.get_dashboard_template(publication["dashboard_template_id"])
+            artifacts = analyst_store.list_run_artifacts(run["id"])
+            results = apply_dashboard_template(
+                read_run_results(run, artifacts, configured_artifact_root),
+                template,
+            )
+            results_error = ""
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ResultReadError as error:
+            results = None
+            results_error = error.message
+        return HTMLResponse(
+            render_client_publication_page(
+                project,
+                scenario,
+                version,
+                run,
+                publication,
+                results,
+                results_error,
+            )
+        )
 
     @app.get("/admin/users", response_class=HTMLResponse)
     async def admin_users_page(request: Request):
@@ -728,6 +769,67 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         except (TypeError, ValueError) as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return RedirectResponse(f"/runs/{publication['run_id']}", status_code=303)
+
+    @app.get("/publications/{publication_id}/preview", response_class=HTMLResponse)
+    async def preview_publication_as_client(publication_id: int):
+        try:
+            publication = analyst_store.get_publication(publication_id)
+            project = analyst_store.get_project(publication["project_id"])
+            scenario = analyst_store.get_scenario(publication["scenario_id"])
+            version = analyst_store.get_scenario_version(
+                publication["scenario_version_id"],
+                include_document=False,
+            )
+            run = analyst_store.get_run(publication["run_id"])
+            template = analyst_store.get_dashboard_template(publication["dashboard_template_id"])
+            artifacts = analyst_store.list_run_artifacts(run["id"])
+            results = apply_dashboard_template(
+                read_run_results(run, artifacts, configured_artifact_root),
+                template,
+            )
+            results_error = ""
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ResultReadError as error:
+            results = None
+            results_error = error.message
+        return HTMLResponse(
+            render_client_publication_page(
+                project,
+                scenario,
+                version,
+                run,
+                publication,
+                results,
+                results_error,
+            )
+        )
+
+    @app.post("/publications/{publication_id}/publish")
+    async def publish_publication_from_page(publication_id: int, request: Request):
+        try:
+            publication = analyst_store.publish_publication(
+                publication_id,
+                published_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return RedirectResponse(f"/runs/{publication['run_id']}", status_code=303)
+
+    @app.post("/publications/{publication_id}/unpublish")
+    async def unpublish_publication_from_page(publication_id: int, request: Request):
+        try:
+            publication = analyst_store.unpublish_publication(
+                publication_id,
+                unpublished_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
         return RedirectResponse(f"/runs/{publication['run_id']}", status_code=303)
 
@@ -1472,6 +1574,32 @@ def create_app(
                 analyst_notes=payload.analyst_notes,
                 allowed_artifact_types=payload.allowed_artifact_types,
                 updated_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return {"publication": publication}
+
+    @app.post("/api/publications/{publication_id}/publish")
+    async def publish_publication(publication_id: int, request: Request):
+        try:
+            publication = analyst_store.publish_publication(
+                publication_id,
+                published_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return {"publication": publication}
+
+    @app.post("/api/publications/{publication_id}/unpublish")
+    async def unpublish_publication(publication_id: int, request: Request):
+        try:
+            publication = analyst_store.unpublish_publication(
+                publication_id,
+                unpublished_by=current_user_email(request),
             )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
@@ -2767,7 +2895,15 @@ def render_client_home_page(user: dict[str, Any] | None, projects: list[dict[str
     )
 
 
-def render_client_project_page(project: dict[str, Any]) -> str:
+def render_client_project_page(project: dict[str, Any], publications: list[dict[str, Any]]) -> str:
+    publication_items = "".join(
+        f'<li><a href="/client/projects/{project["id"]}/publications/{publication["id"]}">'
+        f'{escape(publication["public_title"])}</a>'
+        f'<span>{escape(publication.get("published_at") or "")}</span></li>'
+        for publication in publications
+    )
+    if not publication_items:
+        publication_items = '<li class="empty">No published results yet.</li>'
     return render_auth_shell(
         project["name"],
         f"""
@@ -2776,8 +2912,39 @@ def render_client_project_page(project: dict[str, Any]) -> str:
         <p>{escape(project["description"])}</p>
         <section>
           <h2>Publications</h2>
-          <p>No published results yet.</p>
+          <ul class="entity-list">{publication_items}</ul>
         </section>
+        <form method="post" action="/logout">
+          <button type="submit">Log Out</button>
+        </form>
+        """,
+    )
+
+
+def render_client_publication_page(
+    project: dict[str, Any],
+    scenario: dict[str, Any],
+    version: dict[str, Any],
+    run: dict[str, Any],
+    publication: dict[str, Any],
+    results: dict | None,
+    results_error: str = "",
+) -> str:
+    metadata = {
+        "Published At": publication.get("published_at") or "",
+        "Scenario": scenario["name"],
+        "Scenario Version": version["version_number"],
+        "Run Date": run.get("finished_at") or run.get("created_at") or "",
+        "Run Status": run["status"],
+    }
+    return render_auth_shell(
+        publication["public_title"],
+        f"""
+        <nav><a href="/client">Client Portal</a> / <a href="/client/projects/{project['id']}">{escape(project['name'])}</a></nav>
+        <h1>{escape(publication["public_title"])}</h1>
+        <p>{escape(publication["analyst_notes"])}</p>
+        {render_key_value_table(metadata)}
+        {render_client_dashboard_results(results, results_error)}
         <form method="post" action="/logout">
           <button type="submit">Log Out</button>
         </form>
@@ -3225,6 +3392,18 @@ def render_publication_item(
     artifacts: list[dict],
 ) -> str:
     allowed_text = ", ".join(publication["allowed_artifact_types"]) or "no downloads"
+    preview_link = f'<a href="/publications/{publication["id"]}/preview">Preview as Client</a>'
+    state_form = ""
+    if publication["status"] in {"draft", "unpublished"}:
+        state_form = (
+            f'<form class="inline-form" method="post" action="/publications/{publication["id"]}/publish">'
+            '<button type="submit">Publish Publication</button></form>'
+        )
+    elif publication["status"] == "published":
+        state_form = (
+            f'<form class="inline-form" method="post" action="/publications/{publication["id"]}/unpublish">'
+            '<button type="submit">Unpublish Publication</button></form>'
+        )
     edit_form = ""
     if publication["status"] == "draft":
         edit_form = render_publication_form(
@@ -3238,6 +3417,8 @@ def render_publication_item(
         f"<strong>{escape(publication['public_title'])}</strong>"
         f"<span>{escape(publication['status'])} | {escape(allowed_text)}</span>"
         f"<span>{escape(publication['analyst_notes'])}</span>"
+        f"{preview_link}"
+        f"{state_form}"
         f"{edit_form}"
         "</li>"
     )
@@ -3303,6 +3484,43 @@ def render_artifact_allowlist_row(
         f"{escape(artifact_type)} ({escape(display_name)})"
         "</label>"
     )
+
+
+def render_client_dashboard_results(results: dict | None, results_error: str = "") -> str:
+    if results_error:
+        return (
+            '<section class="notice error results-section">'
+            "<h2>Results Error</h2>"
+            f"<p>{escape(results_error)}</p>"
+            "</section>"
+        )
+    if results is None:
+        return ""
+
+    sections: list[str] = []
+    if results.get("summary") is not None:
+        sections.append(
+            "<h2>Run Summary</h2>"
+            f"{render_summary_details(results['summary'])}"
+        )
+    if results.get("charts"):
+        sections.append(
+            "<h2>Charts</h2>"
+            f"{render_chart_grid(results['charts'])}"
+        )
+    if results.get("dispatch_table") is not None:
+        sections.append(
+            "<h2>System Dispatch</h2>"
+            f"{render_result_table(results['dispatch_table'])}"
+        )
+    if results.get("asset_dispatch_table") is not None:
+        sections.append(
+            "<h2>Asset Dispatch</h2>"
+            f"{render_result_table(results['asset_dispatch_table'])}"
+        )
+    if not sections:
+        sections.append("<p>No dashboard sections are enabled for this publication.</p>")
+    return f'<section class="results-section">{"".join(sections)}</section>'
 
 
 def render_results_section(results: dict | None, results_error: str = "") -> str:
