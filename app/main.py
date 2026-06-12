@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from pydantic import BaseModel, Field
 
 from app.auth import (
-    INTERNAL_USER_ROLES,
+    AuthorizationService,
     VALID_USER_ROLES,
     hash_password,
     hash_session_token,
@@ -144,12 +144,13 @@ def create_app(
     app = FastAPI(title="BESS Analyst App", lifespan=lifespan)
     app.state.analyst_store = analyst_store
     app.state.auth_enabled = auth_required
+    authorization = AuthorizationService(analyst_store)
 
     def current_user_from_request(request: Request) -> dict[str, Any] | None:
         token = request.cookies.get(session_cookie_name)
         if not token:
             return None
-        return analyst_store.get_user_for_session(hash_session_token(token))
+        return authorization.user_for_session_token_hash(hash_session_token(token))
 
     def auth_redirect(request: Request) -> RedirectResponse:
         target = request.url.path
@@ -170,9 +171,38 @@ def create_app(
     def require_admin_user(request: Request) -> None:
         if not auth_required:
             return
-        user = request.state.current_user
-        if user is None or user["role"] != "admin":
+        try:
+            authorization.require_admin(request.state.current_user)
+        except PermissionError as error:
             raise HTTPException(status_code=403, detail="forbidden")
+
+    def require_client_project_access(request: Request, project_id: int) -> None:
+        if not auth_required:
+            return
+        try:
+            authorization.require_client_project_access(request.state.current_user, project_id)
+        except PermissionError as error:
+            raise HTTPException(status_code=403, detail="forbidden") from error
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="project not found") from error
+
+    def require_client_publication_access(
+        request: Request,
+        project_id: int,
+        publication_id: int,
+    ) -> dict[str, Any] | None:
+        if not auth_required:
+            return None
+        try:
+            return authorization.require_published_client_publication(
+                request.state.current_user,
+                project_id=project_id,
+                publication_id=publication_id,
+            )
+        except PermissionError as error:
+            raise HTTPException(status_code=403, detail="forbidden") from error
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
 
     def set_session_cookie(response: Response, token: str) -> None:
         response.set_cookie(
@@ -208,13 +238,17 @@ def create_app(
                 return RedirectResponse("/bootstrap", status_code=303)
             return auth_required_response(request)
 
-        if path == "/":
+        if path == "/" or path == "/api/auth/me":
             return await call_next(request)
         if path.startswith("/client"):
-            if user["role"] != "client":
+            try:
+                authorization.require_client(user)
+            except PermissionError:
                 return forbidden_response(request)
             return await call_next(request)
-        if user["role"] not in INTERNAL_USER_ROLES:
+        try:
+            authorization.require_internal(user)
+        except PermissionError:
             return forbidden_response(request)
         return await call_next(request)
 
@@ -402,9 +436,7 @@ def create_app(
 
     @app.get("/client/projects/{project_id}", response_class=HTMLResponse)
     async def client_project_detail(project_id: int, request: Request):
-        user = request.state.current_user
-        if not analyst_store.client_has_project_access(user_id=user["id"], project_id=project_id):
-            raise HTTPException(status_code=404, detail="project not found")
+        require_client_project_access(request, project_id)
         try:
             project = analyst_store.get_project(project_id)
             publications = analyst_store.list_published_project_publications(project_id)
@@ -414,14 +446,13 @@ def create_app(
 
     @app.get("/client/projects/{project_id}/publications/{publication_id}", response_class=HTMLResponse)
     async def client_publication_detail(project_id: int, publication_id: int, request: Request):
-        user = request.state.current_user
-        if not analyst_store.client_has_project_access(user_id=user["id"], project_id=project_id):
-            raise HTTPException(status_code=404, detail="project not found")
         try:
             project = analyst_store.get_project(project_id)
-            publication = analyst_store.get_publication(publication_id)
-            if publication["project_id"] != project_id or publication["status"] != "published":
-                raise KeyError(f"publication {publication_id} not found")
+            publication = require_client_publication_access(request, project_id, publication_id)
+            if publication is None:
+                publication = analyst_store.get_publication(publication_id)
+                if publication["project_id"] != project_id or publication["status"] != "published":
+                    raise KeyError(f"publication {publication_id} not found")
             scenario = analyst_store.get_scenario(publication["scenario_id"])
             version = analyst_store.get_scenario_version(
                 publication["scenario_version_id"],
@@ -468,9 +499,7 @@ def create_app(
         artifact_type: str,
         request: Request,
     ):
-        user = request.state.current_user
-        if not analyst_store.client_has_project_access(user_id=user["id"], project_id=project_id):
-            raise HTTPException(status_code=404, detail="project not found")
+        require_client_publication_access(request, project_id, publication_id)
         try:
             artifact = get_client_publication_download(project_id, publication_id, artifact_type)
         except KeyError as error:

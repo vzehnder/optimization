@@ -5,10 +5,52 @@ import hashlib
 import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 
 VALID_USER_ROLES = {"admin", "analyst", "client"}
 INTERNAL_USER_ROLES = {"admin", "analyst"}
+
+
+class AuthorizationService:
+    def __init__(self, store: Any):
+        self.store = store
+
+    def user_for_session_token_hash(self, token_hash: str) -> dict[str, Any] | None:
+        return self.store.get_user_for_session(token_hash)
+
+    def require_admin(self, user: dict[str, Any] | None) -> dict[str, Any]:
+        if user is None or user["role"] != "admin":
+            raise PermissionError("forbidden")
+        return user
+
+    def require_internal(self, user: dict[str, Any] | None) -> dict[str, Any]:
+        if user is None or user["role"] not in INTERNAL_USER_ROLES:
+            raise PermissionError("forbidden")
+        return user
+
+    def require_client(self, user: dict[str, Any] | None) -> dict[str, Any]:
+        if user is None or user["role"] != "client":
+            raise PermissionError("forbidden")
+        return user
+
+    def require_client_project_access(self, user: dict[str, Any] | None, project_id: int) -> None:
+        client_user = self.require_client(user)
+        if not self.store.client_has_project_access(user_id=client_user["id"], project_id=project_id):
+            raise KeyError(f"project {project_id} not found")
+
+    def require_published_client_publication(
+        self,
+        user: dict[str, Any] | None,
+        *,
+        project_id: int,
+        publication_id: int,
+    ) -> dict[str, Any]:
+        self.require_client_project_access(user, project_id)
+        publication = self.store.get_publication(publication_id)
+        if publication["project_id"] != project_id or publication["status"] != "published":
+            raise KeyError(f"publication {publication_id} not found")
+        return publication
 
 
 def hash_password(password: str, *, iterations: int = 200_000) -> str:
