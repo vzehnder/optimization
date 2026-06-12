@@ -26,7 +26,7 @@ triage label.
 | BESS-ITER6-003 | Create Minimal Dashboard Templates | AFK | ready-for-agent | Done | BESS-ITER6-001 | [BESS-ITER6-003-create-minimal-dashboard-templates.md](BESS-ITER6-003-create-minimal-dashboard-templates.md) |
 | BESS-ITER6-004 | Create Publication Drafts From Succeeded Runs | AFK | ready-for-agent | Done | BESS-ITER6-003 | [BESS-ITER6-004-create-publication-drafts-from-succeeded-runs.md](BESS-ITER6-004-create-publication-drafts-from-succeeded-runs.md) |
 | BESS-ITER6-005 | Publish And Preview Client-Visible Results | AFK | ready-for-agent | Done | BESS-ITER6-002, BESS-ITER6-004 | [BESS-ITER6-005-publish-and-preview-client-visible-results.md](BESS-ITER6-005-publish-and-preview-client-visible-results.md) |
-| BESS-ITER6-006 | Allowlist Client Artifact Downloads | AFK | ready-for-agent | Todo | BESS-ITER6-005 | [BESS-ITER6-006-allowlist-client-artifact-downloads.md](BESS-ITER6-006-allowlist-client-artifact-downloads.md) |
+| BESS-ITER6-006 | Allowlist Client Artifact Downloads | AFK | ready-for-agent | Done | BESS-ITER6-005 | [BESS-ITER6-006-allowlist-client-artifact-downloads.md](BESS-ITER6-006-allowlist-client-artifact-downloads.md) |
 | BESS-ITER6-007 | Harden Authorization And Revocation | AFK | ready-for-agent | Todo | BESS-ITER6-002, BESS-ITER6-005, BESS-ITER6-006 | [BESS-ITER6-007-harden-authorization-and-revocation.md](BESS-ITER6-007-harden-authorization-and-revocation.md) |
 | BESS-ITER6-008 | Finalize Iteration 6 Acceptance Suite And Docs | AFK | ready-for-agent | Todo | BESS-ITER6-001 through BESS-ITER6-007 | [BESS-ITER6-008-finalize-iteration-6-acceptance-suite-and-docs.md](BESS-ITER6-008-finalize-iteration-6-acceptance-suite-and-docs.md) |
 
@@ -56,6 +56,7 @@ triage label.
 | 2026-06-12 | BESS-ITER6-003 | Todo -> Done | Added project-scoped dashboard templates with section toggles, table preview limits, SSR project-page controls, internal APIs, template-filtered result rendering over existing result readers, missing-column fallbacks, and focused dashboard-template acceptance coverage. |
 | 2026-06-12 | BESS-ITER6-004 | Todo -> Done | Added publication draft persistence above succeeded runs, internal API and SSR run-page controls for creating/editing draft title, notes, template, and artifact allowlist, default business artifact selection, project-template scoping, incomplete-run rejection, and focused publication draft coverage. |
 | 2026-06-12 | BESS-ITER6-005 | Todo -> Done | Added preview-as-client, publish/unpublish state transitions, client project active-publication listings, client publication result pages with template-filtered summary/charts/table previews, and immediate client revocation on unpublish. |
+| 2026-06-12 | BESS-ITER6-006 | Todo -> Done | Added publication allowlist download links on client publication pages, a client download route enforcing authentication, project assignment, published status, artifact allowlist membership, and safe artifact paths, while preserving internal artifact downloads. |
 
 ## Regression Guard
 

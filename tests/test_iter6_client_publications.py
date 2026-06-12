@@ -19,6 +19,109 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
     def tearDown(self):
         self.store.close()
 
+    def test_client_downloads_only_allowlisted_artifacts_for_active_assigned_publication(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            run = create_completed_run_with_result_artifacts(self.store, artifact_root)
+            project_id = self.store.get_run_lineage(run["id"])["project_id"]
+            metadata_path = artifact_root / "runs" / "1" / "outputs" / "model_metadata.json"
+            metadata_path.write_text('{"schema_version":"bess_system_dispatch.v1"}\n', encoding="utf-8")
+            self.store.register_run_artifact(
+                run_id=run["id"],
+                artifact_type="model_metadata_json",
+                path=str(metadata_path),
+                display_name="model_metadata.json",
+                media_type="application/json",
+            )
+            self.store.assign_client_to_project(
+                project_id=project_id,
+                user_id=self.client_user["id"],
+                assigned_by="analyst@example.local",
+            )
+            template = self.store.create_dashboard_template(
+                project_id=project_id,
+                name="Download Template",
+                created_by="analyst@example.local",
+            )
+            analyst = TestClient(create_app(store=self.store, artifact_root=artifact_root, auth_enabled=True))
+            self.login(analyst, "analyst@example.local", "analyst pass")
+            publication = analyst.post(
+                f"/api/runs/{run['id']}/publications",
+                json={
+                    "dashboard_template_id": template["id"],
+                    "public_title": "Download Review",
+                    "allowed_artifact_types": ["summary_json"],
+                },
+            ).json()["publication"]
+            analyst.post(f"/api/publications/{publication['id']}/publish")
+
+            client = TestClient(create_app(store=self.store, artifact_root=artifact_root, auth_enabled=True))
+            self.login(client, "client@example.local", "client pass")
+            page = client.get(f"/client/projects/{project_id}/publications/{publication['id']}")
+
+            self.assertEqual(page.status_code, 200)
+            self.assertIn("summary.json", page.text)
+            self.assertIn(
+                f"/client/projects/{project_id}/publications/{publication['id']}/artifacts/summary_json/download",
+                page.text,
+            )
+            self.assertNotIn("dispatch.csv", page.text)
+            self.assertNotIn("model_metadata.json", page.text)
+
+            allowed = client.get(
+                f"/client/projects/{project_id}/publications/{publication['id']}/artifacts/summary_json/download"
+            )
+
+            self.assertEqual(allowed.status_code, 200)
+            self.assertEqual(allowed.headers["content-type"], "application/json")
+            self.assertIn('filename="summary.json"', allowed.headers["content-disposition"])
+            self.assertEqual(allowed.json()["case_name"], "hybrid_system")
+            self.assertEqual(
+                client.get(
+                    f"/client/projects/{project_id}/publications/{publication['id']}/artifacts/dispatch_csv/download"
+                ).status_code,
+                404,
+            )
+            self.assertEqual(
+                client.get(
+                    f"/client/projects/{project_id}/publications/{publication['id']}/artifacts/model_metadata_json/download"
+                ).status_code,
+                404,
+            )
+
+            self.create_user("other-client@example.local", role="client", password="client pass")
+            unassigned = TestClient(create_app(store=self.store, artifact_root=artifact_root, auth_enabled=True))
+            self.login(unassigned, "other-client@example.local", "client pass")
+            self.assertEqual(
+                unassigned.get(
+                    f"/client/projects/{project_id}/publications/{publication['id']}/artifacts/summary_json/download"
+                ).status_code,
+                404,
+            )
+
+            draft = analyst.post(
+                f"/api/runs/{run['id']}/publications",
+                json={
+                    "dashboard_template_id": template["id"],
+                    "public_title": "Draft Download Review",
+                    "allowed_artifact_types": ["summary_json"],
+                },
+            ).json()["publication"]
+            self.assertEqual(
+                client.get(
+                    f"/client/projects/{project_id}/publications/{draft['id']}/artifacts/summary_json/download"
+                ).status_code,
+                404,
+            )
+            anonymous = TestClient(create_app(store=self.store, artifact_root=artifact_root, auth_enabled=True))
+            self.assertEqual(
+                anonymous.get(
+                    f"/client/projects/{project_id}/publications/{publication['id']}/artifacts/summary_json/download",
+                    follow_redirects=False,
+                ).status_code,
+                303,
+            )
+
     def test_published_publication_appears_in_assigned_client_portal(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             artifact_root = Path(temp_dir) / "artifacts"

@@ -1,6 +1,6 @@
 # BESS-ITER6-006: Allowlist Client Artifact Downloads
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/iter6/prd_client_publication_portal.md`
@@ -21,24 +21,48 @@ artifacts.
 
 ## Acceptance criteria
 
-- [ ] Publication configuration can enable or disable each registered run
+- [x] Publication configuration can enable or disable each registered run
       artifact for client download.
-- [ ] `summary_json`, `dispatch_csv`, and `asset_dispatch_csv` are easy to
+- [x] `summary_json`, `dispatch_csv`, and `asset_dispatch_csv` are easy to
       enable as default client artifacts.
-- [ ] Technical artifacts such as input snapshots, stdout logs, stderr logs,
+- [x] Technical artifacts such as input snapshots, stdout logs, stderr logs,
       model metadata, and resolved system cases are disabled by default.
-- [ ] Client publication pages list only enabled downloads.
-- [ ] Clients can download enabled artifacts for active publications in assigned
+- [x] Client publication pages list only enabled downloads.
+- [x] Clients can download enabled artifacts for active publications in assigned
       projects.
-- [ ] Clients cannot download disabled artifacts even if they guess the route.
-- [ ] Clients cannot download artifacts from unassigned projects.
-- [ ] Clients cannot download artifacts from draft or unpublished publications.
-- [ ] Unauthenticated users cannot download client artifacts.
-- [ ] Internal users retain access to existing internal artifact downloads.
-- [ ] Download responses preserve useful filenames and media types where the
+- [x] Clients cannot download disabled artifacts even if they guess the route.
+- [x] Clients cannot download artifacts from unassigned projects.
+- [x] Clients cannot download artifacts from draft or unpublished publications.
+- [x] Unauthenticated users cannot download client artifacts.
+- [x] Internal users retain access to existing internal artifact downloads.
+- [x] Download responses preserve useful filenames and media types where the
       existing artifact registry provides them.
+
+## Implementation notes
+
+Completed on 2026-06-12.
+
+- Added client publication download rendering that lists only artifacts selected
+  by the publication allowlist and backed by safe registered artifact paths.
+- Added a client download route under
+  `/client/projects/{project_id}/publications/{publication_id}/artifacts/{artifact_type}/download`
+  that enforces client authentication, project assignment, published status,
+  allowlist membership, and artifact path safety before returning a file.
+- Preserved existing internal artifact download behavior through
+  `/api/run-artifacts/{artifact_id}/download`, including preview-as-client
+  download links for internal users.
+- Kept default publication artifact selection on `summary_json`,
+  `dispatch_csv`, and `asset_dispatch_csv`; technical artifacts remain hidden
+  from clients unless explicitly selected.
+
+## Verification
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_iter6_client_publications.Iteration6ClientPublicationTests.test_client_downloads_only_allowlisted_artifacts_for_active_assigned_publication -v
+.\.venv\Scripts\python.exe -m unittest tests.test_iter6_auth tests.test_iter6_project_access tests.test_iter6_dashboard_templates tests.test_iter6_publications tests.test_iter6_client_publications -v
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
 
 ## Blocked by
 
 BESS-ITER6-005
-

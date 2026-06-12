@@ -250,6 +250,43 @@ def create_app(
         local_run_queue.enqueue(run["id"])
         return run
 
+    def publication_download_artifacts(
+        publication: dict[str, Any],
+        artifacts: list[dict[str, Any]],
+        url_builder,
+    ) -> list[dict[str, Any]]:
+        allowed_types = set(publication.get("allowed_artifact_types") or [])
+        downloads: list[dict[str, Any]] = []
+        for artifact in artifacts:
+            artifact_type = artifact["artifact_type"]
+            if artifact_type not in allowed_types:
+                continue
+            if not artifact_path_is_safe(artifact["path"], configured_artifact_root):
+                continue
+            if not Path(artifact["path"]).is_file():
+                continue
+            body = artifact_response_body(artifact)
+            body["download_url"] = url_builder(artifact)
+            downloads.append(body)
+        return downloads
+
+    def get_client_publication_download(project_id: int, publication_id: int, artifact_type: str) -> dict[str, Any]:
+        publication = analyst_store.get_publication(publication_id)
+        if publication["project_id"] != project_id or publication["status"] != "published":
+            raise KeyError(f"publication {publication_id} not found")
+        if artifact_type not in set(publication.get("allowed_artifact_types") or []):
+            raise KeyError(f"artifact {artifact_type} not found for publication {publication_id}")
+        for artifact in analyst_store.list_run_artifacts(publication["run_id"]):
+            if artifact["artifact_type"] != artifact_type:
+                continue
+            if not artifact_path_is_safe(artifact["path"], configured_artifact_root):
+                raise KeyError(f"artifact {artifact_type} not found for publication {publication_id}")
+            artifact_path = Path(artifact["path"])
+            if not artifact_path.is_file():
+                raise KeyError(f"artifact {artifact_type} file not found")
+            return artifact
+        raise KeyError(f"artifact {artifact_type} not found for publication {publication_id}")
+
     def get_or_create_scenario_draft(scenario_id: int) -> dict:
         try:
             return analyst_store.get_scenario_draft(scenario_id)
@@ -393,6 +430,14 @@ def create_app(
             run = analyst_store.get_run(publication["run_id"])
             template = analyst_store.get_dashboard_template(publication["dashboard_template_id"])
             artifacts = analyst_store.list_run_artifacts(run["id"])
+            downloads = publication_download_artifacts(
+                publication,
+                artifacts,
+                lambda artifact: (
+                    f"/client/projects/{project_id}/publications/{publication_id}/artifacts/"
+                    f"{quote(artifact['artifact_type'], safe='')}/download"
+                ),
+            )
             results = apply_dashboard_template(
                 read_run_results(run, artifacts, configured_artifact_root),
                 template,
@@ -412,7 +457,28 @@ def create_app(
                 publication,
                 results,
                 results_error,
+                downloads,
             )
+        )
+
+    @app.get("/client/projects/{project_id}/publications/{publication_id}/artifacts/{artifact_type}/download")
+    async def download_client_publication_artifact(
+        project_id: int,
+        publication_id: int,
+        artifact_type: str,
+        request: Request,
+    ):
+        user = request.state.current_user
+        if not analyst_store.client_has_project_access(user_id=user["id"], project_id=project_id):
+            raise HTTPException(status_code=404, detail="project not found")
+        try:
+            artifact = get_client_publication_download(project_id, publication_id, artifact_type)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return FileResponse(
+            Path(artifact["path"]),
+            media_type=artifact["media_type"],
+            filename=artifact["display_name"],
         )
 
     @app.get("/admin/users", response_class=HTMLResponse)
@@ -785,6 +851,11 @@ def create_app(
             run = analyst_store.get_run(publication["run_id"])
             template = analyst_store.get_dashboard_template(publication["dashboard_template_id"])
             artifacts = analyst_store.list_run_artifacts(run["id"])
+            downloads = publication_download_artifacts(
+                publication,
+                artifacts,
+                lambda artifact: f"/api/run-artifacts/{artifact['id']}/download",
+            )
             results = apply_dashboard_template(
                 read_run_results(run, artifacts, configured_artifact_root),
                 template,
@@ -804,6 +875,7 @@ def create_app(
                 publication,
                 results,
                 results_error,
+                downloads,
             )
         )
 
@@ -2929,6 +3001,7 @@ def render_client_publication_page(
     publication: dict[str, Any],
     results: dict | None,
     results_error: str = "",
+    downloads: list[dict[str, Any]] | None = None,
 ) -> str:
     metadata = {
         "Published At": publication.get("published_at") or "",
@@ -2945,11 +3018,30 @@ def render_client_publication_page(
         <p>{escape(publication["analyst_notes"])}</p>
         {render_key_value_table(metadata)}
         {render_client_dashboard_results(results, results_error)}
+        {render_client_downloads(downloads or [])}
         <form method="post" action="/logout">
           <button type="submit">Log Out</button>
         </form>
         """,
     )
+
+
+def render_client_downloads(downloads: list[dict[str, Any]]) -> str:
+    if not downloads:
+        items = '<li class="empty">No downloads enabled for this publication.</li>'
+    else:
+        items = "".join(
+            f'<li><a href="{escape(download["download_url"])}">{escape(download["display_name"])}</a>'
+            f'<span>{escape(download["artifact_type"])} | {escape(download["media_type"])} | '
+            f'{download["byte_size"]} bytes</span></li>'
+            for download in downloads
+        )
+    return f"""
+        <section>
+          <h2>Downloads</h2>
+          <ul class="entity-list">{items}</ul>
+        </section>
+    """
 
 
 def render_admin_users_page(users: list[dict[str, Any]], error_message: str = "") -> str:
