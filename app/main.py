@@ -29,7 +29,7 @@ from app.draft_editor import (
     structured_draft_document_from_form,
 )
 from app.persistence import AnalystStore, utc_now_iso
-from app.results import ResultReadError, read_run_results
+from app.results import ResultReadError, apply_dashboard_template, read_run_results
 from app.runner import JuliaRunExecutor, LocalRunQueue
 from app.time_series_ingestion import (
     TimeSeriesIngestionError,
@@ -63,6 +63,20 @@ class UserCreateRequest(BaseModel):
 
 class ProjectClientAccessRequest(BaseModel):
     user_id: int
+
+
+class DashboardTemplateWriteRequest(BaseModel):
+    name: str = Field(min_length=1)
+    show_summary: bool = True
+    show_price_chart: bool = True
+    show_grid_chart: bool = True
+    show_renewable_chart: bool = True
+    show_bess_chart: bool = True
+    show_hydro_chart: bool = True
+    show_profit_chart: bool = True
+    show_system_dispatch_table: bool = True
+    show_asset_dispatch_table: bool = True
+    table_preview_limit: int = Field(default=10, ge=1)
 
 
 class ScenarioVersionCreateRequest(BaseModel):
@@ -493,6 +507,101 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"removed": True}
 
+    @app.get("/api/projects/{project_id}/dashboard-templates")
+    async def list_dashboard_templates(project_id: int):
+        try:
+            templates = analyst_store.list_dashboard_templates(project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"dashboard_templates": templates}
+
+    @app.post("/api/projects/{project_id}/dashboard-templates", status_code=201)
+    async def create_dashboard_template(
+        project_id: int,
+        request: Request,
+        payload: DashboardTemplateWriteRequest,
+    ):
+        try:
+            template = analyst_store.create_dashboard_template(
+                project_id=project_id,
+                name=payload.name,
+                show_summary=payload.show_summary,
+                show_price_chart=payload.show_price_chart,
+                show_grid_chart=payload.show_grid_chart,
+                show_renewable_chart=payload.show_renewable_chart,
+                show_bess_chart=payload.show_bess_chart,
+                show_hydro_chart=payload.show_hydro_chart,
+                show_profit_chart=payload.show_profit_chart,
+                show_system_dispatch_table=payload.show_system_dispatch_table,
+                show_asset_dispatch_table=payload.show_asset_dispatch_table,
+                table_preview_limit=payload.table_preview_limit,
+                created_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return {"dashboard_template": template}
+
+    @app.get("/api/dashboard-templates/{template_id}")
+    async def get_dashboard_template(template_id: int):
+        try:
+            template = analyst_store.get_dashboard_template(template_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"dashboard_template": template}
+
+    @app.put("/api/dashboard-templates/{template_id}")
+    async def update_dashboard_template(
+        template_id: int,
+        request: Request,
+        payload: DashboardTemplateWriteRequest,
+    ):
+        try:
+            template = analyst_store.update_dashboard_template(
+                template_id,
+                name=payload.name,
+                show_summary=payload.show_summary,
+                show_price_chart=payload.show_price_chart,
+                show_grid_chart=payload.show_grid_chart,
+                show_renewable_chart=payload.show_renewable_chart,
+                show_bess_chart=payload.show_bess_chart,
+                show_hydro_chart=payload.show_hydro_chart,
+                show_profit_chart=payload.show_profit_chart,
+                show_system_dispatch_table=payload.show_system_dispatch_table,
+                show_asset_dispatch_table=payload.show_asset_dispatch_table,
+                table_preview_limit=payload.table_preview_limit,
+                updated_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return {"dashboard_template": template}
+
+    @app.get("/api/dashboard-templates/{template_id}/runs/{run_id}/results")
+    async def get_dashboard_template_run_results(template_id: int, run_id: int):
+        try:
+            template = analyst_store.get_dashboard_template(template_id)
+            if analyst_store.get_run_project_id(run_id) != template["project_id"]:
+                raise KeyError(f"run {run_id} not found for dashboard template {template_id}")
+            run = analyst_store.get_run(run_id)
+            artifacts = analyst_store.list_run_artifacts(run_id)
+            results = read_run_results(run, artifacts, configured_artifact_root)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ResultReadError as error:
+            return JSONResponse(
+                {"status": "error", "message": error.message},
+                status_code=error.status_code,
+            )
+        return {
+            "dashboard": {
+                "template": template,
+                "results": apply_dashboard_template(results, template),
+            }
+        }
+
     @app.get("/projects", response_class=HTMLResponse)
     async def projects_page():
         return HTMLResponse(render_projects_page(analyst_store.list_projects()))
@@ -512,11 +621,72 @@ def create_app(
             project = analyst_store.get_project(project_id)
             scenarios = analyst_store.list_scenarios(project_id)
             client_access = analyst_store.list_project_client_access(project_id)
+            dashboard_templates = analyst_store.list_dashboard_templates(project_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         client_users = [user for user in analyst_store.list_users() if user["role"] == "client"]
         can_manage_access = bool(auth_required and request.state.current_user and request.state.current_user["role"] == "admin")
-        return HTMLResponse(render_project_page(project, scenarios, client_access, client_users, can_manage_access))
+        return HTMLResponse(
+            render_project_page(
+                project,
+                scenarios,
+                dashboard_templates,
+                client_access,
+                client_users,
+                can_manage_access,
+            )
+        )
+
+    @app.post("/projects/{project_id}/dashboard-templates")
+    async def create_dashboard_template_from_page(project_id: int, request: Request):
+        form = await request.form()
+        try:
+            analyst_store.create_dashboard_template(
+                project_id=project_id,
+                name=str(form.get("name", "")).strip(),
+                show_summary=form_checkbox(form, "show_summary"),
+                show_price_chart=form_checkbox(form, "show_price_chart"),
+                show_grid_chart=form_checkbox(form, "show_grid_chart"),
+                show_renewable_chart=form_checkbox(form, "show_renewable_chart"),
+                show_bess_chart=form_checkbox(form, "show_bess_chart"),
+                show_hydro_chart=form_checkbox(form, "show_hydro_chart"),
+                show_profit_chart=form_checkbox(form, "show_profit_chart"),
+                show_system_dispatch_table=form_checkbox(form, "show_system_dispatch_table"),
+                show_asset_dispatch_table=form_checkbox(form, "show_asset_dispatch_table"),
+                table_preview_limit=int(str(form.get("table_preview_limit", "10"))),
+                created_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except (TypeError, ValueError) as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return RedirectResponse(f"/projects/{project_id}", status_code=303)
+
+    @app.post("/dashboard-templates/{template_id}")
+    async def update_dashboard_template_from_page(template_id: int, request: Request):
+        form = await request.form()
+        try:
+            existing = analyst_store.get_dashboard_template(template_id)
+            analyst_store.update_dashboard_template(
+                template_id,
+                name=str(form.get("name", "")).strip(),
+                show_summary=form_checkbox(form, "show_summary"),
+                show_price_chart=form_checkbox(form, "show_price_chart"),
+                show_grid_chart=form_checkbox(form, "show_grid_chart"),
+                show_renewable_chart=form_checkbox(form, "show_renewable_chart"),
+                show_bess_chart=form_checkbox(form, "show_bess_chart"),
+                show_hydro_chart=form_checkbox(form, "show_hydro_chart"),
+                show_profit_chart=form_checkbox(form, "show_profit_chart"),
+                show_system_dispatch_table=form_checkbox(form, "show_system_dispatch_table"),
+                show_asset_dispatch_table=form_checkbox(form, "show_asset_dispatch_table"),
+                table_preview_limit=int(str(form.get("table_preview_limit", "10"))),
+                updated_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except (TypeError, ValueError) as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return RedirectResponse(f"/projects/{existing['project_id']}", status_code=303)
 
     @app.post("/projects/{project_id}/client-access")
     async def assign_client_access_from_page(project_id: int, request: Request):
@@ -1647,6 +1817,7 @@ def render_projects_page(projects: list[dict]) -> str:
 def render_project_page(
     project: dict,
     scenarios: list[dict],
+    dashboard_templates: list[dict[str, Any]] | None = None,
     client_access: list[dict[str, Any]] | None = None,
     client_users: list[dict[str, Any]] | None = None,
     can_manage_access: bool = False,
@@ -1658,6 +1829,10 @@ def render_project_page(
     )
     if not scenario_items:
         scenario_items = '<li class="empty">No scenarios yet</li>'
+    dashboard_templates = dashboard_templates or []
+    template_items = "".join(render_dashboard_template_item(template) for template in dashboard_templates)
+    if not template_items:
+        template_items = '<li class="empty">No dashboard templates yet</li>'
     access_section = ""
     if can_manage_access:
         client_access = client_access or []
@@ -1713,8 +1888,94 @@ def render_project_page(
             <button type="submit">Create Scenario</button>
           </form>
         </section>
+        <section class="split">
+          <div>
+            <h2>Dashboard Templates</h2>
+            <ul class="entity-list">{template_items}</ul>
+          </div>
+          {render_dashboard_template_form(f'/projects/{project["id"]}/dashboard-templates')}
+        </section>
         {access_section}
         """,
+    )
+
+
+def render_dashboard_template_item(template: dict[str, Any]) -> str:
+    enabled = [
+        label
+        for field, label in [
+            ("show_summary", "summary"),
+            ("show_price_chart", "price"),
+            ("show_grid_chart", "grid"),
+            ("show_renewable_chart", "renewable"),
+            ("show_bess_chart", "BESS"),
+            ("show_hydro_chart", "hydro"),
+            ("show_profit_chart", "profit"),
+            ("show_system_dispatch_table", "system table"),
+            ("show_asset_dispatch_table", "asset table"),
+        ]
+        if template.get(field)
+    ]
+    enabled_text = ", ".join(enabled) if enabled else "no sections enabled"
+    form_action = f"/dashboard-templates/{template['id']}"
+    return (
+        "<li>"
+        f"<strong>{escape(template['name'])}</strong>"
+        f"<span>{escape(enabled_text)} | table preview {template['table_preview_limit']} rows</span>"
+        f"{render_dashboard_template_form(form_action, template)}"
+        "</li>"
+    )
+
+
+def render_dashboard_template_form(action: str, template: dict[str, Any] | None = None) -> str:
+    template = template or {
+        "name": "",
+        "show_summary": True,
+        "show_price_chart": True,
+        "show_grid_chart": True,
+        "show_renewable_chart": True,
+        "show_bess_chart": True,
+        "show_hydro_chart": True,
+        "show_profit_chart": True,
+        "show_system_dispatch_table": True,
+        "show_asset_dispatch_table": True,
+        "table_preview_limit": 10,
+    }
+    title = "Edit Template" if template.get("id") else "New Dashboard Template"
+    button = "Update Template" if template.get("id") else "Create Template"
+    checkbox_rows = "".join(
+        render_checkbox_row(field, label, template.get(field, False))
+        for field, label in [
+            ("show_summary", "Summary"),
+            ("show_price_chart", "Price chart"),
+            ("show_grid_chart", "Grid chart"),
+            ("show_renewable_chart", "Renewable chart"),
+            ("show_bess_chart", "BESS chart"),
+            ("show_hydro_chart", "Hydro charts"),
+            ("show_profit_chart", "Period profit chart"),
+            ("show_system_dispatch_table", "System dispatch preview"),
+            ("show_asset_dispatch_table", "Asset dispatch preview"),
+        ]
+    )
+    return f"""
+          <form method="post" action="{escape(action, quote=True)}">
+            <h2>{title}</h2>
+            <label for="template_name_{template.get('id', 'new')}">Name</label>
+            <input id="template_name_{template.get('id', 'new')}" name="name" value="{html_value(template.get('name', ''))}" required>
+            {checkbox_rows}
+            <label for="table_preview_limit_{template.get('id', 'new')}">Table Preview Rows</label>
+            <input id="table_preview_limit_{template.get('id', 'new')}" name="table_preview_limit" type="number" min="1" value="{html_value(template.get('table_preview_limit', 10))}" required>
+            <button type="submit">{button}</button>
+          </form>
+    """
+
+
+def render_checkbox_row(field: str, label: str, value: Any) -> str:
+    return (
+        '<label class="checkbox-row">'
+        f'<input type="checkbox" name="{escape(field, quote=True)}" {checked_attr(value)}>'
+        f"{escape(label)}"
+        "</label>"
     )
 
 
@@ -2205,6 +2466,17 @@ def html_value(value: Any) -> str:
 
 def checked_attr(value: Any) -> str:
     return "checked" if bool(value) else ""
+
+
+def form_checkbox(form: Any, name: str) -> bool:
+    return name in form
+
+
+def current_user_email(request: Request) -> str:
+    user = getattr(request.state, "current_user", None)
+    if isinstance(user, dict) and user.get("email"):
+        return str(user["email"])
+    return "internal_analyst"
 
 
 def auth_enabled_from_env(default: bool) -> bool:

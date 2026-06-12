@@ -11,6 +11,21 @@ from typing import Any
 from app.auth import VALID_USER_ROLES
 
 
+DASHBOARD_TEMPLATE_FLAGS = [
+    "show_summary",
+    "show_price_chart",
+    "show_grid_chart",
+    "show_renewable_chart",
+    "show_bess_chart",
+    "show_hydro_chart",
+    "show_profit_chart",
+    "show_system_dispatch_table",
+    "show_asset_dispatch_table",
+]
+
+DEFAULT_TABLE_PREVIEW_LIMIT = 10
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -173,6 +188,28 @@ class AnalystStore:
                 PRIMARY KEY (project_id, user_id),
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS dashboard_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                show_summary INTEGER NOT NULL DEFAULT 1,
+                show_price_chart INTEGER NOT NULL DEFAULT 1,
+                show_grid_chart INTEGER NOT NULL DEFAULT 1,
+                show_renewable_chart INTEGER NOT NULL DEFAULT 1,
+                show_bess_chart INTEGER NOT NULL DEFAULT 1,
+                show_hydro_chart INTEGER NOT NULL DEFAULT 1,
+                show_profit_chart INTEGER NOT NULL DEFAULT 1,
+                show_system_dispatch_table INTEGER NOT NULL DEFAULT 1,
+                show_asset_dispatch_table INTEGER NOT NULL DEFAULT 1,
+                table_preview_limit INTEGER NOT NULL DEFAULT 10,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                CHECK (table_preview_limit >= 1)
             );
             """
         )
@@ -516,6 +553,173 @@ class AnalystStore:
                 raise KeyError(f"client {user_id} is not assigned to project {project_id}")
             self.connection.commit()
 
+    def create_dashboard_template(
+        self,
+        *,
+        project_id: int,
+        name: str,
+        show_summary: bool = True,
+        show_price_chart: bool = True,
+        show_grid_chart: bool = True,
+        show_renewable_chart: bool = True,
+        show_bess_chart: bool = True,
+        show_hydro_chart: bool = True,
+        show_profit_chart: bool = True,
+        show_system_dispatch_table: bool = True,
+        show_asset_dispatch_table: bool = True,
+        table_preview_limit: int = DEFAULT_TABLE_PREVIEW_LIMIT,
+        created_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        self.get_project(project_id)
+        clean_name = name.strip()
+        if not clean_name:
+            raise ValueError("dashboard template name is required")
+        preview_limit = validate_table_preview_limit(table_preview_limit)
+        now = utc_now_iso()
+        with self._lock:
+            cursor = self.connection.execute(
+                """
+                INSERT INTO dashboard_templates (
+                    project_id,
+                    name,
+                    show_summary,
+                    show_price_chart,
+                    show_grid_chart,
+                    show_renewable_chart,
+                    show_bess_chart,
+                    show_hydro_chart,
+                    show_profit_chart,
+                    show_system_dispatch_table,
+                    show_asset_dispatch_table,
+                    table_preview_limit,
+                    created_at,
+                    updated_at,
+                    created_by,
+                    updated_by
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    project_id,
+                    clean_name,
+                    bool_to_int(show_summary),
+                    bool_to_int(show_price_chart),
+                    bool_to_int(show_grid_chart),
+                    bool_to_int(show_renewable_chart),
+                    bool_to_int(show_bess_chart),
+                    bool_to_int(show_hydro_chart),
+                    bool_to_int(show_profit_chart),
+                    bool_to_int(show_system_dispatch_table),
+                    bool_to_int(show_asset_dispatch_table),
+                    preview_limit,
+                    now,
+                    now,
+                    created_by,
+                    created_by,
+                ),
+            )
+            self.connection.commit()
+            return self.get_dashboard_template(cursor.lastrowid)
+
+    def list_dashboard_templates(self, project_id: int) -> list[dict[str, Any]]:
+        self.get_project(project_id)
+        rows = self.connection.execute(
+            """
+            SELECT id, project_id, name,
+                   show_summary, show_price_chart, show_grid_chart,
+                   show_renewable_chart, show_bess_chart, show_hydro_chart,
+                   show_profit_chart, show_system_dispatch_table,
+                   show_asset_dispatch_table, table_preview_limit,
+                   created_at, updated_at, created_by, updated_by
+            FROM dashboard_templates
+            WHERE project_id = ?
+            ORDER BY id
+            """,
+            (project_id,),
+        ).fetchall()
+        return [dashboard_template_row_to_dict(row) for row in rows]
+
+    def get_dashboard_template(self, template_id: int) -> dict[str, Any]:
+        row = self.connection.execute(
+            """
+            SELECT id, project_id, name,
+                   show_summary, show_price_chart, show_grid_chart,
+                   show_renewable_chart, show_bess_chart, show_hydro_chart,
+                   show_profit_chart, show_system_dispatch_table,
+                   show_asset_dispatch_table, table_preview_limit,
+                   created_at, updated_at, created_by, updated_by
+            FROM dashboard_templates
+            WHERE id = ?
+            """,
+            (template_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"dashboard template {template_id} not found")
+        return dashboard_template_row_to_dict(row)
+
+    def update_dashboard_template(
+        self,
+        template_id: int,
+        *,
+        name: str,
+        show_summary: bool,
+        show_price_chart: bool,
+        show_grid_chart: bool,
+        show_renewable_chart: bool,
+        show_bess_chart: bool,
+        show_hydro_chart: bool,
+        show_profit_chart: bool,
+        show_system_dispatch_table: bool,
+        show_asset_dispatch_table: bool,
+        table_preview_limit: int,
+        updated_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        clean_name = name.strip()
+        if not clean_name:
+            raise ValueError("dashboard template name is required")
+        preview_limit = validate_table_preview_limit(table_preview_limit)
+        now = utc_now_iso()
+        with self._lock:
+            cursor = self.connection.execute(
+                """
+                UPDATE dashboard_templates
+                SET name = ?,
+                    show_summary = ?,
+                    show_price_chart = ?,
+                    show_grid_chart = ?,
+                    show_renewable_chart = ?,
+                    show_bess_chart = ?,
+                    show_hydro_chart = ?,
+                    show_profit_chart = ?,
+                    show_system_dispatch_table = ?,
+                    show_asset_dispatch_table = ?,
+                    table_preview_limit = ?,
+                    updated_at = ?,
+                    updated_by = ?
+                WHERE id = ?
+                """,
+                (
+                    clean_name,
+                    bool_to_int(show_summary),
+                    bool_to_int(show_price_chart),
+                    bool_to_int(show_grid_chart),
+                    bool_to_int(show_renewable_chart),
+                    bool_to_int(show_bess_chart),
+                    bool_to_int(show_hydro_chart),
+                    bool_to_int(show_profit_chart),
+                    bool_to_int(show_system_dispatch_table),
+                    bool_to_int(show_asset_dispatch_table),
+                    preview_limit,
+                    now,
+                    updated_by,
+                    template_id,
+                ),
+            )
+            if cursor.rowcount == 0:
+                raise KeyError(f"dashboard template {template_id} not found")
+            self.connection.commit()
+            return self.get_dashboard_template(template_id)
+
     def create_scenario(
         self,
         *,
@@ -837,6 +1041,21 @@ class AnalystStore:
                 raise KeyError(f"run {run_id} not found")
             return run_row_to_dict(row)
 
+    def get_run_project_id(self, run_id: int) -> int:
+        row = self.connection.execute(
+            """
+            SELECT scenarios.project_id
+            FROM runs
+            JOIN scenario_versions ON scenario_versions.id = runs.scenario_version_id
+            JOIN scenarios ON scenarios.id = scenario_versions.scenario_id
+            WHERE runs.id = ?
+            """,
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"run {run_id} not found")
+        return int(row["project_id"])
+
     def mark_run_running(
         self,
         run_id: int,
@@ -1096,6 +1315,27 @@ def user_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     value = row_to_dict(row)
     value["is_active"] = bool(value["is_active"])
     return value
+
+
+def dashboard_template_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    value = row_to_dict(row)
+    for field in DASHBOARD_TEMPLATE_FLAGS:
+        value[field] = bool(value[field])
+    return value
+
+
+def bool_to_int(value: bool) -> int:
+    return 1 if bool(value) else 0
+
+
+def validate_table_preview_limit(value: int) -> int:
+    try:
+        preview_limit = int(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("table preview limit must be a positive integer") from error
+    if preview_limit < 1:
+        raise ValueError("table preview limit must be a positive integer")
+    return preview_limit
 
 
 def extract_system_case_metadata(document: dict[str, Any]) -> dict[str, Any]:

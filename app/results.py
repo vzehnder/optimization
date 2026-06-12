@@ -6,6 +6,16 @@ from pathlib import Path
 from typing import Any
 
 
+TEMPLATE_CHART_GROUPS = [
+    ("show_price_chart", ["price"]),
+    ("show_grid_chart", ["grid_import_export"]),
+    ("show_renewable_chart", ["renewable_used_curtailed"]),
+    ("show_bess_chart", ["bess_charge_discharge_soc"]),
+    ("show_profit_chart", ["period_profit"]),
+    ("show_hydro_chart", ["hydro_power", "hydro_flows", "hydro_storage", "hydro_reservoir_elevation"]),
+]
+
+
 class ResultReadError(ValueError):
     def __init__(self, message: str, *, status_code: int = 422):
         super().__init__(message)
@@ -41,6 +51,37 @@ def read_run_results(run: dict[str, Any], artifacts: list[dict[str, Any]], artif
         "dispatch_table": dispatch_table,
         "asset_dispatch_table": asset_dispatch_table,
         "charts": build_chart_data(dispatch_table, asset_dispatch_table),
+    }
+
+
+def apply_dashboard_template(results: dict[str, Any], template: dict[str, Any]) -> dict[str, Any]:
+    charts: dict[str, Any] = {}
+    source_charts = results.get("charts", {})
+    for flag, chart_keys in TEMPLATE_CHART_GROUPS:
+        if not template.get(flag, False):
+            continue
+        for chart_key in chart_keys:
+            chart = source_charts.get(chart_key)
+            if chart is not None:
+                charts[chart_key] = chart
+
+    preview_limit = int(template["table_preview_limit"])
+    return {
+        "summary": results["summary"] if template.get("show_summary", False) else None,
+        "charts": charts,
+        "dispatch_table": limit_result_table(results["dispatch_table"], preview_limit)
+        if template.get("show_system_dispatch_table", False)
+        else None,
+        "asset_dispatch_table": limit_result_table(results["asset_dispatch_table"], preview_limit)
+        if template.get("show_asset_dispatch_table", False)
+        else None,
+    }
+
+
+def limit_result_table(table: dict[str, Any], row_limit: int) -> dict[str, Any]:
+    return {
+        "columns": list(table["columns"]),
+        "rows": [dict(row) for row in table["rows"][:row_limit]],
     }
 
 
