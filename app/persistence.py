@@ -164,6 +164,16 @@ class AnalystStore:
                 revoked_at TEXT,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS project_client_access (
+                project_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                assigned_at TEXT NOT NULL,
+                assigned_by TEXT NOT NULL,
+                PRIMARY KEY (project_id, user_id),
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
             """
         )
         self._ensure_column("runs", "stdout_log_path", "TEXT")
@@ -385,6 +395,126 @@ class AnalystStore:
         if row is None:
             raise KeyError(f"project {project_id} not found")
         return row_to_dict(row)
+
+    def assign_client_to_project(
+        self,
+        *,
+        project_id: int,
+        user_id: int,
+        assigned_by: str = "system",
+    ) -> dict[str, Any]:
+        self.get_project(project_id)
+        user = self.get_user(user_id)
+        if user["role"] != "client":
+            raise ValueError("project access can only be assigned to client users")
+        now = utc_now_iso()
+        with self._lock:
+            self.connection.execute(
+                """
+                INSERT OR IGNORE INTO project_client_access (
+                    project_id,
+                    user_id,
+                    assigned_at,
+                    assigned_by
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (project_id, user_id, now, assigned_by),
+            )
+            self.connection.commit()
+        return self.get_project_client_access(project_id, user_id)
+
+    def get_project_client_access(self, project_id: int, user_id: int) -> dict[str, Any]:
+        row = self.connection.execute(
+            """
+            SELECT project_client_access.project_id,
+                   project_client_access.user_id,
+                   project_client_access.assigned_at,
+                   project_client_access.assigned_by,
+                   users.email,
+                   users.display_name,
+                   users.role,
+                   users.is_active
+            FROM project_client_access
+            JOIN users ON users.id = project_client_access.user_id
+            WHERE project_client_access.project_id = ?
+              AND project_client_access.user_id = ?
+            """,
+            (project_id, user_id),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"client {user_id} is not assigned to project {project_id}")
+        value = row_to_dict(row)
+        value["is_active"] = bool(value["is_active"])
+        return value
+
+    def list_project_client_access(self, project_id: int) -> list[dict[str, Any]]:
+        self.get_project(project_id)
+        rows = self.connection.execute(
+            """
+            SELECT project_client_access.project_id,
+                   project_client_access.user_id,
+                   project_client_access.assigned_at,
+                   project_client_access.assigned_by,
+                   users.email,
+                   users.display_name,
+                   users.role,
+                   users.is_active
+            FROM project_client_access
+            JOIN users ON users.id = project_client_access.user_id
+            WHERE project_client_access.project_id = ?
+            ORDER BY users.email
+            """,
+            (project_id,),
+        ).fetchall()
+        values = [row_to_dict(row) for row in rows]
+        for value in values:
+            value["is_active"] = bool(value["is_active"])
+        return values
+
+    def list_client_projects(self, user_id: int) -> list[dict[str, Any]]:
+        user = self.get_user(user_id)
+        if user["role"] != "client" or not user["is_active"]:
+            return []
+        rows = self.connection.execute(
+            """
+            SELECT projects.id, projects.name, projects.description, projects.created_at, projects.created_by
+            FROM project_client_access
+            JOIN projects ON projects.id = project_client_access.project_id
+            WHERE project_client_access.user_id = ?
+            ORDER BY projects.id
+            """,
+            (user_id,),
+        ).fetchall()
+        return [row_to_dict(row) for row in rows]
+
+    def client_has_project_access(self, *, user_id: int, project_id: int) -> bool:
+        row = self.connection.execute(
+            """
+            SELECT 1
+            FROM project_client_access
+            JOIN users ON users.id = project_client_access.user_id
+            WHERE project_client_access.user_id = ?
+              AND project_client_access.project_id = ?
+              AND users.role = 'client'
+              AND users.is_active = 1
+            """,
+            (user_id, project_id),
+        ).fetchone()
+        return row is not None
+
+    def remove_client_project_access(self, *, project_id: int, user_id: int) -> None:
+        with self._lock:
+            cursor = self.connection.execute(
+                """
+                DELETE FROM project_client_access
+                WHERE project_id = ? AND user_id = ?
+                """,
+                (project_id, user_id),
+            )
+            if cursor.rowcount == 0:
+                raise KeyError(f"client {user_id} is not assigned to project {project_id}")
+            self.connection.commit()
 
     def create_scenario(
         self,

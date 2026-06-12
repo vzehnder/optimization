@@ -1,6 +1,6 @@
 # BESS-ITER6-002: Manage Users And Client Project Access
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/iter6/prd_client_publication_portal.md`
@@ -21,22 +21,42 @@ the client portal.
 
 ## Acceptance criteria
 
-- [ ] Admin users can create `client`, `analyst`, and `admin` users.
-- [ ] Created users have hashed passwords and active status by default.
-- [ ] Admin users can list users and see role and active/deactivated state.
-- [ ] Admin users can deactivate a user.
-- [ ] Deactivated users cannot log in or access protected routes.
-- [ ] Admin users can assign a client user to a project.
-- [ ] Admin users can remove a client user's assignment from a project.
-- [ ] One client can be assigned to multiple projects.
-- [ ] One project can be assigned to multiple clients.
-- [ ] Client project lists include only explicitly assigned projects.
-- [ ] Unassigned projects are inaccessible to client users even if URLs are
+- [x] Admin users can create `client`, `analyst`, and `admin` users.
+- [x] Created users have hashed passwords and active status by default.
+- [x] Admin users can list users and see role and active/deactivated state.
+- [x] Admin users can deactivate a user.
+- [x] Deactivated users cannot log in or access protected routes.
+- [x] Admin users can assign a client user to a project.
+- [x] Admin users can remove a client user's assignment from a project.
+- [x] One client can be assigned to multiple projects.
+- [x] One project can be assigned to multiple clients.
+- [x] Client project lists include only explicitly assigned projects.
+- [x] Unassigned projects are inaccessible to client users even if URLs are
       guessed.
-- [ ] Removing an assignment immediately removes client access to that project.
-- [ ] Analyst modeling controls remain unavailable to client users.
+- [x] Removing an assignment immediately removes client access to that project.
+- [x] Analyst modeling controls remain unavailable to client users.
+
+## Implementation notes
+
+Completed on 2026-06-12.
+
+- Added admin-only user management API and SSR page for creating, listing, and
+  deactivating local `admin`, `analyst`, and `client` users without exposing
+  password hashes in responses.
+- Added `project_client_access` many-to-many assignments with admin-only API and
+  project-page forms for assigning and removing clients.
+- Added client portal project listing/detail pages that show only explicitly
+  assigned projects and return `404` for guessed unassigned project URLs.
+- Hardened active-session lookup so deactivated users immediately lose access to
+  protected routes.
+
+## Verification
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_iter6_project_access -v
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
 
 ## Blocked by
 
 BESS-ITER6-001
-

@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from app.auth import (
     INTERNAL_USER_ROLES,
+    VALID_USER_ROLES,
     hash_password,
     hash_session_token,
     new_session_token,
@@ -51,6 +52,17 @@ class ProjectCreateRequest(BaseModel):
 class ScenarioCreateRequest(BaseModel):
     name: str = Field(min_length=1)
     description: str = ""
+
+
+class UserCreateRequest(BaseModel):
+    email: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+    role: str = Field(min_length=1)
+    display_name: str = ""
+
+
+class ProjectClientAccessRequest(BaseModel):
+    user_id: int
 
 
 class ScenarioVersionCreateRequest(BaseModel):
@@ -133,6 +145,13 @@ def create_app(
         if request.url.path.startswith("/api/"):
             return JSONResponse({"detail": "forbidden"}, status_code=403)
         return HTMLResponse(render_forbidden_page(), status_code=403)
+
+    def require_admin_user(request: Request) -> None:
+        if not auth_required:
+            return
+        user = request.state.current_user
+        if user is None or user["role"] != "admin":
+            raise HTTPException(status_code=403, detail="forbidden")
 
     def set_session_cookie(response: Response, token: str) -> None:
         response.set_cookie(
@@ -319,7 +338,67 @@ def create_app(
 
     @app.get("/client", response_class=HTMLResponse)
     async def client_home(request: Request):
-        return HTMLResponse(render_client_home_page(request.state.current_user))
+        user = request.state.current_user
+        projects = analyst_store.list_client_projects(user["id"])
+        return HTMLResponse(render_client_home_page(user, projects))
+
+    @app.get("/client/projects/{project_id}", response_class=HTMLResponse)
+    async def client_project_detail(project_id: int, request: Request):
+        user = request.state.current_user
+        if not analyst_store.client_has_project_access(user_id=user["id"], project_id=project_id):
+            raise HTTPException(status_code=404, detail="project not found")
+        try:
+            project = analyst_store.get_project(project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return HTMLResponse(render_client_project_page(project))
+
+    @app.get("/admin/users", response_class=HTMLResponse)
+    async def admin_users_page(request: Request):
+        require_admin_user(request)
+        return HTMLResponse(render_admin_users_page(analyst_store.list_users()))
+
+    @app.post("/admin/users")
+    async def admin_create_user_from_page(request: Request):
+        require_admin_user(request)
+        form = await request.form()
+        email = str(form.get("email", "")).strip().lower()
+        password = str(form.get("password", ""))
+        role = str(form.get("role", "")).strip()
+        if not email or not password:
+            return HTMLResponse(
+                render_admin_users_page(analyst_store.list_users(), "Email and password are required."),
+                status_code=400,
+            )
+        if role not in VALID_USER_ROLES:
+            return HTMLResponse(
+                render_admin_users_page(analyst_store.list_users(), "Unsupported user role."),
+                status_code=400,
+            )
+        try:
+            analyst_store.create_user(
+                email=email,
+                display_name=str(form.get("display_name", "")).strip(),
+                role=role,
+                password_hash=hash_password(password),
+                created_by=(request.state.current_user or {}).get("email", "admin"),
+            )
+        except ValueError as error:
+            return HTMLResponse(render_admin_users_page(analyst_store.list_users(), str(error)), status_code=400)
+        return RedirectResponse("/admin/users", status_code=303)
+
+    @app.post("/admin/users/{user_id}/deactivate")
+    async def admin_deactivate_user_from_page(user_id: int, request: Request):
+        require_admin_user(request)
+        try:
+            analyst_store.set_user_active(
+                user_id,
+                False,
+                updated_by=(request.state.current_user or {}).get("email", "admin"),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return RedirectResponse("/admin/users", status_code=303)
 
     @app.get("/api/auth/me")
     async def current_auth_user(request: Request):
@@ -336,6 +415,84 @@ def create_app(
             }
         }
 
+    @app.get("/api/admin/users")
+    async def admin_list_users(request: Request):
+        require_admin_user(request)
+        return {"users": [public_user_dict(user) for user in analyst_store.list_users()]}
+
+    @app.post("/api/admin/users", status_code=201)
+    async def admin_create_user(request: Request, payload: UserCreateRequest):
+        require_admin_user(request)
+        email = payload.email.strip().lower()
+        password = payload.password
+        role = payload.role.strip()
+        display_name = payload.display_name.strip()
+        if not email or not password:
+            raise HTTPException(status_code=400, detail="email and password are required")
+        if role not in VALID_USER_ROLES:
+            raise HTTPException(status_code=400, detail="unsupported user role")
+        try:
+            user = analyst_store.create_user(
+                email=email,
+                display_name=display_name,
+                role=role,
+                password_hash=hash_password(password),
+                created_by=(request.state.current_user or {}).get("email", "admin"),
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return {"user": public_user_dict(user)}
+
+    @app.post("/api/admin/users/{user_id}/deactivate")
+    async def admin_deactivate_user(user_id: int, request: Request):
+        require_admin_user(request)
+        try:
+            user = analyst_store.set_user_active(
+                user_id,
+                False,
+                updated_by=(request.state.current_user or {}).get("email", "admin"),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"user": public_user_dict(user)}
+
+    @app.get("/api/admin/projects/{project_id}/client-access")
+    async def admin_list_project_client_access(project_id: int, request: Request):
+        require_admin_user(request)
+        try:
+            assignments = analyst_store.list_project_client_access(project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"client_access": assignments}
+
+    @app.post("/api/admin/projects/{project_id}/client-access", status_code=201)
+    async def admin_assign_project_client(
+        project_id: int,
+        request: Request,
+        payload: ProjectClientAccessRequest,
+    ):
+        require_admin_user(request)
+        try:
+            assignment = analyst_store.assign_client_to_project(
+                project_id=project_id,
+                user_id=payload.user_id,
+                assigned_by=(request.state.current_user or {}).get("email", "admin"),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return {"client_access": assignment}
+
+    @app.delete("/api/admin/projects/{project_id}/client-access/{user_id}")
+    async def admin_remove_project_client_access(project_id: int, user_id: int, request: Request):
+        require_admin_user(request)
+        try:
+            analyst_store.remove_client_project_access(project_id=project_id, user_id=user_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"removed": True}
+
     @app.get("/projects", response_class=HTMLResponse)
     async def projects_page():
         return HTMLResponse(render_projects_page(analyst_store.list_projects()))
@@ -350,13 +507,39 @@ def create_app(
         return RedirectResponse(f"/projects/{project['id']}", status_code=303)
 
     @app.get("/projects/{project_id}", response_class=HTMLResponse)
-    async def project_page(project_id: int):
+    async def project_page(project_id: int, request: Request):
         try:
             project = analyst_store.get_project(project_id)
             scenarios = analyst_store.list_scenarios(project_id)
+            client_access = analyst_store.list_project_client_access(project_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        return HTMLResponse(render_project_page(project, scenarios))
+        client_users = [user for user in analyst_store.list_users() if user["role"] == "client"]
+        can_manage_access = bool(auth_required and request.state.current_user and request.state.current_user["role"] == "admin")
+        return HTMLResponse(render_project_page(project, scenarios, client_access, client_users, can_manage_access))
+
+    @app.post("/projects/{project_id}/client-access")
+    async def assign_client_access_from_page(project_id: int, request: Request):
+        require_admin_user(request)
+        form = await request.form()
+        try:
+            analyst_store.assign_client_to_project(
+                project_id=project_id,
+                user_id=int(str(form.get("user_id", "0"))),
+                assigned_by=(request.state.current_user or {}).get("email", "admin"),
+            )
+        except (KeyError, ValueError) as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return RedirectResponse(f"/projects/{project_id}", status_code=303)
+
+    @app.post("/projects/{project_id}/client-access/{user_id}/remove")
+    async def remove_client_access_from_page(project_id: int, user_id: int, request: Request):
+        require_admin_user(request)
+        try:
+            analyst_store.remove_client_project_access(project_id=project_id, user_id=user_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return RedirectResponse(f"/projects/{project_id}", status_code=303)
 
     @app.post("/projects/{project_id}/scenarios")
     async def create_scenario_from_page(project_id: int, request: Request):
@@ -1461,7 +1644,13 @@ def render_projects_page(projects: list[dict]) -> str:
     )
 
 
-def render_project_page(project: dict, scenarios: list[dict]) -> str:
+def render_project_page(
+    project: dict,
+    scenarios: list[dict],
+    client_access: list[dict[str, Any]] | None = None,
+    client_users: list[dict[str, Any]] | None = None,
+    can_manage_access: bool = False,
+) -> str:
     scenario_items = "".join(
         f'<li><a href="/scenarios/{scenario["id"]}">{escape(scenario["name"])}</a>'
         f'<span>{escape(scenario["description"])}</span></li>'
@@ -1469,6 +1658,38 @@ def render_project_page(project: dict, scenarios: list[dict]) -> str:
     )
     if not scenario_items:
         scenario_items = '<li class="empty">No scenarios yet</li>'
+    access_section = ""
+    if can_manage_access:
+        client_access = client_access or []
+        client_users = client_users or []
+        access_items = "".join(
+            f'<li><span>{escape(assignment["email"])}</span>'
+            f'<form method="post" action="/projects/{project["id"]}/client-access/{assignment["user_id"]}/remove">'
+            '<button type="submit">Remove</button></form></li>'
+            for assignment in client_access
+        )
+        if not access_items:
+            access_items = '<li class="empty">No client access assigned</li>'
+        client_options = "".join(
+            f'<option value="{user["id"]}">{escape(user["email"])}</option>'
+            for user in client_users
+        )
+        if not client_options:
+            client_options = '<option value="">No client users available</option>'
+        access_section = f"""
+        <section class="split">
+          <div>
+            <h2>Client Access</h2>
+            <ul class="entity-list">{access_items}</ul>
+          </div>
+          <form method="post" action="/projects/{project["id"]}/client-access">
+            <h2>Assign Client</h2>
+            <label for="user_id">Client</label>
+            <select id="user_id" name="user_id" required>{client_options}</select>
+            <button type="submit">Assign Client</button>
+          </form>
+        </section>
+        """
 
     return render_app_page(
         project["name"],
@@ -1492,6 +1713,7 @@ def render_project_page(project: dict, scenarios: list[dict]) -> str:
             <button type="submit">Create Scenario</button>
           </form>
         </section>
+        {access_section}
         """,
     )
 
@@ -2136,18 +2358,111 @@ def render_forbidden_page(message: str = "You do not have access to this page.")
     )
 
 
-def render_client_home_page(user: dict[str, Any] | None) -> str:
+def render_client_home_page(user: dict[str, Any] | None, projects: list[dict[str, Any]]) -> str:
     email = user["email"] if user else ""
+    project_items = "".join(
+        f'<li><a href="/client/projects/{project["id"]}">{escape(project["name"])}</a>'
+        f'<span>{escape(project["description"])}</span></li>'
+        for project in projects
+    )
+    if not project_items:
+        project_items = '<li class="empty">No assigned projects yet</li>'
     return render_auth_shell(
         "Client Portal",
         f"""
         <h1>Client Portal</h1>
         <p>Signed in as {escape(email)}.</p>
+        <section>
+          <h2>Projects</h2>
+          <ul class="entity-list">{project_items}</ul>
+        </section>
         <form method="post" action="/logout">
           <button type="submit">Log Out</button>
         </form>
         """,
     )
+
+
+def render_client_project_page(project: dict[str, Any]) -> str:
+    return render_auth_shell(
+        project["name"],
+        f"""
+        <nav><a href="/client">Client Portal</a></nav>
+        <h1>{escape(project["name"])}</h1>
+        <p>{escape(project["description"])}</p>
+        <section>
+          <h2>Publications</h2>
+          <p>No published results yet.</p>
+        </section>
+        <form method="post" action="/logout">
+          <button type="submit">Log Out</button>
+        </form>
+        """,
+    )
+
+
+def render_admin_users_page(users: list[dict[str, Any]], error_message: str = "") -> str:
+    error_markup = f'<p class="error">{escape(error_message)}</p>' if error_message else ""
+    user_items = "".join(
+        f'<li><span>{escape(user["email"])} - {escape(user["role"])} - '
+        f'{"active" if user["is_active"] else "deactivated"}</span>'
+        + (
+            f'<form method="post" action="/admin/users/{user["id"]}/deactivate">'
+            '<button type="submit">Deactivate</button></form>'
+            if user["is_active"]
+            else ""
+        )
+        + "</li>"
+        for user in users
+    )
+    if not user_items:
+        user_items = '<li class="empty">No users yet</li>'
+    return render_app_page(
+        "Users",
+        f"""
+        <nav><a href="/projects">Projects</a></nav>
+        <section class="toolbar">
+          <h1>Users</h1>
+        </section>
+        {error_markup}
+        <section class="split">
+          <div>
+            <h2>User List</h2>
+            <ul class="entity-list">{user_items}</ul>
+          </div>
+          <form method="post" action="/admin/users">
+            <h2>New User</h2>
+            <label for="email">Email</label>
+            <input id="email" name="email" type="email" required>
+            <label for="display_name">Display Name</label>
+            <input id="display_name" name="display_name">
+            <label for="role">Role</label>
+            <select id="role" name="role" required>
+              <option value="client">client</option>
+              <option value="analyst">analyst</option>
+              <option value="admin">admin</option>
+            </select>
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" required>
+            <button type="submit">Create User</button>
+          </form>
+        </section>
+        """,
+    )
+
+
+def public_user_dict(user: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "display_name": user["display_name"],
+        "role": user["role"],
+        "is_active": user["is_active"],
+        "created_at": user["created_at"],
+        "updated_at": user["updated_at"],
+        "created_by": user["created_by"],
+        "deactivated_at": user["deactivated_at"],
+    }
 
 
 def render_app_page(title: str, content: str) -> str:
