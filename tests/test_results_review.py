@@ -1,0 +1,874 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from app.main import create_app
+from app.persistence import AnalystStore
+from app.results import read_run_results
+
+
+class ResultsReaderTests(unittest.TestCase):
+    def test_reads_summary_artifact_for_completed_run_without_mutating_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            output_dir = artifact_root / "runs" / "1" / "outputs"
+            output_dir.mkdir(parents=True)
+            summary_path = output_dir / "summary.json"
+            dispatch_path = output_dir / "dispatch.csv"
+            asset_dispatch_path = output_dir / "asset_dispatch.csv"
+            summary_text = json.dumps(
+                {
+                    "case_name": "hybrid_system",
+                    "run_timestamp": "run-001",
+                    "solver_name": "HiGHS",
+                    "solver_status": "OPTIMAL",
+                    "termination_status": "OPTIMAL",
+                    "objective_value_usd": 1250.5,
+                    "model_version": "0.1.0",
+                },
+                sort_keys=True,
+            ) + "\n"
+            summary_path.write_text(summary_text, encoding="utf-8")
+            dispatch_path.write_text("timestamp,grid_import_mw\n2026-01-01T00:00:00,0.0\n", encoding="utf-8")
+            asset_dispatch_path.write_text("timestamp,asset_id,asset_type\n2026-01-01T00:00:00,grid_1,grid\n", encoding="utf-8")
+            before_stat = summary_path.stat()
+
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                scenario_version = create_persisted_scenario_version(store)
+                run = store.create_run(scenario_version_id=scenario_version["id"])
+                store.mark_run_running(
+                    run["id"],
+                    workspace_path=str(artifact_root / "runs" / str(run["id"])),
+                    input_snapshot_path=str(artifact_root / "runs" / str(run["id"]) / "input" / "system_case.json"),
+                )
+                run = store.mark_run_succeeded(
+                    run["id"],
+                    exit_code=0,
+                    stdout="{}",
+                    stderr="",
+                    success_payload={"termination_status": "OPTIMAL"},
+                    output_dir=str(output_dir),
+                    summary_path=str(summary_path),
+                )
+                store.register_run_artifact(
+                    run_id=run["id"],
+                    artifact_type="summary_json",
+                    path=str(summary_path),
+                    display_name="summary.json",
+                    media_type="application/json",
+                )
+                store.register_run_artifact(
+                    run_id=run["id"],
+                    artifact_type="dispatch_csv",
+                    path=str(dispatch_path),
+                    display_name="dispatch.csv",
+                    media_type="text/csv",
+                )
+                store.register_run_artifact(
+                    run_id=run["id"],
+                    artifact_type="asset_dispatch_csv",
+                    path=str(asset_dispatch_path),
+                    display_name="asset_dispatch.csv",
+                    media_type="text/csv",
+                )
+
+                results = read_run_results(run, store.list_run_artifacts(run["id"]), artifact_root)
+
+                self.assertEqual(results["summary"]["case_name"], "hybrid_system")
+                self.assertEqual(results["summary"]["termination_status"], "OPTIMAL")
+                self.assertEqual(results["summary"]["objective_value_usd"], 1250.5)
+                after_stat = summary_path.stat()
+                self.assertEqual(summary_path.read_text(encoding="utf-8"), summary_text)
+                self.assertEqual(after_stat.st_size, before_stat.st_size)
+                self.assertEqual(after_stat.st_mtime_ns, before_stat.st_mtime_ns)
+            finally:
+                store.close()
+
+    def test_builds_basic_chart_data_from_result_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_result_artifacts(store, artifact_root)
+
+                results = read_run_results(run, store.list_run_artifacts(run["id"]), artifact_root)
+
+                grid_chart = results["charts"]["grid_import_export"]
+                self.assertTrue(grid_chart["available"])
+                self.assertEqual(grid_chart["labels"], ["2026-01-01T00:00:00"])
+                self.assertEqual(
+                    [series["label"] for series in grid_chart["series"]],
+                    ["Grid Import MW", "Grid Export MW"],
+                )
+                self.assertEqual(grid_chart["series"][0]["values"], [2.5])
+                self.assertEqual(grid_chart["series"][1]["values"], [0.0])
+
+                price_chart = results["charts"]["price"]
+                self.assertTrue(price_chart["available"])
+                self.assertEqual(
+                    [series["key"] for series in price_chart["series"]],
+                    ["price_usd_per_mwh"],
+                )
+                self.assertEqual(price_chart["series"][0]["values"], [45.0])
+
+                bess_chart = results["charts"]["bess_charge_discharge_soc"]
+                self.assertTrue(bess_chart["available"])
+                self.assertEqual(
+                    [series["label"] for series in bess_chart["series"]],
+                    ["BESS Charge MW", "BESS Discharge MW", "BESS SOC MWh"],
+                )
+                self.assertEqual(bess_chart["series"][2]["values"], [20.0])
+            finally:
+                store.close()
+
+    def test_price_chart_prefers_separate_import_export_prices_when_available(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_separate_price_result_artifacts(store, artifact_root)
+
+                results = read_run_results(run, store.list_run_artifacts(run["id"]), artifact_root)
+
+                price_chart = results["charts"]["price"]
+                self.assertTrue(price_chart["available"])
+                self.assertEqual(
+                    [series["key"] for series in price_chart["series"]],
+                    ["import_price_usd_per_mwh", "export_price_usd_per_mwh"],
+                )
+                self.assertEqual(
+                    [series["label"] for series in price_chart["series"]],
+                    ["Import Price USD/MWh", "Export Price USD/MWh"],
+                )
+                self.assertEqual(price_chart["series"][0]["values"], [10.0])
+                self.assertEqual(price_chart["series"][1]["values"], [100.0])
+            finally:
+                store.close()
+
+    def test_builds_hydro_chart_data_and_kpis_from_result_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_hydro_result_artifacts(store, artifact_root)
+
+                results = read_run_results(run, store.list_run_artifacts(run["id"]), artifact_root)
+
+                self.assertEqual(results["summary"]["hydro_totals"]["total_hydro_generation_mwh"], 5.0)
+                self.assertEqual(
+                    results["summary"]["hydro_kpis_by_asset"]["hydro_1"]["final_reservoir_elevation_masl"],
+                    711.0,
+                )
+                self.assertIn("total_hydro_power_mw", results["dispatch_table"]["columns"])
+                self.assertEqual(results["dispatch_table"]["rows"][0]["total_hydro_power_mw"], "2.0")
+                self.assertEqual(results["asset_dispatch_table"]["rows"][0]["asset_type"], "hydro")
+                self.assertEqual(results["asset_dispatch_table"]["rows"][0]["hydro_power_mw"], "2.0")
+
+                hydro_power_chart = results["charts"]["hydro_power"]
+                self.assertTrue(hydro_power_chart["available"])
+                self.assertEqual(hydro_power_chart["series"][0]["key"], "total_hydro_power_mw")
+                self.assertEqual(hydro_power_chart["series"][0]["unit"], "MW")
+                self.assertEqual(hydro_power_chart["series"][0]["source"], "dispatch.csv")
+                self.assertEqual(hydro_power_chart["series"][0]["values"], [2.0, 3.0])
+
+                hydro_storage_chart = results["charts"]["hydro_storage"]
+                self.assertTrue(hydro_storage_chart["available"])
+                self.assertEqual(hydro_storage_chart["series"][0]["key"], "total_hydro_storage_hm3")
+                self.assertEqual(hydro_storage_chart["series"][0]["unit"], "hm3")
+                self.assertEqual(hydro_storage_chart["series"][0]["source"], "dispatch.csv")
+
+                hydro_elevation_chart = results["charts"]["hydro_reservoir_elevation"]
+                self.assertTrue(hydro_elevation_chart["available"])
+                self.assertEqual(
+                    [series["key"] for series in hydro_elevation_chart["series"]],
+                    ["hydro_reservoir_elevation_masl"],
+                )
+                self.assertEqual(
+                    [series["unit"] for series in hydro_elevation_chart["series"]],
+                    ["masl"],
+                )
+                self.assertEqual(
+                    [series["source"] for series in hydro_elevation_chart["series"]],
+                    ["asset_dispatch.csv"],
+                )
+            finally:
+                store.close()
+
+
+class ResultsApiTests(unittest.TestCase):
+    def test_results_api_returns_summary_and_result_tables_for_completed_run(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_result_artifacts(store, artifact_root)
+                client = TestClient(
+                    create_app(
+                        validation_service=StubValidationService(),
+                        store=store,
+                        run_queue=RecordingRunQueue(),
+                        artifact_root=artifact_root,
+                    )
+                )
+
+                response = client.get(f"/api/runs/{run['id']}/results")
+
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                self.assertEqual(payload["results"]["summary"]["case_name"], "hybrid_system")
+                self.assertEqual(payload["results"]["summary"]["termination_status"], "OPTIMAL")
+                self.assertIn("period_profit_usd", payload["results"]["dispatch_table"]["columns"])
+                self.assertEqual(payload["results"]["dispatch_table"]["rows"][0]["grid_import_mw"], "2.5")
+                self.assertEqual(payload["results"]["asset_dispatch_table"]["rows"][0]["asset_id"], "grid_1")
+                self.assertTrue(payload["results"]["charts"]["grid_import_export"]["available"])
+                self.assertTrue(payload["results"]["charts"]["renewable_used_curtailed"]["available"])
+                self.assertTrue(payload["results"]["charts"]["bess_charge_discharge_soc"]["available"])
+                self.assertTrue(payload["results"]["charts"]["period_profit"]["available"])
+            finally:
+                store.close()
+
+    def test_results_api_returns_hydro_result_tables_kpis_and_charts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_hydro_result_artifacts(store, artifact_root)
+                client = TestClient(
+                    create_app(
+                        validation_service=StubValidationService(),
+                        store=store,
+                        run_queue=RecordingRunQueue(),
+                        artifact_root=artifact_root,
+                    )
+                )
+
+                response = client.get(f"/api/runs/{run['id']}/results")
+
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                results = payload["results"]
+                self.assertEqual(results["summary"]["hydro_totals"]["terminal_water_value_usd"], 550.0)
+                self.assertIn("total_hydro_turbine_flow_m3s", results["dispatch_table"]["columns"])
+                self.assertIn("hydro_reservoir_elevation_masl", results["asset_dispatch_table"]["columns"])
+                self.assertEqual(results["asset_dispatch_table"]["rows"][0]["asset_type"], "hydro")
+                self.assertTrue(results["charts"]["hydro_power"]["available"])
+                self.assertTrue(results["charts"]["hydro_flows"]["available"])
+                self.assertTrue(results["charts"]["hydro_storage"]["available"])
+                self.assertTrue(results["charts"]["hydro_reservoir_elevation"]["available"])
+                self.assertEqual(
+                    results["charts"]["hydro_flows"]["series"][1]["key"],
+                    "total_hydro_turbine_flow_m3s",
+                )
+                self.assertEqual(results["charts"]["hydro_flows"]["series"][1]["unit"], "m3/s")
+            finally:
+                store.close()
+
+    def test_results_api_reports_missing_result_artifact(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            output_dir = artifact_root / "runs" / "1" / "outputs"
+            output_dir.mkdir(parents=True)
+            summary_path = output_dir / "summary.json"
+            summary_path.write_text('{"termination_status":"OPTIMAL"}\n', encoding="utf-8")
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                scenario_version = create_persisted_scenario_version(store)
+                run = store.create_run(scenario_version_id=scenario_version["id"])
+                store.mark_run_running(
+                    run["id"],
+                    workspace_path=str(artifact_root / "runs" / str(run["id"])),
+                    input_snapshot_path=str(artifact_root / "runs" / str(run["id"]) / "input" / "system_case.json"),
+                )
+                run = store.mark_run_succeeded(
+                    run["id"],
+                    exit_code=0,
+                    stdout="{}",
+                    stderr="",
+                    success_payload={"termination_status": "OPTIMAL"},
+                    output_dir=str(output_dir),
+                    summary_path=str(summary_path),
+                )
+                store.register_run_artifact(
+                    run_id=run["id"],
+                    artifact_type="summary_json",
+                    path=str(summary_path),
+                    display_name="summary.json",
+                    media_type="application/json",
+                )
+                client = TestClient(
+                    create_app(
+                        validation_service=StubValidationService(),
+                        store=store,
+                        run_queue=RecordingRunQueue(),
+                        artifact_root=artifact_root,
+                    )
+                )
+
+                response = client.get(f"/api/runs/{run['id']}/results")
+
+                self.assertEqual(response.status_code, 404)
+                self.assertIn("dispatch.csv artifact is not registered", response.json()["message"])
+            finally:
+                store.close()
+
+    def test_results_api_reports_malformed_result_artifact(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_result_artifacts(store, artifact_root)
+                summary_path = Path(store.get_run(run["id"])["summary_path"])
+                summary_path.write_text('{"termination_status": ', encoding="utf-8")
+                client = TestClient(
+                    create_app(
+                        validation_service=StubValidationService(),
+                        store=store,
+                        run_queue=RecordingRunQueue(),
+                        artifact_root=artifact_root,
+                    )
+                )
+
+                response = client.get(f"/api/runs/{run['id']}/results")
+
+                self.assertEqual(response.status_code, 422)
+                self.assertIn("summary.json is malformed JSON", response.json()["message"])
+            finally:
+                store.close()
+
+
+class ResultsTemplateTests(unittest.TestCase):
+    def test_completed_run_page_renders_summary_and_result_tables(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_result_artifacts(store, artifact_root)
+                client = TestClient(
+                    create_app(
+                        validation_service=StubValidationService(),
+                        store=store,
+                        run_queue=RecordingRunQueue(),
+                        artifact_root=artifact_root,
+                    )
+                )
+
+                response = client.get(f"/runs/{run['id']}")
+
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("Run Summary", response.text)
+                self.assertIn("hybrid_system", response.text)
+                self.assertIn("Objective Value", response.text)
+                self.assertIn("System Dispatch", response.text)
+                self.assertIn("Asset Dispatch", response.text)
+                self.assertIn("grid_import_mw", response.text)
+                self.assertIn("period_profit_usd", response.text)
+                self.assertIn("grid_1", response.text)
+            finally:
+                store.close()
+
+    def test_completed_run_page_renders_basic_result_charts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_result_artifacts(store, artifact_root)
+                client = TestClient(
+                    create_app(
+                        validation_service=StubValidationService(),
+                        store=store,
+                        run_queue=RecordingRunQueue(),
+                        artifact_root=artifact_root,
+                    )
+                )
+
+                response = client.get(f"/runs/{run['id']}")
+
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("Basic Charts", response.text)
+                self.assertIn('data-chart-id="price"', response.text)
+                self.assertIn('data-chart-id="grid-import-export"', response.text)
+                self.assertIn('data-chart-id="renewable-used-curtailed"', response.text)
+                self.assertIn('data-chart-id="bess-charge-discharge-soc"', response.text)
+                self.assertIn('data-chart-id="period-profit"', response.text)
+                self.assertIn('data-value="2.5"', response.text)
+                self.assertIn('data-value="-112.5"', response.text)
+            finally:
+                store.close()
+
+    def test_completed_run_page_renders_hydro_kpis_tables_and_charts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_hydro_result_artifacts(store, artifact_root)
+                client = TestClient(
+                    create_app(
+                        validation_service=StubValidationService(),
+                        store=store,
+                        run_queue=RecordingRunQueue(),
+                        artifact_root=artifact_root,
+                    )
+                )
+
+                response = client.get(f"/runs/{run['id']}")
+
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("Hydro Summary", response.text)
+                self.assertIn("total_hydro_generation_mwh", response.text)
+                self.assertIn("terminal_water_value_usd", response.text)
+                self.assertIn("hydro_1", response.text)
+                self.assertIn("total_hydro_power_mw", response.text)
+                self.assertIn("hydro_reservoir_elevation_masl", response.text)
+                self.assertIn('data-chart-id="hydro-power"', response.text)
+                self.assertIn('data-chart-id="hydro-flows"', response.text)
+                self.assertIn('data-chart-id="hydro-storage"', response.text)
+                self.assertIn('data-chart-id="hydro-reservoir-elevation"', response.text)
+                self.assertIn('data-value="711"', response.text)
+            finally:
+                store.close()
+
+    def test_completed_run_page_handles_missing_optional_chart_columns(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            output_dir = artifact_root / "runs" / "1" / "outputs"
+            output_dir.mkdir(parents=True)
+            summary_path = output_dir / "summary.json"
+            dispatch_path = output_dir / "dispatch.csv"
+            asset_dispatch_path = output_dir / "asset_dispatch.csv"
+            summary_path.write_text('{"termination_status":"OPTIMAL"}\n', encoding="utf-8")
+            dispatch_path.write_text(
+                "timestamp,grid_import_mw,grid_export_mw\n"
+                "2026-01-01T00:00:00,2.5,0.0\n",
+                encoding="utf-8",
+            )
+            asset_dispatch_path.write_text(
+                "timestamp,asset_id,asset_type\n"
+                "2026-01-01T00:00:00,grid_1,grid\n",
+                encoding="utf-8",
+            )
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                scenario_version = create_persisted_scenario_version(store)
+                run = store.create_run(scenario_version_id=scenario_version["id"])
+                store.mark_run_running(
+                    run["id"],
+                    workspace_path=str(artifact_root / "runs" / str(run["id"])),
+                    input_snapshot_path=str(artifact_root / "runs" / str(run["id"]) / "input" / "system_case.json"),
+                )
+                run = store.mark_run_succeeded(
+                    run["id"],
+                    exit_code=0,
+                    stdout="{}",
+                    stderr="",
+                    success_payload={"termination_status": "OPTIMAL"},
+                    output_dir=str(output_dir),
+                    summary_path=str(summary_path),
+                )
+                for artifact_type, path, display_name, media_type in [
+                    ("summary_json", summary_path, "summary.json", "application/json"),
+                    ("dispatch_csv", dispatch_path, "dispatch.csv", "text/csv"),
+                    ("asset_dispatch_csv", asset_dispatch_path, "asset_dispatch.csv", "text/csv"),
+                ]:
+                    store.register_run_artifact(
+                        run_id=run["id"],
+                        artifact_type=artifact_type,
+                        path=str(path),
+                        display_name=display_name,
+                        media_type=media_type,
+                    )
+                client = TestClient(
+                    create_app(
+                        validation_service=StubValidationService(),
+                        store=store,
+                        run_queue=RecordingRunQueue(),
+                        artifact_root=artifact_root,
+                    )
+                )
+
+                response = client.get(f"/runs/{run['id']}")
+
+                self.assertEqual(response.status_code, 200)
+                self.assertIn('data-chart-id="grid-import-export"', response.text)
+                self.assertIn('data-chart-id="renewable-used-curtailed"', response.text)
+                self.assertIn("Missing columns: renewable_used_mw, renewable_curtailed_mw", response.text)
+                self.assertIn("Missing columns: battery_charge_mw, battery_discharge_mw, battery_energy_mwh", response.text)
+                self.assertIn("Missing columns: period_profit_usd", response.text)
+            finally:
+                store.close()
+
+    def test_reads_dispatch_and_asset_dispatch_tables_with_iteration_2_columns(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            output_dir = artifact_root / "runs" / "1" / "outputs"
+            output_dir.mkdir(parents=True)
+            summary_path = output_dir / "summary.json"
+            dispatch_path = output_dir / "dispatch.csv"
+            asset_dispatch_path = output_dir / "asset_dispatch.csv"
+            summary_path.write_text('{"termination_status":"OPTIMAL"}\n', encoding="utf-8")
+            dispatch_columns = [
+                "timestamp",
+                "duration_hours",
+                "price_usd_per_mwh",
+                "grid_import_mw",
+                "grid_export_mw",
+                "net_grid_export_mw",
+                "renewable_used_mw",
+                "renewable_curtailed_mw",
+                "load_demand_mw",
+                "battery_charge_mw",
+                "battery_discharge_mw",
+                "battery_net_discharge_mw",
+                "battery_energy_mwh",
+                "battery_delta_soc_abs_mwh",
+                "market_value_usd",
+                "battery_degradation_cost_usd",
+                "curtailment_penalty_usd",
+                "period_profit_usd",
+            ]
+            dispatch_text = (
+                ",".join(dispatch_columns)
+                + "\n"
+                + "2026-01-01T00:00:00,1.0,45.0,2.5,0.0,-2.5,4.0,0.0,6.5,0.0,0.0,0.0,20.0,0.0,-112.5,0.0,0.0,-112.5\n"
+            )
+            dispatch_path.write_text(dispatch_text, encoding="utf-8")
+            asset_columns = [
+                "timestamp",
+                "duration_hours",
+                "price_usd_per_mwh",
+                "asset_id",
+                "asset_type",
+                "grid_import_mw",
+                "grid_export_mw",
+                "renewable_used_mw",
+                "renewable_curtailed_mw",
+                "load_demand_mw",
+                "battery_charge_mw",
+                "battery_discharge_mw",
+                "battery_energy_mwh",
+                "battery_delta_soc_abs_mwh",
+            ]
+            asset_dispatch_text = (
+                ",".join(asset_columns)
+                + "\n"
+                + "2026-01-01T00:00:00,1.0,45.0,grid_1,grid,2.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0\n"
+            )
+            asset_dispatch_path.write_text(asset_dispatch_text, encoding="utf-8")
+            before_dispatch_stat = dispatch_path.stat()
+            before_asset_dispatch_stat = asset_dispatch_path.stat()
+
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                scenario_version = create_persisted_scenario_version(store)
+                run = store.create_run(scenario_version_id=scenario_version["id"])
+                store.mark_run_running(
+                    run["id"],
+                    workspace_path=str(artifact_root / "runs" / str(run["id"])),
+                    input_snapshot_path=str(artifact_root / "runs" / str(run["id"]) / "input" / "system_case.json"),
+                )
+                run = store.mark_run_succeeded(
+                    run["id"],
+                    exit_code=0,
+                    stdout="{}",
+                    stderr="",
+                    success_payload={"termination_status": "OPTIMAL"},
+                    output_dir=str(output_dir),
+                    summary_path=str(summary_path),
+                )
+                store.register_run_artifact(
+                    run_id=run["id"],
+                    artifact_type="summary_json",
+                    path=str(summary_path),
+                    display_name="summary.json",
+                    media_type="application/json",
+                )
+                store.register_run_artifact(
+                    run_id=run["id"],
+                    artifact_type="dispatch_csv",
+                    path=str(dispatch_path),
+                    display_name="dispatch.csv",
+                    media_type="text/csv",
+                )
+                store.register_run_artifact(
+                    run_id=run["id"],
+                    artifact_type="asset_dispatch_csv",
+                    path=str(asset_dispatch_path),
+                    display_name="asset_dispatch.csv",
+                    media_type="text/csv",
+                )
+
+                results = read_run_results(run, store.list_run_artifacts(run["id"]), artifact_root)
+
+                self.assertEqual(results["dispatch_table"]["columns"], dispatch_columns)
+                self.assertEqual(results["dispatch_table"]["rows"][0]["grid_import_mw"], "2.5")
+                self.assertEqual(results["dispatch_table"]["rows"][0]["period_profit_usd"], "-112.5")
+                self.assertEqual(results["asset_dispatch_table"]["columns"], asset_columns)
+                self.assertEqual(results["asset_dispatch_table"]["rows"][0]["asset_id"], "grid_1")
+                self.assertEqual(results["asset_dispatch_table"]["rows"][0]["asset_type"], "grid")
+                after_dispatch_stat = dispatch_path.stat()
+                after_asset_dispatch_stat = asset_dispatch_path.stat()
+                self.assertEqual(dispatch_path.read_text(encoding="utf-8"), dispatch_text)
+                self.assertEqual(asset_dispatch_path.read_text(encoding="utf-8"), asset_dispatch_text)
+                self.assertEqual(after_dispatch_stat.st_mtime_ns, before_dispatch_stat.st_mtime_ns)
+                self.assertEqual(after_asset_dispatch_stat.st_mtime_ns, before_asset_dispatch_stat.st_mtime_ns)
+            finally:
+                store.close()
+
+
+def create_persisted_scenario_version(store):
+    project = store.create_project(name="Hybrid PMGD")
+    scenario = store.create_scenario(project_id=project["id"], name="Base case")
+    return store.create_scenario_version(
+        scenario_id=scenario["id"],
+        system_case_json={
+            "schema_version": "bess_system_dispatch.v1",
+            "case_name": "hybrid_system",
+            "nodes": [],
+            "time_series": [],
+        },
+        validation_payload={"status": "ok"},
+    )
+
+
+def create_completed_run_with_result_artifacts(store, artifact_root):
+    output_dir = artifact_root / "runs" / "1" / "outputs"
+    output_dir.mkdir(parents=True)
+    summary_path = output_dir / "summary.json"
+    dispatch_path = output_dir / "dispatch.csv"
+    asset_dispatch_path = output_dir / "asset_dispatch.csv"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "case_name": "hybrid_system",
+                "solver_status": "OPTIMAL",
+                "termination_status": "OPTIMAL",
+                "objective_value_usd": 1250.5,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    dispatch_path.write_text(
+        "timestamp,duration_hours,price_usd_per_mwh,grid_import_mw,grid_export_mw,net_grid_export_mw,"
+        "renewable_used_mw,renewable_curtailed_mw,load_demand_mw,battery_charge_mw,battery_discharge_mw,"
+        "battery_net_discharge_mw,battery_energy_mwh,battery_delta_soc_abs_mwh,market_value_usd,"
+        "battery_degradation_cost_usd,curtailment_penalty_usd,period_profit_usd\n"
+        "2026-01-01T00:00:00,1.0,45.0,2.5,0.0,-2.5,4.0,0.0,6.5,0.0,0.0,0.0,20.0,0.0,-112.5,0.0,0.0,-112.5\n",
+        encoding="utf-8",
+    )
+    asset_dispatch_path.write_text(
+        "timestamp,duration_hours,price_usd_per_mwh,asset_id,asset_type,grid_import_mw,grid_export_mw,"
+        "renewable_used_mw,renewable_curtailed_mw,load_demand_mw,battery_charge_mw,battery_discharge_mw,"
+        "battery_energy_mwh,battery_delta_soc_abs_mwh\n"
+        "2026-01-01T00:00:00,1.0,45.0,grid_1,grid,2.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0\n",
+        encoding="utf-8",
+    )
+
+    scenario_version = create_persisted_scenario_version(store)
+    run = store.create_run(scenario_version_id=scenario_version["id"])
+    store.mark_run_running(
+        run["id"],
+        workspace_path=str(artifact_root / "runs" / str(run["id"])),
+        input_snapshot_path=str(artifact_root / "runs" / str(run["id"]) / "input" / "system_case.json"),
+    )
+    run = store.mark_run_succeeded(
+        run["id"],
+        exit_code=0,
+        stdout="{}",
+        stderr="",
+        success_payload={"termination_status": "OPTIMAL"},
+        output_dir=str(output_dir),
+        summary_path=str(summary_path),
+    )
+    for artifact_type, path, display_name, media_type in [
+        ("summary_json", summary_path, "summary.json", "application/json"),
+        ("dispatch_csv", dispatch_path, "dispatch.csv", "text/csv"),
+        ("asset_dispatch_csv", asset_dispatch_path, "asset_dispatch.csv", "text/csv"),
+    ]:
+        store.register_run_artifact(
+            run_id=run["id"],
+            artifact_type=artifact_type,
+            path=str(path),
+            display_name=display_name,
+            media_type=media_type,
+        )
+    return run
+
+
+def create_completed_run_with_separate_price_result_artifacts(store, artifact_root):
+    output_dir = artifact_root / "runs" / "1" / "outputs"
+    output_dir.mkdir(parents=True)
+    summary_path = output_dir / "summary.json"
+    dispatch_path = output_dir / "dispatch.csv"
+    asset_dispatch_path = output_dir / "asset_dispatch.csv"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "case_name": "separate_price_system",
+                "solver_status": "OPTIMAL",
+                "termination_status": "OPTIMAL",
+                "objective_value_usd": 450.0,
+                "price_mode": "separate_import_export",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    dispatch_path.write_text(
+        "timestamp,duration_hours,import_price_usd_per_mwh,export_price_usd_per_mwh,"
+        "grid_import_mw,grid_export_mw,net_grid_export_mw,renewable_used_mw,renewable_curtailed_mw,"
+        "load_demand_mw,battery_charge_mw,battery_discharge_mw,battery_net_discharge_mw,"
+        "battery_energy_mwh,battery_delta_soc_abs_mwh,import_cost_usd,export_revenue_usd,"
+        "net_market_value_usd,market_value_usd,battery_degradation_cost_usd,curtailment_penalty_usd,"
+        "period_profit_usd\n"
+        "2026-01-01T00:00:00,1.0,10.0,100.0,5.0,0.0,-5.0,0.0,0.0,0.0,5.0,0.0,-5.0,5.0,5.0,50.0,0.0,-50.0,-50.0,0.0,0.0,-50.0\n",
+        encoding="utf-8",
+    )
+    asset_dispatch_path.write_text(
+        "timestamp,duration_hours,import_price_usd_per_mwh,export_price_usd_per_mwh,asset_id,asset_type,"
+        "grid_import_mw,grid_export_mw,renewable_used_mw,renewable_curtailed_mw,load_demand_mw,"
+        "battery_charge_mw,battery_discharge_mw,battery_energy_mwh,battery_delta_soc_abs_mwh\n"
+        "2026-01-01T00:00:00,1.0,10.0,100.0,grid_1,grid,5.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0\n",
+        encoding="utf-8",
+    )
+
+    scenario_version = create_persisted_scenario_version(store)
+    run = store.create_run(scenario_version_id=scenario_version["id"])
+    store.mark_run_running(
+        run["id"],
+        workspace_path=str(artifact_root / "runs" / str(run["id"])),
+        input_snapshot_path=str(artifact_root / "runs" / str(run["id"]) / "input" / "system_case.json"),
+    )
+    run = store.mark_run_succeeded(
+        run["id"],
+        exit_code=0,
+        stdout="{}",
+        stderr="",
+        success_payload={"termination_status": "OPTIMAL"},
+        output_dir=str(output_dir),
+        summary_path=str(summary_path),
+    )
+    for artifact_type, path, display_name, media_type in [
+        ("summary_json", summary_path, "summary.json", "application/json"),
+        ("dispatch_csv", dispatch_path, "dispatch.csv", "text/csv"),
+        ("asset_dispatch_csv", asset_dispatch_path, "asset_dispatch.csv", "text/csv"),
+    ]:
+        store.register_run_artifact(
+            run_id=run["id"],
+            artifact_type=artifact_type,
+            path=str(path),
+            display_name=display_name,
+            media_type=media_type,
+        )
+    return run
+
+
+def create_completed_run_with_hydro_result_artifacts(store, artifact_root):
+    output_dir = artifact_root / "runs" / "1" / "outputs"
+    output_dir.mkdir(parents=True)
+    summary_path = output_dir / "summary.json"
+    dispatch_path = output_dir / "dispatch.csv"
+    asset_dispatch_path = output_dir / "asset_dispatch.csv"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "case_name": "hydro_system",
+                "solver_status": "OPTIMAL",
+                "termination_status": "OPTIMAL",
+                "objective_value_usd": 900.0,
+                "hydro_totals": {
+                    "total_hydro_generation_mwh": 5.0,
+                    "total_turbine_volume_hm3": 0.09,
+                    "total_spill_volume_hm3": 0.01,
+                    "total_spill_penalty_usd": 1.0,
+                    "terminal_water_value_usd": 550.0,
+                },
+                "hydro_kpis_by_asset": {
+                    "hydro_1": {
+                        "total_hydro_generation_mwh": 5.0,
+                        "total_turbine_volume_hm3": 0.09,
+                        "total_spill_volume_hm3": 0.01,
+                        "initial_storage_hm3": 2.5,
+                        "final_storage_hm3": 3.2,
+                        "initial_reservoir_elevation_masl": 708.0,
+                        "final_reservoir_elevation_masl": 711.0,
+                        "total_spill_penalty_usd": 1.0,
+                        "terminal_water_value_usd": 550.0,
+                    }
+                },
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    dispatch_path.write_text(
+        "timestamp,duration_hours,export_price_usd_per_mwh,grid_import_mw,grid_export_mw,"
+        "net_grid_export_mw,total_hydro_power_mw,total_hydro_inflow_m3s,"
+        "total_hydro_turbine_flow_m3s,total_hydro_spill_flow_m3s,total_hydro_storage_hm3,"
+        "total_hydro_spill_penalty_usd,total_hydro_terminal_water_value_usd,period_profit_usd\n"
+        "2026-01-01T00:00:00,1.0,80.0,0.0,2.0,2.0,2.0,25.0,25.0,0.0,3.0,0.0,0.0,160.0\n"
+        "2026-01-01T01:00:00,1.0,100.0,0.0,3.0,3.0,3.0,30.0,28.0,2.0,3.2,1.0,550.0,849.0\n",
+        encoding="utf-8",
+    )
+    asset_dispatch_path.write_text(
+        "timestamp,duration_hours,asset_id,asset_type,hydro_power_mw,hydro_inflow_m3s,"
+        "hydro_turbine_flow_m3s,hydro_spill_flow_m3s,hydro_inflow_volume_hm3,"
+        "hydro_turbine_volume_hm3,hydro_spill_volume_hm3,hydro_storage_hm3,"
+        "hydro_reservoir_elevation_masl,hydro_spill_penalty_usd,hydro_terminal_water_value_usd\n"
+        "2026-01-01T00:00:00,1.0,hydro_1,hydro,2.0,25.0,25.0,0.0,0.09,0.09,0.0,3.0,710.0,0.0,0.0\n"
+        "2026-01-01T01:00:00,1.0,hydro_1,hydro,3.0,30.0,28.0,2.0,0.108,0.1008,0.0072,3.2,711.0,1.0,550.0\n",
+        encoding="utf-8",
+    )
+
+    scenario_version = create_persisted_scenario_version(store)
+    run = store.create_run(scenario_version_id=scenario_version["id"])
+    store.mark_run_running(
+        run["id"],
+        workspace_path=str(artifact_root / "runs" / str(run["id"])),
+        input_snapshot_path=str(artifact_root / "runs" / str(run["id"]) / "input" / "system_case.json"),
+    )
+    run = store.mark_run_succeeded(
+        run["id"],
+        exit_code=0,
+        stdout="{}",
+        stderr="",
+        success_payload={"termination_status": "OPTIMAL"},
+        output_dir=str(output_dir),
+        summary_path=str(summary_path),
+    )
+    for artifact_type, path, display_name, media_type in [
+        ("summary_json", summary_path, "summary.json", "application/json"),
+        ("dispatch_csv", dispatch_path, "dispatch.csv", "text/csv"),
+        ("asset_dispatch_csv", asset_dispatch_path, "asset_dispatch.csv", "text/csv"),
+    ]:
+        store.register_run_artifact(
+            run_id=run["id"],
+            artifact_type=artifact_type,
+            path=str(path),
+            display_name=display_name,
+            media_type=media_type,
+        )
+    return run
+
+
+class StubValidationService:
+    def validate_text(self, candidate_text):
+        raise AssertionError("validation should not run in results tests")
+
+
+class RecordingRunQueue:
+    def enqueue(self, run_id):
+        raise AssertionError("runs should not be enqueued in results tests")
+
+    def stop(self):
+        pass
+
+
+if __name__ == "__main__":
+    unittest.main()

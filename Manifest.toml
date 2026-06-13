@@ -2,11 +2,17 @@
 
 julia_version = "1.11.7"
 manifest_format = "2.0"
-project_hash = "d7a6aefa1ef6d7ecda4ed918986598ed574a4878"
+project_hash = "974613684b75287bbc0fd4bcc313adea49a3f1b9"
 
 [[deps.Artifacts]]
 uuid = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
 version = "1.11.0"
+
+[[deps.BESSDispatch]]
+deps = ["CSV", "DataFrames", "Dates", "HiGHS", "JSON3", "JuMP", "PiecewiseLinearOpt", "YAML"]
+path = "."
+uuid = "f1db11d5-b65b-4df8-a261-d70e656fdd33"
+version = "0.1.0"
 
 [[deps.Base64]]
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
@@ -345,6 +351,12 @@ deps = ["Dates", "PrecompileTools", "UUIDs"]
 git-tree-sha1 = "5d5e0a78e971354b1c7bff0655d11fdc1b0e12c8"
 uuid = "69de0a69-1ddd-5017-9359-2bf0b02dc9f0"
 version = "2.8.4"
+
+[[deps.PiecewiseLinearOpt]]
+deps = ["JuMP", "LinearAlgebra", "MathOptInterface", "Random"]
+git-tree-sha1 = "59786d90d750f1c18029a3903e8c1bc49d0e55a8"
+uuid = "0f51c51e-adfa-5141-8a04-d40246b8977c"
+version = "0.4.2"
 
 [[deps.PooledArrays]]
 deps = ["DataAPI", "Future"]

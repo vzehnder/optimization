@@ -4,10 +4,14 @@ using Dates
 using HiGHS
 using JSON3
 using JuMP
+using PiecewiseLinearOpt
 
 const SYSTEM_SCHEMA_VERSION = "bess_system_dispatch.v1"
+const SYSTEM_SCHEMA_VERSION_V2 = "bess_system_dispatch.v2"
+const SYSTEM_SUPPORTED_SCHEMA_VERSIONS = Set([SYSTEM_SCHEMA_VERSION, SYSTEM_SCHEMA_VERSION_V2])
 const SYSTEM_BUS_NODE_TYPES = Set(["bus", "pcc"])
-const SYSTEM_KNOWN_NODE_TYPES = Set(["bus", "pcc", "battery", "renewable", "grid", "load"])
+const SYSTEM_KNOWN_NODE_TYPES = Set(["bus", "pcc", "battery", "renewable", "grid", "load", "hydro"])
+const HM3_PER_M3S_HOUR = 3600.0 / 1_000_000.0
 
 struct SystemNode
     id::String
@@ -22,10 +26,14 @@ end
 
 struct SystemPeriodData
     timestamp::DateTime
-    price_usd_per_mwh::Float64
+    price_usd_per_mwh::Union{Float64,Nothing}
+    import_price_usd_per_mwh::Float64
+    export_price_usd_per_mwh::Float64
+    uses_separate_prices::Bool
     duration_hours::Float64
     renewable_available_power_mw::Dict{String,Float64}
     load_demand_mw::Dict{String,Float64}
+    hydro_inflow_m3s::Dict{String,Float64}
 end
 
 struct SystemGraphData
@@ -61,6 +69,25 @@ struct LoadAssetParameters
     id::String
 end
 
+struct HydroAssetParameters
+    id::String
+    storage_min_hm3::Float64
+    storage_max_hm3::Float64
+    initial_storage_hm3::Float64
+    terminal_condition::String
+    terminal_storage_min_hm3::Union{Float64,Nothing}
+    terminal_water_value_usd_per_hm3::Float64
+    spill_penalty_usd_per_hm3::Float64
+    minimum_release_m3s::Float64
+    generation_mode::String
+    power_per_flow_mw_per_m3s::Union{Float64,Nothing}
+    power_max_mw::Union{Float64,Nothing}
+    turbine_flow_min_m3s::Union{Float64,Nothing}
+    turbine_flow_max_m3s::Union{Float64,Nothing}
+    generation_curve::Vector{Tuple{Float64,Float64}}
+    reservoir_curve::Vector{Tuple{Float64,Float64}}
+end
+
 struct SystemOptimizationData
     case_name::String
     schema_version::String
@@ -69,11 +96,16 @@ struct SystemOptimizationData
     renewables::Vector{RenewableAssetParameters}
     grids::Vector{GridAssetParameters}
     loads::Vector{LoadAssetParameters}
+    hydros::Vector{HydroAssetParameters}
     timestamp::Vector{DateTime}
-    price_usd_per_mwh::Vector{Float64}
+    price_usd_per_mwh::Vector{Union{Float64,Nothing}}
+    import_price_usd_per_mwh::Vector{Float64}
+    export_price_usd_per_mwh::Vector{Float64}
+    uses_separate_prices::Vector{Bool}
     duration_hours::Vector{Float64}
     renewable_available_power_mw::Matrix{Float64}
     load_demand_mw::Matrix{Float64}
+    hydro_inflow_m3s::Matrix{Float64}
     solver::SolverConfig
     graph::SystemGraphData
 end
@@ -90,6 +122,11 @@ struct SystemDispatchModel
     p_grid_import_mw::Matrix{JuMP.VariableRef}
     p_grid_export_mw::Matrix{JuMP.VariableRef}
     is_grid_importing::Union{Nothing,Matrix{JuMP.VariableRef}}
+    hydro_turbine_flow_m3s::Matrix{JuMP.VariableRef}
+    hydro_spill_flow_m3s::Matrix{JuMP.VariableRef}
+    hydro_power_mw::Matrix{JuMP.VariableRef}
+    hydro_storage_hm3::Matrix{JuMP.VariableRef}
+    hydro_reservoir_elevation_masl::Matrix{JuMP.VariableRef}
 end
 
 struct SystemDispatchResult
@@ -107,8 +144,20 @@ struct SystemDispatchResult
     p_grid_import_mw::Matrix{Float64}
     p_grid_export_mw::Matrix{Float64}
     market_value_usd::Vector{Float64}
+    import_cost_usd::Vector{Float64}
+    export_revenue_usd::Vector{Float64}
     battery_degradation_cost_usd::Matrix{Float64}
     curtailment_penalty_usd::Matrix{Float64}
+    hydro_turbine_flow_m3s::Matrix{Float64}
+    hydro_spill_flow_m3s::Matrix{Float64}
+    hydro_power_mw::Matrix{Float64}
+    hydro_storage_hm3::Matrix{Float64}
+    hydro_reservoir_elevation_masl::Matrix{Float64}
+    hydro_inflow_volume_hm3::Matrix{Float64}
+    hydro_turbine_volume_hm3::Matrix{Float64}
+    hydro_spill_volume_hm3::Matrix{Float64}
+    hydro_spill_penalty_usd::Matrix{Float64}
+    hydro_terminal_water_value_usd::Vector{Float64}
 end
 
 struct SystemRunOutput
@@ -146,9 +195,9 @@ function load_system_case(path::AbstractString)::SystemGraphData
 end
 
 function validate_system_case(system_case::SystemGraphData)::SystemGraphData
-    if system_case.schema_version != SYSTEM_SCHEMA_VERSION
+    if !(system_case.schema_version in SYSTEM_SUPPORTED_SCHEMA_VERSIONS)
         throw(ArgumentError(
-            "schema_version must be $(SYSTEM_SCHEMA_VERSION); got $(system_case.schema_version)",
+            "schema_version must be one of $(join(sort(collect(SYSTEM_SUPPORTED_SCHEMA_VERSIONS)), ", ")); got $(system_case.schema_version)",
         ))
     end
 
@@ -159,6 +208,9 @@ function validate_system_case(system_case::SystemGraphData)::SystemGraphData
         end
         if node.id in node_ids
             throw(ArgumentError("node id $(node.id) is duplicated"))
+        end
+        if node.type == "hydro" && system_case.schema_version != SYSTEM_SCHEMA_VERSION_V2
+            throw(ArgumentError("hydro nodes require schema_version $(SYSTEM_SCHEMA_VERSION_V2)"))
         end
         push!(node_ids, node.id)
     end
@@ -190,6 +242,8 @@ function validate_system_case(system_case::SystemGraphData)::SystemGraphData
             parse_system_renewable_asset(node)
         elseif node.type == "grid"
             parse_system_grid_asset(node)
+        elseif node.type == "hydro"
+            parse_system_hydro_asset(node)
         end
     end
 
@@ -204,6 +258,7 @@ function normalize_system_case(system_case::SystemGraphData)::SystemOptimization
     renewables = RenewableAssetParameters[]
     grids = GridAssetParameters[]
     loads = LoadAssetParameters[]
+    hydros = HydroAssetParameters[]
 
     for node in system_case.nodes
         if node.type == "battery"
@@ -214,6 +269,8 @@ function normalize_system_case(system_case::SystemGraphData)::SystemOptimization
             push!(grids, parse_system_grid_asset(node))
         elseif node.type == "load"
             push!(loads, parse_system_load_asset(node))
+        elseif node.type == "hydro"
+            push!(hydros, parse_system_hydro_asset(node))
         end
     end
 
@@ -229,9 +286,13 @@ function normalize_system_case(system_case::SystemGraphData)::SystemOptimization
 
     timestamps = [period.timestamp for period in system_case.time_series]
     prices = [period.price_usd_per_mwh for period in system_case.time_series]
+    import_prices = [period.import_price_usd_per_mwh for period in system_case.time_series]
+    export_prices = [period.export_price_usd_per_mwh for period in system_case.time_series]
+    uses_separate_prices = [period.uses_separate_prices for period in system_case.time_series]
     durations = [period.duration_hours for period in system_case.time_series]
     availability = zeros(length(renewables), length(system_case.time_series))
     load_demand = zeros(length(loads), length(system_case.time_series))
+    hydro_inflow = zeros(length(hydros), length(system_case.time_series))
 
     for (renewable_index, renewable) in enumerate(renewables)
         for (period_index, period) in enumerate(system_case.time_series)
@@ -257,6 +318,12 @@ function normalize_system_case(system_case::SystemGraphData)::SystemOptimization
         end
     end
 
+    for (hydro_index, hydro) in enumerate(hydros)
+        for (period_index, period) in enumerate(system_case.time_series)
+            hydro_inflow[hydro_index, period_index] = period.hydro_inflow_m3s[hydro.id]
+        end
+    end
+
     return SystemOptimizationData(
         system_case.case_name,
         system_case.schema_version,
@@ -265,11 +332,16 @@ function normalize_system_case(system_case::SystemGraphData)::SystemOptimization
         renewables,
         grids,
         loads,
+        hydros,
         timestamps,
         prices,
+        import_prices,
+        export_prices,
+        uses_separate_prices,
         durations,
         availability,
         load_demand,
+        hydro_inflow,
         system_case.solver,
         system_case,
     )
@@ -336,6 +408,223 @@ function parse_system_battery_asset(node::SystemNode)::BatteryAssetParameters
     return battery
 end
 
+function parse_system_hydro_asset(node::SystemNode)::HydroAssetParameters
+    storage_min = required_float(node.attributes, "storage_min_hm3")
+    storage_max = required_float(node.attributes, "storage_max_hm3")
+    initial_storage = required_float(node.attributes, "initial_storage_hm3")
+    terminal_condition = optional_string(node.attributes, "terminal_condition", "none")
+    terminal_storage_min = optional_float(
+        get(node.attributes, "terminal_storage_min_hm3", nothing),
+        "terminal_storage_min_hm3",
+    )
+    terminal_water_value = optional_float(
+        get(node.attributes, "terminal_water_value_usd_per_hm3", 0.0),
+        "terminal_water_value_usd_per_hm3",
+    )
+    spill_penalty = optional_float(
+        get(node.attributes, "spill_penalty_usd_per_hm3", 0.0),
+        "spill_penalty_usd_per_hm3",
+    )
+    minimum_release = optional_float(get(node.attributes, "minimum_release_m3s", 0.0), "minimum_release_m3s")
+    generation_mode = required_string(node.attributes, "generation_mode")
+    power_per_flow = optional_float(
+        get(node.attributes, "power_per_flow_mw_per_m3s", nothing),
+        "power_per_flow_mw_per_m3s",
+    )
+    power_max = optional_float(get(node.attributes, "power_max_mw", nothing), "power_max_mw")
+    turbine_flow_min = optional_float(get(node.attributes, "turbine_flow_min_m3s", nothing), "turbine_flow_min_m3s")
+    turbine_flow_max = optional_float(get(node.attributes, "turbine_flow_max_m3s", nothing), "turbine_flow_max_m3s")
+    generation_curve = generation_mode == "piecewise_linear" ?
+                       parse_hydro_generation_curve(required_vector(node.attributes, "generation_curve"), node.id) :
+                       Tuple{Float64,Float64}[]
+    reservoir_curve = parse_hydro_reservoir_curve(required_vector(node.attributes, "reservoir_curve"), node.id)
+
+    hydro = HydroAssetParameters(
+        node.id,
+        storage_min,
+        storage_max,
+        initial_storage,
+        terminal_condition,
+        terminal_storage_min,
+        terminal_water_value,
+        spill_penalty,
+        minimum_release,
+        generation_mode,
+        power_per_flow,
+        power_max,
+        turbine_flow_min,
+        turbine_flow_max,
+        generation_curve,
+        reservoir_curve,
+    )
+
+    validate_system_hydro(hydro)
+    return hydro
+end
+
+function validate_system_hydro(hydro::HydroAssetParameters)
+    if !isfinite(hydro.storage_min_hm3) || !isfinite(hydro.storage_max_hm3) ||
+       !(hydro.storage_min_hm3 < hydro.storage_max_hm3)
+        throw(ArgumentError(
+            "hydro $(hydro.id) storage_min_hm3 must be less than storage_max_hm3",
+        ))
+    end
+    if !isfinite(hydro.initial_storage_hm3) ||
+       hydro.initial_storage_hm3 < hydro.storage_min_hm3 ||
+       hydro.initial_storage_hm3 > hydro.storage_max_hm3
+        throw(ArgumentError("hydro $(hydro.id) initial_storage_hm3 must be within storage bounds"))
+    end
+    if !(hydro.terminal_condition in ("none", "equal_initial", "min_terminal"))
+        throw(ArgumentError("hydro $(hydro.id) terminal_condition must be one of none, equal_initial, min_terminal"))
+    end
+    if hydro.terminal_condition == "min_terminal" && hydro.terminal_storage_min_hm3 === nothing
+        throw(ArgumentError("hydro $(hydro.id) terminal_storage_min_hm3 is required when terminal_condition is min_terminal"))
+    end
+    if hydro.terminal_storage_min_hm3 !== nothing &&
+       (hydro.terminal_storage_min_hm3 < hydro.storage_min_hm3 ||
+        hydro.terminal_storage_min_hm3 > hydro.storage_max_hm3)
+        throw(ArgumentError("hydro $(hydro.id) terminal_storage_min_hm3 must be within storage bounds"))
+    end
+    if !isfinite(hydro.terminal_water_value_usd_per_hm3) || hydro.terminal_water_value_usd_per_hm3 < 0
+        throw(ArgumentError("hydro $(hydro.id) terminal_water_value_usd_per_hm3 must be nonnegative"))
+    end
+    if !isfinite(hydro.spill_penalty_usd_per_hm3) || hydro.spill_penalty_usd_per_hm3 < 0
+        throw(ArgumentError("hydro $(hydro.id) spill_penalty_usd_per_hm3 must be nonnegative"))
+    end
+    if !isfinite(hydro.minimum_release_m3s) || hydro.minimum_release_m3s < 0
+        throw(ArgumentError("hydro $(hydro.id) minimum_release_m3s must be nonnegative"))
+    end
+    if !(hydro.generation_mode in ("linear", "piecewise_linear"))
+        throw(ArgumentError("hydro $(hydro.id) generation_mode must be one of linear, piecewise_linear"))
+    end
+    if hydro.generation_mode == "linear"
+        if hydro.power_per_flow_mw_per_m3s === nothing
+            throw(ArgumentError("hydro $(hydro.id) power_per_flow_mw_per_m3s is required for linear generation"))
+        end
+        if !isfinite(hydro.power_per_flow_mw_per_m3s) || hydro.power_per_flow_mw_per_m3s < 0
+            throw(ArgumentError("hydro $(hydro.id) power_per_flow_mw_per_m3s must be nonnegative"))
+        end
+        if hydro.turbine_flow_max_m3s === nothing
+            throw(ArgumentError("hydro $(hydro.id) turbine_flow_max_m3s is required for linear generation"))
+        end
+    end
+    if hydro.power_max_mw !== nothing && (!isfinite(hydro.power_max_mw) || hydro.power_max_mw < 0)
+        throw(ArgumentError("hydro $(hydro.id) power_max_mw must be nonnegative"))
+    end
+    if hydro.turbine_flow_min_m3s !== nothing &&
+       (!isfinite(hydro.turbine_flow_min_m3s) || hydro.turbine_flow_min_m3s < 0)
+        throw(ArgumentError("hydro $(hydro.id) turbine_flow_min_m3s must be nonnegative"))
+    end
+    if hydro.turbine_flow_max_m3s !== nothing &&
+       (!isfinite(hydro.turbine_flow_max_m3s) || hydro.turbine_flow_max_m3s < 0)
+        throw(ArgumentError("hydro $(hydro.id) turbine_flow_max_m3s must be nonnegative"))
+    end
+    if hydro.turbine_flow_min_m3s !== nothing &&
+       hydro.turbine_flow_max_m3s !== nothing &&
+       hydro.turbine_flow_min_m3s > hydro.turbine_flow_max_m3s
+        throw(ArgumentError("hydro $(hydro.id) turbine_flow_min_m3s must not exceed turbine_flow_max_m3s"))
+    end
+    if hydro.generation_mode == "piecewise_linear"
+        curve_min = first(hydro.generation_curve)[1]
+        curve_max = last(hydro.generation_curve)[1]
+        for (name, value) in (
+            ("turbine_flow_min_m3s", hydro.turbine_flow_min_m3s),
+            ("turbine_flow_max_m3s", hydro.turbine_flow_max_m3s),
+        )
+            if value !== nothing && (value < curve_min || value > curve_max)
+                throw(ArgumentError("hydro $(hydro.id) $name must lie within generation_curve domain"))
+            end
+        end
+    end
+
+    curve_min = first(hydro.reservoir_curve)[1]
+    curve_max = last(hydro.reservoir_curve)[1]
+    storage_values = Pair{String,Float64}[
+        "storage_min_hm3" => hydro.storage_min_hm3,
+        "storage_max_hm3" => hydro.storage_max_hm3,
+        "initial_storage_hm3" => hydro.initial_storage_hm3,
+    ]
+    if hydro.terminal_storage_min_hm3 !== nothing
+        push!(storage_values, "terminal_storage_min_hm3" => hydro.terminal_storage_min_hm3)
+    end
+    for (name, value) in storage_values
+        if value < curve_min || value > curve_max
+            throw(ArgumentError("hydro $(hydro.id) $name must lie within reservoir_curve domain"))
+        end
+    end
+end
+
+function parse_hydro_generation_curve(curve_values, hydro_id::String)::Vector{Tuple{Float64,Float64}}
+    if length(curve_values) < 2
+        throw(ArgumentError("hydro $hydro_id generation_curve must contain at least two breakpoints"))
+    end
+
+    curve = Tuple{Float64,Float64}[]
+    previous_flow = nothing
+    for (index, point) in enumerate(curve_values)
+        point_dict = to_string_key_dict(point)
+        flow = parse_required_float(
+            required_value(point_dict, "flow_m3s"),
+            "generation_curve[$index].flow_m3s",
+        )
+        power = parse_required_float(
+            required_value(point_dict, "power_mw"),
+            "generation_curve[$index].power_mw",
+        )
+        if !isfinite(flow) || flow < 0
+            throw(ArgumentError("hydro $hydro_id generation_curve flow_m3s must be nonnegative and finite"))
+        end
+        if previous_flow !== nothing && !(previous_flow < flow)
+            throw(ArgumentError("hydro $hydro_id generation_curve flow_m3s must be strictly increasing"))
+        end
+        if !isfinite(power) || power < 0
+            throw(ArgumentError("hydro $hydro_id generation_curve power_mw must be nonnegative and finite"))
+        end
+        push!(curve, (flow, power))
+        previous_flow = flow
+    end
+
+    return curve
+end
+
+function parse_hydro_reservoir_curve(curve_values, hydro_id::String)::Vector{Tuple{Float64,Float64}}
+    if length(curve_values) < 2
+        throw(ArgumentError("hydro $hydro_id reservoir_curve must contain at least two breakpoints"))
+    end
+
+    curve = Tuple{Float64,Float64}[]
+    previous_storage = nothing
+    previous_elevation = nothing
+    for (index, point) in enumerate(curve_values)
+        point_dict = to_string_key_dict(point)
+        storage = parse_required_float(
+            required_value(point_dict, "storage_hm3"),
+            "reservoir_curve[$index].storage_hm3",
+        )
+        elevation = parse_required_float(
+            required_value(point_dict, "elevation_masl"),
+            "reservoir_curve[$index].elevation_masl",
+        )
+        if !isfinite(storage)
+            throw(ArgumentError("hydro $hydro_id reservoir_curve storage_hm3 must be finite"))
+        end
+        if !isfinite(elevation)
+            throw(ArgumentError("hydro $hydro_id reservoir_curve elevation_masl must be finite"))
+        end
+        if previous_storage !== nothing && !(previous_storage < storage)
+            throw(ArgumentError("hydro $hydro_id reservoir_curve storage_hm3 must be strictly increasing"))
+        end
+        if previous_elevation !== nothing && elevation < previous_elevation
+            throw(ArgumentError("hydro $hydro_id reservoir_curve elevation_masl must be nondecreasing"))
+        end
+        push!(curve, (storage, elevation))
+        previous_storage = storage
+        previous_elevation = elevation
+    end
+
+    return curve
+end
+
 function build_system_dispatch_model(data::SystemOptimizationData)::SystemDispatchModel
     if data.solver.name != "HiGHS"
         throw(ArgumentError("only HiGHS solver is supported; got $(data.solver.name)"))
@@ -345,6 +634,7 @@ function build_system_dispatch_model(data::SystemOptimizationData)::SystemDispat
     n_renewables = length(data.renewables)
     n_grids = length(data.grids)
     n_loads = length(data.loads)
+    n_hydros = length(data.hydros)
     n_periods = length(data.timestamp)
 
     model = Model(HiGHS.Optimizer)
@@ -359,6 +649,11 @@ function build_system_dispatch_model(data::SystemOptimizationData)::SystemDispat
     @variable(model, battery_energy_mwh[1:n_batteries, 1:n_periods])
     @variable(model, p_renewable_used_mw[1:n_renewables, 1:n_periods] >= 0)
     @variable(model, p_renewable_curtailed_mw[1:n_renewables, 1:n_periods] >= 0)
+    @variable(model, hydro_turbine_flow_m3s[1:n_hydros, 1:n_periods] >= 0)
+    @variable(model, hydro_spill_flow_m3s[1:n_hydros, 1:n_periods] >= 0)
+    @variable(model, hydro_power_mw[1:n_hydros, 1:n_periods] >= 0)
+    @variable(model, hydro_storage_hm3[1:n_hydros, 1:n_periods])
+    @variable(model, hydro_reservoir_elevation_masl[1:n_hydros, 1:n_periods])
 
     grid_import_bounds = system_grid_import_bounds(data)
     grid_export_bounds = system_grid_export_bounds(data)
@@ -486,6 +781,97 @@ function build_system_dispatch_model(data::SystemOptimizationData)::SystemDispat
         end
     end
 
+    for (hydro_index, hydro) in enumerate(data.hydros)
+        @constraint(
+            model,
+            [period in 1:n_periods],
+            hydro.storage_min_hm3 <= hydro_storage_hm3[hydro_index, period] <= hydro.storage_max_hm3
+        )
+        @constraint(
+            model,
+            [period in 1:n_periods],
+            hydro_turbine_flow_m3s[hydro_index, period] <= hydro_turbine_flow_upper_bound(hydro)
+        )
+        turbine_flow_lower_bound = hydro_turbine_flow_lower_bound(hydro)
+        if turbine_flow_lower_bound > 0.0
+            @constraint(
+                model,
+                [period in 1:n_periods],
+                hydro_turbine_flow_m3s[hydro_index, period] >= turbine_flow_lower_bound
+            )
+        end
+        @constraint(
+            model,
+            [period in 1:n_periods],
+            hydro_turbine_flow_m3s[hydro_index, period] + hydro_spill_flow_m3s[hydro_index, period] >=
+            hydro.minimum_release_m3s
+        )
+        if hydro.generation_mode == "linear"
+            @constraint(
+                model,
+                [period in 1:n_periods],
+                hydro_power_mw[hydro_index, period] ==
+                hydro.power_per_flow_mw_per_m3s * hydro_turbine_flow_m3s[hydro_index, period]
+            )
+        else
+            flow_breakpoints = hydro_generation_flow_breakpoints(hydro)
+            power_breakpoints = hydro_generation_power_breakpoints(hydro)
+            for period in 1:n_periods
+                piecewise_power = PiecewiseLinearOpt.piecewiselinear(
+                    model,
+                    hydro_turbine_flow_m3s[hydro_index, period],
+                    flow_breakpoints,
+                    power_breakpoints,
+                )
+                @constraint(model, hydro_power_mw[hydro_index, period] == piecewise_power)
+            end
+        end
+        if hydro.power_max_mw !== nothing
+            @constraint(
+                model,
+                [period in 1:n_periods],
+                hydro_power_mw[hydro_index, period] <= hydro.power_max_mw
+            )
+        end
+        storage_breakpoints = hydro_reservoir_storage_breakpoints(hydro)
+        elevation_breakpoints = hydro_reservoir_elevation_breakpoints(hydro)
+        for period in 1:n_periods
+            piecewise_elevation = PiecewiseLinearOpt.piecewiselinear(
+                model,
+                hydro_storage_hm3[hydro_index, period],
+                storage_breakpoints,
+                elevation_breakpoints,
+            )
+            @constraint(model, hydro_reservoir_elevation_masl[hydro_index, period] == piecewise_elevation)
+        end
+
+        @constraint(
+            model,
+            hydro_storage_hm3[hydro_index, 1] ==
+            hydro.initial_storage_hm3 +
+            data.hydro_inflow_m3s[hydro_index, 1] * data.duration_hours[1] * HM3_PER_M3S_HOUR -
+            hydro_turbine_flow_m3s[hydro_index, 1] * data.duration_hours[1] * HM3_PER_M3S_HOUR -
+            hydro_spill_flow_m3s[hydro_index, 1] * data.duration_hours[1] * HM3_PER_M3S_HOUR
+        )
+
+        for period in 2:n_periods
+            @constraint(
+                model,
+                hydro_storage_hm3[hydro_index, period] ==
+                hydro_storage_hm3[hydro_index, period - 1] +
+                data.hydro_inflow_m3s[hydro_index, period] * data.duration_hours[period] * HM3_PER_M3S_HOUR -
+                hydro_turbine_flow_m3s[hydro_index, period] * data.duration_hours[period] * HM3_PER_M3S_HOUR -
+                hydro_spill_flow_m3s[hydro_index, period] * data.duration_hours[period] * HM3_PER_M3S_HOUR
+            )
+        end
+
+        if hydro.terminal_condition == "equal_initial"
+            @constraint(model, hydro_storage_hm3[hydro_index, n_periods] == hydro.initial_storage_hm3)
+        elseif hydro.terminal_condition == "min_terminal"
+            @constraint(model, hydro_storage_hm3[hydro_index, n_periods] >= hydro.terminal_storage_min_hm3)
+        end
+    end
+
     @constraint(
         model,
         [renewable in 1:n_renewables, period in 1:n_periods],
@@ -498,16 +884,18 @@ function build_system_dispatch_model(data::SystemOptimizationData)::SystemDispat
         [period in 1:n_periods],
         sum(p_grid_import_mw[grid, period] for grid in 1:n_grids) +
         sum(p_renewable_used_mw[renewable, period] for renewable in 1:n_renewables) +
-        sum(p_battery_discharge_mw[battery, period] for battery in 1:n_batteries) ==
+        sum(p_battery_discharge_mw[battery, period] for battery in 1:n_batteries) +
+        sum(hydro_power_mw[hydro, period] for hydro in 1:n_hydros) ==
         sum(p_grid_export_mw[grid, period] for grid in 1:n_grids) +
         sum(p_battery_charge_mw[battery, period] for battery in 1:n_batteries) +
         sum(data.load_demand_mw[load, period] for load in 1:n_loads)
     )
 
     market_value_objective = sum(
-        data.price_usd_per_mwh[period] *
         (
+            data.export_price_usd_per_mwh[period] *
             sum(p_grid_export_mw[grid, period] for grid in 1:n_grids) -
+            data.import_price_usd_per_mwh[period] *
             sum(p_grid_import_mw[grid, period] for grid in 1:n_grids)
         ) *
         data.duration_hours[period] for period in 1:n_periods
@@ -525,7 +913,28 @@ function build_system_dispatch_model(data::SystemOptimizationData)::SystemDispat
         data.duration_hours[period] for renewable in 1:n_renewables, period in 1:n_periods
     )
 
-    @objective(model, Max, market_value_objective - battery_degradation_cost_objective - curtailment_penalty_objective)
+    hydro_spill_penalty_objective = sum(
+        data.hydros[hydro].spill_penalty_usd_per_hm3 *
+        hydro_spill_flow_m3s[hydro, period] *
+        data.duration_hours[period] *
+        HM3_PER_M3S_HOUR for hydro in 1:n_hydros, period in 1:n_periods;
+        init = 0.0,
+    )
+    hydro_terminal_water_value_objective = sum(
+        data.hydros[hydro].terminal_water_value_usd_per_hm3 *
+        hydro_storage_hm3[hydro, n_periods] for hydro in 1:n_hydros;
+        init = 0.0,
+    )
+
+    @objective(
+        model,
+        Max,
+        market_value_objective -
+        battery_degradation_cost_objective -
+        curtailment_penalty_objective -
+        hydro_spill_penalty_objective +
+        hydro_terminal_water_value_objective
+    )
 
     return SystemDispatchModel(
         model,
@@ -539,6 +948,11 @@ function build_system_dispatch_model(data::SystemOptimizationData)::SystemDispat
         p_grid_import_mw,
         p_grid_export_mw,
         is_grid_importing,
+        hydro_turbine_flow_m3s,
+        hydro_spill_flow_m3s,
+        hydro_power_mw,
+        hydro_storage_hm3,
+        hydro_reservoir_elevation_masl,
     )
 end
 
@@ -563,11 +977,18 @@ function solve_system_dispatch(data::SystemOptimizationData)::SystemDispatchResu
     p_renewable_curtailed = value.(dispatch_model.p_renewable_curtailed_mw)
     p_grid_import = value.(dispatch_model.p_grid_import_mw)
     p_grid_export = value.(dispatch_model.p_grid_export_mw)
+    hydro_turbine_flow = value.(dispatch_model.hydro_turbine_flow_m3s)
+    hydro_spill_flow = value.(dispatch_model.hydro_spill_flow_m3s)
+    hydro_power = value.(dispatch_model.hydro_power_mw)
+    hydro_storage = value.(dispatch_model.hydro_storage_hm3)
+    hydro_elevation = value.(dispatch_model.hydro_reservoir_elevation_masl)
 
     battery_delta_soc_abs = realized_system_delta_soc_abs(data, battery_energy)
-    market_value = data.price_usd_per_mwh .*
-                   (period_sum(p_grid_export, length(data.timestamp)) .- period_sum(p_grid_import, length(data.timestamp))) .*
-                   data.duration_hours
+    grid_import = period_sum(p_grid_import, length(data.timestamp))
+    grid_export = period_sum(p_grid_export, length(data.timestamp))
+    import_cost = data.import_price_usd_per_mwh .* grid_import .* data.duration_hours
+    export_revenue = data.export_price_usd_per_mwh .* grid_export .* data.duration_hours
+    market_value = export_revenue .- import_cost
     battery_degradation_cost = zeros(size(battery_delta_soc_abs))
     for (battery_index, battery_asset) in enumerate(data.batteries)
         if battery_asset.constraints.degradation_linear_delta_soc
@@ -580,6 +1001,17 @@ function solve_system_dispatch(data::SystemOptimizationData)::SystemDispatchResu
     for (renewable_index, renewable) in enumerate(data.renewables)
         curtailment_penalty[renewable_index, :] .=
             renewable.curtailment_penalty_usd_per_mwh .* p_renewable_curtailed[renewable_index, :] .* data.duration_hours
+    end
+    hydro_inflow_volume = hydro_volume_matrix(data.hydro_inflow_m3s, data.duration_hours)
+    hydro_turbine_volume = hydro_volume_matrix(hydro_turbine_flow, data.duration_hours)
+    hydro_spill_volume = hydro_volume_matrix(hydro_spill_flow, data.duration_hours)
+    hydro_spill_penalty = zeros(size(hydro_spill_volume))
+    hydro_terminal_value = zeros(length(data.hydros))
+    for (hydro_index, hydro) in enumerate(data.hydros)
+        hydro_spill_penalty[hydro_index, :] .=
+            hydro.spill_penalty_usd_per_hm3 .* hydro_spill_volume[hydro_index, :]
+        hydro_terminal_value[hydro_index] =
+            hydro.terminal_water_value_usd_per_hm3 * hydro_storage[hydro_index, end]
     end
 
     return SystemDispatchResult(
@@ -597,8 +1029,20 @@ function solve_system_dispatch(data::SystemOptimizationData)::SystemDispatchResu
         p_grid_import,
         p_grid_export,
         market_value,
+        import_cost,
+        export_revenue,
         battery_degradation_cost,
         curtailment_penalty,
+        hydro_turbine_flow,
+        hydro_spill_flow,
+        hydro_power,
+        hydro_storage,
+        hydro_elevation,
+        hydro_inflow_volume,
+        hydro_turbine_volume,
+        hydro_spill_volume,
+        hydro_spill_penalty,
+        hydro_terminal_value,
     )
 end
 
@@ -737,12 +1181,30 @@ function parse_system_periods(periods)::Vector{SystemPeriodData}
                 )
             end
 
+            hydro_values = Dict{String,Float64}()
+            raw_hydro_values = get(period_dict, "hydro_inflow_m3s", Dict{String,Any}())
+            for (asset_id, value) in pairs(to_string_key_dict(raw_hydro_values))
+                hydro_values[string(asset_id)] = parse_required_float(
+                    value,
+                    "time_series[$index].hydro_inflow_m3s[$asset_id]",
+                )
+            end
+
+            legacy_price, import_price, export_price, uses_separate_prices = parse_system_period_prices(
+                period_dict,
+                index,
+            )
+
             push!(parsed_periods, SystemPeriodData(
                 parse_required_datetime(required_value(period_dict, "timestamp"), "time_series[$index].timestamp"),
-                parse_required_float(required_value(period_dict, "price_usd_per_mwh"), "time_series[$index].price_usd_per_mwh"),
+                legacy_price,
+                import_price,
+                export_price,
+                uses_separate_prices,
                 parse_required_float(required_value(period_dict, "duration_hours"), "time_series[$index].duration_hours"),
                 renewable_values,
                 load_values,
+                hydro_values,
             ))
         catch error
             throw(ArgumentError("time_series[$index] is invalid: $(sprint(showerror, error))"))
@@ -750,6 +1212,41 @@ function parse_system_periods(periods)::Vector{SystemPeriodData}
     end
 
     return parsed_periods
+end
+
+function parse_system_period_prices(period_dict::Dict{String,Any}, index::Int)
+    has_legacy_price = haskey(period_dict, "price_usd_per_mwh") && period_dict["price_usd_per_mwh"] !== nothing
+    has_import_price =
+        haskey(period_dict, "import_price_usd_per_mwh") && period_dict["import_price_usd_per_mwh"] !== nothing
+    has_export_price =
+        haskey(period_dict, "export_price_usd_per_mwh") && period_dict["export_price_usd_per_mwh"] !== nothing
+
+    if has_import_price != has_export_price
+        throw(ArgumentError(
+            "time_series[$index] must provide both import_price_usd_per_mwh and export_price_usd_per_mwh when using separate prices",
+        ))
+    end
+
+    if has_import_price
+        legacy_price = has_legacy_price ?
+                       parse_required_float(period_dict["price_usd_per_mwh"], "time_series[$index].price_usd_per_mwh") :
+                       nothing
+        import_price = parse_required_float(
+            period_dict["import_price_usd_per_mwh"],
+            "time_series[$index].import_price_usd_per_mwh",
+        )
+        export_price = parse_required_float(
+            period_dict["export_price_usd_per_mwh"],
+            "time_series[$index].export_price_usd_per_mwh",
+        )
+        return legacy_price, import_price, export_price, true
+    end
+
+    legacy_price = parse_required_float(
+        required_value(period_dict, "price_usd_per_mwh"),
+        "time_series[$index].price_usd_per_mwh",
+    )
+    return legacy_price, legacy_price, legacy_price, false
 end
 
 function validate_system_connectivity(system_case::SystemGraphData, bus_id::String)
@@ -781,6 +1278,7 @@ end
 function validate_system_asset_time_series(system_case::SystemGraphData)
     renewable_ids = [node.id for node in system_case.nodes if node.type == "renewable"]
     load_ids = [node.id for node in system_case.nodes if node.type == "load"]
+    hydro_ids = [node.id for node in system_case.nodes if node.type == "hydro"]
 
     for (period_index, period) in enumerate(system_case.time_series)
         for renewable_id in renewable_ids
@@ -796,6 +1294,14 @@ function validate_system_asset_time_series(system_case::SystemGraphData)
                 period.load_demand_mw,
                 "load_demand_mw",
                 load_id,
+                period_index,
+            )
+        end
+        for hydro_id in hydro_ids
+            validate_required_nonnegative_series_value(
+                period.hydro_inflow_m3s,
+                "hydro_inflow_m3s",
+                hydro_id,
                 period_index,
             )
         end
@@ -832,8 +1338,21 @@ function validate_system_time_series(periods::Vector{SystemPeriodData})
     end
 
     for (index, period) in enumerate(periods)
-        if !isfinite(period.price_usd_per_mwh)
+        if period.price_usd_per_mwh !== nothing && !isfinite(period.price_usd_per_mwh)
             throw(ArgumentError("price_usd_per_mwh[$index] must be finite; got $(period.price_usd_per_mwh)"))
+        end
+        if !period.uses_separate_prices && period.price_usd_per_mwh === nothing
+            throw(ArgumentError("price_usd_per_mwh[$index] is required when separate prices are not provided"))
+        end
+        if !isfinite(period.import_price_usd_per_mwh)
+            throw(ArgumentError(
+                "import_price_usd_per_mwh[$index] must be finite; got $(period.import_price_usd_per_mwh)",
+            ))
+        end
+        if !isfinite(period.export_price_usd_per_mwh)
+            throw(ArgumentError(
+                "export_price_usd_per_mwh[$index] must be finite; got $(period.export_price_usd_per_mwh)",
+            ))
         end
         if !isfinite(period.duration_hours) || !(period.duration_hours > 0)
             throw(ArgumentError("duration_hours[$index] must be positive; got $(period.duration_hours)"))
@@ -878,8 +1397,12 @@ function derived_system_grid_bound(data::SystemOptimizationData)::Float64
     )
     renewable_power = isempty(data.renewable_available_power_mw) ? 0.0 : maximum(data.renewable_available_power_mw)
     load_power = isempty(data.load_demand_mw) ? 0.0 : maximum(data.load_demand_mw)
+    hydro_power = sum(
+        hydro_power_upper_bound(hydro) for hydro in data.hydros;
+        init = 0.0,
+    )
 
-    return max(1.0, battery_power + renewable_power + load_power)
+    return max(1.0, battery_power + renewable_power + load_power + hydro_power)
 end
 
 function realized_system_delta_soc_abs(data::SystemOptimizationData, battery_energy_mwh::Matrix{Float64})::Matrix{Float64}
@@ -903,6 +1426,90 @@ function period_sum(values::Matrix{Float64}, n_periods::Int)::Vector{Float64}
     return vec(sum(values; dims = 1))
 end
 
+function hydro_volume_matrix(flow_m3s::Matrix{Float64}, duration_hours::Vector{Float64})::Matrix{Float64}
+    volumes = zeros(size(flow_m3s))
+    for period in eachindex(duration_hours)
+        volumes[:, period] .= flow_m3s[:, period] .* duration_hours[period] .* HM3_PER_M3S_HOUR
+    end
+
+    return volumes
+end
+
+function hydro_generation_flow_breakpoints(hydro::HydroAssetParameters)::Vector{Float64}
+    return [point[1] for point in hydro.generation_curve]
+end
+
+function hydro_generation_power_breakpoints(hydro::HydroAssetParameters)::Vector{Float64}
+    return [point[2] for point in hydro.generation_curve]
+end
+
+function hydro_reservoir_storage_breakpoints(hydro::HydroAssetParameters)::Vector{Float64}
+    return [point[1] for point in hydro.reservoir_curve]
+end
+
+function hydro_reservoir_elevation_breakpoints(hydro::HydroAssetParameters)::Vector{Float64}
+    return [point[2] for point in hydro.reservoir_curve]
+end
+
+function hydro_turbine_flow_lower_bound(hydro::HydroAssetParameters)::Float64
+    if hydro.turbine_flow_min_m3s !== nothing
+        return hydro.turbine_flow_min_m3s
+    end
+    if hydro.generation_mode == "piecewise_linear"
+        return first(hydro.generation_curve)[1]
+    end
+    return 0.0
+end
+
+function hydro_turbine_flow_upper_bound(hydro::HydroAssetParameters)::Float64
+    if hydro.turbine_flow_max_m3s !== nothing
+        return hydro.turbine_flow_max_m3s
+    end
+    return last(hydro.generation_curve)[1]
+end
+
+function hydro_power_upper_bound(hydro::HydroAssetParameters)::Float64
+    if hydro.power_max_mw !== nothing
+        return hydro.power_max_mw
+    end
+    if hydro.generation_mode == "piecewise_linear"
+        return maximum(hydro_generation_power_breakpoints(hydro))
+    end
+    return hydro.power_per_flow_mw_per_m3s * hydro_turbine_flow_upper_bound(hydro)
+end
+
+function reservoir_elevation_masl(hydro::HydroAssetParameters, storage_hm3::Float64)::Float64
+    curve = hydro.reservoir_curve
+    if storage_hm3 <= first(curve)[1]
+        return first(curve)[2]
+    elseif storage_hm3 >= last(curve)[1]
+        return last(curve)[2]
+    end
+
+    for index in 2:length(curve)
+        previous_storage, previous_elevation = curve[index - 1]
+        next_storage, next_elevation = curve[index]
+        if storage_hm3 <= next_storage
+            fraction = (storage_hm3 - previous_storage) / (next_storage - previous_storage)
+            return previous_elevation + fraction * (next_elevation - previous_elevation)
+        end
+    end
+
+    return last(curve)[2]
+end
+
+function uses_separate_price_case(data::SystemOptimizationData)::Bool
+    return any(data.uses_separate_prices)
+end
+
+function system_price_mode(data::SystemOptimizationData)::String
+    return uses_separate_price_case(data) ? "separate_import_export" : "legacy_single_price"
+end
+
+function legacy_price_vector(data::SystemOptimizationData)::Vector{Float64}
+    return [price === nothing ? NaN : price for price in data.price_usd_per_mwh]
+end
+
 function system_dispatch_dataframe(data::SystemOptimizationData, result::SystemDispatchResult)::DataFrame
     n_periods = length(data.timestamp)
     grid_import = period_sum(result.p_grid_import_mw, n_periods)
@@ -916,34 +1523,66 @@ function system_dispatch_dataframe(data::SystemOptimizationData, result::SystemD
     battery_delta_soc_abs = period_sum(result.battery_delta_soc_abs_mwh, n_periods)
     battery_degradation_cost = period_sum(result.battery_degradation_cost_usd, n_periods)
     curtailment_penalty = period_sum(result.curtailment_penalty_usd, n_periods)
-    period_profit = result.market_value_usd .- battery_degradation_cost .- curtailment_penalty
-
-    return DataFrame(
+    hydro_spill_penalty = period_sum(result.hydro_spill_penalty_usd, n_periods)
+    hydro_terminal_value = zeros(n_periods)
+    if n_periods > 0
+        hydro_terminal_value[end] = sum(result.hydro_terminal_water_value_usd)
+    end
+    period_profit =
+        result.market_value_usd .- battery_degradation_cost .- curtailment_penalty .- hydro_spill_penalty .+ hydro_terminal_value
+    frame = DataFrame(
         timestamp = string.(data.timestamp),
         duration_hours = data.duration_hours,
-        price_usd_per_mwh = data.price_usd_per_mwh,
-        grid_import_mw = grid_import,
-        grid_export_mw = grid_export,
-        net_grid_export_mw = grid_export .- grid_import,
-        renewable_used_mw = renewable_used,
-        renewable_curtailed_mw = renewable_curtailed,
-        load_demand_mw = load_demand,
-        battery_charge_mw = battery_charge,
-        battery_discharge_mw = battery_discharge,
-        battery_net_discharge_mw = battery_discharge .- battery_charge,
-        battery_energy_mwh = battery_energy,
-        battery_delta_soc_abs_mwh = battery_delta_soc_abs,
-        market_value_usd = result.market_value_usd,
-        battery_degradation_cost_usd = battery_degradation_cost,
-        curtailment_penalty_usd = curtailment_penalty,
-        period_profit_usd = period_profit,
     )
+
+    if uses_separate_price_case(data)
+        frame.import_price_usd_per_mwh = data.import_price_usd_per_mwh
+        frame.export_price_usd_per_mwh = data.export_price_usd_per_mwh
+    else
+        frame.price_usd_per_mwh = legacy_price_vector(data)
+    end
+
+    frame.grid_import_mw = grid_import
+    frame.grid_export_mw = grid_export
+    frame.net_grid_export_mw = grid_export .- grid_import
+    frame.renewable_used_mw = renewable_used
+    frame.renewable_curtailed_mw = renewable_curtailed
+    frame.load_demand_mw = load_demand
+    if !isempty(data.hydros)
+        frame.total_hydro_power_mw = period_sum(result.hydro_power_mw, n_periods)
+        frame.total_hydro_inflow_m3s = period_sum(data.hydro_inflow_m3s, n_periods)
+        frame.total_hydro_turbine_flow_m3s = period_sum(result.hydro_turbine_flow_m3s, n_periods)
+        frame.total_hydro_spill_flow_m3s = period_sum(result.hydro_spill_flow_m3s, n_periods)
+        frame.total_hydro_storage_hm3 = period_sum(result.hydro_storage_hm3, n_periods)
+        frame.total_hydro_spill_penalty_usd = hydro_spill_penalty
+        frame.total_hydro_terminal_water_value_usd = hydro_terminal_value
+    end
+    frame.battery_charge_mw = battery_charge
+    frame.battery_discharge_mw = battery_discharge
+    frame.battery_net_discharge_mw = battery_discharge .- battery_charge
+    frame.battery_energy_mwh = battery_energy
+    frame.battery_delta_soc_abs_mwh = battery_delta_soc_abs
+
+    if uses_separate_price_case(data)
+        frame.import_cost_usd = result.import_cost_usd
+        frame.export_revenue_usd = result.export_revenue_usd
+        frame.net_market_value_usd = result.market_value_usd
+    end
+
+    frame.market_value_usd = result.market_value_usd
+    frame.battery_degradation_cost_usd = battery_degradation_cost
+    frame.curtailment_penalty_usd = curtailment_penalty
+    frame.period_profit_usd = period_profit
+
+    return frame
 end
 
 function system_asset_dispatch_dataframe(data::SystemOptimizationData, result::SystemDispatchResult)::DataFrame
     timestamp = String[]
     duration_hours = Float64[]
-    price_usd_per_mwh = Float64[]
+    price_usd_per_mwh = Vector{Union{Float64,Missing}}()
+    import_price_usd_per_mwh = Float64[]
+    export_price_usd_per_mwh = Float64[]
     asset_id = String[]
     asset_type = String[]
     grid_import_mw = Float64[]
@@ -962,6 +1601,8 @@ function system_asset_dispatch_dataframe(data::SystemOptimizationData, result::S
                 timestamp,
                 duration_hours,
                 price_usd_per_mwh,
+                import_price_usd_per_mwh,
+                export_price_usd_per_mwh,
                 asset_id,
                 asset_type,
                 grid_import_mw,
@@ -994,6 +1635,8 @@ function system_asset_dispatch_dataframe(data::SystemOptimizationData, result::S
                 timestamp,
                 duration_hours,
                 price_usd_per_mwh,
+                import_price_usd_per_mwh,
+                export_price_usd_per_mwh,
                 asset_id,
                 asset_type,
                 grid_import_mw,
@@ -1026,6 +1669,8 @@ function system_asset_dispatch_dataframe(data::SystemOptimizationData, result::S
                 timestamp,
                 duration_hours,
                 price_usd_per_mwh,
+                import_price_usd_per_mwh,
+                export_price_usd_per_mwh,
                 asset_id,
                 asset_type,
                 grid_import_mw,
@@ -1058,6 +1703,8 @@ function system_asset_dispatch_dataframe(data::SystemOptimizationData, result::S
                 timestamp,
                 duration_hours,
                 price_usd_per_mwh,
+                import_price_usd_per_mwh,
+                export_price_usd_per_mwh,
                 asset_id,
                 asset_type,
                 grid_import_mw,
@@ -1086,28 +1733,149 @@ function system_asset_dispatch_dataframe(data::SystemOptimizationData, result::S
         end
     end
 
-    return DataFrame(
+    frame = DataFrame(
         timestamp = timestamp,
         duration_hours = duration_hours,
-        price_usd_per_mwh = price_usd_per_mwh,
-        asset_id = asset_id,
-        asset_type = asset_type,
-        grid_import_mw = grid_import_mw,
-        grid_export_mw = grid_export_mw,
-        renewable_used_mw = renewable_used_mw,
-        renewable_curtailed_mw = renewable_curtailed_mw,
-        load_demand_mw = load_demand_mw,
-        battery_charge_mw = battery_charge_mw,
-        battery_discharge_mw = battery_discharge_mw,
-        battery_energy_mwh = battery_energy_mwh,
-        battery_delta_soc_abs_mwh = battery_delta_soc_abs_mwh,
     )
+
+    if uses_separate_price_case(data)
+        frame.import_price_usd_per_mwh = import_price_usd_per_mwh
+        frame.export_price_usd_per_mwh = export_price_usd_per_mwh
+    else
+        frame.price_usd_per_mwh = price_usd_per_mwh
+    end
+
+    frame.asset_id = asset_id
+    frame.asset_type = asset_type
+    frame.grid_import_mw = grid_import_mw
+    frame.grid_export_mw = grid_export_mw
+    frame.renewable_used_mw = renewable_used_mw
+    frame.renewable_curtailed_mw = renewable_curtailed_mw
+    frame.load_demand_mw = load_demand_mw
+    frame.battery_charge_mw = battery_charge_mw
+    frame.battery_discharge_mw = battery_discharge_mw
+    frame.battery_energy_mwh = battery_energy_mwh
+    frame.battery_delta_soc_abs_mwh = battery_delta_soc_abs_mwh
+
+    if !isempty(data.hydros)
+        frame.hydro_power_mw = zeros(nrow(frame))
+        frame.hydro_inflow_m3s = zeros(nrow(frame))
+        frame.hydro_turbine_flow_m3s = zeros(nrow(frame))
+        frame.hydro_spill_flow_m3s = zeros(nrow(frame))
+        frame.hydro_inflow_volume_hm3 = zeros(nrow(frame))
+        frame.hydro_turbine_volume_hm3 = zeros(nrow(frame))
+        frame.hydro_spill_volume_hm3 = zeros(nrow(frame))
+        frame.hydro_storage_hm3 = zeros(nrow(frame))
+        frame.hydro_reservoir_elevation_masl = zeros(nrow(frame))
+        frame.hydro_spill_penalty_usd = zeros(nrow(frame))
+        frame.hydro_terminal_water_value_usd = zeros(nrow(frame))
+
+        hydro_timestamp = String[]
+        hydro_duration_hours = Float64[]
+        hydro_price_usd_per_mwh = Vector{Union{Float64,Missing}}()
+        hydro_import_price_usd_per_mwh = Float64[]
+        hydro_export_price_usd_per_mwh = Float64[]
+        hydro_asset_id = String[]
+        hydro_asset_type = String[]
+        hydro_grid_import_mw = Float64[]
+        hydro_grid_export_mw = Float64[]
+        hydro_renewable_used_mw = Float64[]
+        hydro_renewable_curtailed_mw = Float64[]
+        hydro_load_demand_mw = Float64[]
+        hydro_battery_charge_mw = Float64[]
+        hydro_battery_discharge_mw = Float64[]
+        hydro_battery_energy_mwh = Float64[]
+        hydro_battery_delta_soc_abs_mwh = Float64[]
+        hydro_power_mw = Float64[]
+        hydro_inflow_m3s = Float64[]
+        hydro_turbine_flow_m3s = Float64[]
+        hydro_spill_flow_m3s = Float64[]
+        hydro_inflow_volume_hm3 = Float64[]
+        hydro_turbine_volume_hm3 = Float64[]
+        hydro_spill_volume_hm3 = Float64[]
+        hydro_storage_hm3 = Float64[]
+        hydro_reservoir_elevation_masl = Float64[]
+        hydro_spill_penalty_usd = Float64[]
+        hydro_terminal_water_value_usd = Float64[]
+
+        for period in eachindex(data.timestamp)
+            for (hydro_index, hydro) in enumerate(data.hydros)
+                push!(hydro_timestamp, string(data.timestamp[period]))
+                push!(hydro_duration_hours, data.duration_hours[period])
+                legacy_price = data.price_usd_per_mwh[period]
+                push!(hydro_price_usd_per_mwh, legacy_price === nothing ? missing : legacy_price)
+                push!(hydro_import_price_usd_per_mwh, data.import_price_usd_per_mwh[period])
+                push!(hydro_export_price_usd_per_mwh, data.export_price_usd_per_mwh[period])
+                push!(hydro_asset_id, hydro.id)
+                push!(hydro_asset_type, "hydro")
+                push!(hydro_grid_import_mw, 0.0)
+                push!(hydro_grid_export_mw, 0.0)
+                push!(hydro_renewable_used_mw, 0.0)
+                push!(hydro_renewable_curtailed_mw, 0.0)
+                push!(hydro_load_demand_mw, 0.0)
+                push!(hydro_battery_charge_mw, 0.0)
+                push!(hydro_battery_discharge_mw, 0.0)
+                push!(hydro_battery_energy_mwh, 0.0)
+                push!(hydro_battery_delta_soc_abs_mwh, 0.0)
+                push!(hydro_power_mw, result.hydro_power_mw[hydro_index, period])
+                push!(hydro_inflow_m3s, data.hydro_inflow_m3s[hydro_index, period])
+                push!(hydro_turbine_flow_m3s, result.hydro_turbine_flow_m3s[hydro_index, period])
+                push!(hydro_spill_flow_m3s, result.hydro_spill_flow_m3s[hydro_index, period])
+                push!(hydro_inflow_volume_hm3, result.hydro_inflow_volume_hm3[hydro_index, period])
+                push!(hydro_turbine_volume_hm3, result.hydro_turbine_volume_hm3[hydro_index, period])
+                push!(hydro_spill_volume_hm3, result.hydro_spill_volume_hm3[hydro_index, period])
+                push!(hydro_storage_hm3, result.hydro_storage_hm3[hydro_index, period])
+                push!(hydro_reservoir_elevation_masl, result.hydro_reservoir_elevation_masl[hydro_index, period])
+                push!(hydro_spill_penalty_usd, result.hydro_spill_penalty_usd[hydro_index, period])
+                terminal_value = period == length(data.timestamp) ? result.hydro_terminal_water_value_usd[hydro_index] : 0.0
+                push!(hydro_terminal_water_value_usd, terminal_value)
+            end
+        end
+
+        hydro_frame = DataFrame(
+            timestamp = hydro_timestamp,
+            duration_hours = hydro_duration_hours,
+        )
+        if uses_separate_price_case(data)
+            hydro_frame.import_price_usd_per_mwh = hydro_import_price_usd_per_mwh
+            hydro_frame.export_price_usd_per_mwh = hydro_export_price_usd_per_mwh
+        else
+            hydro_frame.price_usd_per_mwh = hydro_price_usd_per_mwh
+        end
+        hydro_frame.asset_id = hydro_asset_id
+        hydro_frame.asset_type = hydro_asset_type
+        hydro_frame.grid_import_mw = hydro_grid_import_mw
+        hydro_frame.grid_export_mw = hydro_grid_export_mw
+        hydro_frame.renewable_used_mw = hydro_renewable_used_mw
+        hydro_frame.renewable_curtailed_mw = hydro_renewable_curtailed_mw
+        hydro_frame.load_demand_mw = hydro_load_demand_mw
+        hydro_frame.battery_charge_mw = hydro_battery_charge_mw
+        hydro_frame.battery_discharge_mw = hydro_battery_discharge_mw
+        hydro_frame.battery_energy_mwh = hydro_battery_energy_mwh
+        hydro_frame.battery_delta_soc_abs_mwh = hydro_battery_delta_soc_abs_mwh
+        hydro_frame.hydro_power_mw = hydro_power_mw
+        hydro_frame.hydro_inflow_m3s = hydro_inflow_m3s
+        hydro_frame.hydro_turbine_flow_m3s = hydro_turbine_flow_m3s
+        hydro_frame.hydro_spill_flow_m3s = hydro_spill_flow_m3s
+        hydro_frame.hydro_inflow_volume_hm3 = hydro_inflow_volume_hm3
+        hydro_frame.hydro_turbine_volume_hm3 = hydro_turbine_volume_hm3
+        hydro_frame.hydro_spill_volume_hm3 = hydro_spill_volume_hm3
+        hydro_frame.hydro_storage_hm3 = hydro_storage_hm3
+        hydro_frame.hydro_reservoir_elevation_masl = hydro_reservoir_elevation_masl
+        hydro_frame.hydro_spill_penalty_usd = hydro_spill_penalty_usd
+        hydro_frame.hydro_terminal_water_value_usd = hydro_terminal_water_value_usd
+        append!(frame, hydro_frame)
+    end
+
+    return frame
 end
 
 function push_system_asset_row!(
     timestamp,
     duration_hours,
     price_usd_per_mwh,
+    import_price_usd_per_mwh,
+    export_price_usd_per_mwh,
     asset_id,
     asset_type,
     grid_import_mw,
@@ -1135,7 +1903,10 @@ function push_system_asset_row!(
 )
     push!(timestamp, string(data.timestamp[period]))
     push!(duration_hours, data.duration_hours[period])
-    push!(price_usd_per_mwh, data.price_usd_per_mwh[period])
+    legacy_price = data.price_usd_per_mwh[period]
+    push!(price_usd_per_mwh, legacy_price === nothing ? missing : legacy_price)
+    push!(import_price_usd_per_mwh, data.import_price_usd_per_mwh[period])
+    push!(export_price_usd_per_mwh, data.export_price_usd_per_mwh[period])
     push!(asset_id, current_asset_id)
     push!(asset_type, current_asset_type)
     push!(grid_import_mw, current_grid_import_mw)
@@ -1155,29 +1926,65 @@ function system_summary_dict(
     run_timestamp::String,
     source_identifiers,
 )::Dict{String,Any}
-    return Dict{String,Any}(
+    summary = Dict{String,Any}(
         "case_name" => data.case_name,
         "run_timestamp" => run_timestamp,
         "solver_name" => result.solver_name,
         "solver_status" => result.solver_status,
         "termination_status" => result.termination_status,
         "objective_value_usd" => result.objective_value_usd,
+        "price_mode" => system_price_mode(data),
         "source_identifiers" => Dict{String,Any}(string(key) => value for (key, value) in pairs(source_identifiers)),
         "model_version" => package_version_string(),
     )
+
+    if !isempty(data.hydros)
+        hydro_kpis_by_asset = Dict{String,Any}()
+        for (hydro_index, hydro) in enumerate(data.hydros)
+            hydro_kpis_by_asset[hydro.id] = Dict{String,Any}(
+                "total_hydro_generation_mwh" => sum(
+                    result.hydro_power_mw[hydro_index, period] * data.duration_hours[period]
+                    for period in eachindex(data.duration_hours)
+                ),
+                "total_turbine_volume_hm3" => sum(result.hydro_turbine_volume_hm3[hydro_index, :]),
+                "total_spill_volume_hm3" => sum(result.hydro_spill_volume_hm3[hydro_index, :]),
+                "initial_storage_hm3" => hydro.initial_storage_hm3,
+                "final_storage_hm3" => result.hydro_storage_hm3[hydro_index, end],
+                "initial_reservoir_elevation_masl" => reservoir_elevation_masl(hydro, hydro.initial_storage_hm3),
+                "final_reservoir_elevation_masl" => result.hydro_reservoir_elevation_masl[hydro_index, end],
+                "total_spill_penalty_usd" => sum(result.hydro_spill_penalty_usd[hydro_index, :]),
+                "terminal_water_value_usd" => result.hydro_terminal_water_value_usd[hydro_index],
+            )
+        end
+        summary["hydro_kpis_by_asset"] = hydro_kpis_by_asset
+        summary["hydro_totals"] = Dict{String,Any}(
+            "total_hydro_generation_mwh" => sum(
+                result.hydro_power_mw[hydro, period] * data.duration_hours[period]
+                for hydro in axes(result.hydro_power_mw, 1), period in eachindex(data.duration_hours)
+            ),
+            "total_turbine_volume_hm3" => sum(result.hydro_turbine_volume_hm3),
+            "total_spill_volume_hm3" => sum(result.hydro_spill_volume_hm3),
+            "total_spill_penalty_usd" => sum(result.hydro_spill_penalty_usd),
+            "terminal_water_value_usd" => sum(result.hydro_terminal_water_value_usd),
+        )
+    end
+
+    return summary
 end
 
 function system_model_metadata_dict(data::SystemOptimizationData)::Dict{String,Any}
-    return Dict{String,Any}(
+    metadata = Dict{String,Any}(
         "model_name" => "one_bus_hybrid_system_dispatch",
         "schema_version" => data.schema_version,
         "bus_id" => data.bus_id,
+        "price_mode" => system_price_mode(data),
         "number_of_periods" => length(data.timestamp),
         "asset_ids" => Dict{String,Any}(
             "batteries" => [battery.id for battery in data.batteries],
             "renewables" => [renewable.id for renewable in data.renewables],
             "grids" => [grid.id for grid in data.grids],
             "loads" => [load.id for load in data.loads],
+            "hydros" => [hydro.id for hydro in data.hydros],
         ),
         "active_constraint_flags" => Dict{String,Any}(
             "one_bus_balance" => true,
@@ -1189,6 +1996,15 @@ function system_model_metadata_dict(data::SystemOptimizationData)::Dict{String,A
             "battery_degradation_linear_delta_soc" => any(
                 battery.constraints.degradation_linear_delta_soc for battery in data.batteries
             ),
+            "hydro_storage_balance" => !isempty(data.hydros),
+            "hydro_linear_generation" => any(hydro.generation_mode == "linear" for hydro in data.hydros),
+            "hydro_piecewise_generation" => any(
+                hydro.generation_mode == "piecewise_linear" for hydro in data.hydros
+            ),
+            "hydro_reservoir_elevation_curve" => !isempty(data.hydros),
+            "hydro_power_max" => any(hydro.power_max_mw !== nothing for hydro in data.hydros),
+            "hydro_minimum_release" => any(hydro.minimum_release_m3s > 0 for hydro in data.hydros),
+            "hydro_terminal_condition" => any(hydro.terminal_condition != "none" for hydro in data.hydros),
         ),
         "unit_conventions" => Dict{String,Any}(
             "power" => "MW",
@@ -1196,8 +2012,27 @@ function system_model_metadata_dict(data::SystemOptimizationData)::Dict{String,A
             "price" => "USD/MWh",
             "duration" => "hours",
             "revenue_and_cost" => "USD",
+            "reservoir_storage" => "hm3",
+            "hydro_flow" => "m3/s",
+            "reservoir_elevation" => "masl",
+            "water_value" => "USD/hm3",
         ),
     )
+    if !isempty(data.hydros)
+        metadata["hydro_generation_modes"] = Dict{String,Any}(
+            hydro.id => hydro.generation_mode for hydro in data.hydros
+        )
+        metadata["hydro_unit_conventions"] = Dict{String,Any}(
+            "storage" => "hm3",
+            "flow" => "m3/s",
+            "elevation" => "masl",
+            "terminal_water_value" => "USD/hm3",
+            "spill_penalty" => "USD/hm3",
+        )
+        metadata["piecewise_linear_library"] = "PiecewiseLinearOpt"
+    end
+
+    return metadata
 end
 
 function system_case_dict(system_case::SystemGraphData)::Dict{String,Any}
@@ -1212,22 +2047,37 @@ function system_case_dict(system_case::SystemGraphData)::Dict{String,Any}
             Dict{String,Any}("from" => edge.from, "to" => edge.to)
             for edge in system_case.edges
         ],
-        "time_series" => [
-            Dict{String,Any}(
-                "timestamp" => string(period.timestamp),
-                "duration_hours" => period.duration_hours,
-                "price_usd_per_mwh" => period.price_usd_per_mwh,
-                "renewable_available_power_mw" => period.renewable_available_power_mw,
-                "load_demand_mw" => period.load_demand_mw,
-            )
-            for period in system_case.time_series
-        ],
+        "time_series" => [system_period_dict(period) for period in system_case.time_series],
         "constraints" => system_case.constraints,
         "solver" => Dict{String,Any}(
             "name" => system_case.solver.name,
             "options" => Dict{String,Any}(string(key) => value for (key, value) in pairs(system_case.solver.options)),
         ),
     )
+end
+
+function system_period_dict(period::SystemPeriodData)::Dict{String,Any}
+    period_dict = Dict{String,Any}(
+        "timestamp" => string(period.timestamp),
+        "duration_hours" => period.duration_hours,
+        "renewable_available_power_mw" => period.renewable_available_power_mw,
+        "load_demand_mw" => period.load_demand_mw,
+    )
+    if !isempty(period.hydro_inflow_m3s)
+        period_dict["hydro_inflow_m3s"] = period.hydro_inflow_m3s
+    end
+
+    if period.uses_separate_prices
+        period_dict["import_price_usd_per_mwh"] = period.import_price_usd_per_mwh
+        period_dict["export_price_usd_per_mwh"] = period.export_price_usd_per_mwh
+        if period.price_usd_per_mwh !== nothing
+            period_dict["price_usd_per_mwh"] = period.price_usd_per_mwh
+        end
+    else
+        period_dict["price_usd_per_mwh"] = period.price_usd_per_mwh
+    end
+
+    return period_dict
 end
 
 function system_case_source_identifiers(path::AbstractString)::Dict{String,Any}

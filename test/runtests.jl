@@ -93,6 +93,11 @@ function system_cli_command(script_path::AbstractString, case_path::AbstractStri
     return `$(Base.julia_cmd()) --project=$(project_root) $(script_path) $(case_path) --output-root $(output_root) --run-timestamp 2026-01-02T03:04:05`
 end
 
+function system_validation_cli_command(script_path::AbstractString, case_path::AbstractString)
+    project_root = normpath(joinpath(@__DIR__, ".."))
+    return `$(Base.julia_cmd()) --project=$(project_root) $(script_path) $(case_path)`
+end
+
 function minimal_system_case_document()
     return Dict{String,Any}(
         "schema_version" => "bess_system_dispatch.v1",
@@ -185,6 +190,116 @@ function curtailment_system_case_document()
     return document
 end
 
+function separate_price_system_case_document()
+    document = minimal_system_case_document()
+    document["case_name"] = "separate_price_system"
+
+    battery = system_case_node(document, "battery_1")
+    battery["degradation_linear_delta_soc"] = false
+
+    document["time_series"] = [
+        Dict{String,Any}(
+            "timestamp" => "2026-01-01T00:00:00",
+            "duration_hours" => 1.0,
+            "import_price_usd_per_mwh" => 10.0,
+            "export_price_usd_per_mwh" => 5.0,
+            "renewable_available_power_mw" => Dict{String,Any}("solar_1" => 0.0),
+        ),
+        Dict{String,Any}(
+            "timestamp" => "2026-01-01T01:00:00",
+            "duration_hours" => 1.0,
+            "import_price_usd_per_mwh" => 80.0,
+            "export_price_usd_per_mwh" => 100.0,
+            "renewable_available_power_mw" => Dict{String,Any}("solar_1" => 0.0),
+        ),
+    ]
+
+    return document
+end
+
+function linear_hydro_system_case_document()
+    document = minimal_system_case_document()
+    document["schema_version"] = "bess_system_dispatch.v2"
+    document["case_name"] = "linear_hydro_system"
+
+    battery = system_case_node(document, "battery_1")
+    battery["charge_power_max_mw"] = 0.0
+    battery["discharge_power_max_mw"] = 0.0
+    battery["energy_min_mwh"] = 0.0
+    battery["energy_max_mwh"] = 1.0
+    battery["initial_energy_mwh"] = 0.0
+    battery["terminal_condition"] = "none"
+    battery["degradation_linear_delta_soc"] = false
+
+    grid = system_case_node(document, "grid_1")
+    grid["import_power_max_mw"] = 0.0
+    grid["export_power_max_mw"] = 5.0
+
+    push!(document["nodes"], Dict{String,Any}(
+        "id" => "hydro_1",
+        "type" => "hydro",
+        "storage_min_hm3" => 1.0,
+        "storage_max_hm3" => 5.0,
+        "initial_storage_hm3" => 2.5,
+        "generation_mode" => "linear",
+        "power_per_flow_mw_per_m3s" => 0.1,
+        "turbine_flow_max_m3s" => 10.0,
+        "power_max_mw" => 1.0,
+        "minimum_release_m3s" => 1.0,
+        "spill_penalty_usd_per_hm3" => 100.0,
+        "terminal_condition" => "min_terminal",
+        "terminal_storage_min_hm3" => 2.3,
+        "terminal_water_value_usd_per_hm3" => 10.0,
+        "reservoir_curve" => [
+            Dict{String,Any}("storage_hm3" => 1.0, "elevation_masl" => 700.0),
+            Dict{String,Any}("storage_hm3" => 3.0, "elevation_masl" => 710.0),
+            Dict{String,Any}("storage_hm3" => 5.0, "elevation_masl" => 720.0),
+        ],
+    ))
+    push!(document["edges"], Dict{String,Any}("from" => "hydro_1", "to" => "bus_1"))
+
+    document["time_series"] = [
+        Dict{String,Any}(
+            "timestamp" => "2026-01-01T00:00:00",
+            "duration_hours" => 1.0,
+            "import_price_usd_per_mwh" => 40.0,
+            "export_price_usd_per_mwh" => 60.0,
+            "renewable_available_power_mw" => Dict{String,Any}("solar_1" => 0.0),
+            "hydro_inflow_m3s" => Dict{String,Any}("hydro_1" => 30.0),
+        ),
+        Dict{String,Any}(
+            "timestamp" => "2026-01-01T01:00:00",
+            "duration_hours" => 1.0,
+            "import_price_usd_per_mwh" => 40.0,
+            "export_price_usd_per_mwh" => 120.0,
+            "renewable_available_power_mw" => Dict{String,Any}("solar_1" => 0.0),
+            "hydro_inflow_m3s" => Dict{String,Any}("hydro_1" => 30.0),
+        ),
+    ]
+
+    return document
+end
+
+function piecewise_hydro_system_case_document()
+    document = linear_hydro_system_case_document()
+    document["case_name"] = "piecewise_hydro_system"
+
+    hydro = system_case_node(document, "hydro_1")
+    hydro["generation_mode"] = "piecewise_linear"
+    delete!(hydro, "power_per_flow_mw_per_m3s")
+    hydro["turbine_flow_min_m3s"] = 0.0
+    hydro["turbine_flow_max_m3s"] = 12.0
+    hydro["power_max_mw"] = 0.8
+    hydro["generation_curve"] = [
+        Dict{String,Any}("flow_m3s" => 0.0, "power_mw" => 0.0),
+        Dict{String,Any}("flow_m3s" => 4.0, "power_mw" => 0.75),
+        Dict{String,Any}("flow_m3s" => 8.0, "power_mw" => 0.55),
+        Dict{String,Any}("flow_m3s" => 12.0, "power_mw" => 0.9),
+    ]
+
+    return document
+end
+
 function local_load_system_case_document()
     document = minimal_system_case_document()
     document["case_name"] = "local_load_system"
@@ -257,6 +372,14 @@ end
 
 function sample_hybrid_system_case_path()
     return joinpath(@__DIR__, "..", "data", "cases", "hybrid_system", "system_case.json")
+end
+
+function sample_linear_hydro_system_case_path()
+    return joinpath(@__DIR__, "..", "data", "cases", "linear_hydro_system", "system_case.json")
+end
+
+function sample_piecewise_hydro_system_case_path()
+    return joinpath(@__DIR__, "..", "data", "cases", "piecewise_hydro_system", "system_case.json")
 end
 
 function system_case_node(document, node_id::AbstractString)
@@ -701,6 +824,229 @@ end
         end
     end
 
+    @testset "runs separate import export price system case end to end" begin
+        mktempdir() do case_dir
+            case_path = write_minimal_system_case_json(case_dir; document = separate_price_system_case_document())
+
+            system_case = BESSDispatch.load_system_case(case_path)
+            optimization_case = BESSDispatch.normalize_system_case(system_case)
+            @test optimization_case.price_usd_per_mwh == [nothing, nothing]
+            @test optimization_case.import_price_usd_per_mwh == [10.0, 80.0]
+            @test optimization_case.export_price_usd_per_mwh == [5.0, 100.0]
+
+            result = BESSDispatch.solve_system_dispatch(optimization_case)
+            @test result.termination_status == "OPTIMAL"
+            @test isapprox(result.p_grid_import_mw[1, 1], 5.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(result.p_grid_export_mw[1, 2], 5.0; atol = POWER_TOLERANCE_MW)
+            @test isapprox(result.import_cost_usd[1], 50.0; atol = OBJECTIVE_TOLERANCE_USD)
+            @test isapprox(result.export_revenue_usd[2], 500.0; atol = OBJECTIVE_TOLERANCE_USD)
+            @test isapprox(result.market_value_usd[1], -50.0; atol = OBJECTIVE_TOLERANCE_USD)
+            @test isapprox(result.market_value_usd[2], 500.0; atol = OBJECTIVE_TOLERANCE_USD)
+            @test isapprox(result.objective_value_usd, 450.0; atol = OBJECTIVE_TOLERANCE_USD)
+
+            run_output = BESSDispatch.run_system_case(
+                case_path;
+                output_root = joinpath(case_dir, "outputs"),
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+
+            dispatch_rows = collect(CSV.File(run_output.dispatch_path))
+            @test propertynames(dispatch_rows[1]) == [
+                :timestamp,
+                :duration_hours,
+                :import_price_usd_per_mwh,
+                :export_price_usd_per_mwh,
+                :grid_import_mw,
+                :grid_export_mw,
+                :net_grid_export_mw,
+                :renewable_used_mw,
+                :renewable_curtailed_mw,
+                :load_demand_mw,
+                :battery_charge_mw,
+                :battery_discharge_mw,
+                :battery_net_discharge_mw,
+                :battery_energy_mwh,
+                :battery_delta_soc_abs_mwh,
+                :import_cost_usd,
+                :export_revenue_usd,
+                :net_market_value_usd,
+                :market_value_usd,
+                :battery_degradation_cost_usd,
+                :curtailment_penalty_usd,
+                :period_profit_usd,
+            ]
+            @test isapprox(dispatch_rows[1].import_cost_usd, 50.0; atol = OBJECTIVE_TOLERANCE_USD)
+            @test isapprox(dispatch_rows[2].export_revenue_usd, 500.0; atol = OBJECTIVE_TOLERANCE_USD)
+            @test isapprox(dispatch_rows[1].period_profit_usd, -50.0; atol = OBJECTIVE_TOLERANCE_USD)
+            @test isapprox(dispatch_rows[2].period_profit_usd, 500.0; atol = OBJECTIVE_TOLERANCE_USD)
+
+            asset_rows = collect(CSV.File(run_output.asset_dispatch_path))
+            @test :import_price_usd_per_mwh in propertynames(asset_rows[1])
+            @test :export_price_usd_per_mwh in propertynames(asset_rows[1])
+
+            summary = JSON3.read(read(run_output.summary_path, String))
+            @test string(summary.price_mode) == "separate_import_export"
+
+            metadata = JSON3.read(read(run_output.model_metadata_path, String))
+            @test string(metadata.price_mode) == "separate_import_export"
+        end
+    end
+
+    @testset "runs linear hydro v2 system case end to end" begin
+        mktempdir() do case_dir
+            case_path = write_minimal_system_case_json(case_dir; document = linear_hydro_system_case_document())
+
+            system_case = BESSDispatch.load_system_case(case_path)
+            @test system_case.schema_version == "bess_system_dispatch.v2"
+
+            optimization_case = BESSDispatch.normalize_system_case(system_case)
+            @test optimization_case.case_name == "linear_hydro_system"
+            @test [asset.id for asset in optimization_case.hydros] == ["hydro_1"]
+            @test optimization_case.hydro_inflow_m3s == [30.0 30.0]
+            @test optimization_case.hydros[1].generation_mode == "linear"
+
+            result = BESSDispatch.solve_system_dispatch(optimization_case)
+            @test result.termination_status == "OPTIMAL"
+            @test all(result.hydro_turbine_flow_m3s .>= 1.0 - POWER_TOLERANCE_MW)
+            @test all(isapprox.(
+                result.hydro_power_mw,
+                result.hydro_turbine_flow_m3s .* 0.1;
+                atol = POWER_TOLERANCE_MW,
+            ))
+            @test all(result.hydro_storage_hm3 .>= 2.3 - ENERGY_TOLERANCE_MWH)
+            @test result.p_grid_export_mw[1, 2] > POWER_TOLERANCE_MW
+            @test result.hydro_terminal_water_value_usd[1] > 0.0
+
+            run_output = BESSDispatch.run_system_case(
+                case_path;
+                output_root = joinpath(case_dir, "outputs"),
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+
+            dispatch_rows = collect(CSV.File(run_output.dispatch_path))
+            @test :total_hydro_power_mw in propertynames(dispatch_rows[1])
+            @test :total_hydro_turbine_flow_m3s in propertynames(dispatch_rows[1])
+            @test :total_hydro_storage_hm3 in propertynames(dispatch_rows[1])
+            @test dispatch_rows[2].total_hydro_power_mw > POWER_TOLERANCE_MW
+
+            asset_rows = collect(CSV.File(run_output.asset_dispatch_path))
+            hydro_rows = [row for row in asset_rows if string(row.asset_id) == "hydro_1"]
+            @test length(hydro_rows) == 2
+            @test all(row -> string(row.asset_type) == "hydro", hydro_rows)
+            @test all(row -> row.hydro_inflow_m3s == 30.0, hydro_rows)
+            @test all(row -> isapprox(row.hydro_power_mw, row.hydro_turbine_flow_m3s * 0.1; atol = POWER_TOLERANCE_MW), hydro_rows)
+            @test all(row -> row.hydro_reservoir_elevation_masl >= 700.0, hydro_rows)
+
+            summary = JSON3.read(read(run_output.summary_path, String))
+            @test haskey(summary, :hydro_kpis_by_asset)
+            @test summary.hydro_totals.total_hydro_generation_mwh > 0.0
+            @test summary.hydro_kpis_by_asset.hydro_1.final_storage_hm3 >= 2.3 - ENERGY_TOLERANCE_MWH
+
+            metadata = JSON3.read(read(run_output.model_metadata_path, String))
+            @test string(metadata.schema_version) == "bess_system_dispatch.v2"
+            @test collect(string.(metadata.asset_ids.hydros)) == ["hydro_1"]
+            @test string(metadata.hydro_generation_modes.hydro_1) == "linear"
+            @test string(metadata.unit_conventions.reservoir_storage) == "hm3"
+        end
+    end
+
+    @testset "sample linear hydro v2 case solves through API and CLI" begin
+        sample_path = sample_linear_hydro_system_case_path()
+        @test isfile(sample_path)
+
+        system_case = BESSDispatch.load_system_case(sample_path)
+        @test system_case.case_name == "linear_hydro_system"
+        @test system_case.schema_version == "bess_system_dispatch.v2"
+
+        optimization_case = BESSDispatch.normalize_system_case(system_case)
+        @test [asset.id for asset in optimization_case.hydros] == ["hydro_1"]
+        @test optimization_case.hydro_inflow_m3s == [30.0 30.0]
+
+        result = BESSDispatch.solve_system_dispatch(optimization_case)
+        @test result.termination_status == "OPTIMAL"
+        @test any(result.hydro_power_mw .> POWER_TOLERANCE_MW)
+
+        mktempdir() do output_root
+            run_output = BESSDispatch.run_system_case(
+                sample_path;
+                output_root = output_root,
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+            @test isfile(run_output.dispatch_path)
+            @test isfile(run_output.asset_dispatch_path)
+            @test any(row -> string(row.asset_type) == "hydro", CSV.File(run_output.asset_dispatch_path))
+        end
+
+        mktempdir() do output_root
+            script_path = normpath(joinpath(@__DIR__, "..", "scripts", "run_system_case.jl"))
+            stdout = read(system_cli_command(script_path, sample_path, output_root), String)
+            payload = JSON3.read(stdout)
+
+            @test string(payload.case_name) == "linear_hydro_system"
+            @test string(payload.termination_status) == "OPTIMAL"
+            @test isfile(string(payload.summary_path))
+        end
+    end
+
+    @testset "sample piecewise hydro v2 case solves through API and CLI" begin
+        sample_path = sample_piecewise_hydro_system_case_path()
+        @test isfile(sample_path)
+
+        system_case = BESSDispatch.load_system_case(sample_path)
+        @test system_case.case_name == "piecewise_hydro_system"
+        @test system_case.schema_version == "bess_system_dispatch.v2"
+
+        optimization_case = BESSDispatch.normalize_system_case(system_case)
+        @test [asset.id for asset in optimization_case.hydros] == ["hydro_1"]
+        @test optimization_case.hydros[1].generation_mode == "piecewise_linear"
+        @test optimization_case.hydros[1].generation_curve == [
+            (0.0, 0.0),
+            (4.0, 0.75),
+            (8.0, 0.55),
+            (12.0, 0.9),
+        ]
+        @test optimization_case.hydros[1].power_max_mw == 0.8
+        @test maximum(point[2] for point in optimization_case.hydros[1].generation_curve) >
+              optimization_case.hydros[1].power_max_mw
+
+        result = BESSDispatch.solve_system_dispatch(optimization_case)
+        @test result.termination_status == "OPTIMAL"
+        @test all(result.hydro_turbine_flow_m3s .>= -POWER_TOLERANCE_MW)
+        @test all(result.hydro_turbine_flow_m3s .<= 12.0 + POWER_TOLERANCE_MW)
+        @test any(result.hydro_power_mw .> POWER_TOLERANCE_MW)
+        @test all(result.hydro_power_mw .<= 0.8 + POWER_TOLERANCE_MW)
+        @test all(result.hydro_reservoir_elevation_masl .>= 700.0 - ENERGY_TOLERANCE_MWH)
+        @test all(result.hydro_reservoir_elevation_masl .<= 720.0 + ENERGY_TOLERANCE_MWH)
+
+        mktempdir() do output_root
+            run_output = BESSDispatch.run_system_case(
+                sample_path;
+                output_root = output_root,
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+            @test isfile(run_output.dispatch_path)
+            @test isfile(run_output.asset_dispatch_path)
+            @test isfile(run_output.model_metadata_path)
+            @test any(row -> string(row.asset_type) == "hydro", CSV.File(run_output.asset_dispatch_path))
+
+            metadata = JSON3.read(read(run_output.model_metadata_path, String))
+            @test string(metadata.hydro_generation_modes.hydro_1) == "piecewise_linear"
+            @test metadata.active_constraint_flags.hydro_piecewise_generation == true
+            @test metadata.active_constraint_flags.hydro_reservoir_elevation_curve == true
+            @test string(metadata.piecewise_linear_library) == "PiecewiseLinearOpt"
+        end
+
+        mktempdir() do output_root
+            script_path = normpath(joinpath(@__DIR__, "..", "scripts", "run_system_case.jl"))
+            stdout = read(system_cli_command(script_path, sample_path, output_root), String)
+            payload = JSON3.read(stdout)
+
+            @test string(payload.case_name) == "piecewise_hydro_system"
+            @test string(payload.termination_status) == "OPTIMAL"
+            @test isfile(string(payload.summary_path))
+        end
+    end
+
     @testset "curtails excess renewable generation and applies configured penalty" begin
         mktempdir() do case_dir
             case_path = write_minimal_system_case_json(case_dir; document = curtailment_system_case_document())
@@ -921,6 +1267,7 @@ end
         exported_names = Set(names(BESSDispatch))
         required_public_names = [
             :SystemGraphData,
+            :HydroAssetParameters,
             :SystemOptimizationData,
             :SystemDispatchResult,
             :SystemRunOutput,
@@ -976,6 +1323,70 @@ end
         end
     end
 
+    @testset "system case validation CLI validates without solving" begin
+        script_path = normpath(joinpath(@__DIR__, "..", "scripts", "validate_system_case.jl"))
+        @test isfile(script_path)
+
+        sample_path = sample_hybrid_system_case_path()
+        stdout = read(system_validation_cli_command(script_path, sample_path), String)
+        payload = JSON3.read(stdout)
+
+        @test string(payload.status) == "ok"
+        @test string(payload.case_name) == "hybrid_system"
+        @test string(payload.schema_version) == "bess_system_dispatch.v1"
+        @test Int(payload.period_count) == 4
+        @test Int(payload.asset_counts.battery) == 1
+        @test Int(payload.asset_counts.renewable) == 1
+        @test Int(payload.asset_counts.grid) == 1
+        @test Int(payload.asset_counts.load) == 1
+        @test !occursin("output_dir", stdout)
+
+        mktempdir() do case_dir
+            document = local_load_system_case_document()
+            grid = system_case_node(document, "grid_1")
+            grid["import_power_max_mw"] = 0.0
+            grid["export_power_max_mw"] = 0.0
+            battery = system_case_node(document, "battery_1")
+            battery["charge_power_max_mw"] = 0.0
+            battery["discharge_power_max_mw"] = 0.0
+            for period in document["time_series"]
+                period["renewable_available_power_mw"] = Dict{String,Any}("solar_1" => 0.0)
+                period["load_demand_mw"] = Dict{String,Any}("load_1" => 100.0)
+            end
+
+            case_path = write_minimal_system_case_json(case_dir; document = document)
+            validation_stdout = read(system_validation_cli_command(script_path, case_path), String)
+            validation_payload = JSON3.read(validation_stdout)
+
+            @test string(validation_payload.status) == "ok"
+            @test string(validation_payload.case_name) == "local_load_system"
+        end
+
+        mktempdir() do case_dir
+            document = minimal_system_case_document()
+            delete!(document, "schema_version")
+            case_path = write_minimal_system_case_json(case_dir; document = document)
+            stdout_path = joinpath(case_dir, "stdout.txt")
+            stderr_path = joinpath(case_dir, "stderr.txt")
+
+            process = open(stdout_path, "w") do stdout_io
+                open(stderr_path, "w") do stderr_io
+                    return run(pipeline(
+                        ignorestatus(system_validation_cli_command(script_path, case_path));
+                        stdout = stdout_io,
+                        stderr = stderr_io,
+                    ))
+                end
+            end
+
+            @test !success(process)
+            @test isempty(strip(read(stdout_path, String)))
+            error_payload = JSON3.read(read(stderr_path, String))
+            @test string(error_payload.status) == "error"
+            @test occursin("schema_version is required", string(error_payload.message))
+        end
+    end
+
     @testset "rejects invalid system battery bounds before model construction" begin
         document = minimal_system_case_document()
         battery = system_case_node(document, "battery_1")
@@ -989,8 +1400,8 @@ end
         @test occursin("schema_version is required", invalid_system_case_error_text(
             document -> delete!(document, "schema_version"),
         ))
-        @test occursin("schema_version must be bess_system_dispatch.v1", invalid_system_case_error_text(
-            document -> document["schema_version"] = "bess_system_dispatch.v2",
+        @test occursin("schema_version must be one of", invalid_system_case_error_text(
+            document -> document["schema_version"] = "bess_system_dispatch.v3",
         ))
         @test occursin("node id battery_1 is duplicated", invalid_system_case_error_text(
             document -> system_case_node(document, "solar_1")["id"] = "battery_1",
@@ -1025,6 +1436,12 @@ end
         @test occursin("price_usd_per_mwh[1] must be finite", invalid_system_case_error_text(
             document -> document["time_series"][1]["price_usd_per_mwh"] = "NaN",
         ))
+        @test occursin("must provide both import_price_usd_per_mwh and export_price_usd_per_mwh", invalid_system_case_error_text(
+            document -> begin
+                delete!(document["time_series"][1], "price_usd_per_mwh")
+                document["time_series"][1]["import_price_usd_per_mwh"] = 10.0
+            end,
+        ))
         @test occursin("timestamps must be strictly increasing", invalid_system_case_error_text(
             document -> document["time_series"][2]["timestamp"] = "2026-01-01T00:00:00",
         ))
@@ -1048,6 +1465,237 @@ end
         ))
         @test occursin("load_demand_mw[load_1] at time_series[1] must be nonnegative", invalid_system_case_error_text(
             document -> add_load_node!(document; demands = [-1.0, 1.0]),
+        ))
+
+        @test occursin("hydro nodes require schema_version bess_system_dispatch.v2", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                document["schema_version"] = "bess_system_dispatch.v1"
+                document
+            end,
+        ))
+        @test occursin("hydro_inflow_m3s for asset hydro_1 is required", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                delete!(document["time_series"][1], "hydro_inflow_m3s")
+                document
+            end,
+        ))
+        @test occursin("hydro_inflow_m3s[hydro_1] at time_series[1] must be nonnegative", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                document["time_series"][1]["hydro_inflow_m3s"] = Dict{String,Any}("hydro_1" => -1.0)
+                document
+            end,
+        ))
+        @test occursin("asset node hydro_1 is disconnected from bus bus_1", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                filter!(edge -> edge["from"] != "hydro_1" && edge["to"] != "hydro_1", document["edges"])
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 storage_min_hm3 must be less than storage_max_hm3", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                hydro = system_case_node(document, "hydro_1")
+                hydro["storage_min_hm3"] = 5.0
+                hydro["storage_max_hm3"] = 5.0
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 initial_storage_hm3 must be within storage bounds", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["initial_storage_hm3"] = 6.0
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 terminal_storage_min_hm3 must be within storage bounds", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["terminal_storage_min_hm3"] = 6.0
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 storage_min_hm3 must lie within reservoir_curve domain", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["storage_min_hm3"] = 0.5
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 terminal_condition must be one of none, equal_initial, min_terminal", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["terminal_condition"] = "target_storage"
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 terminal_storage_min_hm3 is required when terminal_condition is min_terminal", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                delete!(system_case_node(document, "hydro_1"), "terminal_storage_min_hm3")
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 spill_penalty_usd_per_hm3 must be nonnegative", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["spill_penalty_usd_per_hm3"] = -1.0
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 terminal_water_value_usd_per_hm3 must be nonnegative", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["terminal_water_value_usd_per_hm3"] = -1.0
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 minimum_release_m3s must be nonnegative", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["minimum_release_m3s"] = -1.0
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 turbine_flow_min_m3s must be nonnegative", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["turbine_flow_min_m3s"] = -1.0
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 turbine_flow_min_m3s must not exceed turbine_flow_max_m3s", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                hydro = system_case_node(document, "hydro_1")
+                hydro["turbine_flow_min_m3s"] = 11.0
+                hydro["turbine_flow_max_m3s"] = 10.0
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 generation_mode must be one of linear, piecewise_linear", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["generation_mode"] = "quadratic"
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 power_per_flow_mw_per_m3s is required for linear generation", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                delete!(system_case_node(document, "hydro_1"), "power_per_flow_mw_per_m3s")
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 power_per_flow_mw_per_m3s must be nonnegative", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["power_per_flow_mw_per_m3s"] = -0.1
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 turbine_flow_max_m3s is required for linear generation", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                delete!(system_case_node(document, "hydro_1"), "turbine_flow_max_m3s")
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 power_max_mw must be nonnegative", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["power_max_mw"] = -1.0
+                document
+            end,
+        ))
+        @test occursin("generation_curve is required", system_case_validation_message(
+            begin
+                document = piecewise_hydro_system_case_document()
+                delete!(system_case_node(document, "hydro_1"), "generation_curve")
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 generation_curve must contain at least two breakpoints", system_case_validation_message(
+            begin
+                document = piecewise_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["generation_curve"] = [
+                    Dict{String,Any}("flow_m3s" => 0.0, "power_mw" => 0.0),
+                ]
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 generation_curve flow_m3s must be strictly increasing", system_case_validation_message(
+            begin
+                document = piecewise_hydro_system_case_document()
+                hydro = system_case_node(document, "hydro_1")
+                hydro["generation_curve"][2]["flow_m3s"] = 0.0
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 generation_curve power_mw must be nonnegative and finite", system_case_validation_message(
+            begin
+                document = piecewise_hydro_system_case_document()
+                hydro = system_case_node(document, "hydro_1")
+                hydro["generation_curve"][2]["power_mw"] = -1.0
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 turbine_flow_max_m3s must lie within generation_curve domain", system_case_validation_message(
+            begin
+                document = piecewise_hydro_system_case_document()
+                hydro = system_case_node(document, "hydro_1")
+                hydro["turbine_flow_max_m3s"] = 13.0
+                document
+            end,
+        ))
+        @test isnothing(system_case_validation_message(
+            begin
+                document = piecewise_hydro_system_case_document()
+                hydro = system_case_node(document, "hydro_1")
+                hydro["power_max_mw"] = 2.0
+                hydro["generation_curve"] = [
+                    Dict{String,Any}("flow_m3s" => 0.0, "power_mw" => 0.0),
+                    Dict{String,Any}("flow_m3s" => 4.0, "power_mw" => 0.75),
+                    Dict{String,Any}("flow_m3s" => 8.0, "power_mw" => 0.55),
+                    Dict{String,Any}("flow_m3s" => 12.0, "power_mw" => 1.2),
+                ]
+                document
+            end,
+        ))
+        @test occursin("reservoir_curve is required", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                delete!(system_case_node(document, "hydro_1"), "reservoir_curve")
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 reservoir_curve must contain at least two breakpoints", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                system_case_node(document, "hydro_1")["reservoir_curve"] = [
+                    Dict{String,Any}("storage_hm3" => 1.0, "elevation_masl" => 700.0),
+                ]
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 reservoir_curve storage_hm3 must be strictly increasing", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                hydro = system_case_node(document, "hydro_1")
+                hydro["reservoir_curve"][2]["storage_hm3"] = 1.0
+                document
+            end,
+        ))
+        @test occursin("hydro hydro_1 reservoir_curve elevation_masl must be nondecreasing", system_case_validation_message(
+            begin
+                document = linear_hydro_system_case_document()
+                hydro = system_case_node(document, "hydro_1")
+                hydro["reservoir_curve"][2]["elevation_masl"] = 690.0
+                document
+            end,
         ))
     end
 
