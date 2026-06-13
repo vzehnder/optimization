@@ -513,3 +513,124 @@ run execution, resolved-case and metadata artifacts, hydro result tables and
 charts, paste/upload `bess_system_dispatch.v1` compatibility, structured
 editor cases without hydro still generated as `v2`, and malformed hydro inputs
 reported before promotion.
+
+## Client Publication And Read-Only Portal
+
+Iteration 6 adds the product boundary above completed analyst runs: local auth,
+role-gated internal pages, admin user management, client project assignment,
+minimal dashboard templates, publication drafts, client preview, publish and
+unpublish controls, a read-only client portal, and allowlisted downloads.
+
+The app still uses the Julia optimizer and artifact formats from earlier
+iterations. Publications do not mutate runs or scenario versions; they curate
+which completed results are visible to assigned clients.
+
+### Local Auth Roles And Sessions
+
+When auth is enabled, a fresh database redirects to `/bootstrap`. The bootstrap
+form creates the first internal `admin` user and then closes. All later users
+sign in through `/login` and end sessions through `/logout`.
+
+Supported roles:
+
+- `admin`: internal role that can manage users, assign clients to projects, and
+  use analyst workflow pages.
+- `analyst`: internal role that can create projects, scenarios, versions, runs,
+  dashboard templates, and publications.
+- `client`: read-only role that can only access `/client` routes for assigned
+  projects and active publications.
+
+Passwords are stored as PBKDF2-SHA256 hashes. Sessions are opaque server-side
+tokens referenced by an HTTP-only cookie. Deactivated users cannot create new
+sessions, and existing sessions stop resolving once the user is deactivated.
+
+### Admin Users And Project Access
+
+Admins manage local users from `/admin/users` or the `/api/admin/users`
+endpoints. User records preserve email, display name, role, active state, and
+audit timestamps without exposing password hashes through API responses.
+
+Client project access is explicit many-to-many assignment. Admins add or remove
+client users under a project through the admin project-access endpoints. A
+client sees only assigned projects on `/client`, and assignment removal
+immediately blocks project pages, publication pages, and downloads for that
+project.
+
+### Dashboard Templates
+
+Dashboard templates belong to a project and control selected result sections
+for client views. They can enable or disable summary KPIs, price charts, grid
+charts, renewable charts, BESS charts, hydro charts, profit charts, system
+dispatch table previews, and asset dispatch table previews. `table_preview_limit`
+keeps client tables bounded.
+
+Templates reuse existing result readers. Missing columns hide or mark only the
+unavailable section, so legacy runs without hydro columns and older single-price
+runs still render cleanly.
+
+### Publication Drafts Preview Publish And Unpublish
+
+Analysts create publication drafts from succeeded runs only. A publication
+stores project, scenario, scenario version, run, selected dashboard template,
+public title, analyst notes, status, allowed artifact types, and audit fields.
+
+Drafts start hidden from clients. Internal users can open
+`/publications/{publication_id}/preview` to see the same client renderer before
+publishing. Publishing changes status to `published`; unpublishing changes
+status to `unpublished` and removes client access immediately without deleting
+the internal run or publication record.
+
+### Client Portal And Read-Only Routes
+
+Clients enter at `/client`, see assigned projects, open
+`/client/projects/{project_id}`, and then open active publications under
+`/client/projects/{project_id}/publications/{publication_id}`. These pages show
+publication title, notes, run provenance, selected summary, selected charts,
+limited table previews, and enabled downloads.
+
+Client pages do not render analyst controls such as draft editing, validation,
+source upload, promotion, run launch, publication editing, or internal artifact
+downloads. Client attempts to access internal pages or APIs return a controlled
+redirect, `403`, or `404` depending on authentication and object visibility.
+
+### Artifact Allowlist And Revocation
+
+Publication drafts default to business artifacts when those files are
+registered:
+
+- `summary_json`
+- `dispatch_csv`
+- `asset_dispatch_csv`
+
+Technical artifacts such as input snapshots, stdout logs, stderr logs, resolved
+system cases, and model metadata are disabled by default. Analysts can enable
+registered artifact types explicitly. Client download routes validate client
+role, active session, project assignment, publication status, artifact allowlist
+membership, and safe registered paths under `ARTIFACT_ROOT` before returning a
+file.
+
+Revocation is immediate for three cases: user deactivation, project-assignment
+removal, and publication unpublish. Those changes stop client page and download
+access without changing the underlying analyst run history.
+
+### Iteration 6 Acceptance Verification
+
+Run the focused Iteration 6 acceptance suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_iter6_acceptance -v
+```
+
+Run the full Python web acceptance suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Iteration 6 does not change Julia-facing contracts or artifact formats. Run the
+Julia suite only when a later change touches optimizer behavior or output
+formats:
+
+```powershell
+julia --project=. -e "import Pkg; Pkg.test()"
+```

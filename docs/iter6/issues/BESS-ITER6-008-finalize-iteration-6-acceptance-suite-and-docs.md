@@ -1,6 +1,6 @@
 # BESS-ITER6-008: Finalize Iteration 6 Acceptance Suite And Docs
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/iter6/prd_client_publication_portal.md`
@@ -22,39 +22,65 @@ This is the closing proof issue, not the first implementation of core behavior.
 
 ## Acceptance criteria
 
-- [ ] Documentation explains local auth, roles, sessions, and first-admin
+- [x] Documentation explains local auth, roles, sessions, and first-admin
       bootstrap.
-- [ ] Documentation explains admin user management and client project access
+- [x] Documentation explains admin user management and client project access
       assignment.
-- [ ] Documentation explains minimal dashboard templates and selected result
+- [x] Documentation explains minimal dashboard templates and selected result
       sections.
-- [ ] Documentation explains publication drafts, publish/unpublish behavior, and
+- [x] Documentation explains publication drafts, publish/unpublish behavior, and
       preview-as-client workflow.
-- [ ] Documentation explains client portal routes and read-only behavior.
-- [ ] Documentation explains artifact allowlist defaults and security behavior.
-- [ ] Documentation explains revocation behavior for deactivated users, removed
+- [x] Documentation explains client portal routes and read-only behavior.
+- [x] Documentation explains artifact allowlist defaults and security behavior.
+- [x] Documentation explains revocation behavior for deactivated users, removed
       project access, and unpublished publications.
-- [ ] A focused Iteration 6 acceptance suite proves the full central flow end to
+- [x] A focused Iteration 6 acceptance suite proves the full central flow end to
       end.
-- [ ] Acceptance coverage proves clients see assigned projects and published
+- [x] Acceptance coverage proves clients see assigned projects and published
       publications only.
-- [ ] Acceptance coverage proves clients can download only allowlisted
+- [x] Acceptance coverage proves clients can download only allowlisted
       artifacts.
-- [ ] Acceptance coverage proves clients cannot access analyst controls or
+- [x] Acceptance coverage proves clients cannot access analyst controls or
       internal APIs.
-- [ ] Acceptance coverage proves publication preview matches the live client
+- [x] Acceptance coverage proves publication preview matches the live client
       view.
-- [ ] Acceptance coverage proves unpublish and assignment removal revoke access
+- [x] Acceptance coverage proves unpublish and assignment removal revoke access
       immediately.
-- [ ] Regression coverage proves existing analyst flows still work for internal
+- [x] Regression coverage proves existing analyst flows still work for internal
       users.
-- [ ] Manual test checklist is added or updated for Iteration 6.
-- [ ] Full Python web tests pass.
-- [ ] Julia regression tests pass if Iteration 6 touches Julia-facing contracts
+- [x] Manual test checklist is added or updated for Iteration 6.
+- [x] Full Python web tests pass.
+- [x] Julia regression tests pass if Iteration 6 touches Julia-facing contracts
       or artifact formats.
-- [ ] The Iteration 6 tracker includes final verification instructions.
+- [x] The Iteration 6 tracker includes final verification instructions.
 
 ## Blocked by
 
 BESS-ITER6-001, BESS-ITER6-002, BESS-ITER6-003, BESS-ITER6-004, BESS-ITER6-005, BESS-ITER6-006, BESS-ITER6-007
 
+## Implementation Notes
+
+Completed the closing Iteration 6 acceptance proof. Added
+`tests.test_iter6_acceptance` to exercise the central client-publication path:
+first-admin bootstrap, admin-created analyst and client users, client project
+assignment, scenario version creation, manual run execution through the Python
+web queue, dashboard template creation, publication draft creation, preview as
+client, publish, read-only client portal review, allowlisted download access,
+client denial from analyst controls, unpublish revocation, assignment-removal
+revocation, and deactivated-user login denial.
+
+Expanded README documentation for local auth, roles, sessions, admin user
+management, project access, dashboard templates, publication lifecycle, client
+portal routes, artifact allowlists, and revocation. Updated the manual Iteration
+6 checklist with a final closing section and kept tracker verification
+instructions in place.
+
+## Verification
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_iter6_acceptance -v
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Julia regression was not required for this slice because no Julia-facing
+contracts, optimizer behavior, or artifact formats changed.

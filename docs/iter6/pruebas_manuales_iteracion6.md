@@ -145,7 +145,18 @@ artefactos o comportamiento del optimizador, tambien ejecutar:
 julia --project=. -e "import Pkg; Pkg.test()"
 ```
 
-## Cierre
+## Cierre Iteracion 6
+
+Antes de aceptar la iteracion, ejecutar la suite automatizada enfocada y luego
+la suite Python completa:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_iter6_acceptance -v
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+No se requiere Julia para este cierre salvo que el cambio haya tocado contratos
+Julia, formatos de artefactos o comportamiento del optimizador.
 
 | Area | Resultado | Evidencia / notas |
 | --- | --- | --- |
