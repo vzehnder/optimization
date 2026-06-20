@@ -208,9 +208,8 @@ virtual environment and start the app:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-$env:DATABASE_URL = "sqlite:///.tmp/analyst_app.sqlite3"
-$env:ARTIFACT_ROOT = ".tmp/artifacts"
-$env:JULIA = "julia"
+Copy-Item .env.example .env
+# Edit DB_PASSWORD in .env so it matches the local PostgreSQL role.
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
@@ -227,9 +226,33 @@ the Iteration 6 boundary.
 
 ### Database Configuration
 
-The app reads `DATABASE_URL` at startup. The Iteration 3 local implementation
-supports `sqlite:///...` URLs, including `sqlite:///:memory:` for tests and
-`sqlite:///.tmp/analyst_app.sqlite3` for local development.
+The app loads a repository-root `.env` file and builds its PostgreSQL
+connection URL from separate settings:
+
+```text
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_NAME=energy_dispatch
+DB_USER=energy_dispatch_app
+DB_PASSWORD=<local-role-password>
+```
+
+Create the local role and database as a PostgreSQL administrator:
+
+```sql
+CREATE ROLE energy_dispatch_app
+    LOGIN
+    PASSWORD '<same value as DB_PASSWORD>'
+    NOSUPERUSER
+    NOCREATEDB
+    NOCREATEROLE
+    NOREPLICATION;
+
+CREATE DATABASE energy_dispatch OWNER energy_dispatch_app;
+```
+
+`DATABASE_URL` remains available as an explicit override. SQLite URLs,
+including `sqlite:///:memory:`, remain supported for isolated tests.
 
 The app domain is already organized around tables that map cleanly to a future
 PostgreSQL or Supabase-backed deployment:

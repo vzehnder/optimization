@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import os
 import json
 import sqlite3
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from app.auth import VALID_USER_ROLES
+from app.database import connect_database, database_url_from_env, postgres_schema_from_sqlite
 
 
 DASHBOARD_TEMPLATE_FLAGS = [
@@ -47,14 +47,9 @@ def elapsed_seconds(started_at: str | None, finished_at: str) -> float | None:
 
 class AnalystStore:
     def __init__(self, database_url: str | None = None):
-        self.database_url = database_url or os.environ.get("DATABASE_URL") or "sqlite:///.tmp/analyst_app.sqlite3"
-        self.database_path = sqlite_path_from_url(self.database_url)
-        if self.database_path != ":memory:":
-            Path(self.database_path).parent.mkdir(parents=True, exist_ok=True)
+        self.database_url = database_url or database_url_from_env()
         self._lock = threading.RLock()
-        self.connection = sqlite3.connect(self.database_path, check_same_thread=False)
-        self.connection.row_factory = sqlite3.Row
-        self.connection.execute("PRAGMA foreign_keys = ON")
+        self.database_backend, self.database_path, self.connection = connect_database(self.database_url)
         self._initialize_schema()
 
     def close(self) -> None:
@@ -67,8 +62,7 @@ class AnalystStore:
         self.close()
 
     def _initialize_schema(self) -> None:
-        self.connection.executescript(
-            """
+        schema = """
             CREATE TABLE IF NOT EXISTS projects (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -244,7 +238,9 @@ class AnalystStore:
                 CHECK (status IN ('draft', 'published', 'unpublished'))
             );
             """
-        )
+        if self.database_backend == "postgresql":
+            schema = postgres_schema_from_sqlite(schema)
+        self.connection.executescript(schema)
         self._ensure_column("runs", "stdout_log_path", "TEXT")
         self._ensure_column("runs", "stderr_log_path", "TEXT")
         self._ensure_column("runs", "error_message", "TEXT NOT NULL DEFAULT ''")
@@ -252,6 +248,23 @@ class AnalystStore:
         self.connection.commit()
 
     def _ensure_column(self, table_name: str, column_name: str, definition: str) -> None:
+        if self.database_backend == "postgresql":
+            row = self.connection.execute(
+                """
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = ?
+                  AND column_name = ?
+                """,
+                (table_name, column_name),
+            ).fetchone()
+            if row is None:
+                self.connection.execute(
+                    f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}"
+                )
+            return
+
         columns = {
             row["name"]
             for row in self.connection.execute(f"PRAGMA table_info({table_name})").fetchall()
@@ -1580,39 +1593,24 @@ class AnalystStore:
         return resolved
 
 
-def sqlite_path_from_url(database_url: str) -> str:
-    if database_url == "sqlite:///:memory:":
-        return ":memory:"
-
-    prefix = "sqlite:///"
-    if not database_url.startswith(prefix):
-        raise ValueError("Only sqlite:/// DATABASE_URL values are supported by the local app store")
-
-    path_text = database_url[len(prefix) :]
-    if not path_text:
-        raise ValueError("sqlite DATABASE_URL must include a database path")
-
-    return path_text
-
-
-def row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+def row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
     return {key: row[key] for key in row.keys()}
 
 
-def user_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+def user_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
     value = row_to_dict(row)
     value["is_active"] = bool(value["is_active"])
     return value
 
 
-def dashboard_template_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+def dashboard_template_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
     value = row_to_dict(row)
     for field in DASHBOARD_TEMPLATE_FLAGS:
         value[field] = bool(value[field])
     return value
 
 
-def publication_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+def publication_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
     value = row_to_dict(row)
     value["allowed_artifact_types"] = json.loads(value.pop("allowed_artifact_types_json") or "[]")
     return value
@@ -1647,7 +1645,11 @@ def extract_system_case_metadata(document: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def scenario_version_row_to_dict(row: sqlite3.Row, *, include_document: bool) -> dict[str, Any]:
+def scenario_version_row_to_dict(
+    row: Mapping[str, Any] | sqlite3.Row,
+    *,
+    include_document: bool,
+) -> dict[str, Any]:
     value = row_to_dict(row)
     value["asset_counts"] = json.loads(value.pop("asset_counts_json"))
     value["generation_metadata"] = json.loads(value.pop("generation_metadata_json") or "{}")
@@ -1657,13 +1659,13 @@ def scenario_version_row_to_dict(row: sqlite3.Row, *, include_document: bool) ->
     return value
 
 
-def scenario_draft_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+def scenario_draft_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
     value = row_to_dict(row)
     value["document"] = json.loads(value.pop("document_json"))
     return value
 
 
-def run_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+def run_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
     value = row_to_dict(row)
     value["success_payload"] = json.loads(value.pop("success_payload_json") or "{}")
     value["error_payload"] = json.loads(value.pop("error_payload_json") or "{}")

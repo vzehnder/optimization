@@ -1,5 +1,7 @@
 fastapi
 httpx
 openpyxl
+psycopg[binary]
+python-dotenv
 python-multipart
 uvicorn[standard]
