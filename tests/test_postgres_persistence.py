@@ -19,7 +19,7 @@ class DatabaseEnvironmentTests(unittest.TestCase):
             "DB_HOST": "127.0.0.1",
             "DB_PORT": "5432",
             "DB_NAME": "energy_dispatch",
-            "DB_USER": "energy_dispatch_app",
+            "DB_USER": "energy_dispatch_user",
             "DB_PASSWORD": "reserved:/?#[]@!$&'()*+,;=",
         }
         with patch.dict(os.environ, environment, clear=True):
@@ -27,7 +27,7 @@ class DatabaseEnvironmentTests(unittest.TestCase):
 
         self.assertEqual(
             database_url,
-            "postgresql://energy_dispatch_app:"
+            "postgresql://energy_dispatch_user:"
             "reserved%3A%2F%3F%23%5B%5D%40%21%24%26%27%28%29%2A%2B%2C%3B%3D"
             "@127.0.0.1:5432/energy_dispatch",
         )

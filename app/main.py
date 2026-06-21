@@ -24,7 +24,10 @@ from app.auth import (
 )
 from app.draft_editor import (
     DraftGenerationError,
+    SUPPORTED_ASSET_TYPES,
+    add_asset_to_draft,
     generate_system_case_from_draft,
+    remove_asset_from_draft,
     structured_draft_document_from_system_case,
     structured_draft_document_from_form,
 )
@@ -1034,7 +1037,11 @@ def create_app(
     async def save_structured_scenario_draft_from_page(scenario_id: int, request: Request):
         form = await request.form()
         try:
-            draft_document = structured_draft_document_from_form(form)
+            current_draft = get_or_create_scenario_draft(scenario_id)
+            draft_document = structured_draft_document_from_form(
+                form,
+                existing_document=current_draft["document"],
+            )
             analyst_store.create_or_replace_scenario_draft(
                 scenario_id=scenario_id,
                 document=draft_document,
@@ -1051,6 +1058,66 @@ def create_app(
                     empty_scenario_draft_document(scenario["name"]),
                     error_message=str(error),
                 )
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return RedirectResponse(f"/scenarios/{scenario_id}/draft", status_code=303)
+
+    @app.post("/scenarios/{scenario_id}/draft/assets")
+    async def add_scenario_draft_asset_from_page(scenario_id: int, request: Request):
+        form = await request.form()
+        try:
+            draft = get_or_create_scenario_draft(scenario_id)
+            updated_document = add_asset_to_draft(
+                draft["document"],
+                str(form.get("asset_type") or ""),
+            )
+            analyst_store.update_scenario_draft(
+                scenario_id=scenario_id,
+                document=updated_document,
+            )
+        except DraftGenerationError as error:
+            try:
+                scenario = analyst_store.get_scenario(scenario_id)
+                draft = get_or_create_scenario_draft(scenario_id)
+            except KeyError as not_found:
+                raise HTTPException(status_code=404, detail=str(not_found)) from not_found
+            return HTMLResponse(
+                render_scenario_draft_page(
+                    scenario,
+                    draft,
+                    draft["document"],
+                    error_message=str(error),
+                ),
+                status_code=400,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return RedirectResponse(f"/scenarios/{scenario_id}/draft", status_code=303)
+
+    @app.post("/scenarios/{scenario_id}/draft/assets/{asset_id}/remove")
+    async def remove_scenario_draft_asset_from_page(scenario_id: int, asset_id: str):
+        try:
+            draft = get_or_create_scenario_draft(scenario_id)
+            updated_document = remove_asset_from_draft(draft["document"], asset_id)
+            analyst_store.update_scenario_draft(
+                scenario_id=scenario_id,
+                document=updated_document,
+            )
+        except DraftGenerationError as error:
+            try:
+                scenario = analyst_store.get_scenario(scenario_id)
+                draft = get_or_create_scenario_draft(scenario_id)
+            except KeyError as not_found:
+                raise HTTPException(status_code=404, detail=str(not_found)) from not_found
+            return HTMLResponse(
+                render_scenario_draft_page(
+                    scenario,
+                    draft,
+                    draft["document"],
+                    error_message=str(error),
+                ),
+                status_code=404,
             )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
@@ -2413,6 +2480,7 @@ def render_scenario_draft_page(
             "</section>"
         )
     document_for_sections = draft_document if isinstance(draft_document, dict) else {}
+    asset_builder = render_asset_builder(scenario, document_for_sections)
     structured_form = render_structured_draft_form(scenario, document_for_sections)
     time_series_section = render_time_series_source_section(scenario, document_for_sections)
     preview_markup = render_generated_preview(draft_document if isinstance(draft_document, dict) else None)
@@ -2431,19 +2499,80 @@ def render_scenario_draft_page(
           <p>{escape(scenario["name"])} | {escape(status_text)}</p>
         </section>
         {error_markup}
+        {asset_builder}
         {structured_form}
         {time_series_section}
         {preview_markup}
         {generated_validation_markup}
-        <form method="post" action="/scenarios/{scenario["id"]}/draft">
-          <h2>Draft Document</h2>
-          <label for="structured_draft_json">structured_draft_json</label>
-          <textarea id="structured_draft_json" name="structured_draft_json" spellcheck="false">{escape(draft_text)}</textarea>
-          {hidden_source}
-          <button type="submit">Save Draft</button>
-        </form>
+        <details class="advanced-section">
+          <summary>Advanced: edit raw draft JSON</summary>
+          <form method="post" action="/scenarios/{scenario["id"]}/draft">
+            <label for="structured_draft_json">structured_draft_json</label>
+            <textarea id="structured_draft_json" name="structured_draft_json" spellcheck="false">{escape(draft_text)}</textarea>
+            {hidden_source}
+            <button type="submit">Save Raw Draft</button>
+          </form>
+        </details>
         """,
     )
+
+
+def render_asset_builder(scenario: dict, document: dict) -> str:
+    assets = document.get("assets") if isinstance(document.get("assets"), list) else []
+    valid_assets = [
+        asset
+        for asset in assets
+        if isinstance(asset, dict) and asset.get("type") in SUPPORTED_ASSET_TYPES
+    ]
+    present_types = {str(asset.get("type")) for asset in valid_assets}
+    labels = {
+        "battery": "BESS",
+        "load": "Demand",
+        "renewable": "Renewable",
+        "hydro": "Hydro",
+    }
+    cards = []
+    for asset in valid_assets:
+        asset_id = str(asset.get("id") or "")
+        asset_type = str(asset.get("type") or "")
+        cards.append(
+            '<article class="asset-card">'
+            "<div>"
+            f"<strong>{escape(labels.get(asset_type, asset_type.title()))}</strong>"
+            f"<span>{escape(asset_id)}</span>"
+            "</div>"
+            f'<form method="post" action="/scenarios/{scenario["id"]}/draft/assets/'
+            f'{quote(asset_id, safe="")}/remove" class="inline-form">'
+            '<button type="submit" class="button-secondary">Remove</button>'
+            "</form>"
+            "</article>"
+        )
+    cards_markup = "".join(cards) or '<p class="empty">No optional assets added yet.</p>'
+    options = "".join(
+        f'<option value="{asset_type}">{escape(labels[asset_type])}</option>'
+        for asset_type in SUPPORTED_ASSET_TYPES
+        if asset_type not in present_types
+    )
+    if options:
+        add_form = f"""
+          <form method="post" action="/scenarios/{scenario["id"]}/draft/assets" class="asset-add-form">
+            <label for="asset_type">Asset type</label>
+            <select id="asset_type" name="asset_type">{options}</select>
+            <button type="submit">Add Asset</button>
+          </form>
+        """
+    else:
+        add_form = '<p class="empty">All supported asset types are already present.</p>'
+    return f"""
+      <section class="asset-builder">
+        <div>
+          <h2>1. Choose Assets</h2>
+          <p>Add only what this scenario needs. PCC and grid are created automatically.</p>
+        </div>
+        <div class="asset-list">{cards_markup}</div>
+        {add_form}
+      </section>
+    """
 
 
 def render_structured_draft_form(scenario: dict, document: dict) -> str:
@@ -2452,13 +2581,144 @@ def render_structured_draft_form(scenario: dict, document: dict) -> str:
     grid = document.get("grid") if isinstance(document.get("grid"), dict) else {}
     solver = document.get("solver") if isinstance(document.get("solver"), dict) else {}
     assets = document.get("assets") if isinstance(document.get("assets"), list) else []
-    battery = first_asset_of_type(assets, "battery")
-    renewable = first_asset_of_type(assets, "renewable")
-    load = first_asset_of_type(assets, "load")
-    hydro = first_asset_of_type(assets, "hydro")
     solver_options = solver.get("options") if isinstance(solver.get("options"), dict) else {}
-    hydro_generation_curve = hydro.get("generation_curve") if isinstance(hydro.get("generation_curve"), list) else []
-    hydro_reservoir_curve = (
+    asset_sections = "".join(
+        render_asset_settings(asset)
+        for asset in assets
+        if isinstance(asset, dict) and asset.get("type") in SUPPORTED_ASSET_TYPES
+    )
+    if not asset_sections:
+        asset_sections = '<p class="empty asset-empty">Add an asset above to configure it.</p>'
+
+    return f"""
+        <form method="post" action="/scenarios/{scenario["id"]}/draft/structure" class="structured-form">
+          <h2>2. Configure Scenario</h2>
+          <label for="case_name">Scenario name</label>
+          <input id="case_name" name="case_name" value="{html_value(case.get("name") or scenario["name"])}">
+          <label for="case_description">Description</label>
+          <textarea id="case_description" name="case_description">{escape(str(case.get("description") or ""))}</textarea>
+
+          {asset_sections}
+
+          <details class="advanced-section">
+            <summary>Connection and solver settings</summary>
+            <div class="form-grid details-fields">
+              <label for="pcc_id">PCC ID</label>
+              <input id="pcc_id" name="pcc_id" value="{html_value(pcc.get("id") or "bus_1")}">
+              <label for="grid_id">Grid ID</label>
+              <input id="grid_id" name="grid_id" value="{html_value(grid.get("id") or "grid_1")}">
+              <label for="grid_import_power_max_mw">Maximum import (MW)</label>
+              <input id="grid_import_power_max_mw" name="grid_import_power_max_mw" type="number" step="any" value="{html_value(grid.get("import_power_max_mw"))}">
+              <label for="grid_export_power_max_mw">Maximum export (MW)</label>
+              <input id="grid_export_power_max_mw" name="grid_export_power_max_mw" type="number" step="any" value="{html_value(grid.get("export_power_max_mw"))}">
+              <label for="solver_name">Solver</label>
+              <input id="solver_name" name="solver_name" value="{html_value(solver.get("name") or "HiGHS")}">
+            </div>
+            <label class="checkbox-row">
+              <input type="checkbox" name="grid_prevent_simultaneous_grid_import_export" {checked_attr(grid.get("prevent_simultaneous_grid_import_export", True))}>
+              Prevent simultaneous import and export
+            </label>
+            <label for="solver_options_json">Solver options (JSON)</label>
+            <textarea id="solver_options_json" name="solver_options_json" spellcheck="false">{escape(json.dumps(solver_options, sort_keys=True))}</textarea>
+          </details>
+          <button type="submit">Save Scenario Changes</button>
+        </form>
+    """
+
+
+def render_asset_settings(asset: dict[str, Any]) -> str:
+    asset_type = str(asset.get("type") or "")
+    if asset_type == "battery":
+        return render_battery_settings(asset)
+    if asset_type == "load":
+        return render_load_settings(asset)
+    if asset_type == "renewable":
+        return render_renewable_settings(asset)
+    if asset_type == "hydro":
+        return render_hydro_settings(asset)
+    return ""
+
+
+def render_battery_settings(battery: dict[str, Any]) -> str:
+    terminal_condition = str(battery.get("terminal_condition") or "equal_initial")
+    return f"""
+      <fieldset class="asset-settings">
+        <legend>BESS settings</legend>
+        <div class="form-grid">
+          <label for="battery_id">Asset ID</label>
+          <input id="battery_id" name="battery_id" value="{html_value(battery.get("id"))}" required>
+          <label for="battery_charge_power_max_mw">Maximum charge (MW)</label>
+          <input id="battery_charge_power_max_mw" name="battery_charge_power_max_mw" type="number" step="any" value="{html_value(draft_value(battery, "charge_power_max_mw", 4.0))}" required>
+          <label for="battery_discharge_power_max_mw">Maximum discharge (MW)</label>
+          <input id="battery_discharge_power_max_mw" name="battery_discharge_power_max_mw" type="number" step="any" value="{html_value(draft_value(battery, "discharge_power_max_mw", 4.0))}" required>
+          <label for="battery_energy_min_mwh">Minimum energy (MWh)</label>
+          <input id="battery_energy_min_mwh" name="battery_energy_min_mwh" type="number" step="any" value="{html_value(draft_value(battery, "energy_min_mwh", 0.0))}" required>
+          <label for="battery_energy_max_mwh">Maximum energy (MWh)</label>
+          <input id="battery_energy_max_mwh" name="battery_energy_max_mwh" type="number" step="any" value="{html_value(draft_value(battery, "energy_max_mwh", 8.0))}" required>
+          <label for="battery_initial_energy_mwh">Initial energy (MWh)</label>
+          <input id="battery_initial_energy_mwh" name="battery_initial_energy_mwh" type="number" step="any" value="{html_value(draft_value(battery, "initial_energy_mwh", 4.0))}" required>
+          <label for="battery_charge_efficiency">Charge efficiency</label>
+          <input id="battery_charge_efficiency" name="battery_charge_efficiency" type="number" step="any" value="{html_value(draft_value(battery, "charge_efficiency", 0.95))}" required>
+          <label for="battery_discharge_efficiency">Discharge efficiency</label>
+          <input id="battery_discharge_efficiency" name="battery_discharge_efficiency" type="number" step="any" value="{html_value(draft_value(battery, "discharge_efficiency", 0.95))}" required>
+          <label for="battery_degradation_cost_per_mwh_delta_soc">Degradation cost (USD/MWh)</label>
+          <input id="battery_degradation_cost_per_mwh_delta_soc" name="battery_degradation_cost_per_mwh_delta_soc" type="number" step="any" value="{html_value(draft_value(battery, "degradation_cost_per_mwh_delta_soc", 0.0))}" required>
+          <label for="battery_terminal_condition">Terminal condition</label>
+          <select id="battery_terminal_condition" name="battery_terminal_condition">
+            <option value="none" {selected_attr(terminal_condition == "none")}>None</option>
+            <option value="equal_initial" {selected_attr(terminal_condition == "equal_initial")}>Equal initial</option>
+            <option value="min_terminal" {selected_attr(terminal_condition == "min_terminal")}>Minimum terminal</option>
+          </select>
+          <label for="battery_terminal_energy_min_mwh">Minimum terminal energy (MWh)</label>
+          <input id="battery_terminal_energy_min_mwh" name="battery_terminal_energy_min_mwh" type="number" step="any" value="{html_value(battery.get("terminal_energy_min_mwh"))}">
+        </div>
+        <label class="checkbox-row">
+          <input type="checkbox" name="battery_prevent_simultaneous_charge_discharge" {checked_attr(battery.get("prevent_simultaneous_charge_discharge", True))}>
+          Prevent simultaneous charge and discharge
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" name="battery_degradation_linear_delta_soc" {checked_attr(battery.get("degradation_linear_delta_soc", True))}>
+          Apply linear degradation
+        </label>
+      </fieldset>
+    """
+
+
+def render_load_settings(load: dict[str, Any]) -> str:
+    return f"""
+      <fieldset class="asset-settings">
+        <legend>Demand settings</legend>
+        <label for="load_id">Asset ID</label>
+        <input id="load_id" name="load_id" value="{html_value(load.get("id"))}" required>
+        <p>Demand values are supplied period by period in the time-series file.</p>
+      </fieldset>
+    """
+
+
+def render_renewable_settings(renewable: dict[str, Any]) -> str:
+    category = str(renewable.get("category") or renewable.get("display_category") or "solar")
+    return f"""
+      <fieldset class="asset-settings">
+        <legend>Renewable settings</legend>
+        <div class="form-grid">
+          <label for="renewable_id">Asset ID</label>
+          <input id="renewable_id" name="renewable_id" value="{html_value(renewable.get("id"))}" required>
+          <label for="renewable_category">Technology</label>
+          <select id="renewable_category" name="renewable_category">
+            <option value="solar" {selected_attr(category == "solar")}>Solar</option>
+            <option value="wind" {selected_attr(category == "wind")}>Wind</option>
+          </select>
+          <label for="renewable_curtailment_penalty_usd_per_mwh">Curtailment penalty (USD/MWh)</label>
+          <input id="renewable_curtailment_penalty_usd_per_mwh" name="renewable_curtailment_penalty_usd_per_mwh" type="number" step="any" value="{html_value(draft_value(renewable, "curtailment_penalty_usd_per_mwh", 0.0))}">
+        </div>
+        <p>Availability values are supplied period by period in the time-series file.</p>
+      </fieldset>
+    """
+
+
+def render_hydro_settings(hydro: dict[str, Any]) -> str:
+    generation_curve = hydro.get("generation_curve") if isinstance(hydro.get("generation_curve"), list) else []
+    reservoir_curve = (
         hydro.get("reservoir_curve")
         if isinstance(hydro.get("reservoir_curve"), list)
         else [
@@ -2467,121 +2727,59 @@ def render_structured_draft_form(scenario: dict, document: dict) -> str:
             {"storage_hm3": 5.0, "elevation_masl": 720.0},
         ]
     )
-
+    generation_mode = str(hydro.get("generation_mode") or "linear")
+    terminal_condition = str(hydro.get("terminal_condition") or "none")
     return f"""
-        <form method="post" action="/scenarios/{scenario["id"]}/draft/structure" class="structured-form">
-          <h2>Case Metadata</h2>
-          <label for="case_name">case_name</label>
-          <input id="case_name" name="case_name" value="{html_value(case.get("name") or scenario["name"])}">
-          <label for="case_description">case_description</label>
-          <textarea id="case_description" name="case_description">{escape(str(case.get("description") or ""))}</textarea>
-
-          <h2>PCC And Grid</h2>
-          <div class="form-grid">
-            <label for="pcc_id">pcc_id</label>
-            <input id="pcc_id" name="pcc_id" value="{html_value(pcc.get("id") or "bus_1")}">
-            <label for="grid_id">grid_id</label>
-            <input id="grid_id" name="grid_id" value="{html_value(grid.get("id") or "grid_1")}">
-            <label for="grid_import_power_max_mw">grid_import_power_max_mw</label>
-            <input id="grid_import_power_max_mw" name="grid_import_power_max_mw" value="{html_value(grid.get("import_power_max_mw"))}">
-            <label for="grid_export_power_max_mw">grid_export_power_max_mw</label>
-            <input id="grid_export_power_max_mw" name="grid_export_power_max_mw" value="{html_value(grid.get("export_power_max_mw"))}">
-          </div>
-          <label class="checkbox-row">
-            <input type="checkbox" name="grid_prevent_simultaneous_grid_import_export" {checked_attr(grid.get("prevent_simultaneous_grid_import_export", True))}>
-            prevent_simultaneous_grid_import_export
-          </label>
-
-          <h2>Battery Asset</h2>
-          <div class="form-grid">
-            <label for="battery_id">battery_id</label>
-            <input id="battery_id" name="battery_id" value="{html_value(battery.get("id") or "battery_1")}">
-            <label for="battery_charge_power_max_mw">charge_power_max_mw</label>
-            <input id="battery_charge_power_max_mw" name="battery_charge_power_max_mw" value="{html_value(battery.get("charge_power_max_mw") or 4.0)}">
-            <label for="battery_discharge_power_max_mw">discharge_power_max_mw</label>
-            <input id="battery_discharge_power_max_mw" name="battery_discharge_power_max_mw" value="{html_value(battery.get("discharge_power_max_mw") or 4.0)}">
-            <label for="battery_energy_min_mwh">energy_min_mwh</label>
-            <input id="battery_energy_min_mwh" name="battery_energy_min_mwh" value="{html_value(battery.get("energy_min_mwh") if "energy_min_mwh" in battery else 0.0)}">
-            <label for="battery_energy_max_mwh">energy_max_mwh</label>
-            <input id="battery_energy_max_mwh" name="battery_energy_max_mwh" value="{html_value(battery.get("energy_max_mwh") or 8.0)}">
-            <label for="battery_initial_energy_mwh">initial_energy_mwh</label>
-            <input id="battery_initial_energy_mwh" name="battery_initial_energy_mwh" value="{html_value(battery.get("initial_energy_mwh") or 4.0)}">
-            <label for="battery_charge_efficiency">charge_efficiency</label>
-            <input id="battery_charge_efficiency" name="battery_charge_efficiency" value="{html_value(battery.get("charge_efficiency") or 0.95)}">
-            <label for="battery_discharge_efficiency">discharge_efficiency</label>
-            <input id="battery_discharge_efficiency" name="battery_discharge_efficiency" value="{html_value(battery.get("discharge_efficiency") or 0.95)}">
-            <label for="battery_degradation_cost_per_mwh_delta_soc">degradation_cost_per_mwh_delta_soc</label>
-            <input id="battery_degradation_cost_per_mwh_delta_soc" name="battery_degradation_cost_per_mwh_delta_soc" value="{html_value(battery.get("degradation_cost_per_mwh_delta_soc") if "degradation_cost_per_mwh_delta_soc" in battery else 0.0)}">
-            <label for="battery_terminal_condition">terminal_condition</label>
-            <input id="battery_terminal_condition" name="battery_terminal_condition" value="{html_value(battery.get("terminal_condition") or "equal_initial")}">
-            <label for="battery_terminal_energy_min_mwh">terminal_energy_min_mwh</label>
-            <input id="battery_terminal_energy_min_mwh" name="battery_terminal_energy_min_mwh" value="{html_value(battery.get("terminal_energy_min_mwh"))}">
-          </div>
-          <label class="checkbox-row">
-            <input type="checkbox" name="battery_prevent_simultaneous_charge_discharge" {checked_attr(battery.get("prevent_simultaneous_charge_discharge", True))}>
-            prevent_simultaneous_charge_discharge
-          </label>
-          <label class="checkbox-row">
-            <input type="checkbox" name="battery_degradation_linear_delta_soc" {checked_attr(battery.get("degradation_linear_delta_soc", True))}>
-            degradation_linear_delta_soc
-          </label>
-
-          <h2>Renewable And Load Assets</h2>
-          <div class="form-grid">
-            <label for="renewable_id">renewable_id</label>
-            <input id="renewable_id" name="renewable_id" value="{html_value(renewable.get("id") or "solar_1")}">
-            <label for="renewable_category">renewable_category</label>
-            <input id="renewable_category" name="renewable_category" value="{html_value(renewable.get("category") or renewable.get("display_category") or "solar")}">
-            <label for="renewable_curtailment_penalty_usd_per_mwh">curtailment_penalty_usd_per_mwh</label>
-            <input id="renewable_curtailment_penalty_usd_per_mwh" name="renewable_curtailment_penalty_usd_per_mwh" value="{html_value(renewable.get("curtailment_penalty_usd_per_mwh") if "curtailment_penalty_usd_per_mwh" in renewable else 0.0)}">
-            <label for="load_id">load_id</label>
-            <input id="load_id" name="load_id" value="{html_value(load.get("id") or "load_1")}">
-          </div>
-
-          <h2>Hydro Asset</h2>
-          <div class="form-grid">
-            <label for="hydro_id">hydro_id</label>
-            <input id="hydro_id" name="hydro_id" value="{html_value(hydro.get("id") or "")}">
-            <label for="hydro_storage_min_hm3">storage_min_hm3</label>
-            <input id="hydro_storage_min_hm3" name="hydro_storage_min_hm3" value="{html_value(hydro.get("storage_min_hm3") if "storage_min_hm3" in hydro else 1.0)}">
-            <label for="hydro_storage_max_hm3">storage_max_hm3</label>
-            <input id="hydro_storage_max_hm3" name="hydro_storage_max_hm3" value="{html_value(hydro.get("storage_max_hm3") if "storage_max_hm3" in hydro else 5.0)}">
-            <label for="hydro_initial_storage_hm3">initial_storage_hm3</label>
-            <input id="hydro_initial_storage_hm3" name="hydro_initial_storage_hm3" value="{html_value(hydro.get("initial_storage_hm3") if "initial_storage_hm3" in hydro else 2.5)}">
-            <label for="hydro_generation_mode">generation_mode</label>
-            <input id="hydro_generation_mode" name="hydro_generation_mode" value="{html_value(hydro.get("generation_mode") or "linear")}">
-            <label for="hydro_power_per_flow_mw_per_m3s">power_per_flow_mw_per_m3s</label>
-            <input id="hydro_power_per_flow_mw_per_m3s" name="hydro_power_per_flow_mw_per_m3s" value="{html_value(hydro.get("power_per_flow_mw_per_m3s") if "power_per_flow_mw_per_m3s" in hydro else 0.08)}">
-            <label for="hydro_turbine_flow_min_m3s">turbine_flow_min_m3s</label>
-            <input id="hydro_turbine_flow_min_m3s" name="hydro_turbine_flow_min_m3s" value="{html_value(hydro.get("turbine_flow_min_m3s"))}">
-            <label for="hydro_turbine_flow_max_m3s">turbine_flow_max_m3s</label>
-            <input id="hydro_turbine_flow_max_m3s" name="hydro_turbine_flow_max_m3s" value="{html_value(hydro.get("turbine_flow_max_m3s") if "turbine_flow_max_m3s" in hydro else 40.0)}">
-            <label for="hydro_power_max_mw">power_max_mw</label>
-            <input id="hydro_power_max_mw" name="hydro_power_max_mw" value="{html_value(hydro.get("power_max_mw") if "power_max_mw" in hydro else 3.0)}">
-            <label for="hydro_minimum_release_m3s">minimum_release_m3s</label>
-            <input id="hydro_minimum_release_m3s" name="hydro_minimum_release_m3s" value="{html_value(hydro.get("minimum_release_m3s") if "minimum_release_m3s" in hydro else 0.0)}">
-            <label for="hydro_spill_penalty_usd_per_hm3">spill_penalty_usd_per_hm3</label>
-            <input id="hydro_spill_penalty_usd_per_hm3" name="hydro_spill_penalty_usd_per_hm3" value="{html_value(hydro.get("spill_penalty_usd_per_hm3") if "spill_penalty_usd_per_hm3" in hydro else 100.0)}">
-            <label for="hydro_terminal_condition">terminal_condition</label>
-            <input id="hydro_terminal_condition" name="hydro_terminal_condition" value="{html_value(hydro.get("terminal_condition") or "none")}">
-            <label for="hydro_terminal_storage_min_hm3">terminal_storage_min_hm3</label>
-            <input id="hydro_terminal_storage_min_hm3" name="hydro_terminal_storage_min_hm3" value="{html_value(hydro.get("terminal_storage_min_hm3"))}">
-            <label for="hydro_terminal_water_value_usd_per_hm3">terminal_water_value_usd_per_hm3</label>
-            <input id="hydro_terminal_water_value_usd_per_hm3" name="hydro_terminal_water_value_usd_per_hm3" value="{html_value(hydro.get("terminal_water_value_usd_per_hm3") if "terminal_water_value_usd_per_hm3" in hydro else 0.0)}">
-          </div>
-          <label for="hydro_generation_curve_json">generation_curve_json</label>
-          <textarea id="hydro_generation_curve_json" name="hydro_generation_curve_json" spellcheck="false">{escape(json.dumps(hydro_generation_curve, sort_keys=True))}</textarea>
-          <label for="hydro_reservoir_curve_json">reservoir_curve_json</label>
-          <textarea id="hydro_reservoir_curve_json" name="hydro_reservoir_curve_json" spellcheck="false">{escape(json.dumps(hydro_reservoir_curve, sort_keys=True))}</textarea>
-
-          <h2>Solver</h2>
-          <label for="solver_name">solver_name</label>
-          <input id="solver_name" name="solver_name" value="{html_value(solver.get("name") or "HiGHS")}">
-          <label for="solver_options_json">solver_options_json</label>
-          <textarea id="solver_options_json" name="solver_options_json" spellcheck="false">{escape(json.dumps(solver_options, sort_keys=True))}</textarea>
-          <button type="submit">Save Structured Draft</button>
-        </form>
+      <fieldset class="asset-settings">
+        <legend>Hydro settings</legend>
+        <div class="form-grid">
+          <label for="hydro_id">Asset ID</label>
+          <input id="hydro_id" name="hydro_id" value="{html_value(hydro.get("id"))}" required>
+          <label for="hydro_storage_min_hm3">Minimum storage (hm3)</label>
+          <input id="hydro_storage_min_hm3" name="hydro_storage_min_hm3" type="number" step="any" value="{html_value(draft_value(hydro, "storage_min_hm3", 1.0))}" required>
+          <label for="hydro_storage_max_hm3">Maximum storage (hm3)</label>
+          <input id="hydro_storage_max_hm3" name="hydro_storage_max_hm3" type="number" step="any" value="{html_value(draft_value(hydro, "storage_max_hm3", 5.0))}" required>
+          <label for="hydro_initial_storage_hm3">Initial storage (hm3)</label>
+          <input id="hydro_initial_storage_hm3" name="hydro_initial_storage_hm3" type="number" step="any" value="{html_value(draft_value(hydro, "initial_storage_hm3", 2.5))}" required>
+          <label for="hydro_generation_mode">Generation mode</label>
+          <select id="hydro_generation_mode" name="hydro_generation_mode">
+            <option value="linear" {selected_attr(generation_mode == "linear")}>Linear</option>
+            <option value="piecewise_linear" {selected_attr(generation_mode == "piecewise_linear")}>Piecewise linear</option>
+          </select>
+          <label for="hydro_power_per_flow_mw_per_m3s">Power per flow (MW per m3/s)</label>
+          <input id="hydro_power_per_flow_mw_per_m3s" name="hydro_power_per_flow_mw_per_m3s" type="number" step="any" value="{html_value(draft_value(hydro, "power_per_flow_mw_per_m3s", 0.08))}">
+          <label for="hydro_turbine_flow_min_m3s">Minimum turbine flow (m3/s)</label>
+          <input id="hydro_turbine_flow_min_m3s" name="hydro_turbine_flow_min_m3s" type="number" step="any" value="{html_value(hydro.get("turbine_flow_min_m3s"))}">
+          <label for="hydro_turbine_flow_max_m3s">Maximum turbine flow (m3/s)</label>
+          <input id="hydro_turbine_flow_max_m3s" name="hydro_turbine_flow_max_m3s" type="number" step="any" value="{html_value(draft_value(hydro, "turbine_flow_max_m3s", 40.0))}">
+          <label for="hydro_power_max_mw">Maximum power (MW)</label>
+          <input id="hydro_power_max_mw" name="hydro_power_max_mw" type="number" step="any" value="{html_value(draft_value(hydro, "power_max_mw", 3.0))}">
+          <label for="hydro_minimum_release_m3s">Minimum release (m3/s)</label>
+          <input id="hydro_minimum_release_m3s" name="hydro_minimum_release_m3s" type="number" step="any" value="{html_value(draft_value(hydro, "minimum_release_m3s", 0.0))}">
+          <label for="hydro_spill_penalty_usd_per_hm3">Spill penalty (USD/hm3)</label>
+          <input id="hydro_spill_penalty_usd_per_hm3" name="hydro_spill_penalty_usd_per_hm3" type="number" step="any" value="{html_value(draft_value(hydro, "spill_penalty_usd_per_hm3", 100.0))}">
+          <label for="hydro_terminal_condition">Terminal condition</label>
+          <select id="hydro_terminal_condition" name="hydro_terminal_condition">
+            <option value="none" {selected_attr(terminal_condition == "none")}>None</option>
+            <option value="equal_initial" {selected_attr(terminal_condition == "equal_initial")}>Equal initial</option>
+            <option value="min_terminal" {selected_attr(terminal_condition == "min_terminal")}>Minimum terminal</option>
+          </select>
+          <label for="hydro_terminal_storage_min_hm3">Minimum terminal storage (hm3)</label>
+          <input id="hydro_terminal_storage_min_hm3" name="hydro_terminal_storage_min_hm3" type="number" step="any" value="{html_value(hydro.get("terminal_storage_min_hm3"))}">
+          <label for="hydro_terminal_water_value_usd_per_hm3">Terminal water value (USD/hm3)</label>
+          <input id="hydro_terminal_water_value_usd_per_hm3" name="hydro_terminal_water_value_usd_per_hm3" type="number" step="any" value="{html_value(draft_value(hydro, "terminal_water_value_usd_per_hm3", 0.0))}">
+        </div>
+        <label for="hydro_generation_curve_json">Generation curve (JSON)</label>
+        <textarea id="hydro_generation_curve_json" name="hydro_generation_curve_json" spellcheck="false">{escape(json.dumps(generation_curve, sort_keys=True))}</textarea>
+        <label for="hydro_reservoir_curve_json">Reservoir curve (JSON)</label>
+        <textarea id="hydro_reservoir_curve_json" name="hydro_reservoir_curve_json" spellcheck="false">{escape(json.dumps(reservoir_curve, sort_keys=True))}</textarea>
+      </fieldset>
     """
+
+
+def draft_value(document: dict[str, Any], key: str, default: Any) -> Any:
+    value = document.get(key)
+    return default if value is None else value
 
 
 def render_time_series_source_section(scenario: dict, document: dict) -> str:
@@ -2592,12 +2790,13 @@ def render_time_series_source_section(scenario: dict, document: dict) -> str:
     return f"""
         <section class="time-series-source">
           <form method="post" action="/scenarios/{scenario["id"]}/draft/time-series-sources/upload" enctype="multipart/form-data">
-            <h2>CSV Time-Series Source</h2>
-            <label for="source_file">source_file</label>
+            <h2>3. Upload Time Series</h2>
+            <p>Use a CSV or XLSX file for prices, demand and asset availability by period.</p>
+            <label for="source_file">Time-series file</label>
             <input id="source_file" name="source_file" type="file" accept="text/csv,.csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
-            <label for="sheet_name">xlsx_sheet_name</label>
+            <label for="sheet_name">XLSX sheet (optional)</label>
             <input id="sheet_name" name="sheet_name" placeholder="First sheet by default">
-            <button type="submit">Upload Source</button>
+            <button type="submit">Upload Time Series</button>
           </form>
           {source_markup}
         </section>
@@ -2740,10 +2939,10 @@ def render_generated_preview(document: dict | None) -> str:
     except DraftGenerationError:
         return ""
     return (
-        '<section class="preview-block">'
-        "<h2>Generated System Case Preview</h2>"
+        '<details class="preview-block advanced-section">'
+        "<summary>Generated system case preview</summary>"
         f'<textarea id="generated_system_case_preview" readonly spellcheck="false">{escape(preview_text)}</textarea>'
-        "</section>"
+        "</details>"
     )
 
 
@@ -2780,8 +2979,8 @@ def render_generated_validation_section(
     return (
         f'<form method="post" action="/scenarios/{scenario["id"]}/draft/generated-system-case/validate" '
         'class="inline-form">'
-        "<h2>Generated System Case Validation</h2>"
-        '<button type="submit">Validate Generated System Case</button>'
+        "<h2>4. Validate Scenario</h2>"
+        '<button type="submit">Validate Scenario</button>'
         "</form>"
         f"{result_markup}"
         f"{promote_markup}"
@@ -3228,6 +3427,67 @@ def render_app_page(title: str, content: str) -> str:
     .structured-form {{
       margin-bottom: 18px;
     }}
+    .asset-builder {{
+      display: grid;
+      gap: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin-bottom: 18px;
+      padding: 18px;
+    }}
+    .asset-list {{
+      display: grid;
+      gap: 8px;
+    }}
+    .asset-card {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px 12px;
+      background: var(--surface);
+    }}
+    .asset-card div {{
+      display: grid;
+      gap: 3px;
+    }}
+    .asset-card span {{
+      color: var(--muted);
+      font-size: 13px;
+    }}
+    .asset-add-form {{
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) auto;
+      align-items: end;
+      gap: 8px 12px;
+      border: 0;
+      padding: 0;
+      background: transparent;
+    }}
+    .asset-add-form label {{
+      grid-column: 1 / -1;
+    }}
+    .asset-settings {{
+      display: grid;
+      gap: 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      margin: 8px 0;
+      padding: 16px;
+      background: white;
+    }}
+    .asset-settings legend {{
+      padding: 0 8px;
+      color: var(--ink);
+      font-weight: 700;
+    }}
+    .asset-empty {{
+      border: 1px dashed var(--line);
+      border-radius: 6px;
+      padding: 16px;
+    }}
     .form-grid {{
       display: grid;
       grid-template-columns: repeat(2, minmax(180px, 1fr));
@@ -3246,6 +3506,7 @@ def render_app_page(title: str, content: str) -> str:
       font-weight: 700;
     }}
     input,
+    select,
     textarea {{
       box-sizing: border-box;
       width: 100%;
@@ -3281,6 +3542,30 @@ def render_app_page(title: str, content: str) -> str:
       color: white;
       font-weight: 700;
       cursor: pointer;
+    }}
+    .button-secondary {{
+      border: 1px solid var(--line);
+      padding: 7px 10px;
+      background: white;
+      color: var(--ink);
+    }}
+    .advanced-section {{
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      margin: 12px 0;
+      padding: 12px;
+      background: white;
+    }}
+    .advanced-section summary {{
+      cursor: pointer;
+      color: var(--ink);
+      font-weight: 700;
+    }}
+    .advanced-section[open] summary {{
+      margin-bottom: 14px;
+    }}
+    .details-fields {{
+      margin-bottom: 12px;
     }}
     .notice {{
       border-left: 4px solid var(--accent);
@@ -3395,6 +3680,9 @@ def render_app_page(title: str, content: str) -> str:
         grid-template-columns: 1fr;
       }}
       .form-grid {{
+        grid-template-columns: 1fr;
+      }}
+      .asset-add-form {{
         grid-template-columns: 1fr;
       }}
       .details dl {{

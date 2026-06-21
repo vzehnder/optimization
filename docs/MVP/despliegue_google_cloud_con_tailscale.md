@@ -96,7 +96,7 @@ La aplicacion recibe componentes separados y construye internamente la URL:
 DB_HOST=<tailscale-db-ip>
 DB_PORT=5432
 DB_NAME=energy_dispatch
-DB_USER=energy_dispatch_app
+DB_USER=energy_dispatch_user
 DB_PASSWORD=<password>
 ```
 

@@ -233,14 +233,14 @@ connection URL from separate settings:
 DB_HOST=127.0.0.1
 DB_PORT=5432
 DB_NAME=energy_dispatch
-DB_USER=energy_dispatch_app
+DB_USER=energy_dispatch_user
 DB_PASSWORD=<local-role-password>
 ```
 
 Create the local role and database as a PostgreSQL administrator:
 
 ```sql
-CREATE ROLE energy_dispatch_app
+CREATE ROLE energy_dispatch_user
     LOGIN
     PASSWORD '<same value as DB_PASSWORD>'
     NOSUPERUSER
@@ -248,7 +248,7 @@ CREATE ROLE energy_dispatch_app
     NOCREATEROLE
     NOREPLICATION;
 
-CREATE DATABASE energy_dispatch OWNER energy_dispatch_app;
+CREATE DATABASE energy_dispatch OWNER energy_dispatch_user;
 ```
 
 `DATABASE_URL` remains available as an explicit override. SQLite URLs,

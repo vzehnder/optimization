@@ -207,12 +207,17 @@ class StructuredDraftEditorTests(unittest.TestCase):
             'name="case_name"',
             'name="pcc_id"',
             'name="grid_import_power_max_mw"',
-            'name="battery_id"',
-            'name="renewable_id"',
-            'name="load_id"',
+            'name="asset_type"',
             'name="solver_options_json"',
         ]:
             self.assertIn(expected, draft_page.text)
+        for absent_asset_field in [
+            'name="battery_id"',
+            'name="renewable_id"',
+            'name="load_id"',
+            'name="hydro_id"',
+        ]:
+            self.assertNotIn(absent_asset_field, draft_page.text)
 
         form_response = self.client.post(
             f"/scenarios/{self.scenario['id']}/draft/structure",
@@ -265,11 +270,8 @@ class StructuredDraftEditorTests(unittest.TestCase):
         draft_page = self.client.get(f"/scenarios/{self.scenario['id']}/draft")
         self.assertEqual(draft_page.status_code, 200)
         for expected in [
-            'name="hydro_id"',
-            'name="hydro_generation_mode"',
-            'name="hydro_power_per_flow_mw_per_m3s"',
-            'name="hydro_generation_curve_json"',
-            'name="hydro_reservoir_curve_json"',
+            'name="asset_type"',
+            '<option value="hydro">Hydro</option>',
         ]:
             self.assertIn(expected, draft_page.text)
 
@@ -314,6 +316,58 @@ class StructuredDraftEditorTests(unittest.TestCase):
         self.assertEqual(hydro["power_per_flow_mw_per_m3s"], 0.08)
         self.assertEqual(hydro["terminal_condition"], "min_terminal")
         self.assertEqual(hydro["reservoir_curve"][2], {"storage_hm3": 5.0, "elevation_masl": 720.0})
+
+    def test_assets_can_be_added_one_by_one_and_removed(self):
+        initial_page = self.client.get(f"/scenarios/{self.scenario['id']}/draft")
+        self.assertIn("No optional assets added yet", initial_page.text)
+
+        add_battery = self.client.post(
+            f"/scenarios/{self.scenario['id']}/draft/assets",
+            data={"asset_type": "battery"},
+            follow_redirects=False,
+        )
+        self.assertEqual(add_battery.status_code, 303)
+        battery_page = self.client.get(f"/scenarios/{self.scenario['id']}/draft")
+        self.assertIn("BESS settings", battery_page.text)
+        self.assertIn('name="battery_id"', battery_page.text)
+        self.assertNotIn('name="load_id"', battery_page.text)
+
+        add_load = self.client.post(
+            f"/scenarios/{self.scenario['id']}/draft/assets",
+            data={"asset_type": "load"},
+            follow_redirects=False,
+        )
+        self.assertEqual(add_load.status_code, 303)
+        draft = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/draft"
+        ).json()["draft"]["document"]
+        self.assertEqual(
+            [(asset["id"], asset["type"]) for asset in draft["assets"]],
+            [("battery_1", "battery"), ("load_1", "load")],
+        )
+
+        selected_page = self.client.get(f"/scenarios/{self.scenario['id']}/draft")
+        self.assertIn("BESS settings", selected_page.text)
+        self.assertIn("Demand settings", selected_page.text)
+        self.assertNotIn('name="renewable_id"', selected_page.text)
+        self.assertNotIn('name="hydro_id"', selected_page.text)
+
+        duplicate = self.client.post(
+            f"/scenarios/{self.scenario['id']}/draft/assets",
+            data={"asset_type": "battery"},
+        )
+        self.assertEqual(duplicate.status_code, 400)
+        self.assertIn("battery asset is already present", duplicate.text)
+
+        remove_battery = self.client.post(
+            f"/scenarios/{self.scenario['id']}/draft/assets/battery_1/remove",
+            follow_redirects=False,
+        )
+        self.assertEqual(remove_battery.status_code, 303)
+        remaining = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/draft"
+        ).json()["draft"]["document"]
+        self.assertEqual(remaining["assets"], [{"id": "load_1", "type": "load"}])
 
     def test_ssr_structured_form_edits_piecewise_hydro_breakpoints(self):
         form_response = self.client.post(
