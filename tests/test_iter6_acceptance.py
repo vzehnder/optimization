@@ -119,7 +119,7 @@ class Iteration6AcceptanceTests(unittest.TestCase):
                 run_page = client.get(f"/runs/{run_id}")
                 self.assertEqual(run_page.status_code, 200)
                 self.assertIn("Run Summary", run_page.text)
-                self.assertIn("Basic Charts", run_page.text)
+                self.assertIn("Interactive Plots", run_page.text)
                 self.assertIn("Publication Drafts", run_page.text)
 
                 template_response = client.post(
@@ -168,7 +168,7 @@ class Iteration6AcceptanceTests(unittest.TestCase):
                     "Approved assumptions for client review.",
                     "Run Status",
                     "succeeded",
-                    "Grid Import / Export",
+                    "Interactive Plots",
                     "System Dispatch",
                     "summary.json",
                 ]:
@@ -206,7 +206,7 @@ class Iteration6AcceptanceTests(unittest.TestCase):
                     "Approved assumptions for client review.",
                     "Run Status",
                     "succeeded",
-                    "Grid Import / Export",
+                    "Interactive Plots",
                     "System Dispatch",
                     "summary.json",
                 ]:

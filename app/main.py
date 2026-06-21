@@ -4,6 +4,7 @@ import copy
 import json
 import os
 from contextlib import asynccontextmanager
+from functools import lru_cache
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from plotly.offline import get_plotlyjs
 from pydantic import BaseModel, Field
 
 from app.auth import (
@@ -231,7 +233,7 @@ def create_app(
             return await call_next(request)
 
         path = request.url.path
-        if path in {"/favicon.ico", "/login", "/bootstrap", "/logout"}:
+        if path in {"/favicon.ico", "/login", "/bootstrap", "/logout", "/assets/plotly.min.js"}:
             return await call_next(request)
 
         user = current_user_from_request(request)
@@ -254,6 +256,14 @@ def create_app(
         except PermissionError:
             return forbidden_response(request)
         return await call_next(request)
+
+    @app.get("/assets/plotly.min.js", include_in_schema=False)
+    async def plotly_javascript_bundle():
+        return Response(
+            content=cached_plotly_javascript(),
+            media_type="application/javascript",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
 
     def save_validated_scenario_version(
         scenario_id: int,
@@ -1341,6 +1351,7 @@ def create_app(
     async def run_page(run_id: int):
         try:
             run = analyst_store.get_run(run_id)
+            lineage = analyst_store.get_run_lineage(run_id)
             stored_artifacts = analyst_store.list_run_artifacts(run_id)
             artifacts = [
                 artifact_response_body(artifact)
@@ -1350,8 +1361,7 @@ def create_app(
             publications = analyst_store.list_run_publications(run_id)
             dashboard_templates = []
             if run["status"] == "succeeded":
-                project_id = analyst_store.get_run_project_id(run_id)
-                dashboard_templates = analyst_store.list_dashboard_templates(project_id)
+                dashboard_templates = analyst_store.list_dashboard_templates(lineage["project_id"])
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
@@ -1371,6 +1381,7 @@ def create_app(
                 publications=publications,
                 dashboard_templates=dashboard_templates,
                 publication_artifacts=stored_artifacts,
+                scenario_id=lineage["scenario_id"],
             )
         )
 
@@ -3390,6 +3401,11 @@ def render_app_page(title: str, content: str) -> str:
       margin-bottom: 24px;
       padding-bottom: 18px;
     }}
+    .run-actions {{
+      display: flex;
+      gap: 8px;
+      margin-top: 14px;
+    }}
     .split {{
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
@@ -3549,6 +3565,14 @@ def render_app_page(title: str, content: str) -> str:
       background: white;
       color: var(--ink);
     }}
+    .button-link {{
+      display: inline-block;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 9px 12px;
+      background: white;
+      color: var(--ink);
+    }}
     .advanced-section {{
       border: 1px solid var(--line);
       border-radius: 6px;
@@ -3603,9 +3627,6 @@ def render_app_page(title: str, content: str) -> str:
       margin-top: 26px;
     }}
     .chart-grid {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 16px;
       margin-bottom: 24px;
     }}
     .chart-panel {{
@@ -3623,34 +3644,139 @@ def render_app_page(title: str, content: str) -> str:
     .chart-panel p {{
       font-size: 13px;
     }}
-    .chart-svg {{
-      display: block;
-      width: 100%;
-      aspect-ratio: 16 / 7;
-      min-height: 180px;
-    }}
-    .chart-legend {{
+    .plot-builder-toolbar,
+    .configurable-plot-header {{
       display: flex;
-      flex-wrap: wrap;
-      gap: 8px 12px;
-      margin: 8px 0 0;
-      padding: 0;
-      list-style: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }}
+    .plot-builder-toolbar p {{
+      margin: 0;
+    }}
+    .plot-favorites {{
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) auto minmax(180px, 1fr) auto auto;
+      gap: 8px;
+      align-items: end;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin-bottom: 16px;
+      padding: 12px;
+      background: var(--surface);
+    }}
+    .plot-favorites label {{
+      display: grid;
+      gap: 5px;
+    }}
+    .favorite-feedback {{
+      grid-column: 1 / -1;
+      min-height: 18px;
       color: var(--muted);
       font-size: 12px;
     }}
-    .legend-swatch {{
-      display: inline-block;
-      width: 10px;
-      height: 10px;
-      border-radius: 2px;
-      margin-right: 5px;
-      vertical-align: -1px;
+    .configurable-plot {{
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 18px;
+      background: white;
+    }}
+    .plot-title-input {{
+      max-width: 420px;
+      font-size: 16px;
+      font-weight: 700;
+    }}
+    .plot-controls {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(240px, 1fr));
+      gap: 12px;
+      margin-bottom: 10px;
+    }}
+    .series-picker {{
+      position: relative;
+    }}
+    .series-picker summary {{
+      cursor: pointer;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px 12px;
+      color: var(--ink);
+      font-weight: 700;
+      background: var(--surface);
+    }}
+    .series-picker-panel {{
+      position: absolute;
+      z-index: 20;
+      width: min(520px, calc(100vw - 64px));
+      max-height: 360px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px;
+      background: white;
+      box-shadow: 0 12px 28px rgba(24, 33, 47, 0.16);
+    }}
+    .series-filter {{
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      margin-bottom: 8px;
+      background: white;
+    }}
+    .series-group-block {{
+      border-top: 1px solid var(--line);
+      margin-top: 8px;
+      padding-top: 8px;
+    }}
+    .series-group-header {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 4px;
+    }}
+    .series-group-label {{
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }}
+    .series-group-actions {{
+      display: flex;
+      gap: 5px;
+    }}
+    .series-group-action {{
+      border: 1px solid var(--line);
+      padding: 4px 7px;
+      background: white;
+      color: var(--accent);
+      font-size: 11px;
+    }}
+    .series-option {{
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 5px 2px;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 400;
+    }}
+    .series-option input {{
+      width: auto;
+      margin-top: 2px;
+    }}
+    .plotly-chart {{
+      width: 100%;
+      min-height: 500px;
     }}
     .table-scroll {{
       border: 1px solid var(--line);
       border-radius: 6px;
-      overflow-x: auto;
+      max-height: 420px;
+      overflow: auto;
       margin-bottom: 24px;
     }}
     table {{
@@ -3667,6 +3793,9 @@ def render_app_page(title: str, content: str) -> str:
       white-space: nowrap;
     }}
     thead th {{
+      position: sticky;
+      top: 0;
+      z-index: 2;
       background: var(--surface);
       color: var(--muted);
       font-weight: 700;
@@ -3684,6 +3813,15 @@ def render_app_page(title: str, content: str) -> str:
       }}
       .asset-add-form {{
         grid-template-columns: 1fr;
+      }}
+      .plot-controls {{
+        grid-template-columns: 1fr;
+      }}
+      .plot-favorites {{
+        grid-template-columns: 1fr;
+      }}
+      .favorite-feedback {{
+        grid-column: 1;
       }}
       .details dl {{
         grid-template-columns: 1fr;
@@ -3707,6 +3845,7 @@ def render_run_page(
     publications: list[dict] | None = None,
     dashboard_templates: list[dict[str, Any]] | None = None,
     publication_artifacts: list[dict] | None = None,
+    scenario_id: int | None = None,
 ) -> str:
     artifact_items = render_artifact_items(artifacts or [])
     publication_markup = render_publications_section(
@@ -3716,6 +3855,11 @@ def render_run_page(
         publication_artifacts or [],
     )
     results_markup = render_results_section(results, results_error)
+    parameters_link = (
+        f'<a class="button-link" href="/scenarios/{scenario_id}/draft">Back to parameters</a>'
+        if scenario_id is not None
+        else ""
+    )
     return render_app_page(
         f"Run {run['id']}",
         f"""
@@ -3723,6 +3867,7 @@ def render_run_page(
         <section class="toolbar">
           <h1>Run {run["id"]}</h1>
           <p>Status: <strong id="run-status">{escape(run["status"])}</strong></p>
+          <div class="run-actions">{parameters_link}</div>
         </section>
         <section class="details">
           <dl>
@@ -3920,8 +4065,8 @@ def render_client_dashboard_results(results: dict | None, results_error: str = "
         )
     if results.get("charts"):
         sections.append(
-            "<h2>Charts</h2>"
-            f"{render_chart_grid(results['charts'])}"
+            "<h2>Interactive Plots</h2>"
+            f"{render_chart_grid(results['charts'], results.get('plot_series', []))}"
         )
     if results.get("dispatch_table") is not None:
         sections.append(
@@ -3953,8 +4098,8 @@ def render_results_section(results: dict | None, results_error: str = "") -> str
         <section class="results-section">
           <h2>Run Summary</h2>
           {render_summary_details(results["summary"])}
-          <h2>Basic Charts</h2>
-          {render_chart_grid(results["charts"])}
+          <h2>Interactive Plots</h2>
+          {render_chart_grid(results["charts"], results.get("plot_series", []))}
           <h2>System Dispatch</h2>
           {render_result_table(results["dispatch_table"])}
           <h2>Asset Dispatch</h2>
@@ -4036,133 +4181,374 @@ def render_key_value_table(values: dict[str, Any]) -> str:
     )
 
 
-def render_chart_grid(charts: dict) -> str:
-    chart_keys = [
-        "price",
-        "grid_import_export",
-        "renewable_used_curtailed",
-        "bess_charge_discharge_soc",
-        "period_profit",
-        "hydro_power",
-        "hydro_flows",
-        "hydro_storage",
-        "hydro_reservoir_elevation",
-    ]
-    panels = "".join(render_chart_panel(charts[key]) for key in chart_keys if key in charts)
-    return f'<div class="chart-grid">{panels}</div>'
+def render_chart_grid(charts: dict, plot_series: list[dict[str, Any]]) -> str:
+    if not charts:
+        return ""
+    if not plot_series:
+        return '<p>No numeric series are available for plotting.</p>'
+    payload = json_for_inline_script(plot_series)
+    script = """
+      <script>
+        (() => {
+          const root = document.getElementById("plot-builder");
+          const catalog = __PLOT_SERIES__;
+          const seriesById = new Map(catalog.map((series) => [series.id, series]));
+          const plotsContainer = root.querySelector("[data-plots]");
+          const addButton = root.querySelector("[data-add-plot]");
+          const favoriteNameInput = root.querySelector("[data-favorite-name]");
+          const favoriteSelect = root.querySelector("[data-favorite-select]");
+          const favoriteFeedback = root.querySelector("[data-favorite-feedback]");
+          const favoriteStorageKey = "energy_dispatch.plotFavorites.v1";
+          const plots = [];
+          let nextPlotId = 1;
 
+          function element(tag, className, text) {
+            const node = document.createElement(tag);
+            if (className) node.className = className;
+            if (text !== undefined) node.textContent = text;
+            return node;
+          }
 
-def render_chart_panel(chart: dict) -> str:
-    chart_id = escape(chart["id"])
-    title = escape(chart["title"])
-    if not chart["available"]:
-        message = escape(chart.get("message") or "Chart data is not available for this run.")
-        return (
-            f'<section class="chart-panel" data-chart-id="{chart_id}">'
-            f"<h3>{title}</h3>"
-            f"<p>{message}</p>"
-            "</section>"
-        )
+          function setFavoriteFeedback(message) {
+            favoriteFeedback.textContent = message;
+          }
 
+          function readFavorites() {
+            try {
+              const parsed = JSON.parse(window.localStorage.getItem(favoriteStorageKey) || "[]");
+              return Array.isArray(parsed) ? parsed.filter((favorite) => favorite && favorite.name) : [];
+            } catch (error) {
+              setFavoriteFeedback("Favorites could not be read from this browser.");
+              return [];
+            }
+          }
+
+          function writeFavorites(favorites) {
+            try {
+              window.localStorage.setItem(favoriteStorageKey, JSON.stringify(favorites));
+              return true;
+            } catch (error) {
+              setFavoriteFeedback("Favorites could not be saved in this browser.");
+              return false;
+            }
+          }
+
+          function refreshFavoriteOptions(selectedName = "") {
+            favoriteSelect.replaceChildren(new Option("Choose a favorite", ""));
+            for (const favorite of readFavorites().sort((left, right) => left.name.localeCompare(right.name))) {
+              favoriteSelect.appendChild(new Option(favorite.name, favorite.name));
+            }
+            favoriteSelect.value = selectedName;
+          }
+
+          function saveFavorite() {
+            const name = favoriteNameInput.value.trim();
+            if (!name) {
+              setFavoriteFeedback("Enter a name before saving a favorite.");
+              favoriteNameInput.focus();
+              return;
+            }
+            if (!plots.length) {
+              setFavoriteFeedback("Add at least one plot before saving a favorite.");
+              return;
+            }
+            const favorite = {
+              name,
+              plots: plots.map((state) => ({
+                title: state.titleInput.value,
+                primary: [...state.primary],
+                secondary: [...state.secondary],
+              })),
+              updatedAt: new Date().toISOString(),
+            };
+            const favorites = readFavorites().filter((item) => item.name !== name);
+            favorites.push(favorite);
+            if (!writeFavorites(favorites)) return;
+            refreshFavoriteOptions(name);
+            setFavoriteFeedback(`Favorite “${name}” saved in this browser.`);
+          }
+
+          function clearPlots() {
+            for (const state of [...plots]) {
+              Plotly.purge(state.chart);
+              state.card.remove();
+            }
+            plots.length = 0;
+          }
+
+          function loadFavorite() {
+            const name = favoriteSelect.value;
+            const favorite = readFavorites().find((item) => item.name === name);
+            if (!favorite) {
+              setFavoriteFeedback("Choose a favorite to load.");
+              return;
+            }
+            clearPlots();
+            for (const plot of favorite.plots || []) {
+              addPlot(plot.primary || [], plot.secondary || [], plot.title || "");
+            }
+            if (!plots.length) addPlot();
+            favoriteNameInput.value = favorite.name;
+            setFavoriteFeedback(`Favorite “${favorite.name}” loaded.`);
+          }
+
+          function deleteFavorite() {
+            const name = favoriteSelect.value;
+            if (!name) {
+              setFavoriteFeedback("Choose a favorite to delete.");
+              return;
+            }
+            if (!window.confirm(`Delete favorite “${name}”?`)) return;
+            const favorites = readFavorites().filter((item) => item.name !== name);
+            if (!writeFavorites(favorites)) return;
+            refreshFavoriteOptions();
+            if (favoriteNameInput.value.trim() === name) favoriteNameInput.value = "";
+            setFavoriteFeedback(`Favorite “${name}” deleted.`);
+          }
+
+          function axisTitle(seriesIds) {
+            const units = [...new Set(seriesIds.map((id) => seriesById.get(id)?.unit).filter(Boolean))];
+            return units.length === 1 ? units[0] : "Value (mixed units)";
+          }
+
+          function updateGroupSelection(state, axis, groupSeries, selected) {
+            const otherAxis = axis === "primary" ? "secondary" : "primary";
+            for (const series of groupSeries) {
+              if (selected) {
+                state[axis].add(series.id);
+                state[otherAxis].delete(series.id);
+              } else {
+                state[axis].delete(series.id);
+              }
+            }
+            syncControls(state);
+            updatePlot(state);
+          }
+
+          function createSeriesPicker(state, axis, label) {
+            const details = element("details", "series-picker");
+            const summary = element("summary", "", label);
+            const panel = element("div", "series-picker-panel");
+            const filter = element("input", "series-filter");
+            filter.type = "search";
+            filter.placeholder = "Filter series...";
+            panel.appendChild(filter);
+            state.summaries[axis] = summary;
+            state.inputs[axis] = new Map();
+
+            const groups = new Map();
+            for (const series of catalog) {
+              if (!groups.has(series.source_label)) groups.set(series.source_label, []);
+              groups.get(series.source_label).push(series);
+            }
+            for (const [groupLabel, groupSeries] of groups) {
+              const groupBlock = element("div", "series-group-block");
+              const groupHeader = element("div", "series-group-header");
+              const groupActions = element("div", "series-group-actions");
+              const selectAll = element("button", "series-group-action", "Select all");
+              const unselectAll = element("button", "series-group-action", "Unselect all");
+              selectAll.type = "button";
+              unselectAll.type = "button";
+              selectAll.addEventListener("click", () => updateGroupSelection(state, axis, groupSeries, true));
+              unselectAll.addEventListener("click", () => updateGroupSelection(state, axis, groupSeries, false));
+              groupActions.append(selectAll, unselectAll);
+              groupHeader.append(element("div", "series-group-label", groupLabel), groupActions);
+              groupBlock.appendChild(groupHeader);
+
+              for (const series of groupSeries) {
+                const option = element("label", "series-option");
+                option.dataset.search = `${series.label} ${series.column} ${series.source_label}`.toLowerCase();
+                const checkbox = element("input");
+                checkbox.type = "checkbox";
+                checkbox.dataset.seriesId = series.id;
+                checkbox.dataset.axis = axis;
+                checkbox.addEventListener("change", () => {
+                  const otherAxis = axis === "primary" ? "secondary" : "primary";
+                  if (checkbox.checked) {
+                    state[axis].add(series.id);
+                    state[otherAxis].delete(series.id);
+                  } else {
+                    state[axis].delete(series.id);
+                  }
+                  syncControls(state);
+                  updatePlot(state);
+                });
+                state.inputs[axis].set(series.id, checkbox);
+                option.append(checkbox, document.createTextNode(series.label));
+                groupBlock.appendChild(option);
+              }
+              panel.appendChild(groupBlock);
+            }
+
+            filter.addEventListener("input", () => {
+              const query = filter.value.trim().toLowerCase();
+              for (const groupBlock of panel.querySelectorAll(".series-group-block")) {
+                const options = [...groupBlock.querySelectorAll(".series-option")];
+                for (const option of options) {
+                  option.hidden = Boolean(query) && !option.dataset.search.includes(query);
+                }
+                groupBlock.hidden = options.every((option) => option.hidden);
+              }
+            });
+            details.append(summary, panel);
+            return details;
+          }
+
+          function syncControls(state) {
+            for (const axis of ["primary", "secondary"]) {
+              for (const [seriesId, checkbox] of state.inputs[axis]) {
+                checkbox.checked = state[axis].has(seriesId);
+              }
+              const label = axis === "primary" ? "Primary Y axis" : "Secondary Y axis";
+              state.summaries[axis].textContent = `${label} (${state[axis].size})`;
+            }
+          }
+
+          function updatePlot(state) {
+            const primaryIds = [...state.primary];
+            const secondaryIds = [...state.secondary];
+            const traces = [...primaryIds, ...secondaryIds].map((seriesId) => {
+              const series = seriesById.get(seriesId);
+              const secondary = state.secondary.has(seriesId);
+              return {
+                x: series.labels,
+                y: series.values,
+                name: series.label,
+                mode: "lines",
+                type: "scatter",
+                yaxis: secondary ? "y2" : "y",
+                connectgaps: false,
+                customdata: series.values.map(() => series.unit || ""),
+                hovertemplate: "%{x}<br>%{fullData.name}: %{y} %{customdata}<extra></extra>",
+              };
+            });
+            const layout = {
+              title: {text: state.titleInput.value || `Plot ${state.id}`, x: 0.02},
+              autosize: true,
+              height: 500,
+              hovermode: "closest",
+              margin: {l: 70, r: secondaryIds.length ? 80 : 30, t: 55, b: 135},
+              xaxis: {title: "Timestamp", type: "date", rangeslider: {visible: true}},
+              yaxis: {title: axisTitle(primaryIds), zeroline: true},
+              yaxis2: {
+                title: axisTitle(secondaryIds),
+                overlaying: "y",
+                side: "right",
+                showgrid: false,
+                visible: secondaryIds.length > 0,
+              },
+              legend: {
+                orientation: "h",
+                yanchor: "top",
+                y: -0.3,
+                itemclick: "toggle",
+                itemdoubleclick: "toggleothers",
+              },
+              annotations: traces.length ? [] : [{
+                text: "Choose series from the Primary or Secondary Y axis dropdowns",
+                showarrow: false,
+                xref: "paper",
+                yref: "paper",
+                x: 0.5,
+                y: 0.5,
+              }],
+              paper_bgcolor: "#ffffff",
+              plot_bgcolor: "#ffffff",
+              uirevision: `plot-${state.id}`,
+            };
+            Plotly.react(state.chart, traces, layout, {
+              responsive: true,
+              displaylogo: false,
+              scrollZoom: true,
+            });
+          }
+
+          function addPlot(initialPrimary = [], initialSecondary = [], initialTitle = "") {
+            const primary = initialPrimary.filter((seriesId) => seriesById.has(seriesId));
+            const primarySet = new Set(primary);
+            const secondary = initialSecondary.filter(
+              (seriesId) => seriesById.has(seriesId) && !primarySet.has(seriesId),
+            );
+            const state = {
+              id: nextPlotId++,
+              primary: primarySet,
+              secondary: new Set(secondary),
+              summaries: {},
+              inputs: {},
+            };
+            const card = element("section", "configurable-plot");
+            state.card = card;
+            card.dataset.plotId = String(state.id);
+            const header = element("div", "configurable-plot-header");
+            state.titleInput = element("input", "plot-title-input");
+            state.titleInput.value = initialTitle || `Plot ${state.id}`;
+            state.titleInput.setAttribute("aria-label", `Plot ${state.id} title`);
+            const removeButton = element("button", "", "Remove plot");
+            removeButton.type = "button";
+            removeButton.addEventListener("click", () => {
+              Plotly.purge(state.chart);
+              card.remove();
+              const index = plots.indexOf(state);
+              if (index >= 0) plots.splice(index, 1);
+            });
+            header.append(state.titleInput, removeButton);
+            const controls = element("div", "plot-controls");
+            controls.append(
+              createSeriesPicker(state, "primary", "Primary Y axis"),
+              createSeriesPicker(state, "secondary", "Secondary Y axis"),
+            );
+            state.chart = element("div", "plotly-chart");
+            state.chart.id = `plotly-configurable-${state.id}`;
+            state.titleInput.addEventListener("input", () => updatePlot(state));
+            card.append(header, controls, state.chart);
+            plotsContainer.appendChild(card);
+            plots.push(state);
+            syncControls(state);
+            updatePlot(state);
+          }
+
+          addButton.addEventListener("click", () => addPlot());
+          root.querySelector("[data-save-favorite]").addEventListener("click", saveFavorite);
+          root.querySelector("[data-load-favorite]").addEventListener("click", loadFavorite);
+          root.querySelector("[data-delete-favorite]").addEventListener("click", deleteFavorite);
+          refreshFavoriteOptions();
+          addPlot(catalog.filter((series) => series.source === "system").map((series) => series.id));
+        })();
+      </script>
+    """.replace("__PLOT_SERIES__", payload)
     return (
-        f'<section class="chart-panel" data-chart-id="{chart_id}">'
-        f"<h3>{title}</h3>"
-        f"{render_chart_svg(chart)}"
-        f"{render_chart_legend(chart)}"
+        '<div id="plot-builder" class="plot-builder" data-series-source="system-and-assets">'
+        '<div class="plot-builder-toolbar">'
+        '<p>Add plots and assign each series to one Y axis. Current changes reset on reload unless saved as a favorite.</p>'
+        '<button type="button" data-add-plot>Add plot</button>'
+        "</div>"
+        '<section class="plot-favorites">'
+        '<label>Favorite name<input type="text" data-favorite-name placeholder="e.g. Battery operation"></label>'
+        '<button type="button" data-save-favorite>Save favorite</button>'
+        '<label>Saved favorites<select data-favorite-select><option value="">Choose a favorite</option></select></label>'
+        '<button type="button" data-load-favorite>Load</button>'
+        '<button type="button" data-delete-favorite>Delete</button>'
+        '<span class="favorite-feedback" data-favorite-feedback role="status">Favorites are saved in this browser.</span>'
         "</section>"
+        '<div data-plots></div>'
+        "</div>"
+        '<script src="/assets/plotly.min.js"></script>'
+        f"{script}"
     )
 
 
-def render_chart_svg(chart: dict) -> str:
-    width = 640
-    height = 280
-    left = 52
-    right = 18
-    top = 22
-    bottom = 42
-    plot_width = width - left - right
-    plot_height = height - top - bottom
-    labels = chart["labels"]
-    values = [
-        value
-        for series in chart["series"]
-        for value in series["values"]
-        if isinstance(value, (int, float))
-    ]
-    if not values:
-        return '<p>No numeric chart data is available for this run.</p>'
-
-    y_min = min(values)
-    y_max = max(values)
-    if y_min == y_max:
-        padding = max(abs(y_min) * 0.1, 1.0)
-        y_min -= padding
-        y_max += padding
-
-    def x_position(index: int) -> float:
-        if len(labels) <= 1:
-            return left + plot_width / 2
-        return left + (plot_width * index / (len(labels) - 1))
-
-    def y_position(value: float) -> float:
-        return top + ((y_max - value) / (y_max - y_min)) * plot_height
-
-    colors = ["#2563eb", "#dc2626", "#0f766e", "#ca8a04"]
-    series_markup = []
-    for series_index, series in enumerate(chart["series"]):
-        color = colors[series_index % len(colors)]
-        points = [
-            (x_position(index), y_position(value), value)
-            for index, value in enumerate(series["values"])
-            if isinstance(value, (int, float))
-        ]
-        if len(points) > 1:
-            point_text = " ".join(f"{x:.2f},{y:.2f}" for x, y, _ in points)
-            series_markup.append(
-                f'<polyline points="{point_text}" fill="none" stroke="{color}" '
-                'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></polyline>'
-            )
-        for x, y, value in points:
-            series_markup.append(
-                f'<circle cx="{x:.2f}" cy="{y:.2f}" r="4" fill="{color}" '
-                f'data-series="{escape(series["key"])}" data-value="{format_chart_number(value)}">'
-                f"<title>{escape(series['label'])}: {format_chart_number(value)}</title>"
-                "</circle>"
-            )
-
-    first_label = escape(labels[0]) if labels else ""
-    last_label = escape(labels[-1]) if labels else ""
-    axis_markup = f"""
-      <line x1="{left}" y1="{height - bottom}" x2="{width - right}" y2="{height - bottom}" stroke="#9aa4b2"></line>
-      <line x1="{left}" y1="{top}" x2="{left}" y2="{height - bottom}" stroke="#9aa4b2"></line>
-      <text x="{left}" y="{height - 14}" fill="#606a78" font-size="11">{first_label}</text>
-      <text x="{width - right}" y="{height - 14}" fill="#606a78" font-size="11" text-anchor="end">{last_label}</text>
-      <text x="{left - 8}" y="{top + 4}" fill="#606a78" font-size="11" text-anchor="end">{format_chart_number(y_max)}</text>
-      <text x="{left - 8}" y="{height - bottom + 4}" fill="#606a78" font-size="11" text-anchor="end">{format_chart_number(y_min)}</text>
-    """
+def json_for_inline_script(value: Any) -> str:
     return (
-        f'<svg class="chart-svg" viewBox="0 0 {width} {height}" role="img" '
-        f'aria-label="{escape(chart["title"])}">'
-        f"{axis_markup}"
-        f"{''.join(series_markup)}"
-        "</svg>"
+        json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
     )
 
 
-def render_chart_legend(chart: dict) -> str:
-    colors = ["#2563eb", "#dc2626", "#0f766e", "#ca8a04"]
-    items = "".join(
-        '<li>'
-        f'<span class="legend-swatch" style="background:{colors[index % len(colors)]}"></span>'
-        f'{escape(series["label"])}'
-        "</li>"
-        for index, series in enumerate(chart["series"])
-    )
-    return f'<ul class="chart-legend">{items}</ul>'
-
-
-def format_chart_number(value: float) -> str:
-    return f"{value:g}"
+@lru_cache(maxsize=1)
+def cached_plotly_javascript() -> str:
+    return get_plotlyjs()
 
 
 def render_result_table(table: dict) -> str:

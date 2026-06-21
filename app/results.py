@@ -51,6 +51,7 @@ def read_run_results(run: dict[str, Any], artifacts: list[dict[str, Any]], artif
         "dispatch_table": dispatch_table,
         "asset_dispatch_table": asset_dispatch_table,
         "charts": build_chart_data(dispatch_table, asset_dispatch_table),
+        "plot_series": build_plot_series_catalog(dispatch_table, asset_dispatch_table),
     }
 
 
@@ -65,10 +66,14 @@ def apply_dashboard_template(results: dict[str, Any], template: dict[str, Any]) 
             if chart is not None:
                 charts[chart_key] = chart
 
+    if charts and "all_series" in source_charts:
+        charts = {"all_series": source_charts["all_series"], **charts}
+
     preview_limit = int(template["table_preview_limit"])
     return {
         "summary": results["summary"] if template.get("show_summary", False) else None,
         "charts": charts,
+        "plot_series": results.get("plot_series", []) if charts else [],
         "dispatch_table": limit_result_table(results["dispatch_table"], preview_limit)
         if template.get("show_system_dispatch_table", False)
         else None,
@@ -87,6 +92,7 @@ def limit_result_table(table: dict[str, Any], row_limit: int) -> dict[str, Any]:
 
 def build_chart_data(dispatch_table: dict[str, Any], asset_dispatch_table: dict[str, Any]) -> dict[str, Any]:
     return {
+        "all_series": build_all_series_chart(dispatch_table),
         "price": build_price_chart(dispatch_table),
         "grid_import_export": build_line_chart(
             "grid-import-export",
@@ -156,6 +162,158 @@ def build_chart_data(dispatch_table: dict[str, Any], asset_dispatch_table: dict[
             "asset_dispatch": len(asset_dispatch_table["rows"]),
         },
     }
+
+
+def build_all_series_chart(dispatch_table: dict[str, Any]) -> dict[str, Any]:
+    if "timestamp" not in dispatch_table["columns"]:
+        return {
+            "id": "all-system-series",
+            "title": "All System Series",
+            "available": False,
+            "labels": [],
+            "series": [],
+            "missing_columns": ["timestamp"],
+            "message": "Missing columns: timestamp",
+        }
+
+    rows = dispatch_table["rows"]
+    series = []
+    for column in dispatch_table["columns"]:
+        if column == "timestamp":
+            continue
+        values = [parse_chart_value(row.get(column)) for row in rows]
+        if not any(value is not None for value in values):
+            continue
+        series.append(
+            {
+                "key": column,
+                "label": column,
+                "unit": chart_series_unit(column),
+                "values": values,
+            }
+        )
+
+    return {
+        "id": "all-system-series",
+        "title": "All System Series",
+        "available": bool(series),
+        "labels": [str(row.get("timestamp") or "") for row in rows],
+        "series": series,
+        "missing_columns": [],
+        "message": "" if series else "No numeric series are available in dispatch.csv",
+    }
+
+
+def chart_series_unit(column: str) -> str:
+    for suffix, unit in [
+        ("_usd_per_mwh", "USD/MWh"),
+        ("_mwh", "MWh"),
+        ("_mw", "MW"),
+        ("_m3s", "m3/s"),
+        ("_hm3", "hm3"),
+        ("_masl", "masl"),
+        ("_usd", "USD"),
+        ("_hours", "hours"),
+    ]:
+        if column.endswith(suffix):
+            return unit
+    return ""
+
+
+def build_plot_series_catalog(
+    dispatch_table: dict[str, Any],
+    asset_dispatch_table: dict[str, Any],
+) -> list[dict[str, Any]]:
+    catalog = build_system_plot_series(dispatch_table)
+    catalog.extend(build_asset_plot_series(asset_dispatch_table))
+    return catalog
+
+
+def build_system_plot_series(table: dict[str, Any]) -> list[dict[str, Any]]:
+    labels = [str(row.get("timestamp") or "") for row in table["rows"]]
+    series = []
+    for column in table["columns"]:
+        if column == "timestamp":
+            continue
+        values = [parse_chart_value(row.get(column)) for row in table["rows"]]
+        if not any(value is not None for value in values):
+            continue
+        series.append(
+            {
+                "id": f"system:{column}",
+                "label": f"System · {column}",
+                "source": "system",
+                "source_label": "System dispatch",
+                "column": column,
+                "unit": chart_series_unit(column),
+                "labels": labels,
+                "values": values,
+            }
+        )
+    return series
+
+
+def build_asset_plot_series(table: dict[str, Any]) -> list[dict[str, Any]]:
+    rows_by_asset: dict[str, list[dict[str, Any]]] = {}
+    asset_types: dict[str, str] = {}
+    for row in table["rows"]:
+        asset_id = str(row.get("asset_id") or "").strip()
+        if not asset_id:
+            continue
+        rows_by_asset.setdefault(asset_id, []).append(row)
+        asset_types.setdefault(asset_id, str(row.get("asset_type") or "asset").strip() or "asset")
+
+    excluded_columns = {
+        "timestamp",
+        "duration_hours",
+        "price_usd_per_mwh",
+        "import_price_usd_per_mwh",
+        "export_price_usd_per_mwh",
+        "asset_id",
+        "asset_type",
+    }
+    catalog = []
+    for asset_id, rows in rows_by_asset.items():
+        asset_type = asset_types[asset_id]
+        labels = [str(row.get("timestamp") or "") for row in rows]
+        for column in table["columns"]:
+            if column in excluded_columns:
+                continue
+            values = [parse_chart_value(row.get(column)) for row in rows]
+            if not any(value is not None for value in values):
+                continue
+            if not asset_column_is_relevant(asset_type, column, values):
+                continue
+            catalog.append(
+                {
+                    "id": f"asset:{asset_id}:{column}",
+                    "label": f"{asset_id} ({asset_type}) · {column}",
+                    "source": "asset",
+                    "source_label": f"Asset · {asset_id} ({asset_type})",
+                    "asset_id": asset_id,
+                    "asset_type": asset_type,
+                    "column": column,
+                    "unit": chart_series_unit(column),
+                    "labels": labels,
+                    "values": values,
+                }
+            )
+    return catalog
+
+
+def asset_column_is_relevant(asset_type: str, column: str, values: list[float | None]) -> bool:
+    normalized_type = asset_type.lower()
+    relevant = {
+        "grid": column.startswith("grid_"),
+        "renewable": column.startswith("renewable_"),
+        "load": column.startswith("load_"),
+        "battery": column.startswith("battery_"),
+        "bess": column.startswith("battery_"),
+        "hydro": column.startswith("hydro_"),
+    }.get(normalized_type)
+    if relevant is not None:
+        return relevant or any(value not in (None, 0.0) for value in values)
+    return True
 
 
 def build_price_chart(dispatch_table: dict[str, Any]) -> dict[str, Any]:

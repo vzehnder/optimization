@@ -142,7 +142,14 @@ class Iteration6DashboardTemplateTests(unittest.TestCase):
             self.assertEqual(results["summary"]["case_name"], "hydro_system")
             self.assertEqual(
                 list(results["charts"].keys()),
-                ["grid_import_export", "hydro_power", "hydro_flows", "hydro_storage", "hydro_reservoir_elevation"],
+                [
+                    "all_series",
+                    "grid_import_export",
+                    "hydro_power",
+                    "hydro_flows",
+                    "hydro_storage",
+                    "hydro_reservoir_elevation",
+                ],
             )
             self.assertTrue(results["charts"]["hydro_power"]["available"])
             self.assertEqual(len(results["dispatch_table"]["rows"]), 1)

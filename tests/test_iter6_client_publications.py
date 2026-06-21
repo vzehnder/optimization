@@ -194,7 +194,7 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
             self.assertIn("Scenario Version", publication_page.text)
             self.assertIn("Objective Value", publication_page.text)
             self.assertIn("1250.5", publication_page.text)
-            self.assertIn("Grid Import / Export", publication_page.text)
+            self.assertIn("Interactive Plots", publication_page.text)
             self.assertIn("System Dispatch", publication_page.text)
             self.assertNotIn("Asset Dispatch", publication_page.text)
             self.assertNotIn("Publication Drafts", publication_page.text)
@@ -301,7 +301,7 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
                 "Run Status",
                 "succeeded",
                 "Objective Value",
-                "Grid Import / Export",
+                "Interactive Plots",
                 "System Dispatch",
             ]:
                 self.assertIn(snippet, preview.text)
@@ -313,7 +313,7 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
             analyst.post(f"/api/publications/{publication['id']}/publish")
             live = client.get(f"/client/projects/{project_id}/publications/{publication['id']}")
             self.assertEqual(live.status_code, 200)
-            for snippet in ["Previewable Review", "Grid Import / Export", "System Dispatch"]:
+            for snippet in ["Previewable Review", "Interactive Plots", "System Dispatch"]:
                 self.assertIn(snippet, live.text)
 
     def test_run_page_exposes_preview_publish_and_unpublish_controls(self):
