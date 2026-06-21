@@ -399,6 +399,18 @@ function add_load_node!(document; demands = nothing)
     return document
 end
 
+function bess_load_system_case_document()
+    document = minimal_system_case_document()
+    document["case_name"] = "bess_load_system"
+    filter!(node -> node["id"] != "solar_1", document["nodes"])
+    filter!(edge -> edge["from"] != "solar_1" && edge["to"] != "solar_1", document["edges"])
+    for period in document["time_series"]
+        delete!(period, "renewable_available_power_mw")
+    end
+    add_load_node!(document; demands = [2.0, 2.0])
+    return document
+end
+
 function system_case_validation_message(document)
     return mktempdir() do case_dir
         case_path = write_minimal_system_case_json(case_dir; document = document)
@@ -821,6 +833,42 @@ end
             @test collect(string.(metadata.asset_ids.batteries)) == ["battery_1"]
             @test collect(string.(metadata.asset_ids.renewables)) == ["solar_1"]
             @test collect(string.(metadata.asset_ids.grids)) == ["grid_1"]
+        end
+    end
+
+    @testset "runs BESS plus demand without renewable assets" begin
+        mktempdir() do case_dir
+            case_path = write_minimal_system_case_json(
+                case_dir;
+                document = bess_load_system_case_document(),
+            )
+
+            system_case = BESSDispatch.load_system_case(case_path)
+            optimization_case = BESSDispatch.normalize_system_case(system_case)
+            @test isempty(optimization_case.renewables)
+            @test size(optimization_case.renewable_available_power_mw) == (0, 2)
+            @test [asset.id for asset in optimization_case.loads] == ["load_1"]
+
+            result = BESSDispatch.solve_system_dispatch(optimization_case)
+            @test result.termination_status == "OPTIMAL"
+            @test isapprox(result.objective_value_usd, 300.0; atol = OBJECTIVE_TOLERANCE_USD)
+
+            output_root = joinpath(case_dir, "outputs")
+            run_output = BESSDispatch.run_system_case(
+                case_path;
+                output_root = output_root,
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+            dispatch_rows = collect(CSV.File(run_output.dispatch_path))
+            @test all(isapprox(row.renewable_used_mw, 0.0; atol = POWER_TOLERANCE_MW) for row in dispatch_rows)
+            @test all(isapprox(row.load_demand_mw, 2.0; atol = POWER_TOLERANCE_MW) for row in dispatch_rows)
+
+            asset_rows = collect(CSV.File(run_output.asset_dispatch_path))
+            @test Set(string(row.asset_id) for row in asset_rows) == Set(["battery_1", "grid_1", "load_1"])
+
+            metadata = JSON3.read(read(run_output.model_metadata_path, String))
+            @test isempty(metadata.asset_ids.renewables)
+            @test collect(string.(metadata.asset_ids.loads)) == ["load_1"]
         end
     end
 

@@ -3740,6 +3740,8 @@ def render_run_page(
         {publication_markup}
         {results_markup}
         <script>
+          const initialRunStatus = {json.dumps(run["status"])};
+
           async function pollRun() {{
             const response = await fetch("/api/runs/{run["id"]}");
             if (!response.ok) return;
@@ -3752,9 +3754,13 @@ def render_run_page(
             document.getElementById("run-error-message").textContent = run.error_message || "";
             if (run.status === "queued" || run.status === "running") {{
               window.setTimeout(pollRun, 1000);
+            }} else if (initialRunStatus === "queued" || initialRunStatus === "running") {{
+              window.location.reload();
             }}
           }}
-          window.setTimeout(pollRun, 1000);
+          if (initialRunStatus === "queued" || initialRunStatus === "running") {{
+            window.setTimeout(pollRun, 1000);
+          }}
         </script>
         """,
     )

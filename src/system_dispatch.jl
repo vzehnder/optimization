@@ -277,9 +277,6 @@ function normalize_system_case(system_case::SystemGraphData)::SystemOptimization
     if isempty(batteries)
         throw(ArgumentError("system graph must contain at least one battery node"))
     end
-    if isempty(renewables)
-        throw(ArgumentError("system graph must contain at least one renewable node"))
-    end
     if isempty(grids)
         throw(ArgumentError("system graph must contain at least one grid node"))
     end
@@ -910,7 +907,8 @@ function build_system_dispatch_model(data::SystemOptimizationData)::SystemDispat
     curtailment_penalty_objective = sum(
         data.renewables[renewable].curtailment_penalty_usd_per_mwh *
         p_renewable_curtailed_mw[renewable, period] *
-        data.duration_hours[period] for renewable in 1:n_renewables, period in 1:n_periods
+        data.duration_hours[period] for renewable in 1:n_renewables, period in 1:n_periods;
+        init = 0.0,
     )
 
     hydro_spill_penalty_objective = sum(
