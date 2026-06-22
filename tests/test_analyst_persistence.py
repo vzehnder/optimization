@@ -240,6 +240,64 @@ class AnalystPersistenceTests(unittest.TestCase):
         detail = detail_response.json()["scenario_version"]
         self.assertEqual(detail["system_case_json"], json.loads(sample_text))
 
+    def test_scenario_versions_can_be_deleted_from_api_and_page(self):
+        project = self.client.post("/api/projects", json={"name": "Hybrid PMGD"}).json()
+        scenario = self.client.post(
+            f"/api/projects/{project['id']}/scenarios",
+            json={"name": "Base case"},
+        ).json()
+        sample_text = (REPO_ROOT / "data" / "cases" / "hybrid_system" / "system_case.json").read_text()
+        first = self.client.post(
+            f"/api/scenarios/{scenario['id']}/versions",
+            json={"system_case_json": sample_text},
+        ).json()
+        second = self.client.post(
+            f"/api/scenarios/{scenario['id']}/versions",
+            json={"system_case_json": sample_text},
+        ).json()
+
+        page = self.client.get(f"/scenarios/{scenario['id']}")
+        self.assertIn(f'action="/scenario-versions/{first["id"]}/delete"', page.text)
+        self.assertIn("Delete Version", page.text)
+        self.assertIn("completed runs, results, and publications", page.text)
+
+        delete_response = self.client.delete(f"/api/scenario-versions/{first['id']}")
+
+        self.assertEqual(delete_response.status_code, 200)
+        deleted = delete_response.json()["deleted_version"]
+        self.assertEqual(deleted["id"], first["id"])
+        self.assertEqual(deleted["deleted_run_count"], 0)
+        self.assertEqual(self.client.get(f"/api/scenario-versions/{first['id']}").status_code, 404)
+        remaining = self.client.get(f"/api/scenarios/{scenario['id']}/versions").json()["versions"]
+        self.assertEqual([version["id"] for version in remaining], [second["id"]])
+
+        page_delete_response = self.client.post(
+            f"/scenario-versions/{second['id']}/delete",
+            follow_redirects=False,
+        )
+        self.assertEqual(page_delete_response.status_code, 303)
+        self.assertEqual(page_delete_response.headers["location"], f"/scenarios/{scenario['id']}")
+        self.assertEqual(self.client.get(f"/api/scenarios/{scenario['id']}/versions").json()["versions"], [])
+
+    def test_scenario_version_with_active_run_cannot_be_deleted(self):
+        project = self.client.post("/api/projects", json={"name": "Hybrid PMGD"}).json()
+        scenario = self.client.post(
+            f"/api/projects/{project['id']}/scenarios",
+            json={"name": "Base case"},
+        ).json()
+        sample_text = (REPO_ROOT / "data" / "cases" / "hybrid_system" / "system_case.json").read_text()
+        version = self.client.post(
+            f"/api/scenarios/{scenario['id']}/versions",
+            json={"system_case_json": sample_text},
+        ).json()
+        self.client.app.state.analyst_store.create_run(scenario_version_id=version["id"])
+
+        delete_response = self.client.delete(f"/api/scenario-versions/{version['id']}")
+
+        self.assertEqual(delete_response.status_code, 409)
+        self.assertIn("queued or running", delete_response.json()["detail"])
+        self.assertEqual(self.client.get(f"/api/scenario-versions/{version['id']}").status_code, 200)
+
     def test_project_and_scenario_pages_render_persisted_workflow(self):
         project = self.client.post("/api/projects", json={"name": "Hybrid PMGD"}).json()
         scenario = self.client.post(
@@ -267,6 +325,48 @@ class AnalystPersistenceTests(unittest.TestCase):
         self.assertIn("Version 1", scenario_page.text)
         self.assertIn("hybrid_system", scenario_page.text)
         self.assertIn('name="system_case_json"', scenario_page.text)
+
+    def test_scenario_page_lists_previous_version_runs_and_loads_succeeded_results(self):
+        project = self.client.post("/api/projects", json={"name": "Hybrid PMGD"}).json()
+        scenario = self.client.post(
+            f"/api/projects/{project['id']}/scenarios",
+            json={"name": "Base case"},
+        ).json()
+        sample_text = (REPO_ROOT / "data" / "cases" / "hybrid_system" / "system_case.json").read_text()
+        previous_version = self.client.post(
+            f"/api/scenarios/{scenario['id']}/versions",
+            json={"system_case_json": sample_text},
+        ).json()
+        current_version = self.client.post(
+            f"/api/scenarios/{scenario['id']}/versions",
+            json={"system_case_json": sample_text},
+        ).json()
+        store = self.client.app.state.analyst_store
+        previous_run = store.create_run(scenario_version_id=previous_version["id"])
+        store.mark_run_succeeded(
+            previous_run["id"],
+            exit_code=0,
+            stdout="",
+            stderr="",
+            success_payload={"status": "ok"},
+            output_dir=None,
+            summary_path=None,
+        )
+        current_run = store.create_run(scenario_version_id=current_version["id"])
+
+        api_response = self.client.get(f"/api/scenarios/{scenario['id']}/runs")
+        page = self.client.get(f"/scenarios/{scenario['id']}")
+
+        self.assertEqual(api_response.status_code, 200)
+        self.assertEqual(
+            [run["id"] for run in api_response.json()["runs"]],
+            [current_run["id"], previous_run["id"]],
+        )
+        self.assertIn("Previous Runs", page.text)
+        self.assertIn(f'href="/runs/{previous_run["id"]}#results">Load Results</a>', page.text)
+        self.assertIn(f'href="/runs/{current_run["id"]}">Open Run</a>', page.text)
+        self.assertIn("Status: succeeded", page.text)
+        self.assertIn("Status: queued", page.text)
 
     def test_invalid_system_case_is_not_saved_as_version(self):
         self.validation_service.result = ValidationResult(

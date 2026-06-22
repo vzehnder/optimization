@@ -1118,6 +1118,40 @@ class AnalystStore:
             raise KeyError(f"scenario version {scenario_version_id} not found")
         return scenario_version_row_to_dict(row, include_document=include_document)
 
+    def delete_scenario_version(self, scenario_version_id: int) -> dict[str, Any]:
+        with self._lock:
+            version = self.get_scenario_version(scenario_version_id, include_document=False)
+            active_run_row = self.connection.execute(
+                """
+                SELECT COUNT(*) AS active_run_count
+                FROM runs
+                WHERE scenario_version_id = ? AND status IN ('queued', 'running')
+                """,
+                (scenario_version_id,),
+            ).fetchone()
+            active_run_count = int(active_run_row["active_run_count"])
+            if active_run_count:
+                raise ValueError("scenario versions with queued or running runs cannot be deleted")
+
+            run_row = self.connection.execute(
+                "SELECT COUNT(*) AS run_count FROM runs WHERE scenario_version_id = ?",
+                (scenario_version_id,),
+            ).fetchone()
+            publication_row = self.connection.execute(
+                "SELECT COUNT(*) AS publication_count FROM publications WHERE scenario_version_id = ?",
+                (scenario_version_id,),
+            ).fetchone()
+            self.connection.execute(
+                "DELETE FROM scenario_versions WHERE id = ?",
+                (scenario_version_id,),
+            )
+            self.connection.commit()
+            return {
+                **version,
+                "deleted_run_count": int(run_row["run_count"]),
+                "deleted_publication_count": int(publication_row["publication_count"]),
+            }
+
     def create_or_replace_scenario_draft(
         self,
         *,
@@ -1297,6 +1331,41 @@ class AnalystStore:
             if row is None:
                 raise KeyError(f"run {run_id} not found")
             return run_row_to_dict(row)
+
+    def list_scenario_runs(self, scenario_id: int) -> list[dict[str, Any]]:
+        self.get_scenario(scenario_id)
+        rows = self.connection.execute(
+            """
+            SELECT
+                runs.id,
+                runs.scenario_version_id,
+                runs.status,
+                runs.created_at,
+                runs.started_at,
+                runs.finished_at,
+                runs.duration_seconds,
+                runs.exit_code,
+                runs.workspace_path,
+                runs.input_snapshot_path,
+                runs.output_dir,
+                runs.summary_path,
+                runs.stdout_log_path,
+                runs.stderr_log_path,
+                runs.error_message,
+                runs.success_payload_json,
+                runs.error_payload_json,
+                runs.stdout,
+                runs.stderr,
+                runs.triggered_by,
+                runs.trigger_type
+            FROM runs
+            JOIN scenario_versions ON scenario_versions.id = runs.scenario_version_id
+            WHERE scenario_versions.scenario_id = ?
+            ORDER BY scenario_versions.version_number DESC, runs.id DESC
+            """,
+            (scenario_id,),
+        ).fetchall()
+        return [run_row_to_dict(row) for row in rows]
 
     def get_run_project_id(self, run_id: int) -> int:
         row = self.connection.execute(

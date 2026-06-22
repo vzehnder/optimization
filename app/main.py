@@ -40,7 +40,9 @@ from app.time_series_ingestion import (
     TimeSeriesIngestionError,
     attach_time_series_source,
     apply_time_series_mapping,
+    get_time_series_source_rows,
     ingest_time_series_source,
+    update_time_series_source_rows,
 )
 from app.validation import JuliaValidationService, ValidationResult
 
@@ -102,6 +104,10 @@ class ScenarioDraftWriteRequest(BaseModel):
 
 class TimeSeriesMappingRequest(BaseModel):
     mapping: dict[str, Any]
+
+
+class TimeSeriesRowsRequest(BaseModel):
+    rows: list[dict[str, Any]]
 
 
 class DraftPromotionError(ValueError):
@@ -1297,6 +1303,7 @@ def create_app(
         try:
             scenario = analyst_store.get_scenario(scenario_id)
             versions = analyst_store.list_scenario_versions(scenario_id)
+            runs = analyst_store.list_scenario_runs(scenario_id)
             candidate_text = ""
             if from_version_id is not None:
                 base_version = analyst_store.get_scenario_version(from_version_id)
@@ -1305,7 +1312,7 @@ def create_app(
                 candidate_text = json.dumps(base_version["system_case_json"], indent=2, sort_keys=True)
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        return HTMLResponse(render_scenario_page(scenario, versions, candidate_text))
+        return HTMLResponse(render_scenario_page(scenario, versions, candidate_text, runs=runs))
 
     @app.post("/scenarios/{scenario_id}/versions", response_class=HTMLResponse)
     async def create_scenario_version_from_page(scenario_id: int, request: Request):
@@ -1318,13 +1325,14 @@ def create_app(
             except UnicodeDecodeError:
                 scenario = analyst_store.get_scenario(scenario_id)
                 versions = analyst_store.list_scenario_versions(scenario_id)
+                runs = analyst_store.list_scenario_runs(scenario_id)
                 error = ValidationResult(
                     ok=False,
                     phase="json",
                     message="Uploaded file must be UTF-8 encoded JSON",
                     payload={"status": "error"},
                 )
-                return HTMLResponse(render_scenario_page(scenario, versions, candidate_text, error))
+                return HTMLResponse(render_scenario_page(scenario, versions, candidate_text, error, runs=runs))
             finally:
                 close_upload = getattr(upload, "close", None)
                 if close_upload is not None:
@@ -1336,8 +1344,19 @@ def create_app(
         if error is not None:
             scenario = analyst_store.get_scenario(scenario_id)
             versions = analyst_store.list_scenario_versions(scenario_id)
-            return HTMLResponse(render_scenario_page(scenario, versions, candidate_text, error))
+            runs = analyst_store.list_scenario_runs(scenario_id)
+            return HTMLResponse(render_scenario_page(scenario, versions, candidate_text, error, runs=runs))
         return RedirectResponse(f"/scenarios/{scenario_id}#version-{version['id']}", status_code=303)
+
+    @app.post("/scenario-versions/{scenario_version_id}/delete")
+    async def delete_scenario_version_from_page(scenario_version_id: int):
+        try:
+            deleted_version = analyst_store.delete_scenario_version(scenario_version_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return RedirectResponse(f"/scenarios/{deleted_version['scenario_id']}", status_code=303)
 
     @app.post("/scenario-versions/{scenario_version_id}/runs")
     async def create_manual_run_from_page(scenario_version_id: int):
@@ -1594,6 +1613,45 @@ def create_app(
             await source_file.close()
         return {"source": source}
 
+    @app.get("/api/scenarios/{scenario_id}/draft/time-series-sources/{source_id}/rows")
+    async def get_draft_time_series_rows(scenario_id: int, source_id: str):
+        try:
+            draft = analyst_store.get_scenario_draft(scenario_id)
+            columns, rows = get_time_series_source_rows(
+                document=draft["document"],
+                source_id=source_id,
+                input_source_root=configured_input_source_root,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except TimeSeriesIngestionError as error:
+            return JSONResponse(error_response_body("source_file", str(error)), status_code=400)
+        return {"columns": columns, "rows": rows}
+
+    @app.put("/api/scenarios/{scenario_id}/draft/time-series-sources/{source_id}/rows")
+    async def save_draft_time_series_rows(
+        scenario_id: int,
+        source_id: str,
+        payload: TimeSeriesRowsRequest,
+    ):
+        try:
+            draft = analyst_store.get_scenario_draft(scenario_id)
+            updated_document, source = update_time_series_source_rows(
+                document=draft["document"],
+                source_id=source_id,
+                rows=payload.rows,
+                input_source_root=configured_input_source_root,
+            )
+            analyst_store.update_scenario_draft(
+                scenario_id=scenario_id,
+                document=updated_document,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except TimeSeriesIngestionError as error:
+            return JSONResponse(error_response_body("source_file", str(error)), status_code=400)
+        return {"source": source}
+
     @app.put("/api/scenarios/{scenario_id}/draft/time-series-sources/{source_id}/mapping")
     async def save_draft_time_series_mapping(
         scenario_id: int,
@@ -1671,6 +1729,14 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"versions": versions}
 
+    @app.get("/api/scenarios/{scenario_id}/runs")
+    async def list_scenario_runs(scenario_id: int):
+        try:
+            runs = analyst_store.list_scenario_runs(scenario_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"runs": runs}
+
     @app.get("/api/scenario-versions/{scenario_version_id}")
     async def get_scenario_version(scenario_version_id: int):
         try:
@@ -1678,6 +1744,16 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"scenario_version": scenario_version}
+
+    @app.delete("/api/scenario-versions/{scenario_version_id}")
+    async def delete_scenario_version(scenario_version_id: int):
+        try:
+            deleted_version = analyst_store.delete_scenario_version(scenario_version_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return {"deleted_version": deleted_version}
 
     @app.post("/api/scenario-versions/{scenario_version_id}/runs", status_code=201)
     async def create_manual_run(scenario_version_id: int):
@@ -2399,17 +2475,29 @@ def render_scenario_page(
     versions: list[dict],
     candidate_text: str = "",
     error: ValidationResult | None = None,
+    *,
+    runs: list[dict] | None = None,
 ) -> str:
+    runs_by_version: dict[int, list[dict]] = {}
+    for run in runs or []:
+        runs_by_version.setdefault(int(run["scenario_version_id"]), []).append(run)
+
     version_items = "".join(
         f'<li id="version-{version["id"]}">'
         f'<strong>Version {version["version_number"]}</strong>'
         f'<span>{escape(version["case_name"])} | {escape(version["schema_version"])} | '
         f'{version["period_count"]} periods | {format_asset_counts(version["asset_counts"])}</span>'
+        f'{render_scenario_version_runs(runs_by_version.get(int(version["id"]), []))}'
         f'<a href="/scenarios/{scenario["id"]}?from_version_id={version["id"]}">Use as base</a>'
         f'<a href="/scenarios/{scenario["id"]}/draft?source_version_id={version["id"]}">Use as draft base</a>'
         f'<form class="inline-form" method="post" action="/scenario-versions/{version["id"]}/runs">'
         f'<button type="submit">Launch Run</button>'
         f"</form>"
+        f'<form class="inline-form" method="post" action="/scenario-versions/{version["id"]}/delete" '
+        'onsubmit="return confirm(\'Delete this version and its completed runs, results, and publications?\')">'
+        f'<button type="submit" class="button-danger" aria-label="Delete version {version["version_number"]}">'
+        "Delete Version</button>"
+        "</form>"
         "</li>"
         for version in versions
     )
@@ -2454,6 +2542,38 @@ def render_scenario_page(
           </form>
         </section>
         """,
+    )
+
+
+def render_scenario_version_runs(runs: list[dict]) -> str:
+    if not runs:
+        return (
+            '<div class="version-runs">'
+            "<h3>Previous Runs</h3>"
+            '<p class="empty">No runs saved for this version.</p>'
+            "</div>"
+        )
+
+    items = []
+    for run in runs:
+        succeeded = run.get("status") == "succeeded"
+        action_label = "Load Results" if succeeded else "Open Run"
+        action_href = f'/runs/{run["id"]}#results' if succeeded else f'/runs/{run["id"]}'
+        finished = f' | finished {escape(str(run["finished_at"]))}' if run.get("finished_at") else ""
+        items.append(
+            "<li>"
+            "<div>"
+            f'<strong>Run {run["id"]}</strong>'
+            f'<span>Status: {escape(str(run["status"]))} | created {escape(str(run["created_at"]))}{finished}</span>'
+            "</div>"
+            f'<a class="button-link" href="{action_href}">{action_label}</a>'
+            "</li>"
+        )
+    return (
+        '<div class="version-runs">'
+        "<h3>Previous Runs</h3>"
+        f'<ul class="version-run-list">{"".join(items)}</ul>'
+        "</div>"
     )
 
 
@@ -2827,6 +2947,7 @@ def render_time_series_source_detail(scenario: dict, document: dict, source: dic
     renewable_inputs = render_asset_mapping_inputs(document, source, "renewable", "renewable_available_power_mw")
     load_inputs = render_asset_mapping_inputs(document, source, "load", "load_demand_mw")
     hydro_inputs = render_asset_mapping_inputs(document, source, "hydro", "hydro_inflow_m3s")
+    editor_markup = render_time_series_editor(scenario, source)
     return f"""
           <div class="source-detail">
             <h2>{source_title}</h2>
@@ -2834,6 +2955,7 @@ def render_time_series_source_detail(scenario: dict, document: dict, source: dic
             {selected_sheet_markup}
             <p>Columns: {escape(", ".join(str(column) for column in columns))}</p>
             {render_preview_rows(source)}
+            {editor_markup}
             <form method="post" action="/scenarios/{scenario["id"]}/draft/time-series-sources/{source_id}/mapping">
               <h2>Column Mapping</h2>
               <div class="form-grid">
@@ -2856,6 +2978,159 @@ def render_time_series_source_detail(scenario: dict, document: dict, source: dic
             {validation_markup}
           </div>
     """
+
+
+def render_time_series_editor(scenario: dict, source: dict) -> str:
+    source_id = quote(str(source.get("id") or ""), safe="")
+    endpoint = f'/api/scenarios/{scenario["id"]}/draft/time-series-sources/{source_id}/rows'
+    editor = f"""
+        <div class="time-series-editor-shell" data-rows-endpoint="{escape(endpoint, quote=True)}">
+          <button type="button" class="edit-time-series-button">Edit Table</button>
+          <div class="time-series-editor" hidden>
+            <div class="time-series-editor-header">
+              <div>
+                <h2>Edit Time-Series Values</h2>
+                <p>Edit individual cells, or paste a column/range copied from Excel into the first destination cell.</p>
+              </div>
+              <button type="button" class="button-secondary close-time-series-editor">Close</button>
+            </div>
+            <div class="table-scroll editable-table-scroll">
+              <table class="editable-time-series-table">
+                <thead><tr></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div class="time-series-editor-actions">
+              <button type="button" class="save-time-series-rows">Save Changes</button>
+              <span class="time-series-editor-status" role="status"></span>
+            </div>
+          </div>
+        </div>
+    """
+    script = r"""
+        <script>
+          (() => {
+            const shell = document.currentScript.previousElementSibling;
+            const editor = shell.querySelector('.time-series-editor');
+            const editButton = shell.querySelector('.edit-time-series-button');
+            const closeButton = shell.querySelector('.close-time-series-editor');
+            const saveButton = shell.querySelector('.save-time-series-rows');
+            const status = shell.querySelector('.time-series-editor-status');
+            const table = shell.querySelector('.editable-time-series-table');
+            const headerRow = table.querySelector('thead tr');
+            const tableBody = table.querySelector('tbody');
+            const endpoint = shell.dataset.rowsEndpoint;
+            let columns = [];
+            let loaded = false;
+
+            const responseError = async (response) => {
+              let body = {};
+              try { body = await response.json(); } catch (_error) { /* no JSON body */ }
+              return body.detail || body.message || `Request failed (${response.status})`;
+            };
+
+            const renderRows = (payload) => {
+              columns = payload.columns;
+              headerRow.replaceChildren(...columns.map((column) => {
+                const th = document.createElement('th');
+                th.textContent = column;
+                return th;
+              }));
+              tableBody.replaceChildren(...payload.rows.map((row, rowIndex) => {
+                const tr = document.createElement('tr');
+                columns.forEach((column, columnIndex) => {
+                  const td = document.createElement('td');
+                  td.contentEditable = 'true';
+                  td.spellcheck = false;
+                  td.dataset.row = String(rowIndex);
+                  td.dataset.column = String(columnIndex);
+                  td.textContent = row[column] ?? '';
+                  tr.appendChild(td);
+                });
+                return tr;
+              }));
+            };
+
+            const loadRows = async () => {
+              status.textContent = 'Loading table...';
+              const response = await fetch(endpoint, { headers: { Accept: 'application/json' } });
+              if (!response.ok) throw new Error(await responseError(response));
+              renderRows(await response.json());
+              loaded = true;
+              status.textContent = '';
+            };
+
+            editButton.addEventListener('click', async () => {
+              editor.hidden = false;
+              editButton.hidden = true;
+              if (loaded) return;
+              try { await loadRows(); } catch (error) { status.textContent = error.message; }
+            });
+
+            closeButton.addEventListener('click', () => {
+              editor.hidden = true;
+              editButton.hidden = false;
+            });
+
+            tableBody.addEventListener('paste', (event) => {
+              const startCell = event.target.closest('td[contenteditable="true"]');
+              if (!startCell) return;
+              const clipboardText = event.clipboardData.getData('text/plain');
+              if (!clipboardText) return;
+              event.preventDefault();
+              const lines = clipboardText.replace(/\r/g, '').split('\n');
+              if (lines.at(-1) === '') lines.pop();
+              const pastedCells = lines.map((line) => line.split('\t'));
+              const startRow = Number(startCell.dataset.row);
+              const startColumn = Number(startCell.dataset.column);
+              pastedCells.forEach((values, rowOffset) => {
+                values.forEach((value, columnOffset) => {
+                  const target = tableBody.querySelector(
+                    `td[data-row="${startRow + rowOffset}"][data-column="${startColumn + columnOffset}"]`
+                  );
+                  if (target) target.textContent = value;
+                });
+              });
+            });
+
+            tableBody.addEventListener('keydown', (event) => {
+              const cell = event.target.closest('td[contenteditable="true"]');
+              if (!cell || event.key !== 'Enter') return;
+              event.preventDefault();
+              const nextCell = tableBody.querySelector(
+                `td[data-row="${Number(cell.dataset.row) + 1}"][data-column="${cell.dataset.column}"]`
+              );
+              if (nextCell) nextCell.focus();
+            });
+
+            saveButton.addEventListener('click', async () => {
+              const rows = Array.from(tableBody.rows).map((row) => {
+                const values = {};
+                columns.forEach((column, index) => {
+                  values[column] = row.cells[index].textContent.replace(/\u00a0/g, ' ');
+                });
+                return values;
+              });
+              saveButton.disabled = true;
+              status.textContent = 'Saving changes...';
+              try {
+                const response = await fetch(endpoint, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                  body: JSON.stringify({ rows }),
+                });
+                if (!response.ok) throw new Error(await responseError(response));
+                status.textContent = 'Changes saved.';
+                window.location.reload();
+              } catch (error) {
+                status.textContent = error.message;
+                saveButton.disabled = false;
+              }
+            });
+          })();
+        </script>
+    """
+    return editor + script
 
 
 def active_time_series_source(document: dict) -> dict | None:
@@ -3432,6 +3707,39 @@ def render_app_page(title: str, content: str) -> str:
       color: var(--muted);
       font-size: 14px;
     }}
+    .version-runs {{
+      border-left: 3px solid var(--line);
+      margin: 8px 0;
+      padding: 8px 0 8px 12px;
+    }}
+    .version-runs h3 {{
+      font-size: 13px;
+      margin: 0 0 8px;
+    }}
+    .version-run-list {{
+      display: grid;
+      gap: 8px;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }}
+    .version-run-list li {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border: 0;
+      padding: 0;
+    }}
+    .version-run-list li div {{
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }}
+    .version-run-list .button-link {{
+      flex: 0 0 auto;
+      padding: 7px 10px;
+    }}
     form {{
       display: grid;
       gap: 10px;
@@ -3565,6 +3873,12 @@ def render_app_page(title: str, content: str) -> str:
       background: white;
       color: var(--ink);
     }}
+    .button-danger {{
+      border: 1px solid #f1b7b2;
+      padding: 7px 10px;
+      background: #fff4f2;
+      color: var(--error);
+    }}
     .button-link {{
       display: inline-block;
       border: 1px solid var(--line);
@@ -3603,6 +3917,49 @@ def render_app_page(title: str, content: str) -> str:
     .preview-block textarea {{
       min-height: 260px;
       font: 13px/1.45 Consolas, "Liberation Mono", monospace;
+    }}
+    .time-series-editor-shell {{
+      margin: 12px 0 20px;
+    }}
+    .time-series-editor {{
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin-top: 10px;
+      padding: 14px;
+      background: var(--surface);
+    }}
+    .time-series-editor-header,
+    .time-series-editor-actions {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }}
+    .time-series-editor-header {{
+      align-items: flex-start;
+      margin-bottom: 12px;
+    }}
+    .time-series-editor-header p {{
+      margin-top: 3px;
+    }}
+    .editable-table-scroll {{
+      max-height: 360px;
+      margin-bottom: 12px;
+      background: white;
+    }}
+    .editable-time-series-table td[contenteditable="true"] {{
+      min-width: 110px;
+      cursor: text;
+      background: white;
+    }}
+    .editable-time-series-table td[contenteditable="true"]:focus {{
+      outline: 2px solid var(--accent);
+      outline-offset: -2px;
+      background: #effcf8;
+    }}
+    .time-series-editor-status {{
+      color: var(--muted);
+      font-size: 13px;
     }}
     .notice.error {{
       border-left-color: var(--error);
@@ -4086,7 +4443,7 @@ def render_client_dashboard_results(results: dict | None, results_error: str = "
 def render_results_section(results: dict | None, results_error: str = "") -> str:
     if results_error:
         return (
-            '<section class="notice error results-section">'
+            '<section id="results" class="notice error results-section">'
             "<h2>Results Error</h2>"
             f"<p>{escape(results_error)}</p>"
             "</section>"
@@ -4095,7 +4452,7 @@ def render_results_section(results: dict | None, results_error: str = "") -> str
         return ""
 
     return f"""
-        <section class="results-section">
+        <section id="results" class="results-section">
           <h2>Run Summary</h2>
           {render_summary_details(results["summary"])}
           <h2>Interactive Plots</h2>
