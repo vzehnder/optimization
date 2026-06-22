@@ -4,6 +4,7 @@ import copy
 import json
 import os
 from contextlib import asynccontextmanager
+from functools import lru_cache
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from plotly.offline import get_plotlyjs
 from pydantic import BaseModel, Field
 
 from app.auth import (
@@ -24,7 +26,10 @@ from app.auth import (
 )
 from app.draft_editor import (
     DraftGenerationError,
+    SUPPORTED_ASSET_TYPES,
+    add_asset_to_draft,
     generate_system_case_from_draft,
+    remove_asset_from_draft,
     structured_draft_document_from_system_case,
     structured_draft_document_from_form,
 )
@@ -35,7 +40,9 @@ from app.time_series_ingestion import (
     TimeSeriesIngestionError,
     attach_time_series_source,
     apply_time_series_mapping,
+    get_time_series_source_rows,
     ingest_time_series_source,
+    update_time_series_source_rows,
 )
 from app.validation import JuliaValidationService, ValidationResult
 
@@ -97,6 +104,10 @@ class ScenarioDraftWriteRequest(BaseModel):
 
 class TimeSeriesMappingRequest(BaseModel):
     mapping: dict[str, Any]
+
+
+class TimeSeriesRowsRequest(BaseModel):
+    rows: list[dict[str, Any]]
 
 
 class DraftPromotionError(ValueError):
@@ -228,7 +239,7 @@ def create_app(
             return await call_next(request)
 
         path = request.url.path
-        if path in {"/favicon.ico", "/login", "/bootstrap", "/logout"}:
+        if path in {"/favicon.ico", "/login", "/bootstrap", "/logout", "/assets/plotly.min.js"}:
             return await call_next(request)
 
         user = current_user_from_request(request)
@@ -251,6 +262,14 @@ def create_app(
         except PermissionError:
             return forbidden_response(request)
         return await call_next(request)
+
+    @app.get("/assets/plotly.min.js", include_in_schema=False)
+    async def plotly_javascript_bundle():
+        return Response(
+            content=cached_plotly_javascript(),
+            media_type="application/javascript",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
 
     def save_validated_scenario_version(
         scenario_id: int,
@@ -1034,7 +1053,11 @@ def create_app(
     async def save_structured_scenario_draft_from_page(scenario_id: int, request: Request):
         form = await request.form()
         try:
-            draft_document = structured_draft_document_from_form(form)
+            current_draft = get_or_create_scenario_draft(scenario_id)
+            draft_document = structured_draft_document_from_form(
+                form,
+                existing_document=current_draft["document"],
+            )
             analyst_store.create_or_replace_scenario_draft(
                 scenario_id=scenario_id,
                 document=draft_document,
@@ -1051,6 +1074,66 @@ def create_app(
                     empty_scenario_draft_document(scenario["name"]),
                     error_message=str(error),
                 )
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return RedirectResponse(f"/scenarios/{scenario_id}/draft", status_code=303)
+
+    @app.post("/scenarios/{scenario_id}/draft/assets")
+    async def add_scenario_draft_asset_from_page(scenario_id: int, request: Request):
+        form = await request.form()
+        try:
+            draft = get_or_create_scenario_draft(scenario_id)
+            updated_document = add_asset_to_draft(
+                draft["document"],
+                str(form.get("asset_type") or ""),
+            )
+            analyst_store.update_scenario_draft(
+                scenario_id=scenario_id,
+                document=updated_document,
+            )
+        except DraftGenerationError as error:
+            try:
+                scenario = analyst_store.get_scenario(scenario_id)
+                draft = get_or_create_scenario_draft(scenario_id)
+            except KeyError as not_found:
+                raise HTTPException(status_code=404, detail=str(not_found)) from not_found
+            return HTMLResponse(
+                render_scenario_draft_page(
+                    scenario,
+                    draft,
+                    draft["document"],
+                    error_message=str(error),
+                ),
+                status_code=400,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return RedirectResponse(f"/scenarios/{scenario_id}/draft", status_code=303)
+
+    @app.post("/scenarios/{scenario_id}/draft/assets/{asset_id}/remove")
+    async def remove_scenario_draft_asset_from_page(scenario_id: int, asset_id: str):
+        try:
+            draft = get_or_create_scenario_draft(scenario_id)
+            updated_document = remove_asset_from_draft(draft["document"], asset_id)
+            analyst_store.update_scenario_draft(
+                scenario_id=scenario_id,
+                document=updated_document,
+            )
+        except DraftGenerationError as error:
+            try:
+                scenario = analyst_store.get_scenario(scenario_id)
+                draft = get_or_create_scenario_draft(scenario_id)
+            except KeyError as not_found:
+                raise HTTPException(status_code=404, detail=str(not_found)) from not_found
+            return HTMLResponse(
+                render_scenario_draft_page(
+                    scenario,
+                    draft,
+                    draft["document"],
+                    error_message=str(error),
+                ),
+                status_code=404,
             )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
@@ -1220,6 +1303,7 @@ def create_app(
         try:
             scenario = analyst_store.get_scenario(scenario_id)
             versions = analyst_store.list_scenario_versions(scenario_id)
+            runs = analyst_store.list_scenario_runs(scenario_id)
             candidate_text = ""
             if from_version_id is not None:
                 base_version = analyst_store.get_scenario_version(from_version_id)
@@ -1228,7 +1312,7 @@ def create_app(
                 candidate_text = json.dumps(base_version["system_case_json"], indent=2, sort_keys=True)
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        return HTMLResponse(render_scenario_page(scenario, versions, candidate_text))
+        return HTMLResponse(render_scenario_page(scenario, versions, candidate_text, runs=runs))
 
     @app.post("/scenarios/{scenario_id}/versions", response_class=HTMLResponse)
     async def create_scenario_version_from_page(scenario_id: int, request: Request):
@@ -1241,13 +1325,14 @@ def create_app(
             except UnicodeDecodeError:
                 scenario = analyst_store.get_scenario(scenario_id)
                 versions = analyst_store.list_scenario_versions(scenario_id)
+                runs = analyst_store.list_scenario_runs(scenario_id)
                 error = ValidationResult(
                     ok=False,
                     phase="json",
                     message="Uploaded file must be UTF-8 encoded JSON",
                     payload={"status": "error"},
                 )
-                return HTMLResponse(render_scenario_page(scenario, versions, candidate_text, error))
+                return HTMLResponse(render_scenario_page(scenario, versions, candidate_text, error, runs=runs))
             finally:
                 close_upload = getattr(upload, "close", None)
                 if close_upload is not None:
@@ -1259,8 +1344,19 @@ def create_app(
         if error is not None:
             scenario = analyst_store.get_scenario(scenario_id)
             versions = analyst_store.list_scenario_versions(scenario_id)
-            return HTMLResponse(render_scenario_page(scenario, versions, candidate_text, error))
+            runs = analyst_store.list_scenario_runs(scenario_id)
+            return HTMLResponse(render_scenario_page(scenario, versions, candidate_text, error, runs=runs))
         return RedirectResponse(f"/scenarios/{scenario_id}#version-{version['id']}", status_code=303)
+
+    @app.post("/scenario-versions/{scenario_version_id}/delete")
+    async def delete_scenario_version_from_page(scenario_version_id: int):
+        try:
+            deleted_version = analyst_store.delete_scenario_version(scenario_version_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return RedirectResponse(f"/scenarios/{deleted_version['scenario_id']}", status_code=303)
 
     @app.post("/scenario-versions/{scenario_version_id}/runs")
     async def create_manual_run_from_page(scenario_version_id: int):
@@ -1274,6 +1370,7 @@ def create_app(
     async def run_page(run_id: int):
         try:
             run = analyst_store.get_run(run_id)
+            lineage = analyst_store.get_run_lineage(run_id)
             stored_artifacts = analyst_store.list_run_artifacts(run_id)
             artifacts = [
                 artifact_response_body(artifact)
@@ -1283,8 +1380,7 @@ def create_app(
             publications = analyst_store.list_run_publications(run_id)
             dashboard_templates = []
             if run["status"] == "succeeded":
-                project_id = analyst_store.get_run_project_id(run_id)
-                dashboard_templates = analyst_store.list_dashboard_templates(project_id)
+                dashboard_templates = analyst_store.list_dashboard_templates(lineage["project_id"])
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
@@ -1304,6 +1400,7 @@ def create_app(
                 publications=publications,
                 dashboard_templates=dashboard_templates,
                 publication_artifacts=stored_artifacts,
+                scenario_id=lineage["scenario_id"],
             )
         )
 
@@ -1516,6 +1613,45 @@ def create_app(
             await source_file.close()
         return {"source": source}
 
+    @app.get("/api/scenarios/{scenario_id}/draft/time-series-sources/{source_id}/rows")
+    async def get_draft_time_series_rows(scenario_id: int, source_id: str):
+        try:
+            draft = analyst_store.get_scenario_draft(scenario_id)
+            columns, rows = get_time_series_source_rows(
+                document=draft["document"],
+                source_id=source_id,
+                input_source_root=configured_input_source_root,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except TimeSeriesIngestionError as error:
+            return JSONResponse(error_response_body("source_file", str(error)), status_code=400)
+        return {"columns": columns, "rows": rows}
+
+    @app.put("/api/scenarios/{scenario_id}/draft/time-series-sources/{source_id}/rows")
+    async def save_draft_time_series_rows(
+        scenario_id: int,
+        source_id: str,
+        payload: TimeSeriesRowsRequest,
+    ):
+        try:
+            draft = analyst_store.get_scenario_draft(scenario_id)
+            updated_document, source = update_time_series_source_rows(
+                document=draft["document"],
+                source_id=source_id,
+                rows=payload.rows,
+                input_source_root=configured_input_source_root,
+            )
+            analyst_store.update_scenario_draft(
+                scenario_id=scenario_id,
+                document=updated_document,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except TimeSeriesIngestionError as error:
+            return JSONResponse(error_response_body("source_file", str(error)), status_code=400)
+        return {"source": source}
+
     @app.put("/api/scenarios/{scenario_id}/draft/time-series-sources/{source_id}/mapping")
     async def save_draft_time_series_mapping(
         scenario_id: int,
@@ -1593,6 +1729,14 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"versions": versions}
 
+    @app.get("/api/scenarios/{scenario_id}/runs")
+    async def list_scenario_runs(scenario_id: int):
+        try:
+            runs = analyst_store.list_scenario_runs(scenario_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"runs": runs}
+
     @app.get("/api/scenario-versions/{scenario_version_id}")
     async def get_scenario_version(scenario_version_id: int):
         try:
@@ -1600,6 +1744,16 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"scenario_version": scenario_version}
+
+    @app.delete("/api/scenario-versions/{scenario_version_id}")
+    async def delete_scenario_version(scenario_version_id: int):
+        try:
+            deleted_version = analyst_store.delete_scenario_version(scenario_version_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return {"deleted_version": deleted_version}
 
     @app.post("/api/scenario-versions/{scenario_version_id}/runs", status_code=201)
     async def create_manual_run(scenario_version_id: int):
@@ -2321,17 +2475,29 @@ def render_scenario_page(
     versions: list[dict],
     candidate_text: str = "",
     error: ValidationResult | None = None,
+    *,
+    runs: list[dict] | None = None,
 ) -> str:
+    runs_by_version: dict[int, list[dict]] = {}
+    for run in runs or []:
+        runs_by_version.setdefault(int(run["scenario_version_id"]), []).append(run)
+
     version_items = "".join(
         f'<li id="version-{version["id"]}">'
         f'<strong>Version {version["version_number"]}</strong>'
         f'<span>{escape(version["case_name"])} | {escape(version["schema_version"])} | '
         f'{version["period_count"]} periods | {format_asset_counts(version["asset_counts"])}</span>'
+        f'{render_scenario_version_runs(runs_by_version.get(int(version["id"]), []))}'
         f'<a href="/scenarios/{scenario["id"]}?from_version_id={version["id"]}">Use as base</a>'
         f'<a href="/scenarios/{scenario["id"]}/draft?source_version_id={version["id"]}">Use as draft base</a>'
         f'<form class="inline-form" method="post" action="/scenario-versions/{version["id"]}/runs">'
         f'<button type="submit">Launch Run</button>'
         f"</form>"
+        f'<form class="inline-form" method="post" action="/scenario-versions/{version["id"]}/delete" '
+        'onsubmit="return confirm(\'Delete this version and its completed runs, results, and publications?\')">'
+        f'<button type="submit" class="button-danger" aria-label="Delete version {version["version_number"]}">'
+        "Delete Version</button>"
+        "</form>"
         "</li>"
         for version in versions
     )
@@ -2379,6 +2545,38 @@ def render_scenario_page(
     )
 
 
+def render_scenario_version_runs(runs: list[dict]) -> str:
+    if not runs:
+        return (
+            '<div class="version-runs">'
+            "<h3>Previous Runs</h3>"
+            '<p class="empty">No runs saved for this version.</p>'
+            "</div>"
+        )
+
+    items = []
+    for run in runs:
+        succeeded = run.get("status") == "succeeded"
+        action_label = "Load Results" if succeeded else "Open Run"
+        action_href = f'/runs/{run["id"]}#results' if succeeded else f'/runs/{run["id"]}'
+        finished = f' | finished {escape(str(run["finished_at"]))}' if run.get("finished_at") else ""
+        items.append(
+            "<li>"
+            "<div>"
+            f'<strong>Run {run["id"]}</strong>'
+            f'<span>Status: {escape(str(run["status"]))} | created {escape(str(run["created_at"]))}{finished}</span>'
+            "</div>"
+            f'<a class="button-link" href="{action_href}">{action_label}</a>'
+            "</li>"
+        )
+    return (
+        '<div class="version-runs">'
+        "<h3>Previous Runs</h3>"
+        f'<ul class="version-run-list">{"".join(items)}</ul>'
+        "</div>"
+    )
+
+
 def render_scenario_draft_page(
     scenario: dict,
     draft: dict | None,
@@ -2413,6 +2611,7 @@ def render_scenario_draft_page(
             "</section>"
         )
     document_for_sections = draft_document if isinstance(draft_document, dict) else {}
+    asset_builder = render_asset_builder(scenario, document_for_sections)
     structured_form = render_structured_draft_form(scenario, document_for_sections)
     time_series_section = render_time_series_source_section(scenario, document_for_sections)
     preview_markup = render_generated_preview(draft_document if isinstance(draft_document, dict) else None)
@@ -2431,19 +2630,80 @@ def render_scenario_draft_page(
           <p>{escape(scenario["name"])} | {escape(status_text)}</p>
         </section>
         {error_markup}
+        {asset_builder}
         {structured_form}
         {time_series_section}
         {preview_markup}
         {generated_validation_markup}
-        <form method="post" action="/scenarios/{scenario["id"]}/draft">
-          <h2>Draft Document</h2>
-          <label for="structured_draft_json">structured_draft_json</label>
-          <textarea id="structured_draft_json" name="structured_draft_json" spellcheck="false">{escape(draft_text)}</textarea>
-          {hidden_source}
-          <button type="submit">Save Draft</button>
-        </form>
+        <details class="advanced-section">
+          <summary>Advanced: edit raw draft JSON</summary>
+          <form method="post" action="/scenarios/{scenario["id"]}/draft">
+            <label for="structured_draft_json">structured_draft_json</label>
+            <textarea id="structured_draft_json" name="structured_draft_json" spellcheck="false">{escape(draft_text)}</textarea>
+            {hidden_source}
+            <button type="submit">Save Raw Draft</button>
+          </form>
+        </details>
         """,
     )
+
+
+def render_asset_builder(scenario: dict, document: dict) -> str:
+    assets = document.get("assets") if isinstance(document.get("assets"), list) else []
+    valid_assets = [
+        asset
+        for asset in assets
+        if isinstance(asset, dict) and asset.get("type") in SUPPORTED_ASSET_TYPES
+    ]
+    present_types = {str(asset.get("type")) for asset in valid_assets}
+    labels = {
+        "battery": "BESS",
+        "load": "Demand",
+        "renewable": "Renewable",
+        "hydro": "Hydro",
+    }
+    cards = []
+    for asset in valid_assets:
+        asset_id = str(asset.get("id") or "")
+        asset_type = str(asset.get("type") or "")
+        cards.append(
+            '<article class="asset-card">'
+            "<div>"
+            f"<strong>{escape(labels.get(asset_type, asset_type.title()))}</strong>"
+            f"<span>{escape(asset_id)}</span>"
+            "</div>"
+            f'<form method="post" action="/scenarios/{scenario["id"]}/draft/assets/'
+            f'{quote(asset_id, safe="")}/remove" class="inline-form">'
+            '<button type="submit" class="button-secondary">Remove</button>'
+            "</form>"
+            "</article>"
+        )
+    cards_markup = "".join(cards) or '<p class="empty">No optional assets added yet.</p>'
+    options = "".join(
+        f'<option value="{asset_type}">{escape(labels[asset_type])}</option>'
+        for asset_type in SUPPORTED_ASSET_TYPES
+        if asset_type not in present_types
+    )
+    if options:
+        add_form = f"""
+          <form method="post" action="/scenarios/{scenario["id"]}/draft/assets" class="asset-add-form">
+            <label for="asset_type">Asset type</label>
+            <select id="asset_type" name="asset_type">{options}</select>
+            <button type="submit">Add Asset</button>
+          </form>
+        """
+    else:
+        add_form = '<p class="empty">All supported asset types are already present.</p>'
+    return f"""
+      <section class="asset-builder">
+        <div>
+          <h2>1. Choose Assets</h2>
+          <p>Add only what this scenario needs. PCC and grid are created automatically.</p>
+        </div>
+        <div class="asset-list">{cards_markup}</div>
+        {add_form}
+      </section>
+    """
 
 
 def render_structured_draft_form(scenario: dict, document: dict) -> str:
@@ -2452,13 +2712,144 @@ def render_structured_draft_form(scenario: dict, document: dict) -> str:
     grid = document.get("grid") if isinstance(document.get("grid"), dict) else {}
     solver = document.get("solver") if isinstance(document.get("solver"), dict) else {}
     assets = document.get("assets") if isinstance(document.get("assets"), list) else []
-    battery = first_asset_of_type(assets, "battery")
-    renewable = first_asset_of_type(assets, "renewable")
-    load = first_asset_of_type(assets, "load")
-    hydro = first_asset_of_type(assets, "hydro")
     solver_options = solver.get("options") if isinstance(solver.get("options"), dict) else {}
-    hydro_generation_curve = hydro.get("generation_curve") if isinstance(hydro.get("generation_curve"), list) else []
-    hydro_reservoir_curve = (
+    asset_sections = "".join(
+        render_asset_settings(asset)
+        for asset in assets
+        if isinstance(asset, dict) and asset.get("type") in SUPPORTED_ASSET_TYPES
+    )
+    if not asset_sections:
+        asset_sections = '<p class="empty asset-empty">Add an asset above to configure it.</p>'
+
+    return f"""
+        <form method="post" action="/scenarios/{scenario["id"]}/draft/structure" class="structured-form">
+          <h2>2. Configure Scenario</h2>
+          <label for="case_name">Scenario name</label>
+          <input id="case_name" name="case_name" value="{html_value(case.get("name") or scenario["name"])}">
+          <label for="case_description">Description</label>
+          <textarea id="case_description" name="case_description">{escape(str(case.get("description") or ""))}</textarea>
+
+          {asset_sections}
+
+          <details class="advanced-section">
+            <summary>Connection and solver settings</summary>
+            <div class="form-grid details-fields">
+              <label for="pcc_id">PCC ID</label>
+              <input id="pcc_id" name="pcc_id" value="{html_value(pcc.get("id") or "bus_1")}">
+              <label for="grid_id">Grid ID</label>
+              <input id="grid_id" name="grid_id" value="{html_value(grid.get("id") or "grid_1")}">
+              <label for="grid_import_power_max_mw">Maximum import (MW)</label>
+              <input id="grid_import_power_max_mw" name="grid_import_power_max_mw" type="number" step="any" value="{html_value(grid.get("import_power_max_mw"))}">
+              <label for="grid_export_power_max_mw">Maximum export (MW)</label>
+              <input id="grid_export_power_max_mw" name="grid_export_power_max_mw" type="number" step="any" value="{html_value(grid.get("export_power_max_mw"))}">
+              <label for="solver_name">Solver</label>
+              <input id="solver_name" name="solver_name" value="{html_value(solver.get("name") or "HiGHS")}">
+            </div>
+            <label class="checkbox-row">
+              <input type="checkbox" name="grid_prevent_simultaneous_grid_import_export" {checked_attr(grid.get("prevent_simultaneous_grid_import_export", True))}>
+              Prevent simultaneous import and export
+            </label>
+            <label for="solver_options_json">Solver options (JSON)</label>
+            <textarea id="solver_options_json" name="solver_options_json" spellcheck="false">{escape(json.dumps(solver_options, sort_keys=True))}</textarea>
+          </details>
+          <button type="submit">Save Scenario Changes</button>
+        </form>
+    """
+
+
+def render_asset_settings(asset: dict[str, Any]) -> str:
+    asset_type = str(asset.get("type") or "")
+    if asset_type == "battery":
+        return render_battery_settings(asset)
+    if asset_type == "load":
+        return render_load_settings(asset)
+    if asset_type == "renewable":
+        return render_renewable_settings(asset)
+    if asset_type == "hydro":
+        return render_hydro_settings(asset)
+    return ""
+
+
+def render_battery_settings(battery: dict[str, Any]) -> str:
+    terminal_condition = str(battery.get("terminal_condition") or "equal_initial")
+    return f"""
+      <fieldset class="asset-settings">
+        <legend>BESS settings</legend>
+        <div class="form-grid">
+          <label for="battery_id">Asset ID</label>
+          <input id="battery_id" name="battery_id" value="{html_value(battery.get("id"))}" required>
+          <label for="battery_charge_power_max_mw">Maximum charge (MW)</label>
+          <input id="battery_charge_power_max_mw" name="battery_charge_power_max_mw" type="number" step="any" value="{html_value(draft_value(battery, "charge_power_max_mw", 4.0))}" required>
+          <label for="battery_discharge_power_max_mw">Maximum discharge (MW)</label>
+          <input id="battery_discharge_power_max_mw" name="battery_discharge_power_max_mw" type="number" step="any" value="{html_value(draft_value(battery, "discharge_power_max_mw", 4.0))}" required>
+          <label for="battery_energy_min_mwh">Minimum energy (MWh)</label>
+          <input id="battery_energy_min_mwh" name="battery_energy_min_mwh" type="number" step="any" value="{html_value(draft_value(battery, "energy_min_mwh", 0.0))}" required>
+          <label for="battery_energy_max_mwh">Maximum energy (MWh)</label>
+          <input id="battery_energy_max_mwh" name="battery_energy_max_mwh" type="number" step="any" value="{html_value(draft_value(battery, "energy_max_mwh", 8.0))}" required>
+          <label for="battery_initial_energy_mwh">Initial energy (MWh)</label>
+          <input id="battery_initial_energy_mwh" name="battery_initial_energy_mwh" type="number" step="any" value="{html_value(draft_value(battery, "initial_energy_mwh", 4.0))}" required>
+          <label for="battery_charge_efficiency">Charge efficiency</label>
+          <input id="battery_charge_efficiency" name="battery_charge_efficiency" type="number" step="any" value="{html_value(draft_value(battery, "charge_efficiency", 0.95))}" required>
+          <label for="battery_discharge_efficiency">Discharge efficiency</label>
+          <input id="battery_discharge_efficiency" name="battery_discharge_efficiency" type="number" step="any" value="{html_value(draft_value(battery, "discharge_efficiency", 0.95))}" required>
+          <label for="battery_degradation_cost_per_mwh_delta_soc">Degradation cost (USD/MWh)</label>
+          <input id="battery_degradation_cost_per_mwh_delta_soc" name="battery_degradation_cost_per_mwh_delta_soc" type="number" step="any" value="{html_value(draft_value(battery, "degradation_cost_per_mwh_delta_soc", 0.0))}" required>
+          <label for="battery_terminal_condition">Terminal condition</label>
+          <select id="battery_terminal_condition" name="battery_terminal_condition">
+            <option value="none" {selected_attr(terminal_condition == "none")}>None</option>
+            <option value="equal_initial" {selected_attr(terminal_condition == "equal_initial")}>Equal initial</option>
+            <option value="min_terminal" {selected_attr(terminal_condition == "min_terminal")}>Minimum terminal</option>
+          </select>
+          <label for="battery_terminal_energy_min_mwh">Minimum terminal energy (MWh)</label>
+          <input id="battery_terminal_energy_min_mwh" name="battery_terminal_energy_min_mwh" type="number" step="any" value="{html_value(battery.get("terminal_energy_min_mwh"))}">
+        </div>
+        <label class="checkbox-row">
+          <input type="checkbox" name="battery_prevent_simultaneous_charge_discharge" {checked_attr(battery.get("prevent_simultaneous_charge_discharge", True))}>
+          Prevent simultaneous charge and discharge
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" name="battery_degradation_linear_delta_soc" {checked_attr(battery.get("degradation_linear_delta_soc", True))}>
+          Apply linear degradation
+        </label>
+      </fieldset>
+    """
+
+
+def render_load_settings(load: dict[str, Any]) -> str:
+    return f"""
+      <fieldset class="asset-settings">
+        <legend>Demand settings</legend>
+        <label for="load_id">Asset ID</label>
+        <input id="load_id" name="load_id" value="{html_value(load.get("id"))}" required>
+        <p>Demand values are supplied period by period in the time-series file.</p>
+      </fieldset>
+    """
+
+
+def render_renewable_settings(renewable: dict[str, Any]) -> str:
+    category = str(renewable.get("category") or renewable.get("display_category") or "solar")
+    return f"""
+      <fieldset class="asset-settings">
+        <legend>Renewable settings</legend>
+        <div class="form-grid">
+          <label for="renewable_id">Asset ID</label>
+          <input id="renewable_id" name="renewable_id" value="{html_value(renewable.get("id"))}" required>
+          <label for="renewable_category">Technology</label>
+          <select id="renewable_category" name="renewable_category">
+            <option value="solar" {selected_attr(category == "solar")}>Solar</option>
+            <option value="wind" {selected_attr(category == "wind")}>Wind</option>
+          </select>
+          <label for="renewable_curtailment_penalty_usd_per_mwh">Curtailment penalty (USD/MWh)</label>
+          <input id="renewable_curtailment_penalty_usd_per_mwh" name="renewable_curtailment_penalty_usd_per_mwh" type="number" step="any" value="{html_value(draft_value(renewable, "curtailment_penalty_usd_per_mwh", 0.0))}">
+        </div>
+        <p>Availability values are supplied period by period in the time-series file.</p>
+      </fieldset>
+    """
+
+
+def render_hydro_settings(hydro: dict[str, Any]) -> str:
+    generation_curve = hydro.get("generation_curve") if isinstance(hydro.get("generation_curve"), list) else []
+    reservoir_curve = (
         hydro.get("reservoir_curve")
         if isinstance(hydro.get("reservoir_curve"), list)
         else [
@@ -2467,121 +2858,59 @@ def render_structured_draft_form(scenario: dict, document: dict) -> str:
             {"storage_hm3": 5.0, "elevation_masl": 720.0},
         ]
     )
-
+    generation_mode = str(hydro.get("generation_mode") or "linear")
+    terminal_condition = str(hydro.get("terminal_condition") or "none")
     return f"""
-        <form method="post" action="/scenarios/{scenario["id"]}/draft/structure" class="structured-form">
-          <h2>Case Metadata</h2>
-          <label for="case_name">case_name</label>
-          <input id="case_name" name="case_name" value="{html_value(case.get("name") or scenario["name"])}">
-          <label for="case_description">case_description</label>
-          <textarea id="case_description" name="case_description">{escape(str(case.get("description") or ""))}</textarea>
-
-          <h2>PCC And Grid</h2>
-          <div class="form-grid">
-            <label for="pcc_id">pcc_id</label>
-            <input id="pcc_id" name="pcc_id" value="{html_value(pcc.get("id") or "bus_1")}">
-            <label for="grid_id">grid_id</label>
-            <input id="grid_id" name="grid_id" value="{html_value(grid.get("id") or "grid_1")}">
-            <label for="grid_import_power_max_mw">grid_import_power_max_mw</label>
-            <input id="grid_import_power_max_mw" name="grid_import_power_max_mw" value="{html_value(grid.get("import_power_max_mw"))}">
-            <label for="grid_export_power_max_mw">grid_export_power_max_mw</label>
-            <input id="grid_export_power_max_mw" name="grid_export_power_max_mw" value="{html_value(grid.get("export_power_max_mw"))}">
-          </div>
-          <label class="checkbox-row">
-            <input type="checkbox" name="grid_prevent_simultaneous_grid_import_export" {checked_attr(grid.get("prevent_simultaneous_grid_import_export", True))}>
-            prevent_simultaneous_grid_import_export
-          </label>
-
-          <h2>Battery Asset</h2>
-          <div class="form-grid">
-            <label for="battery_id">battery_id</label>
-            <input id="battery_id" name="battery_id" value="{html_value(battery.get("id") or "battery_1")}">
-            <label for="battery_charge_power_max_mw">charge_power_max_mw</label>
-            <input id="battery_charge_power_max_mw" name="battery_charge_power_max_mw" value="{html_value(battery.get("charge_power_max_mw") or 4.0)}">
-            <label for="battery_discharge_power_max_mw">discharge_power_max_mw</label>
-            <input id="battery_discharge_power_max_mw" name="battery_discharge_power_max_mw" value="{html_value(battery.get("discharge_power_max_mw") or 4.0)}">
-            <label for="battery_energy_min_mwh">energy_min_mwh</label>
-            <input id="battery_energy_min_mwh" name="battery_energy_min_mwh" value="{html_value(battery.get("energy_min_mwh") if "energy_min_mwh" in battery else 0.0)}">
-            <label for="battery_energy_max_mwh">energy_max_mwh</label>
-            <input id="battery_energy_max_mwh" name="battery_energy_max_mwh" value="{html_value(battery.get("energy_max_mwh") or 8.0)}">
-            <label for="battery_initial_energy_mwh">initial_energy_mwh</label>
-            <input id="battery_initial_energy_mwh" name="battery_initial_energy_mwh" value="{html_value(battery.get("initial_energy_mwh") or 4.0)}">
-            <label for="battery_charge_efficiency">charge_efficiency</label>
-            <input id="battery_charge_efficiency" name="battery_charge_efficiency" value="{html_value(battery.get("charge_efficiency") or 0.95)}">
-            <label for="battery_discharge_efficiency">discharge_efficiency</label>
-            <input id="battery_discharge_efficiency" name="battery_discharge_efficiency" value="{html_value(battery.get("discharge_efficiency") or 0.95)}">
-            <label for="battery_degradation_cost_per_mwh_delta_soc">degradation_cost_per_mwh_delta_soc</label>
-            <input id="battery_degradation_cost_per_mwh_delta_soc" name="battery_degradation_cost_per_mwh_delta_soc" value="{html_value(battery.get("degradation_cost_per_mwh_delta_soc") if "degradation_cost_per_mwh_delta_soc" in battery else 0.0)}">
-            <label for="battery_terminal_condition">terminal_condition</label>
-            <input id="battery_terminal_condition" name="battery_terminal_condition" value="{html_value(battery.get("terminal_condition") or "equal_initial")}">
-            <label for="battery_terminal_energy_min_mwh">terminal_energy_min_mwh</label>
-            <input id="battery_terminal_energy_min_mwh" name="battery_terminal_energy_min_mwh" value="{html_value(battery.get("terminal_energy_min_mwh"))}">
-          </div>
-          <label class="checkbox-row">
-            <input type="checkbox" name="battery_prevent_simultaneous_charge_discharge" {checked_attr(battery.get("prevent_simultaneous_charge_discharge", True))}>
-            prevent_simultaneous_charge_discharge
-          </label>
-          <label class="checkbox-row">
-            <input type="checkbox" name="battery_degradation_linear_delta_soc" {checked_attr(battery.get("degradation_linear_delta_soc", True))}>
-            degradation_linear_delta_soc
-          </label>
-
-          <h2>Renewable And Load Assets</h2>
-          <div class="form-grid">
-            <label for="renewable_id">renewable_id</label>
-            <input id="renewable_id" name="renewable_id" value="{html_value(renewable.get("id") or "solar_1")}">
-            <label for="renewable_category">renewable_category</label>
-            <input id="renewable_category" name="renewable_category" value="{html_value(renewable.get("category") or renewable.get("display_category") or "solar")}">
-            <label for="renewable_curtailment_penalty_usd_per_mwh">curtailment_penalty_usd_per_mwh</label>
-            <input id="renewable_curtailment_penalty_usd_per_mwh" name="renewable_curtailment_penalty_usd_per_mwh" value="{html_value(renewable.get("curtailment_penalty_usd_per_mwh") if "curtailment_penalty_usd_per_mwh" in renewable else 0.0)}">
-            <label for="load_id">load_id</label>
-            <input id="load_id" name="load_id" value="{html_value(load.get("id") or "load_1")}">
-          </div>
-
-          <h2>Hydro Asset</h2>
-          <div class="form-grid">
-            <label for="hydro_id">hydro_id</label>
-            <input id="hydro_id" name="hydro_id" value="{html_value(hydro.get("id") or "")}">
-            <label for="hydro_storage_min_hm3">storage_min_hm3</label>
-            <input id="hydro_storage_min_hm3" name="hydro_storage_min_hm3" value="{html_value(hydro.get("storage_min_hm3") if "storage_min_hm3" in hydro else 1.0)}">
-            <label for="hydro_storage_max_hm3">storage_max_hm3</label>
-            <input id="hydro_storage_max_hm3" name="hydro_storage_max_hm3" value="{html_value(hydro.get("storage_max_hm3") if "storage_max_hm3" in hydro else 5.0)}">
-            <label for="hydro_initial_storage_hm3">initial_storage_hm3</label>
-            <input id="hydro_initial_storage_hm3" name="hydro_initial_storage_hm3" value="{html_value(hydro.get("initial_storage_hm3") if "initial_storage_hm3" in hydro else 2.5)}">
-            <label for="hydro_generation_mode">generation_mode</label>
-            <input id="hydro_generation_mode" name="hydro_generation_mode" value="{html_value(hydro.get("generation_mode") or "linear")}">
-            <label for="hydro_power_per_flow_mw_per_m3s">power_per_flow_mw_per_m3s</label>
-            <input id="hydro_power_per_flow_mw_per_m3s" name="hydro_power_per_flow_mw_per_m3s" value="{html_value(hydro.get("power_per_flow_mw_per_m3s") if "power_per_flow_mw_per_m3s" in hydro else 0.08)}">
-            <label for="hydro_turbine_flow_min_m3s">turbine_flow_min_m3s</label>
-            <input id="hydro_turbine_flow_min_m3s" name="hydro_turbine_flow_min_m3s" value="{html_value(hydro.get("turbine_flow_min_m3s"))}">
-            <label for="hydro_turbine_flow_max_m3s">turbine_flow_max_m3s</label>
-            <input id="hydro_turbine_flow_max_m3s" name="hydro_turbine_flow_max_m3s" value="{html_value(hydro.get("turbine_flow_max_m3s") if "turbine_flow_max_m3s" in hydro else 40.0)}">
-            <label for="hydro_power_max_mw">power_max_mw</label>
-            <input id="hydro_power_max_mw" name="hydro_power_max_mw" value="{html_value(hydro.get("power_max_mw") if "power_max_mw" in hydro else 3.0)}">
-            <label for="hydro_minimum_release_m3s">minimum_release_m3s</label>
-            <input id="hydro_minimum_release_m3s" name="hydro_minimum_release_m3s" value="{html_value(hydro.get("minimum_release_m3s") if "minimum_release_m3s" in hydro else 0.0)}">
-            <label for="hydro_spill_penalty_usd_per_hm3">spill_penalty_usd_per_hm3</label>
-            <input id="hydro_spill_penalty_usd_per_hm3" name="hydro_spill_penalty_usd_per_hm3" value="{html_value(hydro.get("spill_penalty_usd_per_hm3") if "spill_penalty_usd_per_hm3" in hydro else 100.0)}">
-            <label for="hydro_terminal_condition">terminal_condition</label>
-            <input id="hydro_terminal_condition" name="hydro_terminal_condition" value="{html_value(hydro.get("terminal_condition") or "none")}">
-            <label for="hydro_terminal_storage_min_hm3">terminal_storage_min_hm3</label>
-            <input id="hydro_terminal_storage_min_hm3" name="hydro_terminal_storage_min_hm3" value="{html_value(hydro.get("terminal_storage_min_hm3"))}">
-            <label for="hydro_terminal_water_value_usd_per_hm3">terminal_water_value_usd_per_hm3</label>
-            <input id="hydro_terminal_water_value_usd_per_hm3" name="hydro_terminal_water_value_usd_per_hm3" value="{html_value(hydro.get("terminal_water_value_usd_per_hm3") if "terminal_water_value_usd_per_hm3" in hydro else 0.0)}">
-          </div>
-          <label for="hydro_generation_curve_json">generation_curve_json</label>
-          <textarea id="hydro_generation_curve_json" name="hydro_generation_curve_json" spellcheck="false">{escape(json.dumps(hydro_generation_curve, sort_keys=True))}</textarea>
-          <label for="hydro_reservoir_curve_json">reservoir_curve_json</label>
-          <textarea id="hydro_reservoir_curve_json" name="hydro_reservoir_curve_json" spellcheck="false">{escape(json.dumps(hydro_reservoir_curve, sort_keys=True))}</textarea>
-
-          <h2>Solver</h2>
-          <label for="solver_name">solver_name</label>
-          <input id="solver_name" name="solver_name" value="{html_value(solver.get("name") or "HiGHS")}">
-          <label for="solver_options_json">solver_options_json</label>
-          <textarea id="solver_options_json" name="solver_options_json" spellcheck="false">{escape(json.dumps(solver_options, sort_keys=True))}</textarea>
-          <button type="submit">Save Structured Draft</button>
-        </form>
+      <fieldset class="asset-settings">
+        <legend>Hydro settings</legend>
+        <div class="form-grid">
+          <label for="hydro_id">Asset ID</label>
+          <input id="hydro_id" name="hydro_id" value="{html_value(hydro.get("id"))}" required>
+          <label for="hydro_storage_min_hm3">Minimum storage (hm3)</label>
+          <input id="hydro_storage_min_hm3" name="hydro_storage_min_hm3" type="number" step="any" value="{html_value(draft_value(hydro, "storage_min_hm3", 1.0))}" required>
+          <label for="hydro_storage_max_hm3">Maximum storage (hm3)</label>
+          <input id="hydro_storage_max_hm3" name="hydro_storage_max_hm3" type="number" step="any" value="{html_value(draft_value(hydro, "storage_max_hm3", 5.0))}" required>
+          <label for="hydro_initial_storage_hm3">Initial storage (hm3)</label>
+          <input id="hydro_initial_storage_hm3" name="hydro_initial_storage_hm3" type="number" step="any" value="{html_value(draft_value(hydro, "initial_storage_hm3", 2.5))}" required>
+          <label for="hydro_generation_mode">Generation mode</label>
+          <select id="hydro_generation_mode" name="hydro_generation_mode">
+            <option value="linear" {selected_attr(generation_mode == "linear")}>Linear</option>
+            <option value="piecewise_linear" {selected_attr(generation_mode == "piecewise_linear")}>Piecewise linear</option>
+          </select>
+          <label for="hydro_power_per_flow_mw_per_m3s">Power per flow (MW per m3/s)</label>
+          <input id="hydro_power_per_flow_mw_per_m3s" name="hydro_power_per_flow_mw_per_m3s" type="number" step="any" value="{html_value(draft_value(hydro, "power_per_flow_mw_per_m3s", 0.08))}">
+          <label for="hydro_turbine_flow_min_m3s">Minimum turbine flow (m3/s)</label>
+          <input id="hydro_turbine_flow_min_m3s" name="hydro_turbine_flow_min_m3s" type="number" step="any" value="{html_value(hydro.get("turbine_flow_min_m3s"))}">
+          <label for="hydro_turbine_flow_max_m3s">Maximum turbine flow (m3/s)</label>
+          <input id="hydro_turbine_flow_max_m3s" name="hydro_turbine_flow_max_m3s" type="number" step="any" value="{html_value(draft_value(hydro, "turbine_flow_max_m3s", 40.0))}">
+          <label for="hydro_power_max_mw">Maximum power (MW)</label>
+          <input id="hydro_power_max_mw" name="hydro_power_max_mw" type="number" step="any" value="{html_value(draft_value(hydro, "power_max_mw", 3.0))}">
+          <label for="hydro_minimum_release_m3s">Minimum release (m3/s)</label>
+          <input id="hydro_minimum_release_m3s" name="hydro_minimum_release_m3s" type="number" step="any" value="{html_value(draft_value(hydro, "minimum_release_m3s", 0.0))}">
+          <label for="hydro_spill_penalty_usd_per_hm3">Spill penalty (USD/hm3)</label>
+          <input id="hydro_spill_penalty_usd_per_hm3" name="hydro_spill_penalty_usd_per_hm3" type="number" step="any" value="{html_value(draft_value(hydro, "spill_penalty_usd_per_hm3", 100.0))}">
+          <label for="hydro_terminal_condition">Terminal condition</label>
+          <select id="hydro_terminal_condition" name="hydro_terminal_condition">
+            <option value="none" {selected_attr(terminal_condition == "none")}>None</option>
+            <option value="equal_initial" {selected_attr(terminal_condition == "equal_initial")}>Equal initial</option>
+            <option value="min_terminal" {selected_attr(terminal_condition == "min_terminal")}>Minimum terminal</option>
+          </select>
+          <label for="hydro_terminal_storage_min_hm3">Minimum terminal storage (hm3)</label>
+          <input id="hydro_terminal_storage_min_hm3" name="hydro_terminal_storage_min_hm3" type="number" step="any" value="{html_value(hydro.get("terminal_storage_min_hm3"))}">
+          <label for="hydro_terminal_water_value_usd_per_hm3">Terminal water value (USD/hm3)</label>
+          <input id="hydro_terminal_water_value_usd_per_hm3" name="hydro_terminal_water_value_usd_per_hm3" type="number" step="any" value="{html_value(draft_value(hydro, "terminal_water_value_usd_per_hm3", 0.0))}">
+        </div>
+        <label for="hydro_generation_curve_json">Generation curve (JSON)</label>
+        <textarea id="hydro_generation_curve_json" name="hydro_generation_curve_json" spellcheck="false">{escape(json.dumps(generation_curve, sort_keys=True))}</textarea>
+        <label for="hydro_reservoir_curve_json">Reservoir curve (JSON)</label>
+        <textarea id="hydro_reservoir_curve_json" name="hydro_reservoir_curve_json" spellcheck="false">{escape(json.dumps(reservoir_curve, sort_keys=True))}</textarea>
+      </fieldset>
     """
+
+
+def draft_value(document: dict[str, Any], key: str, default: Any) -> Any:
+    value = document.get(key)
+    return default if value is None else value
 
 
 def render_time_series_source_section(scenario: dict, document: dict) -> str:
@@ -2592,12 +2921,13 @@ def render_time_series_source_section(scenario: dict, document: dict) -> str:
     return f"""
         <section class="time-series-source">
           <form method="post" action="/scenarios/{scenario["id"]}/draft/time-series-sources/upload" enctype="multipart/form-data">
-            <h2>CSV Time-Series Source</h2>
-            <label for="source_file">source_file</label>
+            <h2>3. Upload Time Series</h2>
+            <p>Use a CSV or XLSX file for prices, demand and asset availability by period.</p>
+            <label for="source_file">Time-series file</label>
             <input id="source_file" name="source_file" type="file" accept="text/csv,.csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
-            <label for="sheet_name">xlsx_sheet_name</label>
+            <label for="sheet_name">XLSX sheet (optional)</label>
             <input id="sheet_name" name="sheet_name" placeholder="First sheet by default">
-            <button type="submit">Upload Source</button>
+            <button type="submit">Upload Time Series</button>
           </form>
           {source_markup}
         </section>
@@ -2617,6 +2947,7 @@ def render_time_series_source_detail(scenario: dict, document: dict, source: dic
     renewable_inputs = render_asset_mapping_inputs(document, source, "renewable", "renewable_available_power_mw")
     load_inputs = render_asset_mapping_inputs(document, source, "load", "load_demand_mw")
     hydro_inputs = render_asset_mapping_inputs(document, source, "hydro", "hydro_inflow_m3s")
+    editor_markup = render_time_series_editor(scenario, source)
     return f"""
           <div class="source-detail">
             <h2>{source_title}</h2>
@@ -2624,6 +2955,7 @@ def render_time_series_source_detail(scenario: dict, document: dict, source: dic
             {selected_sheet_markup}
             <p>Columns: {escape(", ".join(str(column) for column in columns))}</p>
             {render_preview_rows(source)}
+            {editor_markup}
             <form method="post" action="/scenarios/{scenario["id"]}/draft/time-series-sources/{source_id}/mapping">
               <h2>Column Mapping</h2>
               <div class="form-grid">
@@ -2646,6 +2978,159 @@ def render_time_series_source_detail(scenario: dict, document: dict, source: dic
             {validation_markup}
           </div>
     """
+
+
+def render_time_series_editor(scenario: dict, source: dict) -> str:
+    source_id = quote(str(source.get("id") or ""), safe="")
+    endpoint = f'/api/scenarios/{scenario["id"]}/draft/time-series-sources/{source_id}/rows'
+    editor = f"""
+        <div class="time-series-editor-shell" data-rows-endpoint="{escape(endpoint, quote=True)}">
+          <button type="button" class="edit-time-series-button">Edit Table</button>
+          <div class="time-series-editor" hidden>
+            <div class="time-series-editor-header">
+              <div>
+                <h2>Edit Time-Series Values</h2>
+                <p>Edit individual cells, or paste a column/range copied from Excel into the first destination cell.</p>
+              </div>
+              <button type="button" class="button-secondary close-time-series-editor">Close</button>
+            </div>
+            <div class="table-scroll editable-table-scroll">
+              <table class="editable-time-series-table">
+                <thead><tr></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div class="time-series-editor-actions">
+              <button type="button" class="save-time-series-rows">Save Changes</button>
+              <span class="time-series-editor-status" role="status"></span>
+            </div>
+          </div>
+        </div>
+    """
+    script = r"""
+        <script>
+          (() => {
+            const shell = document.currentScript.previousElementSibling;
+            const editor = shell.querySelector('.time-series-editor');
+            const editButton = shell.querySelector('.edit-time-series-button');
+            const closeButton = shell.querySelector('.close-time-series-editor');
+            const saveButton = shell.querySelector('.save-time-series-rows');
+            const status = shell.querySelector('.time-series-editor-status');
+            const table = shell.querySelector('.editable-time-series-table');
+            const headerRow = table.querySelector('thead tr');
+            const tableBody = table.querySelector('tbody');
+            const endpoint = shell.dataset.rowsEndpoint;
+            let columns = [];
+            let loaded = false;
+
+            const responseError = async (response) => {
+              let body = {};
+              try { body = await response.json(); } catch (_error) { /* no JSON body */ }
+              return body.detail || body.message || `Request failed (${response.status})`;
+            };
+
+            const renderRows = (payload) => {
+              columns = payload.columns;
+              headerRow.replaceChildren(...columns.map((column) => {
+                const th = document.createElement('th');
+                th.textContent = column;
+                return th;
+              }));
+              tableBody.replaceChildren(...payload.rows.map((row, rowIndex) => {
+                const tr = document.createElement('tr');
+                columns.forEach((column, columnIndex) => {
+                  const td = document.createElement('td');
+                  td.contentEditable = 'true';
+                  td.spellcheck = false;
+                  td.dataset.row = String(rowIndex);
+                  td.dataset.column = String(columnIndex);
+                  td.textContent = row[column] ?? '';
+                  tr.appendChild(td);
+                });
+                return tr;
+              }));
+            };
+
+            const loadRows = async () => {
+              status.textContent = 'Loading table...';
+              const response = await fetch(endpoint, { headers: { Accept: 'application/json' } });
+              if (!response.ok) throw new Error(await responseError(response));
+              renderRows(await response.json());
+              loaded = true;
+              status.textContent = '';
+            };
+
+            editButton.addEventListener('click', async () => {
+              editor.hidden = false;
+              editButton.hidden = true;
+              if (loaded) return;
+              try { await loadRows(); } catch (error) { status.textContent = error.message; }
+            });
+
+            closeButton.addEventListener('click', () => {
+              editor.hidden = true;
+              editButton.hidden = false;
+            });
+
+            tableBody.addEventListener('paste', (event) => {
+              const startCell = event.target.closest('td[contenteditable="true"]');
+              if (!startCell) return;
+              const clipboardText = event.clipboardData.getData('text/plain');
+              if (!clipboardText) return;
+              event.preventDefault();
+              const lines = clipboardText.replace(/\r/g, '').split('\n');
+              if (lines.at(-1) === '') lines.pop();
+              const pastedCells = lines.map((line) => line.split('\t'));
+              const startRow = Number(startCell.dataset.row);
+              const startColumn = Number(startCell.dataset.column);
+              pastedCells.forEach((values, rowOffset) => {
+                values.forEach((value, columnOffset) => {
+                  const target = tableBody.querySelector(
+                    `td[data-row="${startRow + rowOffset}"][data-column="${startColumn + columnOffset}"]`
+                  );
+                  if (target) target.textContent = value;
+                });
+              });
+            });
+
+            tableBody.addEventListener('keydown', (event) => {
+              const cell = event.target.closest('td[contenteditable="true"]');
+              if (!cell || event.key !== 'Enter') return;
+              event.preventDefault();
+              const nextCell = tableBody.querySelector(
+                `td[data-row="${Number(cell.dataset.row) + 1}"][data-column="${cell.dataset.column}"]`
+              );
+              if (nextCell) nextCell.focus();
+            });
+
+            saveButton.addEventListener('click', async () => {
+              const rows = Array.from(tableBody.rows).map((row) => {
+                const values = {};
+                columns.forEach((column, index) => {
+                  values[column] = row.cells[index].textContent.replace(/\u00a0/g, ' ');
+                });
+                return values;
+              });
+              saveButton.disabled = true;
+              status.textContent = 'Saving changes...';
+              try {
+                const response = await fetch(endpoint, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                  body: JSON.stringify({ rows }),
+                });
+                if (!response.ok) throw new Error(await responseError(response));
+                status.textContent = 'Changes saved.';
+                window.location.reload();
+              } catch (error) {
+                status.textContent = error.message;
+                saveButton.disabled = false;
+              }
+            });
+          })();
+        </script>
+    """
+    return editor + script
 
 
 def active_time_series_source(document: dict) -> dict | None:
@@ -2740,10 +3225,10 @@ def render_generated_preview(document: dict | None) -> str:
     except DraftGenerationError:
         return ""
     return (
-        '<section class="preview-block">'
-        "<h2>Generated System Case Preview</h2>"
+        '<details class="preview-block advanced-section">'
+        "<summary>Generated system case preview</summary>"
         f'<textarea id="generated_system_case_preview" readonly spellcheck="false">{escape(preview_text)}</textarea>'
-        "</section>"
+        "</details>"
     )
 
 
@@ -2780,8 +3265,8 @@ def render_generated_validation_section(
     return (
         f'<form method="post" action="/scenarios/{scenario["id"]}/draft/generated-system-case/validate" '
         'class="inline-form">'
-        "<h2>Generated System Case Validation</h2>"
-        '<button type="submit">Validate Generated System Case</button>'
+        "<h2>4. Validate Scenario</h2>"
+        '<button type="submit">Validate Scenario</button>'
         "</form>"
         f"{result_markup}"
         f"{promote_markup}"
@@ -3191,6 +3676,11 @@ def render_app_page(title: str, content: str) -> str:
       margin-bottom: 24px;
       padding-bottom: 18px;
     }}
+    .run-actions {{
+      display: flex;
+      gap: 8px;
+      margin-top: 14px;
+    }}
     .split {{
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
@@ -3217,6 +3707,39 @@ def render_app_page(title: str, content: str) -> str:
       color: var(--muted);
       font-size: 14px;
     }}
+    .version-runs {{
+      border-left: 3px solid var(--line);
+      margin: 8px 0;
+      padding: 8px 0 8px 12px;
+    }}
+    .version-runs h3 {{
+      font-size: 13px;
+      margin: 0 0 8px;
+    }}
+    .version-run-list {{
+      display: grid;
+      gap: 8px;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }}
+    .version-run-list li {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border: 0;
+      padding: 0;
+    }}
+    .version-run-list li div {{
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }}
+    .version-run-list .button-link {{
+      flex: 0 0 auto;
+      padding: 7px 10px;
+    }}
     form {{
       display: grid;
       gap: 10px;
@@ -3227,6 +3750,67 @@ def render_app_page(title: str, content: str) -> str:
     }}
     .structured-form {{
       margin-bottom: 18px;
+    }}
+    .asset-builder {{
+      display: grid;
+      gap: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin-bottom: 18px;
+      padding: 18px;
+    }}
+    .asset-list {{
+      display: grid;
+      gap: 8px;
+    }}
+    .asset-card {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px 12px;
+      background: var(--surface);
+    }}
+    .asset-card div {{
+      display: grid;
+      gap: 3px;
+    }}
+    .asset-card span {{
+      color: var(--muted);
+      font-size: 13px;
+    }}
+    .asset-add-form {{
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) auto;
+      align-items: end;
+      gap: 8px 12px;
+      border: 0;
+      padding: 0;
+      background: transparent;
+    }}
+    .asset-add-form label {{
+      grid-column: 1 / -1;
+    }}
+    .asset-settings {{
+      display: grid;
+      gap: 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      margin: 8px 0;
+      padding: 16px;
+      background: white;
+    }}
+    .asset-settings legend {{
+      padding: 0 8px;
+      color: var(--ink);
+      font-weight: 700;
+    }}
+    .asset-empty {{
+      border: 1px dashed var(--line);
+      border-radius: 6px;
+      padding: 16px;
     }}
     .form-grid {{
       display: grid;
@@ -3246,6 +3830,7 @@ def render_app_page(title: str, content: str) -> str:
       font-weight: 700;
     }}
     input,
+    select,
     textarea {{
       box-sizing: border-box;
       width: 100%;
@@ -3282,6 +3867,44 @@ def render_app_page(title: str, content: str) -> str:
       font-weight: 700;
       cursor: pointer;
     }}
+    .button-secondary {{
+      border: 1px solid var(--line);
+      padding: 7px 10px;
+      background: white;
+      color: var(--ink);
+    }}
+    .button-danger {{
+      border: 1px solid #f1b7b2;
+      padding: 7px 10px;
+      background: #fff4f2;
+      color: var(--error);
+    }}
+    .button-link {{
+      display: inline-block;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 9px 12px;
+      background: white;
+      color: var(--ink);
+    }}
+    .advanced-section {{
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      margin: 12px 0;
+      padding: 12px;
+      background: white;
+    }}
+    .advanced-section summary {{
+      cursor: pointer;
+      color: var(--ink);
+      font-weight: 700;
+    }}
+    .advanced-section[open] summary {{
+      margin-bottom: 14px;
+    }}
+    .details-fields {{
+      margin-bottom: 12px;
+    }}
     .notice {{
       border-left: 4px solid var(--accent);
       background: #effcf8;
@@ -3294,6 +3917,49 @@ def render_app_page(title: str, content: str) -> str:
     .preview-block textarea {{
       min-height: 260px;
       font: 13px/1.45 Consolas, "Liberation Mono", monospace;
+    }}
+    .time-series-editor-shell {{
+      margin: 12px 0 20px;
+    }}
+    .time-series-editor {{
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin-top: 10px;
+      padding: 14px;
+      background: var(--surface);
+    }}
+    .time-series-editor-header,
+    .time-series-editor-actions {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }}
+    .time-series-editor-header {{
+      align-items: flex-start;
+      margin-bottom: 12px;
+    }}
+    .time-series-editor-header p {{
+      margin-top: 3px;
+    }}
+    .editable-table-scroll {{
+      max-height: 360px;
+      margin-bottom: 12px;
+      background: white;
+    }}
+    .editable-time-series-table td[contenteditable="true"] {{
+      min-width: 110px;
+      cursor: text;
+      background: white;
+    }}
+    .editable-time-series-table td[contenteditable="true"]:focus {{
+      outline: 2px solid var(--accent);
+      outline-offset: -2px;
+      background: #effcf8;
+    }}
+    .time-series-editor-status {{
+      color: var(--muted);
+      font-size: 13px;
     }}
     .notice.error {{
       border-left-color: var(--error);
@@ -3318,9 +3984,6 @@ def render_app_page(title: str, content: str) -> str:
       margin-top: 26px;
     }}
     .chart-grid {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 16px;
       margin-bottom: 24px;
     }}
     .chart-panel {{
@@ -3338,34 +4001,139 @@ def render_app_page(title: str, content: str) -> str:
     .chart-panel p {{
       font-size: 13px;
     }}
-    .chart-svg {{
-      display: block;
-      width: 100%;
-      aspect-ratio: 16 / 7;
-      min-height: 180px;
-    }}
-    .chart-legend {{
+    .plot-builder-toolbar,
+    .configurable-plot-header {{
       display: flex;
-      flex-wrap: wrap;
-      gap: 8px 12px;
-      margin: 8px 0 0;
-      padding: 0;
-      list-style: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }}
+    .plot-builder-toolbar p {{
+      margin: 0;
+    }}
+    .plot-favorites {{
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) auto minmax(180px, 1fr) auto auto;
+      gap: 8px;
+      align-items: end;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin-bottom: 16px;
+      padding: 12px;
+      background: var(--surface);
+    }}
+    .plot-favorites label {{
+      display: grid;
+      gap: 5px;
+    }}
+    .favorite-feedback {{
+      grid-column: 1 / -1;
+      min-height: 18px;
       color: var(--muted);
       font-size: 12px;
     }}
-    .legend-swatch {{
-      display: inline-block;
-      width: 10px;
-      height: 10px;
-      border-radius: 2px;
-      margin-right: 5px;
-      vertical-align: -1px;
+    .configurable-plot {{
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 18px;
+      background: white;
+    }}
+    .plot-title-input {{
+      max-width: 420px;
+      font-size: 16px;
+      font-weight: 700;
+    }}
+    .plot-controls {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(240px, 1fr));
+      gap: 12px;
+      margin-bottom: 10px;
+    }}
+    .series-picker {{
+      position: relative;
+    }}
+    .series-picker summary {{
+      cursor: pointer;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px 12px;
+      color: var(--ink);
+      font-weight: 700;
+      background: var(--surface);
+    }}
+    .series-picker-panel {{
+      position: absolute;
+      z-index: 20;
+      width: min(520px, calc(100vw - 64px));
+      max-height: 360px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px;
+      background: white;
+      box-shadow: 0 12px 28px rgba(24, 33, 47, 0.16);
+    }}
+    .series-filter {{
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      margin-bottom: 8px;
+      background: white;
+    }}
+    .series-group-block {{
+      border-top: 1px solid var(--line);
+      margin-top: 8px;
+      padding-top: 8px;
+    }}
+    .series-group-header {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 4px;
+    }}
+    .series-group-label {{
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }}
+    .series-group-actions {{
+      display: flex;
+      gap: 5px;
+    }}
+    .series-group-action {{
+      border: 1px solid var(--line);
+      padding: 4px 7px;
+      background: white;
+      color: var(--accent);
+      font-size: 11px;
+    }}
+    .series-option {{
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 5px 2px;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 400;
+    }}
+    .series-option input {{
+      width: auto;
+      margin-top: 2px;
+    }}
+    .plotly-chart {{
+      width: 100%;
+      min-height: 500px;
     }}
     .table-scroll {{
       border: 1px solid var(--line);
       border-radius: 6px;
-      overflow-x: auto;
+      max-height: 420px;
+      overflow: auto;
       margin-bottom: 24px;
     }}
     table {{
@@ -3382,6 +4150,9 @@ def render_app_page(title: str, content: str) -> str:
       white-space: nowrap;
     }}
     thead th {{
+      position: sticky;
+      top: 0;
+      z-index: 2;
       background: var(--surface);
       color: var(--muted);
       font-weight: 700;
@@ -3396,6 +4167,18 @@ def render_app_page(title: str, content: str) -> str:
       }}
       .form-grid {{
         grid-template-columns: 1fr;
+      }}
+      .asset-add-form {{
+        grid-template-columns: 1fr;
+      }}
+      .plot-controls {{
+        grid-template-columns: 1fr;
+      }}
+      .plot-favorites {{
+        grid-template-columns: 1fr;
+      }}
+      .favorite-feedback {{
+        grid-column: 1;
       }}
       .details dl {{
         grid-template-columns: 1fr;
@@ -3419,6 +4202,7 @@ def render_run_page(
     publications: list[dict] | None = None,
     dashboard_templates: list[dict[str, Any]] | None = None,
     publication_artifacts: list[dict] | None = None,
+    scenario_id: int | None = None,
 ) -> str:
     artifact_items = render_artifact_items(artifacts or [])
     publication_markup = render_publications_section(
@@ -3428,6 +4212,11 @@ def render_run_page(
         publication_artifacts or [],
     )
     results_markup = render_results_section(results, results_error)
+    parameters_link = (
+        f'<a class="button-link" href="/scenarios/{scenario_id}/draft">Back to parameters</a>'
+        if scenario_id is not None
+        else ""
+    )
     return render_app_page(
         f"Run {run['id']}",
         f"""
@@ -3435,6 +4224,7 @@ def render_run_page(
         <section class="toolbar">
           <h1>Run {run["id"]}</h1>
           <p>Status: <strong id="run-status">{escape(run["status"])}</strong></p>
+          <div class="run-actions">{parameters_link}</div>
         </section>
         <section class="details">
           <dl>
@@ -3452,6 +4242,8 @@ def render_run_page(
         {publication_markup}
         {results_markup}
         <script>
+          const initialRunStatus = {json.dumps(run["status"])};
+
           async function pollRun() {{
             const response = await fetch("/api/runs/{run["id"]}");
             if (!response.ok) return;
@@ -3464,9 +4256,13 @@ def render_run_page(
             document.getElementById("run-error-message").textContent = run.error_message || "";
             if (run.status === "queued" || run.status === "running") {{
               window.setTimeout(pollRun, 1000);
+            }} else if (initialRunStatus === "queued" || initialRunStatus === "running") {{
+              window.location.reload();
             }}
           }}
-          window.setTimeout(pollRun, 1000);
+          if (initialRunStatus === "queued" || initialRunStatus === "running") {{
+            window.setTimeout(pollRun, 1000);
+          }}
         </script>
         """,
     )
@@ -3626,8 +4422,8 @@ def render_client_dashboard_results(results: dict | None, results_error: str = "
         )
     if results.get("charts"):
         sections.append(
-            "<h2>Charts</h2>"
-            f"{render_chart_grid(results['charts'])}"
+            "<h2>Interactive Plots</h2>"
+            f"{render_chart_grid(results['charts'], results.get('plot_series', []))}"
         )
     if results.get("dispatch_table") is not None:
         sections.append(
@@ -3647,7 +4443,7 @@ def render_client_dashboard_results(results: dict | None, results_error: str = "
 def render_results_section(results: dict | None, results_error: str = "") -> str:
     if results_error:
         return (
-            '<section class="notice error results-section">'
+            '<section id="results" class="notice error results-section">'
             "<h2>Results Error</h2>"
             f"<p>{escape(results_error)}</p>"
             "</section>"
@@ -3656,11 +4452,11 @@ def render_results_section(results: dict | None, results_error: str = "") -> str
         return ""
 
     return f"""
-        <section class="results-section">
+        <section id="results" class="results-section">
           <h2>Run Summary</h2>
           {render_summary_details(results["summary"])}
-          <h2>Basic Charts</h2>
-          {render_chart_grid(results["charts"])}
+          <h2>Interactive Plots</h2>
+          {render_chart_grid(results["charts"], results.get("plot_series", []))}
           <h2>System Dispatch</h2>
           {render_result_table(results["dispatch_table"])}
           <h2>Asset Dispatch</h2>
@@ -3742,133 +4538,374 @@ def render_key_value_table(values: dict[str, Any]) -> str:
     )
 
 
-def render_chart_grid(charts: dict) -> str:
-    chart_keys = [
-        "price",
-        "grid_import_export",
-        "renewable_used_curtailed",
-        "bess_charge_discharge_soc",
-        "period_profit",
-        "hydro_power",
-        "hydro_flows",
-        "hydro_storage",
-        "hydro_reservoir_elevation",
-    ]
-    panels = "".join(render_chart_panel(charts[key]) for key in chart_keys if key in charts)
-    return f'<div class="chart-grid">{panels}</div>'
+def render_chart_grid(charts: dict, plot_series: list[dict[str, Any]]) -> str:
+    if not charts:
+        return ""
+    if not plot_series:
+        return '<p>No numeric series are available for plotting.</p>'
+    payload = json_for_inline_script(plot_series)
+    script = """
+      <script>
+        (() => {
+          const root = document.getElementById("plot-builder");
+          const catalog = __PLOT_SERIES__;
+          const seriesById = new Map(catalog.map((series) => [series.id, series]));
+          const plotsContainer = root.querySelector("[data-plots]");
+          const addButton = root.querySelector("[data-add-plot]");
+          const favoriteNameInput = root.querySelector("[data-favorite-name]");
+          const favoriteSelect = root.querySelector("[data-favorite-select]");
+          const favoriteFeedback = root.querySelector("[data-favorite-feedback]");
+          const favoriteStorageKey = "energy_dispatch.plotFavorites.v1";
+          const plots = [];
+          let nextPlotId = 1;
 
+          function element(tag, className, text) {
+            const node = document.createElement(tag);
+            if (className) node.className = className;
+            if (text !== undefined) node.textContent = text;
+            return node;
+          }
 
-def render_chart_panel(chart: dict) -> str:
-    chart_id = escape(chart["id"])
-    title = escape(chart["title"])
-    if not chart["available"]:
-        message = escape(chart.get("message") or "Chart data is not available for this run.")
-        return (
-            f'<section class="chart-panel" data-chart-id="{chart_id}">'
-            f"<h3>{title}</h3>"
-            f"<p>{message}</p>"
-            "</section>"
-        )
+          function setFavoriteFeedback(message) {
+            favoriteFeedback.textContent = message;
+          }
 
+          function readFavorites() {
+            try {
+              const parsed = JSON.parse(window.localStorage.getItem(favoriteStorageKey) || "[]");
+              return Array.isArray(parsed) ? parsed.filter((favorite) => favorite && favorite.name) : [];
+            } catch (error) {
+              setFavoriteFeedback("Favorites could not be read from this browser.");
+              return [];
+            }
+          }
+
+          function writeFavorites(favorites) {
+            try {
+              window.localStorage.setItem(favoriteStorageKey, JSON.stringify(favorites));
+              return true;
+            } catch (error) {
+              setFavoriteFeedback("Favorites could not be saved in this browser.");
+              return false;
+            }
+          }
+
+          function refreshFavoriteOptions(selectedName = "") {
+            favoriteSelect.replaceChildren(new Option("Choose a favorite", ""));
+            for (const favorite of readFavorites().sort((left, right) => left.name.localeCompare(right.name))) {
+              favoriteSelect.appendChild(new Option(favorite.name, favorite.name));
+            }
+            favoriteSelect.value = selectedName;
+          }
+
+          function saveFavorite() {
+            const name = favoriteNameInput.value.trim();
+            if (!name) {
+              setFavoriteFeedback("Enter a name before saving a favorite.");
+              favoriteNameInput.focus();
+              return;
+            }
+            if (!plots.length) {
+              setFavoriteFeedback("Add at least one plot before saving a favorite.");
+              return;
+            }
+            const favorite = {
+              name,
+              plots: plots.map((state) => ({
+                title: state.titleInput.value,
+                primary: [...state.primary],
+                secondary: [...state.secondary],
+              })),
+              updatedAt: new Date().toISOString(),
+            };
+            const favorites = readFavorites().filter((item) => item.name !== name);
+            favorites.push(favorite);
+            if (!writeFavorites(favorites)) return;
+            refreshFavoriteOptions(name);
+            setFavoriteFeedback(`Favorite “${name}” saved in this browser.`);
+          }
+
+          function clearPlots() {
+            for (const state of [...plots]) {
+              Plotly.purge(state.chart);
+              state.card.remove();
+            }
+            plots.length = 0;
+          }
+
+          function loadFavorite() {
+            const name = favoriteSelect.value;
+            const favorite = readFavorites().find((item) => item.name === name);
+            if (!favorite) {
+              setFavoriteFeedback("Choose a favorite to load.");
+              return;
+            }
+            clearPlots();
+            for (const plot of favorite.plots || []) {
+              addPlot(plot.primary || [], plot.secondary || [], plot.title || "");
+            }
+            if (!plots.length) addPlot();
+            favoriteNameInput.value = favorite.name;
+            setFavoriteFeedback(`Favorite “${favorite.name}” loaded.`);
+          }
+
+          function deleteFavorite() {
+            const name = favoriteSelect.value;
+            if (!name) {
+              setFavoriteFeedback("Choose a favorite to delete.");
+              return;
+            }
+            if (!window.confirm(`Delete favorite “${name}”?`)) return;
+            const favorites = readFavorites().filter((item) => item.name !== name);
+            if (!writeFavorites(favorites)) return;
+            refreshFavoriteOptions();
+            if (favoriteNameInput.value.trim() === name) favoriteNameInput.value = "";
+            setFavoriteFeedback(`Favorite “${name}” deleted.`);
+          }
+
+          function axisTitle(seriesIds) {
+            const units = [...new Set(seriesIds.map((id) => seriesById.get(id)?.unit).filter(Boolean))];
+            return units.length === 1 ? units[0] : "Value (mixed units)";
+          }
+
+          function updateGroupSelection(state, axis, groupSeries, selected) {
+            const otherAxis = axis === "primary" ? "secondary" : "primary";
+            for (const series of groupSeries) {
+              if (selected) {
+                state[axis].add(series.id);
+                state[otherAxis].delete(series.id);
+              } else {
+                state[axis].delete(series.id);
+              }
+            }
+            syncControls(state);
+            updatePlot(state);
+          }
+
+          function createSeriesPicker(state, axis, label) {
+            const details = element("details", "series-picker");
+            const summary = element("summary", "", label);
+            const panel = element("div", "series-picker-panel");
+            const filter = element("input", "series-filter");
+            filter.type = "search";
+            filter.placeholder = "Filter series...";
+            panel.appendChild(filter);
+            state.summaries[axis] = summary;
+            state.inputs[axis] = new Map();
+
+            const groups = new Map();
+            for (const series of catalog) {
+              if (!groups.has(series.source_label)) groups.set(series.source_label, []);
+              groups.get(series.source_label).push(series);
+            }
+            for (const [groupLabel, groupSeries] of groups) {
+              const groupBlock = element("div", "series-group-block");
+              const groupHeader = element("div", "series-group-header");
+              const groupActions = element("div", "series-group-actions");
+              const selectAll = element("button", "series-group-action", "Select all");
+              const unselectAll = element("button", "series-group-action", "Unselect all");
+              selectAll.type = "button";
+              unselectAll.type = "button";
+              selectAll.addEventListener("click", () => updateGroupSelection(state, axis, groupSeries, true));
+              unselectAll.addEventListener("click", () => updateGroupSelection(state, axis, groupSeries, false));
+              groupActions.append(selectAll, unselectAll);
+              groupHeader.append(element("div", "series-group-label", groupLabel), groupActions);
+              groupBlock.appendChild(groupHeader);
+
+              for (const series of groupSeries) {
+                const option = element("label", "series-option");
+                option.dataset.search = `${series.label} ${series.column} ${series.source_label}`.toLowerCase();
+                const checkbox = element("input");
+                checkbox.type = "checkbox";
+                checkbox.dataset.seriesId = series.id;
+                checkbox.dataset.axis = axis;
+                checkbox.addEventListener("change", () => {
+                  const otherAxis = axis === "primary" ? "secondary" : "primary";
+                  if (checkbox.checked) {
+                    state[axis].add(series.id);
+                    state[otherAxis].delete(series.id);
+                  } else {
+                    state[axis].delete(series.id);
+                  }
+                  syncControls(state);
+                  updatePlot(state);
+                });
+                state.inputs[axis].set(series.id, checkbox);
+                option.append(checkbox, document.createTextNode(series.label));
+                groupBlock.appendChild(option);
+              }
+              panel.appendChild(groupBlock);
+            }
+
+            filter.addEventListener("input", () => {
+              const query = filter.value.trim().toLowerCase();
+              for (const groupBlock of panel.querySelectorAll(".series-group-block")) {
+                const options = [...groupBlock.querySelectorAll(".series-option")];
+                for (const option of options) {
+                  option.hidden = Boolean(query) && !option.dataset.search.includes(query);
+                }
+                groupBlock.hidden = options.every((option) => option.hidden);
+              }
+            });
+            details.append(summary, panel);
+            return details;
+          }
+
+          function syncControls(state) {
+            for (const axis of ["primary", "secondary"]) {
+              for (const [seriesId, checkbox] of state.inputs[axis]) {
+                checkbox.checked = state[axis].has(seriesId);
+              }
+              const label = axis === "primary" ? "Primary Y axis" : "Secondary Y axis";
+              state.summaries[axis].textContent = `${label} (${state[axis].size})`;
+            }
+          }
+
+          function updatePlot(state) {
+            const primaryIds = [...state.primary];
+            const secondaryIds = [...state.secondary];
+            const traces = [...primaryIds, ...secondaryIds].map((seriesId) => {
+              const series = seriesById.get(seriesId);
+              const secondary = state.secondary.has(seriesId);
+              return {
+                x: series.labels,
+                y: series.values,
+                name: series.label,
+                mode: "lines",
+                type: "scatter",
+                yaxis: secondary ? "y2" : "y",
+                connectgaps: false,
+                customdata: series.values.map(() => series.unit || ""),
+                hovertemplate: "%{x}<br>%{fullData.name}: %{y} %{customdata}<extra></extra>",
+              };
+            });
+            const layout = {
+              title: {text: state.titleInput.value || `Plot ${state.id}`, x: 0.02},
+              autosize: true,
+              height: 500,
+              hovermode: "closest",
+              margin: {l: 70, r: secondaryIds.length ? 80 : 30, t: 55, b: 135},
+              xaxis: {title: "Timestamp", type: "date", rangeslider: {visible: true}},
+              yaxis: {title: axisTitle(primaryIds), zeroline: true},
+              yaxis2: {
+                title: axisTitle(secondaryIds),
+                overlaying: "y",
+                side: "right",
+                showgrid: false,
+                visible: secondaryIds.length > 0,
+              },
+              legend: {
+                orientation: "h",
+                yanchor: "top",
+                y: -0.3,
+                itemclick: "toggle",
+                itemdoubleclick: "toggleothers",
+              },
+              annotations: traces.length ? [] : [{
+                text: "Choose series from the Primary or Secondary Y axis dropdowns",
+                showarrow: false,
+                xref: "paper",
+                yref: "paper",
+                x: 0.5,
+                y: 0.5,
+              }],
+              paper_bgcolor: "#ffffff",
+              plot_bgcolor: "#ffffff",
+              uirevision: `plot-${state.id}`,
+            };
+            Plotly.react(state.chart, traces, layout, {
+              responsive: true,
+              displaylogo: false,
+              scrollZoom: true,
+            });
+          }
+
+          function addPlot(initialPrimary = [], initialSecondary = [], initialTitle = "") {
+            const primary = initialPrimary.filter((seriesId) => seriesById.has(seriesId));
+            const primarySet = new Set(primary);
+            const secondary = initialSecondary.filter(
+              (seriesId) => seriesById.has(seriesId) && !primarySet.has(seriesId),
+            );
+            const state = {
+              id: nextPlotId++,
+              primary: primarySet,
+              secondary: new Set(secondary),
+              summaries: {},
+              inputs: {},
+            };
+            const card = element("section", "configurable-plot");
+            state.card = card;
+            card.dataset.plotId = String(state.id);
+            const header = element("div", "configurable-plot-header");
+            state.titleInput = element("input", "plot-title-input");
+            state.titleInput.value = initialTitle || `Plot ${state.id}`;
+            state.titleInput.setAttribute("aria-label", `Plot ${state.id} title`);
+            const removeButton = element("button", "", "Remove plot");
+            removeButton.type = "button";
+            removeButton.addEventListener("click", () => {
+              Plotly.purge(state.chart);
+              card.remove();
+              const index = plots.indexOf(state);
+              if (index >= 0) plots.splice(index, 1);
+            });
+            header.append(state.titleInput, removeButton);
+            const controls = element("div", "plot-controls");
+            controls.append(
+              createSeriesPicker(state, "primary", "Primary Y axis"),
+              createSeriesPicker(state, "secondary", "Secondary Y axis"),
+            );
+            state.chart = element("div", "plotly-chart");
+            state.chart.id = `plotly-configurable-${state.id}`;
+            state.titleInput.addEventListener("input", () => updatePlot(state));
+            card.append(header, controls, state.chart);
+            plotsContainer.appendChild(card);
+            plots.push(state);
+            syncControls(state);
+            updatePlot(state);
+          }
+
+          addButton.addEventListener("click", () => addPlot());
+          root.querySelector("[data-save-favorite]").addEventListener("click", saveFavorite);
+          root.querySelector("[data-load-favorite]").addEventListener("click", loadFavorite);
+          root.querySelector("[data-delete-favorite]").addEventListener("click", deleteFavorite);
+          refreshFavoriteOptions();
+          addPlot(catalog.filter((series) => series.source === "system").map((series) => series.id));
+        })();
+      </script>
+    """.replace("__PLOT_SERIES__", payload)
     return (
-        f'<section class="chart-panel" data-chart-id="{chart_id}">'
-        f"<h3>{title}</h3>"
-        f"{render_chart_svg(chart)}"
-        f"{render_chart_legend(chart)}"
+        '<div id="plot-builder" class="plot-builder" data-series-source="system-and-assets">'
+        '<div class="plot-builder-toolbar">'
+        '<p>Add plots and assign each series to one Y axis. Current changes reset on reload unless saved as a favorite.</p>'
+        '<button type="button" data-add-plot>Add plot</button>'
+        "</div>"
+        '<section class="plot-favorites">'
+        '<label>Favorite name<input type="text" data-favorite-name placeholder="e.g. Battery operation"></label>'
+        '<button type="button" data-save-favorite>Save favorite</button>'
+        '<label>Saved favorites<select data-favorite-select><option value="">Choose a favorite</option></select></label>'
+        '<button type="button" data-load-favorite>Load</button>'
+        '<button type="button" data-delete-favorite>Delete</button>'
+        '<span class="favorite-feedback" data-favorite-feedback role="status">Favorites are saved in this browser.</span>'
         "</section>"
+        '<div data-plots></div>'
+        "</div>"
+        '<script src="/assets/plotly.min.js"></script>'
+        f"{script}"
     )
 
 
-def render_chart_svg(chart: dict) -> str:
-    width = 640
-    height = 280
-    left = 52
-    right = 18
-    top = 22
-    bottom = 42
-    plot_width = width - left - right
-    plot_height = height - top - bottom
-    labels = chart["labels"]
-    values = [
-        value
-        for series in chart["series"]
-        for value in series["values"]
-        if isinstance(value, (int, float))
-    ]
-    if not values:
-        return '<p>No numeric chart data is available for this run.</p>'
-
-    y_min = min(values)
-    y_max = max(values)
-    if y_min == y_max:
-        padding = max(abs(y_min) * 0.1, 1.0)
-        y_min -= padding
-        y_max += padding
-
-    def x_position(index: int) -> float:
-        if len(labels) <= 1:
-            return left + plot_width / 2
-        return left + (plot_width * index / (len(labels) - 1))
-
-    def y_position(value: float) -> float:
-        return top + ((y_max - value) / (y_max - y_min)) * plot_height
-
-    colors = ["#2563eb", "#dc2626", "#0f766e", "#ca8a04"]
-    series_markup = []
-    for series_index, series in enumerate(chart["series"]):
-        color = colors[series_index % len(colors)]
-        points = [
-            (x_position(index), y_position(value), value)
-            for index, value in enumerate(series["values"])
-            if isinstance(value, (int, float))
-        ]
-        if len(points) > 1:
-            point_text = " ".join(f"{x:.2f},{y:.2f}" for x, y, _ in points)
-            series_markup.append(
-                f'<polyline points="{point_text}" fill="none" stroke="{color}" '
-                'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></polyline>'
-            )
-        for x, y, value in points:
-            series_markup.append(
-                f'<circle cx="{x:.2f}" cy="{y:.2f}" r="4" fill="{color}" '
-                f'data-series="{escape(series["key"])}" data-value="{format_chart_number(value)}">'
-                f"<title>{escape(series['label'])}: {format_chart_number(value)}</title>"
-                "</circle>"
-            )
-
-    first_label = escape(labels[0]) if labels else ""
-    last_label = escape(labels[-1]) if labels else ""
-    axis_markup = f"""
-      <line x1="{left}" y1="{height - bottom}" x2="{width - right}" y2="{height - bottom}" stroke="#9aa4b2"></line>
-      <line x1="{left}" y1="{top}" x2="{left}" y2="{height - bottom}" stroke="#9aa4b2"></line>
-      <text x="{left}" y="{height - 14}" fill="#606a78" font-size="11">{first_label}</text>
-      <text x="{width - right}" y="{height - 14}" fill="#606a78" font-size="11" text-anchor="end">{last_label}</text>
-      <text x="{left - 8}" y="{top + 4}" fill="#606a78" font-size="11" text-anchor="end">{format_chart_number(y_max)}</text>
-      <text x="{left - 8}" y="{height - bottom + 4}" fill="#606a78" font-size="11" text-anchor="end">{format_chart_number(y_min)}</text>
-    """
+def json_for_inline_script(value: Any) -> str:
     return (
-        f'<svg class="chart-svg" viewBox="0 0 {width} {height}" role="img" '
-        f'aria-label="{escape(chart["title"])}">'
-        f"{axis_markup}"
-        f"{''.join(series_markup)}"
-        "</svg>"
+        json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
     )
 
 
-def render_chart_legend(chart: dict) -> str:
-    colors = ["#2563eb", "#dc2626", "#0f766e", "#ca8a04"]
-    items = "".join(
-        '<li>'
-        f'<span class="legend-swatch" style="background:{colors[index % len(colors)]}"></span>'
-        f'{escape(series["label"])}'
-        "</li>"
-        for index, series in enumerate(chart["series"])
-    )
-    return f'<ul class="chart-legend">{items}</ul>'
-
-
-def format_chart_number(value: float) -> str:
-    return f"{value:g}"
+@lru_cache(maxsize=1)
+def cached_plotly_javascript() -> str:
+    return get_plotlyjs()
 
 
 def render_result_table(table: dict) -> str:

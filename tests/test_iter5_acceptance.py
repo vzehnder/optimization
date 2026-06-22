@@ -153,7 +153,7 @@ class Iteration5AcceptanceTests(unittest.TestCase):
 
                     run_page = client.get(f"/runs/{completed['run_id']}")
                     self.assertEqual(run_page.status_code, 200)
-                    self.assertIn('data-chart-id="hydro-power"', run_page.text)
+                    self.assertIn('id="plot-builder"', run_page.text)
                     self.assertIn("hydro_reservoir_elevation_masl", run_page.text)
 
                 invalid_scenario_id = create_piecewise_scenario(
@@ -615,6 +615,12 @@ def create_piecewise_scenario(client, *, case_name, save_mode, generation_curve=
         generation_curve=generation_curve or default_piecewise_generation_curve(),
     )
     if save_mode == "ui":
+        add_hydro = client.post(
+            f"/scenarios/{scenario['id']}/draft/assets",
+            data={"asset_type": "hydro"},
+            follow_redirects=False,
+        )
+        assert add_hydro.status_code == 303, add_hydro.text
         draft_page = client.get(f"/scenarios/{scenario['id']}/draft")
         assert draft_page.status_code == 200, draft_page.text
         assert 'name="hydro_generation_curve_json"' in draft_page.text

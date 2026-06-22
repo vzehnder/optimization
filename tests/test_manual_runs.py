@@ -108,6 +108,10 @@ class ManualRunApiTests(unittest.TestCase):
         self.assertEqual(run_page.status_code, 200)
         self.assertIn("queued", run_page.text)
         self.assertIn(f"/api/runs/{run_id}", run_page.text)
+        self.assertIn(f'href="/scenarios/{scenario_version["scenario_id"]}/draft"', run_page.text)
+        self.assertIn("Back to parameters", run_page.text)
+        self.assertIn('const initialRunStatus = "queued"', run_page.text)
+        self.assertIn("window.location.reload()", run_page.text)
 
     def test_run_detail_api_and_page_show_failure_message(self):
         scenario_version = self._create_scenario_version()

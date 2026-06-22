@@ -70,7 +70,7 @@ class Iteration4AcceptanceTests(unittest.TestCase):
                     )
                     run_page = client.get(f"/runs/{completed['run_id']}")
                     self.assertEqual(run_page.status_code, 200)
-                    self.assertIn("Basic Charts", run_page.text)
+                    self.assertIn("Interactive Plots", run_page.text)
                     self.assertIn("System Dispatch", run_page.text)
 
                 project = client.post("/api/projects", json={"name": "Legacy JSON"}).json()

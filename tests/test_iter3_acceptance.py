@@ -112,7 +112,7 @@ class Iteration3AcceptanceTests(unittest.TestCase):
                 run_page = client.get(f"/runs/{run_id}")
                 self.assertEqual(run_page.status_code, 200)
                 self.assertIn("Run Summary", run_page.text)
-                self.assertIn("Basic Charts", run_page.text)
+                self.assertIn("Interactive Plots", run_page.text)
                 self.assertIn("System Dispatch", run_page.text)
                 self.assertIn("Asset Dispatch", run_page.text)
                 self.assertIn(artifacts_by_type["summary_json"]["download_url"], run_page.text)

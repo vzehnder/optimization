@@ -273,6 +273,47 @@ class CsvTimeSeriesIngestionTests(unittest.TestCase):
             self.assertEqual(draft["time_series"]["active_source_id"], source["id"])
             self.assertEqual(draft["time_series"]["sources"][0]["id"], source["id"])
 
+    def test_csv_rows_can_be_edited_and_revalidated_without_changing_the_uploaded_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, scenario = self.make_client_and_scenario(input_source_root)
+            csv_text = (
+                "timestamp,duration_hours,price_usd_per_mwh,solar_1_available_mw,load_1_demand_mw\n"
+                "2026-01-01T00:00:00,1.0,50.0,3.5,2.0\n"
+                "2026-01-01T01:00:00,1.0,52.0,4.0,2.5\n"
+            )
+            source = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                files={"source_file": ("source.csv", csv_text, "text/csv")},
+            ).json()["source"]
+            rows_url = (
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/{source['id']}/rows"
+            )
+
+            rows_response = client.get(rows_url)
+            self.assertEqual(rows_response.status_code, 200)
+            payload = rows_response.json()
+            self.assertEqual(len(payload["rows"]), 2)
+            payload["rows"][0]["price_usd_per_mwh"] = "75.25"
+            payload["rows"][1]["load_1_demand_mw"] = "9.5"
+
+            save_response = client.put(rows_url, json={"rows": payload["rows"]})
+
+            self.assertEqual(save_response.status_code, 200)
+            edited_source = save_response.json()["source"]
+            self.assertEqual(edited_source["edited_rows"][0]["price_usd_per_mwh"], "75.25")
+            self.assertEqual(edited_source["preview_rows"][1]["load_1_demand_mw"], "9.5")
+            self.assertTrue(edited_source["validation"]["ok"])
+            self.assertEqual(edited_source["validated_rows"][0]["price_usd_per_mwh"], 75.25)
+            self.assertEqual(edited_source["validated_rows"][1]["load_demand_mw"], {"load_1": 9.5})
+            self.assertEqual(Path(source["stored_path"]).read_text(encoding="utf-8"), csv_text)
+
+            page = client.get(f"/scenarios/{scenario['id']}/draft")
+            self.assertIn("Edit Table", page.text)
+            self.assertIn("editable-table-scroll", page.text)
+            self.assertIn("addEventListener('paste'", page.text)
+            self.assertIn(rows_url, page.text)
+
     def test_xlsx_upload_uses_first_sheet_and_reuses_mapping_validation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             input_source_root = Path(temp_dir) / "input-sources"
@@ -319,6 +360,15 @@ class CsvTimeSeriesIngestionTests(unittest.TestCase):
                 {"solar_1": "solar_1_available_mw"},
             )
 
+            rows_url = (
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/{source['id']}/rows"
+            )
+            editable_rows = client.get(rows_url).json()["rows"]
+            editable_rows[1]["load_1_demand_mw"] = "9.25"
+            edit_response = client.put(rows_url, json={"rows": editable_rows})
+            self.assertEqual(edit_response.status_code, 200)
+            self.assertEqual(edit_response.json()["source"]["preview_rows"][1]["load_1_demand_mw"], "9.25")
+
             mapping_response = client.put(
                 f"/api/scenarios/{scenario['id']}/draft/time-series-sources/{source['id']}/mapping",
                 json={
@@ -336,7 +386,7 @@ class CsvTimeSeriesIngestionTests(unittest.TestCase):
             self.assertEqual(mapping_response.status_code, 200)
             mapped_source = mapping_response.json()["source"]
             self.assertEqual(mapped_source["validation"], {"ok": True, "errors": []})
-            self.assertEqual(mapped_source["validated_rows"][1]["load_demand_mw"], {"load_1": 2.5})
+            self.assertEqual(mapped_source["validated_rows"][1]["load_demand_mw"], {"load_1": 9.25})
 
     def test_xlsx_upload_can_read_selected_sheet(self):
         with tempfile.TemporaryDirectory() as temp_dir:

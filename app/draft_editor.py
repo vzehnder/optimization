@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 from collections.abc import Mapping
 from typing import Any
@@ -7,13 +8,66 @@ from typing import Any
 
 EDITOR_DRAFT_SCHEMA_VERSION = "bess_editor_draft.v1"
 SYSTEM_CASE_SCHEMA_VERSION = "bess_system_dispatch.v2"
+SUPPORTED_ASSET_TYPES = ("battery", "load", "renewable", "hydro")
+
+DEFAULT_ASSETS = {
+    "battery": {
+        "id": "battery_1",
+        "type": "battery",
+        "charge_power_max_mw": 4.0,
+        "discharge_power_max_mw": 4.0,
+        "energy_min_mwh": 0.0,
+        "energy_max_mwh": 8.0,
+        "initial_energy_mwh": 4.0,
+        "charge_efficiency": 0.95,
+        "discharge_efficiency": 0.95,
+        "degradation_cost_per_mwh_delta_soc": 0.0,
+        "terminal_condition": "equal_initial",
+        "terminal_energy_min_mwh": None,
+        "prevent_simultaneous_charge_discharge": True,
+        "degradation_linear_delta_soc": True,
+    },
+    "load": {"id": "load_1", "type": "load"},
+    "renewable": {
+        "id": "solar_1",
+        "type": "renewable",
+        "category": "solar",
+        "curtailment_penalty_usd_per_mwh": 0.0,
+    },
+    "hydro": {
+        "id": "hydro_1",
+        "type": "hydro",
+        "storage_min_hm3": 1.0,
+        "storage_max_hm3": 5.0,
+        "initial_storage_hm3": 2.5,
+        "generation_mode": "linear",
+        "power_per_flow_mw_per_m3s": 0.08,
+        "turbine_flow_min_m3s": None,
+        "turbine_flow_max_m3s": 40.0,
+        "power_max_mw": 3.0,
+        "minimum_release_m3s": 0.0,
+        "spill_penalty_usd_per_hm3": 100.0,
+        "terminal_condition": "none",
+        "terminal_storage_min_hm3": None,
+        "terminal_water_value_usd_per_hm3": 0.0,
+        "reservoir_curve": [
+            {"storage_hm3": 1.0, "elevation_masl": 700.0},
+            {"storage_hm3": 3.0, "elevation_masl": 710.0},
+            {"storage_hm3": 5.0, "elevation_masl": 720.0},
+        ],
+    },
+}
 
 
 class DraftGenerationError(ValueError):
     pass
 
 
-def structured_draft_document_from_form(form: Mapping[str, Any]) -> dict[str, Any]:
+def structured_draft_document_from_form(
+    form: Mapping[str, Any],
+    *,
+    existing_document: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     battery_id = _form_text(form, "battery_id")
     renewable_id = _form_text(form, "renewable_id")
     load_id = _form_text(form, "load_id")
@@ -102,7 +156,7 @@ def structured_draft_document_from_form(form: Mapping[str, Any]) -> dict[str, An
             hydro["generation_curve"] = generation_curve
         assets.append(hydro)
 
-    return {
+    document = {
         "schema_version": EDITOR_DRAFT_SCHEMA_VERSION,
         "case": {
             "name": _form_text(form, "case_name") or "structured_case",
@@ -128,6 +182,66 @@ def structured_draft_document_from_form(form: Mapping[str, Any]) -> dict[str, An
             "options": _form_json_object(form, "solver_options_json"),
         },
     }
+    if existing_document is not None:
+        for key in ("source", "time_series", "system_case_seed"):
+            if key in existing_document:
+                document[key] = copy.deepcopy(existing_document[key])
+    return document
+
+
+def add_asset_to_draft(document: dict[str, Any], asset_type: str) -> dict[str, Any]:
+    normalized_type = str(asset_type).strip().lower()
+    if normalized_type not in SUPPORTED_ASSET_TYPES:
+        supported = ", ".join(SUPPORTED_ASSET_TYPES)
+        raise DraftGenerationError(f"asset type must be one of: {supported}")
+
+    updated = copy.deepcopy(document)
+    assets = updated.get("assets")
+    if not isinstance(assets, list):
+        assets = []
+        updated["assets"] = assets
+    if any(isinstance(asset, dict) and asset.get("type") == normalized_type for asset in assets):
+        raise DraftGenerationError(f"{normalized_type} asset is already present")
+
+    new_asset = copy.deepcopy(DEFAULT_ASSETS[normalized_type])
+    new_asset["id"] = _unique_asset_id(str(new_asset["id"]), assets)
+    assets.append(new_asset)
+    updated.pop("generated_system_case", None)
+    return updated
+
+
+def remove_asset_from_draft(document: dict[str, Any], asset_id: str) -> dict[str, Any]:
+    clean_asset_id = str(asset_id).strip()
+    assets = document.get("assets")
+    if not isinstance(assets, list):
+        raise DraftGenerationError(f"asset {clean_asset_id} not found")
+
+    updated = copy.deepcopy(document)
+    updated_assets = updated.get("assets")
+    matching_indexes = [
+        index
+        for index, asset in enumerate(updated_assets)
+        if isinstance(asset, dict) and str(asset.get("id") or "") == clean_asset_id
+    ]
+    if not matching_indexes:
+        raise DraftGenerationError(f"asset {clean_asset_id} not found")
+    del updated_assets[matching_indexes[0]]
+    updated.pop("generated_system_case", None)
+    return updated
+
+
+def _unique_asset_id(preferred_id: str, assets: list[Any]) -> str:
+    existing_ids = {
+        str(asset.get("id") or "")
+        for asset in assets
+        if isinstance(asset, dict)
+    }
+    if preferred_id not in existing_ids:
+        return preferred_id
+    suffix = 2
+    while f"{preferred_id}_{suffix}" in existing_ids:
+        suffix += 1
+    return f"{preferred_id}_{suffix}"
 
 
 def structured_draft_document_from_system_case(

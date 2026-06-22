@@ -1,5 +1,8 @@
 fastapi
 httpx
 openpyxl
+psycopg[binary]
+python-dotenv
 python-multipart
+plotly>=6,<7
 uvicorn[standard]

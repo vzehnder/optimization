@@ -148,15 +148,7 @@ def apply_time_series_mapping(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     updated = copy.deepcopy(document)
     source = find_source(updated, source_id)
-    stored_path = safe_stored_source_path(source, input_source_root)
-    if source.get("kind") == "xlsx":
-        _, columns, rows = parse_xlsx_rows(
-            stored_path.read_bytes(),
-            sheet_name=source.get("selected_sheet"),
-        )
-    else:
-        text = decode_csv_content(stored_path.read_bytes())
-        columns, rows = parse_csv_rows(text)
+    columns, rows = read_time_series_source_rows(source, input_source_root)
     validation, validated_rows = validate_mapping(
         columns=columns,
         rows=rows,
@@ -167,6 +159,98 @@ def apply_time_series_mapping(
     source["validation"] = validation
     source["validated_rows"] = validated_rows
     return updated, copy.deepcopy(source)
+
+
+def get_time_series_source_rows(
+    *,
+    document: dict[str, Any],
+    source_id: str,
+    input_source_root: Path,
+) -> tuple[list[str], list[dict[str, str]]]:
+    source = find_source(document, source_id)
+    columns, rows = read_time_series_source_rows(source, input_source_root)
+    return list(columns), copy.deepcopy(rows)
+
+
+def update_time_series_source_rows(
+    *,
+    document: dict[str, Any],
+    source_id: str,
+    rows: list[dict[str, Any]],
+    input_source_root: Path,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    updated = copy.deepcopy(document)
+    source = find_source(updated, source_id)
+    columns, current_rows = read_time_series_source_rows(source, input_source_root)
+    normalized_rows = normalize_edited_rows(rows, columns)
+    if len(normalized_rows) != len(current_rows):
+        raise TimeSeriesIngestionError("edited time-series data must preserve the original row count")
+
+    source["edited_rows"] = normalized_rows
+    source["preview_rows"] = copy.deepcopy(normalized_rows[:5])
+
+    mapping = source.get("mapping")
+    if isinstance(mapping, dict):
+        validation, validated_rows = validate_mapping(
+            columns=columns,
+            rows=normalized_rows,
+            mapping=mapping,
+            draft_document=updated,
+        )
+        source["validation"] = validation
+        source["validated_rows"] = validated_rows
+    else:
+        source.pop("validation", None)
+        source.pop("validated_rows", None)
+    return updated, copy.deepcopy(source)
+
+
+def read_time_series_source_rows(
+    source: dict[str, Any],
+    input_source_root: Path,
+) -> tuple[list[str], list[dict[str, str]]]:
+    columns = source.get("columns")
+    edited_rows = source.get("edited_rows")
+    if isinstance(columns, list) and isinstance(edited_rows, list):
+        return [str(column) for column in columns], normalize_edited_rows(edited_rows, [str(column) for column in columns])
+
+    stored_path = safe_stored_source_path(source, input_source_root)
+    if source.get("kind") == "xlsx":
+        _, parsed_columns, rows = parse_xlsx_rows(
+            stored_path.read_bytes(),
+            sheet_name=source.get("selected_sheet"),
+        )
+    else:
+        text = decode_csv_content(stored_path.read_bytes())
+        parsed_columns, rows = parse_csv_rows(text)
+    return parsed_columns, rows
+
+
+def normalize_edited_rows(rows: list[dict[str, Any]], columns: list[str]) -> list[dict[str, str]]:
+    if not isinstance(rows, list):
+        raise TimeSeriesIngestionError("edited time-series data must be a list of rows")
+
+    normalized_rows: list[dict[str, str]] = []
+    allowed_columns = set(columns)
+    for row_index, row in enumerate(rows, start=2):
+        if not isinstance(row, dict):
+            raise TimeSeriesIngestionError(f"row {row_index}: edited row must be an object")
+        extra_columns = set(row) - allowed_columns
+        if extra_columns:
+            extras = ", ".join(sorted(str(column) for column in extra_columns))
+            raise TimeSeriesIngestionError(f"row {row_index}: unknown columns: {extras}")
+
+        normalized_row: dict[str, str] = {}
+        for column in columns:
+            value = row.get(column)
+            if value is None:
+                normalized_row[column] = ""
+            elif isinstance(value, (str, int, float, bool)):
+                normalized_row[column] = str(value)
+            else:
+                raise TimeSeriesIngestionError(f"row {row_index}: {column} must be a scalar value")
+        normalized_rows.append(normalized_row)
+    return normalized_rows
 
 
 def find_source(document: dict[str, Any], source_id: str) -> dict[str, Any]:

@@ -78,6 +78,13 @@ class ResultsReaderTests(unittest.TestCase):
 
                 results = read_run_results(run, store.list_run_artifacts(run["id"]), artifact_root)
 
+                all_series_chart = results["charts"]["all_series"]
+                self.assertTrue(all_series_chart["available"])
+                self.assertEqual(
+                    [series["key"] for series in all_series_chart["series"]],
+                    results["dispatch_table"]["columns"][1:],
+                )
+
                 self.assertEqual(results["summary"]["case_name"], "hybrid_system")
                 self.assertEqual(results["summary"]["termination_status"], "OPTIMAL")
                 self.assertEqual(results["summary"]["objective_value_usd"], 1250.5)
@@ -122,6 +129,12 @@ class ResultsReaderTests(unittest.TestCase):
                     ["BESS Charge MW", "BESS Discharge MW", "BESS SOC MWh"],
                 )
                 self.assertEqual(bess_chart["series"][2]["values"], [20.0])
+
+                catalog_by_id = {series["id"]: series for series in results["plot_series"]}
+                self.assertIn("system:grid_import_mw", catalog_by_id)
+                self.assertIn("asset:grid_1:grid_import_mw", catalog_by_id)
+                self.assertEqual(catalog_by_id["system:grid_import_mw"]["source"], "system")
+                self.assertEqual(catalog_by_id["asset:grid_1:grid_import_mw"]["source"], "asset")
             finally:
                 store.close()
 
@@ -388,14 +401,32 @@ class ResultsTemplateTests(unittest.TestCase):
                 response = client.get(f"/runs/{run['id']}")
 
                 self.assertEqual(response.status_code, 200)
-                self.assertIn("Basic Charts", response.text)
-                self.assertIn('data-chart-id="price"', response.text)
-                self.assertIn('data-chart-id="grid-import-export"', response.text)
-                self.assertIn('data-chart-id="renewable-used-curtailed"', response.text)
-                self.assertIn('data-chart-id="bess-charge-discharge-soc"', response.text)
-                self.assertIn('data-chart-id="period-profit"', response.text)
-                self.assertIn('data-value="2.5"', response.text)
-                self.assertIn('data-value="-112.5"', response.text)
+                self.assertIn("Interactive Plots", response.text)
+                self.assertIn('id="plot-builder"', response.text)
+                self.assertIn("data-add-plot", response.text)
+                self.assertIn("Primary Y axis", response.text)
+                self.assertIn("Secondary Y axis", response.text)
+                self.assertIn("Select all", response.text)
+                self.assertIn("Unselect all", response.text)
+                self.assertIn("updateGroupSelection", response.text)
+                self.assertIn("state[otherAxis].delete(series.id)", response.text)
+                self.assertIn("Plotly.react", response.text)
+                self.assertIn("Favorite name", response.text)
+                self.assertIn("Save favorite", response.text)
+                self.assertIn("Saved favorites", response.text)
+                self.assertIn("energy_dispatch.plotFavorites.v1", response.text)
+                self.assertIn("window.localStorage.setItem", response.text)
+                self.assertIn("function loadFavorite()", response.text)
+                self.assertIn("grid_import_mw", response.text)
+                self.assertIn("period_profit_usd", response.text)
+                self.assertIn("asset:grid_1:grid_import_mw", response.text)
+                self.assertIn("max-height: 420px", response.text)
+                self.assertIn("position: sticky", response.text)
+
+                bundle_response = client.get("/assets/plotly.min.js")
+                self.assertEqual(bundle_response.status_code, 200)
+                self.assertIn("application/javascript", bundle_response.headers["content-type"])
+                self.assertGreater(len(bundle_response.content), 1_000_000)
             finally:
                 store.close()
 
@@ -423,15 +454,13 @@ class ResultsTemplateTests(unittest.TestCase):
                 self.assertIn("hydro_1", response.text)
                 self.assertIn("total_hydro_power_mw", response.text)
                 self.assertIn("hydro_reservoir_elevation_masl", response.text)
-                self.assertIn('data-chart-id="hydro-power"', response.text)
-                self.assertIn('data-chart-id="hydro-flows"', response.text)
-                self.assertIn('data-chart-id="hydro-storage"', response.text)
-                self.assertIn('data-chart-id="hydro-reservoir-elevation"', response.text)
-                self.assertIn('data-value="711"', response.text)
+                self.assertIn('id="plot-builder"', response.text)
+                self.assertIn("asset:hydro_1:hydro_reservoir_elevation_masl", response.text)
+                self.assertIn("total_hydro_power_mw", response.text)
             finally:
                 store.close()
 
-    def test_completed_run_page_handles_missing_optional_chart_columns(self):
+    def test_completed_run_page_plots_every_available_numeric_series(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             artifact_root = Path(temp_dir) / "artifacts"
             output_dir = artifact_root / "runs" / "1" / "outputs"
@@ -492,11 +521,10 @@ class ResultsTemplateTests(unittest.TestCase):
                 response = client.get(f"/runs/{run['id']}")
 
                 self.assertEqual(response.status_code, 200)
-                self.assertIn('data-chart-id="grid-import-export"', response.text)
-                self.assertIn('data-chart-id="renewable-used-curtailed"', response.text)
-                self.assertIn("Missing columns: renewable_used_mw, renewable_curtailed_mw", response.text)
-                self.assertIn("Missing columns: battery_charge_mw, battery_discharge_mw, battery_energy_mwh", response.text)
-                self.assertIn("Missing columns: period_profit_usd", response.text)
+                self.assertIn('id="plot-builder"', response.text)
+                self.assertIn("system:grid_import_mw", response.text)
+                self.assertIn("system:grid_export_mw", response.text)
+                self.assertNotIn("Missing columns:", response.text)
             finally:
                 store.close()
 
