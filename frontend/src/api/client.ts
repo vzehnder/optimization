@@ -67,6 +67,67 @@ export interface ScenarioRun {
   trigger_type?: string;
 }
 
+export type DraftAssetType = "battery" | "load" | "renewable" | "hydro";
+
+export interface DraftAsset {
+  id?: string;
+  type?: DraftAssetType | string;
+  [key: string]: unknown;
+}
+
+export interface ScenarioDraftDocument {
+  schema_version?: string;
+  case?: {
+    name?: string;
+    description?: string;
+    [key: string]: unknown;
+  };
+  source?: unknown;
+  pcc?: {
+    id?: string;
+    type?: string;
+    [key: string]: unknown;
+  };
+  grid?: {
+    id?: string;
+    import_power_max_mw?: number | null;
+    export_power_max_mw?: number | null;
+    prevent_simultaneous_grid_import_export?: boolean;
+    [key: string]: unknown;
+  };
+  assets?: DraftAsset[];
+  time_series?: {
+    active_source_id?: string | null;
+    sources?: unknown[];
+    periods?: unknown[];
+    [key: string]: unknown;
+  };
+  solver?: {
+    name?: string;
+    options?: Record<string, unknown>;
+    [key: string]: unknown;
+  };
+  generated_system_case?: unknown;
+  system_case_seed?: unknown;
+  [key: string]: unknown;
+}
+
+export interface ScenarioDraft {
+  id: number;
+  scenario_id: number;
+  source_version_id: number | null;
+  document: ScenarioDraftDocument;
+  created_at: string;
+  updated_at: string;
+  created_by?: string;
+  updated_by?: string;
+}
+
+export interface ScenarioDraftWritePayload {
+  document?: ScenarioDraftDocument;
+  source_version_id?: number | null;
+}
+
 interface StructuredErrorBody {
   error?: {
     category?: string;
@@ -296,4 +357,40 @@ export async function listScenarioRuns(
     { signal },
   );
   return response.runs;
+}
+
+export async function getScenarioDraft(
+  scenarioId: number,
+  signal?: AbortSignal,
+): Promise<ScenarioDraft> {
+  const response = await requestJson<{ draft: ScenarioDraft }>(
+    `/api/scenarios/${scenarioId}/draft`,
+    { signal },
+  );
+  return response.draft;
+}
+
+export async function createScenarioDraft(
+  scenarioId: number,
+  payload: ScenarioDraftWritePayload = {},
+): Promise<ScenarioDraft> {
+  return postJsonWithCsrf<ScenarioDraft>(
+    `/api/scenarios/${scenarioId}/draft`,
+    payload,
+  );
+}
+
+export async function updateScenarioDraft(
+  scenarioId: number,
+  document: ScenarioDraftDocument,
+): Promise<ScenarioDraft> {
+  const csrfToken = await getCsrfToken();
+  return requestJson<ScenarioDraft>(`/api/scenarios/${scenarioId}/draft`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrfToken,
+    },
+    body: JSON.stringify({ document }),
+  });
 }

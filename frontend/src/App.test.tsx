@@ -5,6 +5,319 @@ import { describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 
 describe("application shell", () => {
+  it("lets analysts create, edit, save, recover, remove, and reopen a structured draft", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Initial modeling branch",
+      created_at: "2026-06-23T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-06-23T12:00:00Z",
+    };
+    let draft: unknown = null;
+    let failNextSave = true;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/draft" && method === "GET") {
+          if (!draft) {
+            return new Response(JSON.stringify({ detail: "not found" }), {
+              status: 404,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          return new Response(JSON.stringify({ draft }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/draft" && method === "POST") {
+          draft = {
+            id: 3,
+            scenario_id: 10,
+            source_version_id: null,
+            created_at: "2026-06-23T12:10:00Z",
+            updated_at: "2026-06-23T12:10:00Z",
+            document: {
+              schema_version: "bess_editor_draft.v1",
+              case: { name: "Base case" },
+              source: null,
+              pcc: { id: "bus_1", type: "bus" },
+              grid: {
+                id: "grid_1",
+                import_power_max_mw: null,
+                export_power_max_mw: null,
+                prevent_simultaneous_grid_import_export: true,
+              },
+              assets: [],
+              time_series: { sources: [] },
+              solver: { name: "HiGHS", options: {} },
+            },
+          };
+          return new Response(JSON.stringify(draft), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/draft" && method === "PUT") {
+          if (failNextSave) {
+            failNextSave = false;
+            return new Response(
+              JSON.stringify({ detail: "database unavailable" }),
+              {
+                status: 503,
+                headers: { "Content-Type": "application/json" },
+              },
+            );
+          }
+          const body = JSON.parse(String(init?.body));
+          draft = {
+            ...(draft as object),
+            updated_at: "2026-06-23T12:12:00Z",
+            document: body.document,
+          };
+          return new Response(JSON.stringify(draft), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Base case" }),
+    ).toBeVisible();
+    await user.click(screen.getByRole("link", { name: "Abrir draft" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Draft estructurado" }),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Crear draft" }));
+    expect(await screen.findByText("Guardado")).toBeVisible();
+
+    await user.clear(screen.getByLabelText("Nombre del caso"));
+    await user.type(screen.getByLabelText("Nombre del caso"), "PMGD verano");
+    await user.click(screen.getByRole("button", { name: "Agregar BESS" }));
+    await user.clear(screen.getByLabelText("BESS asset ID"));
+    await user.type(screen.getByLabelText("BESS asset ID"), "battery_alpha");
+    await user.click(screen.getByRole("button", { name: "Agregar hydro" }));
+    await user.clear(screen.getByLabelText("Hydro asset ID"));
+    await user.type(screen.getByLabelText("Hydro asset ID"), "hydro_north");
+    expect(screen.getByText("Cambios sin guardar")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Guardar draft" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "database unavailable",
+    );
+    expect(screen.getByLabelText("Nombre del caso")).toHaveValue("PMGD verano");
+
+    await user.click(screen.getByRole("button", { name: "Guardar draft" }));
+    expect(await screen.findByText("Guardado")).toBeVisible();
+
+    await user.click(
+      screen.getByRole("button", { name: "Quitar battery_alpha" }),
+    );
+    expect(
+      screen.getByText("Confirma para quitar battery_alpha"),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("button", { name: "Confirmar quitar battery_alpha" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Guardar draft" }));
+    expect(await screen.findByText("Guardado")).toBeVisible();
+
+    await user.click(screen.getByRole("link", { name: "Base case" }));
+    await user.click(screen.getByRole("link", { name: "Abrir draft" }));
+    expect(await screen.findByLabelText("Nombre del caso")).toHaveValue(
+      "PMGD verano",
+    );
+    expect(screen.queryByLabelText("BESS asset ID")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Hydro asset ID")).toHaveValue("hydro_north");
+  });
+
+  it("keeps newer local draft edits when an older save response arrives late", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10/draft");
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Initial modeling branch",
+      created_at: "2026-06-23T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-06-23T12:00:00Z",
+    };
+    const draft = {
+      id: 3,
+      scenario_id: 10,
+      source_version_id: null,
+      created_at: "2026-06-23T12:10:00Z",
+      updated_at: "2026-06-23T12:10:00Z",
+      document: {
+        schema_version: "bess_editor_draft.v1",
+        case: { name: "Base case" },
+        source: null,
+        pcc: { id: "bus_1", type: "bus" },
+        grid: {
+          id: "grid_1",
+          import_power_max_mw: null,
+          export_power_max_mw: null,
+          prevent_simultaneous_grid_import_export: true,
+        },
+        assets: [],
+        time_series: { sources: [] },
+        solver: { name: "HiGHS", options: {} },
+      },
+    };
+    let resolveSave: (response: Response) => void = () => undefined;
+    let savedDocument = draft.document;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/draft" && method === "GET") {
+          return new Response(JSON.stringify({ draft }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/draft" && method === "PUT") {
+          savedDocument = JSON.parse(String(init?.body)).document;
+          return new Promise<Response>((resolve) => {
+            resolveSave = resolve;
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Draft estructurado" }),
+    ).toBeVisible();
+    await user.clear(screen.getByLabelText("Nombre del caso"));
+    await user.type(screen.getByLabelText("Nombre del caso"), "First save");
+    await user.click(screen.getByRole("button", { name: "Guardar draft" }));
+    expect(await screen.findByText("Guardando")).toBeVisible();
+
+    await user.clear(screen.getByLabelText("Nombre del caso"));
+    await user.type(screen.getByLabelText("Nombre del caso"), "Newer local");
+    resolveSave(
+      new Response(
+        JSON.stringify({
+          ...draft,
+          updated_at: "2026-06-23T12:11:00Z",
+          document: savedDocument,
+        }),
+        { headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Nombre del caso")).toHaveValue(
+        "Newer local",
+      );
+    });
+    expect(screen.getByText("Cambios sin guardar")).toBeVisible();
+  });
+
   it("lets internal users create projects and scenarios, then refresh a direct scenario link", async () => {
     window.history.replaceState({}, "", "/react/projects");
     const projects: Array<{

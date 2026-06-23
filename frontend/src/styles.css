@@ -368,6 +368,200 @@ button:focus-visible {
   text-decoration: none;
 }
 
+.draft-editor {
+  display: grid;
+  gap: 1rem;
+}
+
+.draft-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid #c9d8e5;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 12px 30px rgb(16 42 67 / 8%);
+}
+
+.draft-toolbar button {
+  margin-left: auto;
+}
+
+.draft-status {
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  color: #053b2f;
+  background: #baf3df;
+  font-weight: 800;
+}
+
+.draft-section-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+}
+
+.draft-section-heading h2 {
+  margin: 0;
+}
+
+.draft-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.draft-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.field-row {
+  display: grid;
+  gap: 0.35rem;
+  font-weight: 700;
+}
+
+.field-row-wide {
+  grid-column: 1 / -1;
+}
+
+.field-row input,
+.field-row textarea,
+.field-row select {
+  width: 100%;
+  border: 1px solid #b8c7d6;
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+  color: #102a43;
+  font: inherit;
+  background: #fff;
+}
+
+.field-row textarea {
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+}
+
+.field-error {
+  color: #9a3412;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.validation-summary {
+  padding: 0.85rem;
+  border-left: 4px solid #c2410c;
+  border-radius: 8px;
+  color: #7c2d12;
+  background: #fff7ed;
+}
+
+.asset-settings {
+  display: grid;
+  gap: 0.85rem;
+  margin: 1rem 0 0;
+  padding: 1rem;
+  border: 1px solid #d8e2eb;
+  border-radius: 8px;
+  background: #f8fbfd;
+}
+
+.asset-settings legend {
+  padding: 0 0.35rem;
+  font-weight: 800;
+}
+
+.checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 700;
+}
+
+.checkbox-row input {
+  width: 1rem;
+  height: 1rem;
+}
+
+.secondary-action {
+  border: 1px solid #9fb3c8;
+  color: #17324d;
+  background: #fff;
+}
+
+.secondary-action:hover,
+.secondary-action:focus-visible {
+  color: #075985;
+  background: #eaf5fb;
+}
+
+.danger-button {
+  justify-self: start;
+  color: #7c2d12;
+  background: #fed7aa;
+}
+
+.danger-button:hover,
+.danger-button:focus-visible {
+  color: #fff;
+  background: #c2410c;
+}
+
+.remove-confirmation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #fff7ed;
+}
+
+.remove-confirmation p {
+  flex-basis: 100%;
+  margin: 0;
+  color: #7c2d12;
+  font-weight: 800;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(16 42 67 / 45%);
+}
+
+.draft-leave-dialog {
+  width: min(28rem, 100%);
+  padding: 1rem;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 24px 60px rgb(16 42 67 / 20%);
+}
+
+.draft-leave-dialog h2 {
+  margin-top: 0;
+}
+
+.draft-leave-dialog button + button {
+  margin-left: 0.5rem;
+}
+
 @media (max-width: 620px) {
   .topbar,
   .identity {
@@ -380,5 +574,13 @@ button:focus-visible {
 
   .workspace-grid {
     grid-template-columns: 1fr;
+  }
+
+  .draft-field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .draft-toolbar button {
+    margin-left: 0;
   }
 }

@@ -1,6 +1,6 @@
 # BESS-REACT-003: Migrate Structured Scenario Draft Editor
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/react_migration/prd_react_ui_migration.md`
@@ -23,31 +23,39 @@ overwrites.
 
 ## Acceptance criteria
 
-- [ ] An analyst can create a draft from the scenario context and reopen the
+- [x] An analyst can create a draft from the scenario context and reopen the
       persisted draft later.
-- [ ] The editor supports case identity, schema, time-series metadata, graph,
+- [x] The editor supports case identity, schema, time-series metadata, graph,
       grid, and solver settings currently available in the existing UI.
-- [ ] The editor can add BESS, load, renewable, and hydro assets supported by the
+- [x] The editor can add BESS, load, renewable, and hydro assets supported by the
       backend draft contract.
-- [ ] Each asset type exposes its existing physical and economic settings.
-- [ ] Asset removal requires an intentional action and persists correctly.
-- [ ] Stable client-side constraints provide field-level feedback while the
+- [x] Each asset type exposes its existing physical and economic settings.
+- [x] Asset removal requires an intentional action and persists correctly.
+- [x] Stable client-side constraints provide field-level feedback while the
       backend remains authoritative.
-- [ ] The editor visibly distinguishes clean, dirty, saving, saved, and failed
+- [x] The editor visibly distinguishes clean, dirty, saving, saved, and failed
       states.
-- [ ] Save requests are serialized and a late response cannot overwrite newer
+- [x] Save requests are serialized and a late response cannot overwrite newer
       local edits.
-- [ ] Successful saves reconcile the form with the server representation.
-- [ ] Navigation away from unsaved edits requires an explicit keep-editing or
+- [x] Successful saves reconcile the form with the server representation.
+- [x] Navigation away from unsaved edits requires an explicit keep-editing or
       discard decision.
-- [ ] Recoverable save errors do not erase local edits.
-- [ ] The editor is keyboard operable and validation errors move focus or expose
+- [x] Recoverable save errors do not erase local edits.
+- [x] The editor is keyboard operable and validation errors move focus or expose
       an accessible summary.
-- [ ] Browser acceptance covers draft creation, multi-asset editing, save,
+- [x] Browser acceptance covers draft creation, multi-asset editing, save,
       refresh, removal, and one failed-save recovery path.
-- [ ] Existing structured draft and hydro editor tests remain green.
+- [x] Existing structured draft and hydro editor tests remain green.
+
+## Verification
+
+- `npm.cmd test`
+- `npm.cmd run check`
+- `npm.cmd run test:browser`
+- `.\\.venv\\Scripts\\python.exe -m unittest tests.test_structured_draft_editor tests.test_iter5_acceptance -v`
+- Chrome smoke: created a project/scenario, created a React structured draft,
+  added BESS, saved, reloaded, and confirmed persisted form state.
 
 ## Blocked by
 
 - BESS-REACT-002
-

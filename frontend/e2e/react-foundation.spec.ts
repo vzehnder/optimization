@@ -202,3 +202,83 @@ test("React analyst workspace creates a project and scenario, then preserves dir
   await page.goForward();
   await expect(page.getByRole("heading", { name: scenarioName })).toBeVisible();
 });
+
+test("React structured draft editor saves multi-asset edits, recovers from one failed save, and reopens persisted state", async ({
+  page,
+}) => {
+  await ensureAdminSession(page);
+  const suffix = Date.now();
+  const projectName = `Draft PMGD ${suffix}`;
+  const scenarioName = `Structured case ${suffix}`;
+  let failNextDraftSave = true;
+
+  await page.route("**/api/scenarios/*/draft", async (route) => {
+    if (route.request().method() === "PUT" && failNextDraftSave) {
+      failNextDraftSave = false;
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "synthetic save failure" }),
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.getByLabel("Nombre del proyecto").fill(projectName);
+  await page
+    .getByLabel("Descripcion del proyecto")
+    .fill("Browser draft acceptance");
+  await page.getByRole("button", { name: "Crear proyecto" }).click();
+  await page.getByRole("link", { name: projectName }).click();
+  await page.getByLabel("Nombre del escenario").fill(scenarioName);
+  await page
+    .getByLabel("Descripcion del escenario")
+    .fill("Structured editor branch");
+  await page.getByRole("button", { name: "Crear escenario" }).click();
+
+  await page.getByRole("link", { name: "Abrir draft" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Draft estructurado" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Crear draft" }).click();
+  await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
+
+  await page.getByLabel("Nombre del caso").fill("PMGD verano");
+  await page.getByLabel("Maximum import (MW)").fill("12");
+  await page.getByLabel("Maximum export (MW)").fill("8");
+  await page.getByRole("button", { name: "Agregar BESS" }).click();
+  await page.getByLabel("BESS asset ID").fill("battery_alpha");
+  await page.getByLabel("Maximum charge (MW)").fill("3");
+  await page.getByLabel("Maximum discharge (MW)").fill("4");
+  await page.getByRole("button", { name: "Agregar renewable" }).click();
+  await page.getByLabel("Renewable asset ID").fill("solar_north");
+  await page.getByRole("button", { name: "Agregar hydro" }).click();
+  await page.getByLabel("Hydro asset ID").fill("hydro_north");
+  await expect(page.getByText("Cambios sin guardar")).toBeVisible();
+
+  await page.getByRole("button", { name: "Guardar draft" }).click();
+  await expect(page.getByRole("alert")).toContainText("synthetic save failure");
+  await expect(page.getByLabel("Nombre del caso")).toHaveValue("PMGD verano");
+
+  await page.getByRole("button", { name: "Guardar draft" }).click();
+  await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Quitar solar_north" }).click();
+  await expect(
+    page.getByText("Confirma para quitar solar_north"),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Confirmar quitar solar_north" })
+    .click();
+  await page.getByRole("button", { name: "Guardar draft" }).click();
+  await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
+
+  const draftUrl = page.url();
+  await page.reload();
+  await expect(page).toHaveURL(draftUrl);
+  await expect(page.getByLabel("Nombre del caso")).toHaveValue("PMGD verano");
+  await expect(page.getByLabel("BESS asset ID")).toHaveValue("battery_alpha");
+  await expect(page.getByLabel("Hydro asset ID")).toHaveValue("hydro_north");
+  await expect(page.getByLabel("Renewable asset ID")).toHaveCount(0);
+});

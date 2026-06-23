@@ -468,6 +468,12 @@ export function ScenarioDetailView() {
       <header className="workspace-heading">
         <h1>{scenario.data.name}</h1>
         <p>{scenario.data.description || "Sin descripcion."}</p>
+        <Link
+          className="button-link"
+          to={`/scenarios/${scenario.data.id}/draft`}
+        >
+          Abrir draft
+        </Link>
       </header>
       <div className="workspace-stack">
         <section className="workspace-section" aria-labelledby="version-list">

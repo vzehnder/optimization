@@ -26,6 +26,7 @@ import {
   type CurrentUser,
   type CurrentUserResponse,
 } from "./api/client";
+import { ScenarioDraftEditorView } from "./DraftEditor";
 import { ErrorBoundary } from "./ErrorBoundary";
 import "./styles.css";
 import {
@@ -272,6 +273,10 @@ function AuthenticatedRoutes({ user }: { user: CurrentUser }) {
           <Route
             path="scenarios/:scenarioId"
             element={isClient ? <ForbiddenView /> : <ScenarioDetailView />}
+          />
+          <Route
+            path="scenarios/:scenarioId/draft"
+            element={isClient ? <ForbiddenView /> : <ScenarioDraftEditorView />}
           />
           <Route
             path="system"
