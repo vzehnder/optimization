@@ -15,13 +15,20 @@ import {
   getProject,
   getScenario,
   getScenarioDraft,
+  getTimeSeriesRows,
+  saveTimeSeriesMapping,
+  saveTimeSeriesRows,
   updateScenarioDraft,
+  uploadTimeSeriesSource,
   type DraftAsset,
   type DraftAssetType,
   type Project,
   type Scenario,
   type ScenarioDraft,
   type ScenarioDraftDocument,
+  type TimeSeriesMapping,
+  type TimeSeriesRow,
+  type TimeSeriesSource,
 } from "./api/client";
 import { ForbiddenView, NotFoundView } from "./Workspace";
 
@@ -166,6 +173,126 @@ function parseOptionalNumber(value: string): number | null {
   if (!trimmed) return null;
   const parsed = Number(trimmed);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+const scalarMappingKeys = [
+  "timestamp",
+  "duration_hours",
+  "price_usd_per_mwh",
+  "import_price_usd_per_mwh",
+  "export_price_usd_per_mwh",
+] as const;
+
+type ScalarMappingKey = (typeof scalarMappingKeys)[number];
+
+const assetMappingKeys = [
+  "renewable_available_power_mw",
+  "load_demand_mw",
+  "hydro_inflow_m3s",
+] as const;
+
+type AssetMappingKey = (typeof assetMappingKeys)[number];
+
+const assetMappingTypes: Record<AssetMappingKey, DraftAssetType> = {
+  renewable_available_power_mw: "renewable",
+  load_demand_mw: "load",
+  hydro_inflow_m3s: "hydro",
+};
+
+const rowRenderLimit = 50;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isTimeSeriesSource(value: unknown): value is TimeSeriesSource {
+  return isRecord(value) && typeof value.id === "string";
+}
+
+function timeSeriesSources(
+  document: ScenarioDraftDocument,
+): TimeSeriesSource[] {
+  const sources = document.time_series?.sources;
+  return Array.isArray(sources) ? sources.filter(isTimeSeriesSource) : [];
+}
+
+function activeTimeSeriesSource(
+  document: ScenarioDraftDocument,
+): TimeSeriesSource | null {
+  const sources = timeSeriesSources(document);
+  const activeSourceId = document.time_series?.active_source_id;
+  if (activeSourceId) {
+    return sources.find((source) => source.id === activeSourceId) ?? null;
+  }
+  return sources.at(-1) ?? null;
+}
+
+function documentWithTimeSeriesSource(
+  document: ScenarioDraftDocument,
+  source: TimeSeriesSource,
+): ScenarioDraftDocument {
+  const sources = timeSeriesSources(document).filter(
+    (candidate) => candidate.id !== source.id,
+  );
+  return {
+    ...document,
+    time_series: {
+      ...(document.time_series || {}),
+      active_source_id: source.id,
+      sources: [...sources, source],
+    },
+  };
+}
+
+function assetIds(
+  document: ScenarioDraftDocument,
+  assetType: DraftAssetType,
+): string[] {
+  return (document.assets || [])
+    .filter((asset) => asset.type === assetType)
+    .map((asset) => String(asset.id || "").trim())
+    .filter(Boolean);
+}
+
+function mappingString(value: unknown): string {
+  return value === null || value === undefined ? "" : String(value);
+}
+
+function nestedMapping(
+  mapping: TimeSeriesMapping | undefined,
+  key: AssetMappingKey,
+): Record<string, string | null> {
+  const value = mapping?.[key];
+  return isRecord(value)
+    ? Object.fromEntries(
+        Object.entries(value).map(([assetId, column]) => [
+          assetId,
+          mappingString(column) || null,
+        ]),
+      )
+    : {};
+}
+
+function mappingFromSource(
+  source: TimeSeriesSource | null,
+  document: ScenarioDraftDocument,
+): TimeSeriesMapping {
+  const base = source?.mapping || source?.mapping_suggestions || {};
+  const mapping: TimeSeriesMapping = {};
+  for (const key of scalarMappingKeys) {
+    mapping[key] = mappingString(base[key]) || null;
+  }
+  for (const key of assetMappingKeys) {
+    const values = nestedMapping(base, key);
+    const assetType = assetMappingTypes[key];
+    mapping[key] = Object.fromEntries(
+      assetIds(document, assetType).map((assetId) => [
+        assetId,
+        values[assetId] || null,
+      ]),
+    );
+  }
+  return mapping;
 }
 
 function isAssetType(value: unknown): value is DraftAssetType {
@@ -551,6 +678,512 @@ function CheckboxInput({
       />
       <span>{label}</span>
     </label>
+  );
+}
+
+function columnList(source: TimeSeriesSource): string[] {
+  return Array.isArray(source.columns) ? source.columns.map(String) : [];
+}
+
+function previewRows(source: TimeSeriesSource): TimeSeriesRow[] {
+  return Array.isArray(source.preview_rows)
+    ? (source.preview_rows as TimeSeriesRow[])
+    : [];
+}
+
+function cellText(value: unknown): string {
+  return value === null || value === undefined ? "" : String(value);
+}
+
+function mappingValue(
+  mapping: TimeSeriesMapping,
+  key: ScalarMappingKey,
+): string {
+  return mappingString(mapping[key]);
+}
+
+function assetMappingValue(
+  mapping: TimeSeriesMapping,
+  key: AssetMappingKey,
+  assetId: string,
+): string {
+  const values = mapping[key];
+  return isRecord(values) ? mappingString(values[assetId]) : "";
+}
+
+function assetMappingLabel(key: AssetMappingKey, assetId: string): string {
+  if (key === "renewable_available_power_mw") {
+    return `Renewable ${assetId} available column`;
+  }
+  if (key === "load_demand_mw") return `Load ${assetId} demand column`;
+  return `Hydro ${assetId} inflow column`;
+}
+
+function ColumnSelect({
+  id,
+  label,
+  value,
+  columns,
+  onChange,
+  disabled,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  columns: string[];
+  onChange: (value: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="field-row" htmlFor={id}>
+      <span>{label}</span>
+      <select
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
+      >
+        <option value="">No column</option>
+        {columns.map((column) => (
+          <option key={column} value={column}>
+            {column}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function SourceValidation({ source }: { source: TimeSeriesSource }) {
+  const validation = source.validation;
+  if (!validation) return null;
+  if (validation.ok) {
+    const count = Array.isArray(source.validated_rows)
+      ? source.validated_rows.length
+      : 0;
+    return <p className="source-ok">Valid mapped rows: {count}</p>;
+  }
+  const errors = Array.isArray(validation.errors) ? validation.errors : [];
+  return (
+    <div className="source-validation" role="alert">
+      <p>{mappingString(validation.error_category) || "Validation"} errors</p>
+      <ul>
+        {errors.map((error) => (
+          <li key={error}>{error}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function PreviewTable({ source }: { source: TimeSeriesSource }) {
+  const columns = columnList(source);
+  const rows = previewRows(source);
+  if (!columns.length || !rows.length) {
+    return <p className="empty-state">No preview rows detected.</p>;
+  }
+  return (
+    <div className="time-series-table-scroll">
+      <table aria-label="Source preview">
+        <thead>
+          <tr>
+            {columns.map((column) => (
+              <th key={column} scope="col">
+                {column}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr key={rowIndex}>
+              {columns.map((column) => (
+                <td key={column}>{cellText(row[column])}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SourceSummary({ source }: { source: TimeSeriesSource }) {
+  const columns = columnList(source);
+  return (
+    <section className="source-summary" aria-labelledby="active-source-title">
+      <h3 id="active-source-title">Time-series source</h3>
+      <dl className="source-metadata">
+        <div>
+          <dt>File</dt>
+          <dd>{source.original_filename || source.id}</dd>
+        </div>
+        <div>
+          <dt>Kind</dt>
+          <dd>{source.kind || "source"}</dd>
+        </div>
+        <div>
+          <dt>Source ID</dt>
+          <dd>{source.id}</dd>
+        </div>
+        {source.selected_sheet ? (
+          <div>
+            <dt>Sheet</dt>
+            <dd>Selected sheet: {source.selected_sheet}</dd>
+          </div>
+        ) : null}
+      </dl>
+      {columns.length ? (
+        <p className="source-columns">Detected columns: {columns.join(", ")}</p>
+      ) : null}
+      <PreviewTable source={source} />
+      <SourceValidation source={source} />
+    </section>
+  );
+}
+
+function TimeSeriesMappingPanel({
+  scenarioId,
+  source,
+  document,
+  disabled,
+  onSourcePersisted,
+}: {
+  scenarioId: number;
+  source: TimeSeriesSource;
+  document: ScenarioDraftDocument;
+  disabled: boolean;
+  onSourcePersisted: (source: TimeSeriesSource) => void;
+}) {
+  const [mappingDraft, setMappingDraft] = useState<TimeSeriesMapping>(() =>
+    mappingFromSource(source, document),
+  );
+  const [mappingError, setMappingError] = useState("");
+  const columns = columnList(source);
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      saveTimeSeriesMapping(scenarioId, source.id, mappingDraft),
+    onSuccess: (savedSource) => {
+      setMappingError("");
+      onSourcePersisted(savedSource);
+    },
+    onError: (mutationError) => setMappingError(errorMessage(mutationError)),
+  });
+
+  function setScalar(key: ScalarMappingKey, value: string) {
+    setMappingDraft((current) => ({ ...current, [key]: value || null }));
+    setMappingError("");
+  }
+
+  function setAsset(key: AssetMappingKey, assetId: string, value: string) {
+    setMappingDraft((current) => {
+      const currentValues = isRecord(current[key]) ? current[key] : {};
+      return {
+        ...current,
+        [key]: {
+          ...currentValues,
+          [assetId]: value || null,
+        },
+      };
+    });
+    setMappingError("");
+  }
+
+  return (
+    <section className="source-mapping" aria-labelledby="source-mapping-title">
+      <h3 id="source-mapping-title">Column mapping</h3>
+      {mappingError ? <p role="alert">{mappingError}</p> : null}
+      <div className="draft-field-grid">
+        <ColumnSelect
+          id="mapping_timestamp"
+          label="Timestamp column"
+          value={mappingValue(mappingDraft, "timestamp")}
+          columns={columns}
+          onChange={(value) => setScalar("timestamp", value)}
+          disabled={disabled || mutation.isPending}
+        />
+        <ColumnSelect
+          id="mapping_duration_hours"
+          label="Duration column"
+          value={mappingValue(mappingDraft, "duration_hours")}
+          columns={columns}
+          onChange={(value) => setScalar("duration_hours", value)}
+          disabled={disabled || mutation.isPending}
+        />
+        <ColumnSelect
+          id="mapping_price_usd_per_mwh"
+          label="Legacy price column"
+          value={mappingValue(mappingDraft, "price_usd_per_mwh")}
+          columns={columns}
+          onChange={(value) => setScalar("price_usd_per_mwh", value)}
+          disabled={disabled || mutation.isPending}
+        />
+        <ColumnSelect
+          id="mapping_import_price_usd_per_mwh"
+          label="Import price column"
+          value={mappingValue(mappingDraft, "import_price_usd_per_mwh")}
+          columns={columns}
+          onChange={(value) => setScalar("import_price_usd_per_mwh", value)}
+          disabled={disabled || mutation.isPending}
+        />
+        <ColumnSelect
+          id="mapping_export_price_usd_per_mwh"
+          label="Export price column"
+          value={mappingValue(mappingDraft, "export_price_usd_per_mwh")}
+          columns={columns}
+          onChange={(value) => setScalar("export_price_usd_per_mwh", value)}
+          disabled={disabled || mutation.isPending}
+        />
+        {assetMappingKeys.flatMap((key) =>
+          assetIds(document, assetMappingTypes[key]).map((assetId) => (
+            <ColumnSelect
+              key={`${key}-${assetId}`}
+              id={`mapping_${key}_${assetId}`}
+              label={assetMappingLabel(key, assetId)}
+              value={assetMappingValue(mappingDraft, key, assetId)}
+              columns={columns}
+              onChange={(value) => setAsset(key, assetId, value)}
+              disabled={disabled || mutation.isPending}
+            />
+          )),
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={() => mutation.mutate()}
+        disabled={disabled || mutation.isPending}
+      >
+        {mutation.isPending ? "Saving mapping" : "Save mapping"}
+      </button>
+    </section>
+  );
+}
+
+function TimeSeriesRowsEditor({
+  scenarioId,
+  source,
+  disabled,
+  onSourcePersisted,
+}: {
+  scenarioId: number;
+  source: TimeSeriesSource;
+  disabled: boolean;
+  onSourcePersisted: (source: TimeSeriesSource) => void;
+}) {
+  const queryClient = useQueryClient();
+  const rowsQueryKey = ["time-series-rows", scenarioId, source.id] as const;
+  const rows = useQuery({
+    queryKey: rowsQueryKey,
+    queryFn: ({ signal }) => getTimeSeriesRows(scenarioId, source.id, signal),
+    enabled: Boolean(source.id),
+    retry: false,
+  });
+  const [rowEdits, setRowEdits] = useState<Record<string, string>>({});
+  const [rowError, setRowError] = useState("");
+  const [rowStatus, setRowStatus] = useState("");
+  const columns = useMemo(() => rows.data?.columns || [], [rows.data]);
+  const baseRows = useMemo(() => rows.data?.rows || [], [rows.data]);
+  const rowDrafts = useMemo(
+    () =>
+      baseRows.map((row, rowIndex) => {
+        const draft = { ...row };
+        for (const column of columns) {
+          const key = `${rowIndex}:${column}`;
+          if (Object.prototype.hasOwnProperty.call(rowEdits, key)) {
+            draft[column] = rowEdits[key];
+          }
+        }
+        return draft;
+      }),
+    [baseRows, columns, rowEdits],
+  );
+
+  const saveMutation = useMutation({
+    mutationFn: () => saveTimeSeriesRows(scenarioId, source.id, rowDrafts),
+    onSuccess: (savedSource) => {
+      queryClient.setQueryData(rowsQueryKey, {
+        columns: columns.length ? columns : columnList(source),
+        rows: rowDrafts,
+      });
+      setRowEdits({});
+      setRowError("");
+      setRowStatus("Rows saved");
+      onSourcePersisted(savedSource);
+    },
+    onError: (mutationError) => setRowError(errorMessage(mutationError)),
+  });
+
+  function updateCell(rowIndex: number, column: string, value: string) {
+    setRowEdits((current) => ({
+      ...current,
+      [`${rowIndex}:${column}`]: value,
+    }));
+    setRowError("");
+    setRowStatus("");
+  }
+
+  if (rows.isPending) {
+    return <p className="empty-state">Loading editable rows.</p>;
+  }
+  if (rows.isError) {
+    return <p role="alert">{errorMessage(rows.error)}</p>;
+  }
+
+  const renderedRows = rowDrafts.slice(0, rowRenderLimit);
+
+  return (
+    <section className="source-rows" aria-labelledby="source-rows-title">
+      <h3 id="source-rows-title">Editable rows</h3>
+      {rowError ? <p role="alert">{rowError}</p> : null}
+      {rowStatus ? <p className="source-ok">{rowStatus}</p> : null}
+      {rowDrafts.length > rowRenderLimit ? (
+        <p className="source-note">
+          Showing first {rowRenderLimit} of {rowDrafts.length} rows.
+        </p>
+      ) : null}
+      {columns.length && renderedRows.length ? (
+        <div className="time-series-table-scroll editable-table-scroll">
+          <table aria-label="Editable source rows">
+            <thead>
+              <tr>
+                <th scope="col">Row</th>
+                {columns.map((column) => (
+                  <th key={column} scope="col">
+                    {column}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {renderedRows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  <th scope="row">{rowIndex + 1}</th>
+                  {columns.map((column) => (
+                    <td key={column}>
+                      <input
+                        aria-label={`Row ${rowIndex + 1} ${column}`}
+                        value={cellText(row[column])}
+                        onChange={(event) =>
+                          updateCell(rowIndex, column, event.target.value)
+                        }
+                        disabled={disabled || saveMutation.isPending}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="empty-state">No editable rows detected.</p>
+      )}
+      <button
+        type="button"
+        onClick={() => saveMutation.mutate()}
+        disabled={disabled || saveMutation.isPending || !rowDrafts.length}
+      >
+        {saveMutation.isPending ? "Saving rows" : "Save rows"}
+      </button>
+    </section>
+  );
+}
+
+function TimeSeriesWorkflow({
+  scenarioId,
+  document,
+  dirty,
+  onSourcePersisted,
+}: {
+  scenarioId: number;
+  document: ScenarioDraftDocument;
+  dirty: boolean;
+  onSourcePersisted: (source: TimeSeriesSource) => void;
+}) {
+  const source = activeTimeSeriesSource(document);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [sheetName, setSheetName] = useState("");
+  const [uploadError, setUploadError] = useState("");
+  const uploadMutation = useMutation({
+    mutationFn: ({ file, sheet }: { file: File; sheet: string }) =>
+      uploadTimeSeriesSource(scenarioId, file, sheet),
+    onSuccess: (savedSource) => {
+      setUploadError("");
+      onSourcePersisted(savedSource);
+    },
+    onError: (mutationError) => setUploadError(errorMessage(mutationError)),
+  });
+
+  function uploadSource() {
+    const file = fileInputRef.current?.files?.[0];
+    if (!file) {
+      setUploadError("Select a CSV or XLSX file.");
+      return;
+    }
+    setUploadError("");
+    uploadMutation.mutate({ file, sheet: sheetName });
+  }
+
+  const controlsDisabled = dirty || uploadMutation.isPending;
+
+  return (
+    <div className="time-series-workflow">
+      {dirty ? (
+        <p className="source-note">
+          Save draft before uploading or changing time-series sources.
+        </p>
+      ) : null}
+      <div className="source-upload">
+        <label className="field-row" htmlFor="time_series_source_file">
+          <span>Source file</span>
+          <input
+            id="time_series_source_file"
+            ref={fileInputRef}
+            type="file"
+            accept="text/csv,.csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            disabled={controlsDisabled}
+          />
+        </label>
+        <TextInput
+          id="time_series_sheet_name"
+          label="XLSX sheet"
+          value={sheetName}
+          onChange={setSheetName}
+          errors={{}}
+        />
+        <button
+          type="button"
+          onClick={uploadSource}
+          disabled={controlsDisabled}
+        >
+          {uploadMutation.isPending ? "Uploading source" : "Upload source"}
+        </button>
+      </div>
+      {uploadError ? <p role="alert">{uploadError}</p> : null}
+      {source ? (
+        <>
+          <SourceSummary source={source} />
+          <TimeSeriesMappingPanel
+            key={`mapping-${source.id}`}
+            scenarioId={scenarioId}
+            source={source}
+            document={document}
+            disabled={dirty}
+            onSourcePersisted={onSourcePersisted}
+          />
+          <TimeSeriesRowsEditor
+            key={`rows-${source.id}`}
+            scenarioId={scenarioId}
+            source={source}
+            disabled={dirty}
+            onSourcePersisted={onSourcePersisted}
+          />
+        </>
+      ) : (
+        <p className="empty-state">Upload a CSV or XLSX source to begin.</p>
+      )}
+    </div>
   );
 }
 
@@ -1211,6 +1844,26 @@ function DraftEditor({
     });
   }
 
+  function persistTimeSeriesSource(source: TimeSeriesSource) {
+    const updatedDocument = documentWithTimeSeriesSource(document, source);
+    const updatedTexts = jsonTextsFromDocument(updatedDocument);
+    setDocument(cloneDocument(updatedDocument));
+    setJsonTexts(updatedTexts);
+    setPersistedSignature(editorSignature(updatedDocument, updatedTexts));
+    setSaveError("");
+    setValidationErrors({});
+    queryClient.setQueryData<ScenarioDraft>(
+      draftQueryKey(scenario.id),
+      (current) =>
+        current
+          ? {
+              ...current,
+              document: updatedDocument,
+            }
+          : current,
+    );
+  }
+
   const presentTypes = new Set(
     (document.assets || [])
       .map((asset) => asset.type)
@@ -1439,33 +2092,11 @@ function DraftEditor({
           aria-labelledby="time-series-metadata"
         >
           <h2 id="time-series-metadata">Time-series metadata</h2>
-          <TextInput
-            id="active_source_id"
-            label="Active source ID"
-            value={textValue(document.time_series?.active_source_id)}
-            onChange={(value) =>
-              updateDocument((current) =>
-                setNestedValue(
-                  current,
-                  "time_series",
-                  "active_source_id",
-                  value || null,
-                ),
-              )
-            }
-            errors={validationErrors}
-          />
-          <JsonTextarea
-            id="time_series_sources_json"
-            label="Sources metadata (JSON)"
-            value={jsonTexts.timeSeriesSources}
-            onChange={(value) =>
-              setJsonTexts((current) => ({
-                ...current,
-                timeSeriesSources: value,
-              }))
-            }
-            errors={validationErrors}
+          <TimeSeriesWorkflow
+            scenarioId={scenario.id}
+            document={document}
+            dirty={dirty}
+            onSourcePersisted={persistTimeSeriesSource}
           />
         </section>
         <section className="workspace-section" aria-labelledby="asset-settings">

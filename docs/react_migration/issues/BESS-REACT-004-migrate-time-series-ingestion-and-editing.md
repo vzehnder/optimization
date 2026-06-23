@@ -1,6 +1,6 @@
 # BESS-REACT-004: Migrate Time-Series Ingestion And Editing
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/react_migration/prd_react_ui_migration.md`
@@ -21,30 +21,39 @@ backend ingestion rules while keeping realistic tables responsive.
 
 ## Acceptance criteria
 
-- [ ] An analyst can upload supported CSV and XLSX files through multipart API
+- [x] An analyst can upload supported CSV and XLSX files through multipart API
       requests from the draft editor.
-- [ ] XLSX uploads support worksheet selection and explain invalid worksheet
+- [x] XLSX uploads support worksheet selection and explain invalid worksheet
       choices.
-- [ ] The UI shows source metadata, detected columns, preview rows, and mapping
+- [x] The UI shows source metadata, detected columns, preview rows, and mapping
       suggestions returned by the backend.
-- [ ] The analyst can map timestamps, durations, prices, load, renewable
+- [x] The analyst can map timestamps, durations, prices, load, renewable
       availability, and hydro inflows to the applicable draft assets.
-- [ ] Saved mappings refresh source validation and persisted draft state.
-- [ ] The analyst can edit and save source rows through the existing row
+- [x] Saved mappings refresh source validation and persisted draft state.
+- [x] The analyst can edit and save source rows through the existing row
       contract.
-- [ ] Source, mapping, row, and column errors are presented in actionable
+- [x] Source, mapping, row, and column errors are presented in actionable
       context without discarding edits.
-- [ ] Upload and save progress prevent accidental duplicate submissions.
-- [ ] Table rendering remains responsive for the supported realistic data size
+- [x] Upload and save progress prevent accidental duplicate submissions.
+- [x] Table rendering remains responsive for the supported realistic data size
       through bounded rendering or virtualization.
-- [ ] Unsafe source paths and unsupported files remain rejected by the backend.
-- [ ] Keyboard users can navigate mappings and the editable table.
-- [ ] Browser acceptance covers one CSV path, one XLSX path, a corrected mapping,
+- [x] Unsafe source paths and unsupported files remain rejected by the backend.
+- [x] Keyboard users can navigate mappings and the editable table.
+- [x] Browser acceptance covers one CSV path, one XLSX path, a corrected mapping,
       row editing, and an invalid-data path.
-- [ ] Existing CSV, XLSX, mapping, draft generation, and hydro ingestion tests
+- [x] Existing CSV, XLSX, mapping, draft generation, and hydro ingestion tests
       remain green.
+
+## Verification
+
+- `npm.cmd test`
+- `npm.cmd run check`
+- `npm.cmd run test:browser`
+- `.\\.venv\\Scripts\\python.exe -m unittest tests.test_csv_time_series_ingestion tests.test_draft_generated_system_case tests.test_structured_draft_editor -v`
+- Chrome smoke: created a project/scenario/draft in Chrome, added load,
+  renewable, and hydro assets, saved the draft, and confirmed the React
+  time-series upload controls render with no console errors.
 
 ## Blocked by
 
 - BESS-REACT-003
-

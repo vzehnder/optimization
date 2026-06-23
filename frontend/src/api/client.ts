@@ -75,6 +75,46 @@ export interface DraftAsset {
   [key: string]: unknown;
 }
 
+export type TimeSeriesCell = string | number | boolean | null;
+
+export type TimeSeriesRow = Record<string, TimeSeriesCell>;
+
+export interface TimeSeriesValidation {
+  ok?: boolean;
+  error_category?: string;
+  errors?: string[];
+  [key: string]: unknown;
+}
+
+export interface TimeSeriesMapping {
+  timestamp?: string | null;
+  duration_hours?: string | null;
+  price_usd_per_mwh?: string | null;
+  import_price_usd_per_mwh?: string | null;
+  export_price_usd_per_mwh?: string | null;
+  renewable_available_power_mw?: Record<string, string | null>;
+  load_demand_mw?: Record<string, string | null>;
+  hydro_inflow_m3s?: Record<string, string | null>;
+  [key: string]: unknown;
+}
+
+export interface TimeSeriesSource {
+  id: string;
+  kind?: string;
+  original_filename?: string;
+  media_type?: string;
+  stored_path?: string;
+  selected_sheet?: string;
+  columns?: string[];
+  preview_rows?: TimeSeriesRow[];
+  edited_rows?: TimeSeriesRow[];
+  mapping_suggestions?: TimeSeriesMapping;
+  mapping?: TimeSeriesMapping;
+  validation?: TimeSeriesValidation;
+  validated_rows?: unknown[];
+  [key: string]: unknown;
+}
+
 export interface ScenarioDraftDocument {
   schema_version?: string;
   case?: {
@@ -393,4 +433,81 @@ export async function updateScenarioDraft(
     },
     body: JSON.stringify({ document }),
   });
+}
+
+export async function uploadTimeSeriesSource(
+  scenarioId: number,
+  file: File,
+  sheetName = "",
+): Promise<TimeSeriesSource> {
+  const csrfToken = await getCsrfToken();
+  const body = new FormData();
+  body.append("source_file", file);
+  if (sheetName.trim()) body.append("sheet_name", sheetName.trim());
+  const response = await requestJson<{ source: TimeSeriesSource }>(
+    `/api/scenarios/${scenarioId}/draft/time-series-sources/upload`,
+    {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken },
+      body,
+    },
+  );
+  return response.source;
+}
+
+export async function getTimeSeriesRows(
+  scenarioId: number,
+  sourceId: string,
+  signal?: AbortSignal,
+): Promise<{ columns: string[]; rows: TimeSeriesRow[] }> {
+  return requestJson<{ columns: string[]; rows: TimeSeriesRow[] }>(
+    `/api/scenarios/${scenarioId}/draft/time-series-sources/${encodeURIComponent(
+      sourceId,
+    )}/rows`,
+    { signal },
+  );
+}
+
+export async function saveTimeSeriesRows(
+  scenarioId: number,
+  sourceId: string,
+  rows: TimeSeriesRow[],
+): Promise<TimeSeriesSource> {
+  const csrfToken = await getCsrfToken();
+  const response = await requestJson<{ source: TimeSeriesSource }>(
+    `/api/scenarios/${scenarioId}/draft/time-series-sources/${encodeURIComponent(
+      sourceId,
+    )}/rows`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrfToken,
+      },
+      body: JSON.stringify({ rows }),
+    },
+  );
+  return response.source;
+}
+
+export async function saveTimeSeriesMapping(
+  scenarioId: number,
+  sourceId: string,
+  mapping: TimeSeriesMapping,
+): Promise<TimeSeriesSource> {
+  const csrfToken = await getCsrfToken();
+  const response = await requestJson<{ source: TimeSeriesSource }>(
+    `/api/scenarios/${scenarioId}/draft/time-series-sources/${encodeURIComponent(
+      sourceId,
+    )}/mapping`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrfToken,
+      },
+      body: JSON.stringify({ mapping }),
+    },
+  );
+  return response.source;
 }

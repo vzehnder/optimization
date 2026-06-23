@@ -1,3 +1,8 @@
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+
 import {
   expect,
   request as requestFactory,
@@ -59,6 +64,46 @@ async function ensureAdminSession(page: Page) {
   await expect(
     page.getByRole("heading", { name: "Proyectos", exact: true }),
   ).toBeVisible();
+}
+
+function pythonExecutable(): string {
+  return (
+    process.env.PYTHON ||
+    [
+      resolve("..", ".venv/Scripts/python.exe"),
+      resolve("..", ".venv/bin/python"),
+    ].find(existsSync) ||
+    "python"
+  );
+}
+
+function workbookBuffer(): Buffer {
+  const workbookPath = join(
+    mkdtempSync(join(tmpdir(), "bess-react-xlsx-")),
+    "source.xlsx",
+  );
+  const script = `
+import sys
+from openpyxl import Workbook
+
+wb = Workbook()
+sheet = wb.active
+sheet.title = "Ignored"
+sheet.append(["ignored"])
+sheet.append(["not active"])
+inputs = wb.create_sheet("Inputs")
+for row in [
+    ["period_start", "hours", "buy_cost", "sell_revenue", "solar_1_available_mw", "load_1_demand_mw", "hydro_inflow_m3s"],
+    ["2026-01-02T00:00:00", 1.0, 61.0, 49.0, 4.5, 2.1, 31.0],
+    ["2026-01-02T01:00:00", 1.0, 62.0, 50.0, 4.8, 2.3, 32.0],
+]:
+    inputs.append(row)
+wb.save(sys.argv[1])
+`;
+  execFileSync(pythonExecutable(), ["-c", script, workbookPath], {
+    cwd: resolve(".."),
+  });
+  return readFileSync(workbookPath);
 }
 
 test("React auth handles bootstrap, login, refresh, roles, logout, and deactivation", async ({
@@ -281,4 +326,96 @@ test("React structured draft editor saves multi-asset edits, recovers from one f
   await expect(page.getByLabel("BESS asset ID")).toHaveValue("battery_alpha");
   await expect(page.getByLabel("Hydro asset ID")).toHaveValue("hydro_north");
   await expect(page.getByLabel("Renewable asset ID")).toHaveCount(0);
+});
+
+test("React draft editor uploads, maps, edits, and validates time-series sources", async ({
+  page,
+}) => {
+  await ensureAdminSession(page);
+  const suffix = Date.now();
+  const projectName = `Time-series PMGD ${suffix}`;
+  const scenarioName = `Source workflow ${suffix}`;
+
+  await page.getByLabel("Nombre del proyecto").fill(projectName);
+  await page
+    .getByLabel("Descripcion del proyecto")
+    .fill("Browser time-series acceptance");
+  await page.getByRole("button", { name: "Crear proyecto" }).click();
+  await page.getByRole("link", { name: projectName }).click();
+  await page.getByLabel("Nombre del escenario").fill(scenarioName);
+  await page
+    .getByLabel("Descripcion del escenario")
+    .fill("Upload and mapping branch");
+  await page.getByRole("button", { name: "Crear escenario" }).click();
+
+  await page.getByRole("link", { name: "Abrir draft" }).click();
+  await page.getByRole("button", { name: "Crear draft" }).click();
+  await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Agregar load" }).click();
+  await page.getByRole("button", { name: "Agregar renewable" }).click();
+  await page.getByRole("button", { name: "Agregar hydro" }).click();
+  await page.getByRole("button", { name: "Guardar draft" }).click();
+  await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
+
+  const workbook = workbookBuffer();
+  await page.getByLabel("XLSX sheet").fill("Missing");
+  await page.getByLabel("Source file").setInputFiles({
+    name: "source.xlsx",
+    mimeType:
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    buffer: workbook,
+  });
+  await page.getByRole("button", { name: "Upload source" }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "XLSX sheet 'Missing' was not found",
+  );
+  await expect(page.getByLabel("Nombre del caso")).toHaveValue(scenarioName);
+
+  const csvText = [
+    "period_start,hours,buy_cost,sell_revenue,solar_1_available_mw,load_1_demand_mw,hydro_inflow_m3s",
+    "2026-01-01T00:00:00,1.0,55.0,42.0,3.5,2.0,25.0",
+    "2026-01-01T01:00:00,1.0,60.0,48.0,4.0,2.5,30.0",
+    "",
+  ].join("\n");
+  await page.getByLabel("XLSX sheet").fill("");
+  await page.getByLabel("Source file").setInputFiles({
+    name: "source.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from(csvText),
+  });
+  await page.getByRole("button", { name: "Upload source" }).click();
+  await expect(page.getByText("source.csv")).toBeVisible();
+  await expect(
+    page.getByLabel("Source preview").getByRole("columnheader", {
+      name: "buy_cost",
+    }),
+  ).toBeVisible();
+  await expect(page.getByText("2026-01-01T00:00:00")).toBeVisible();
+
+  await page.getByLabel("Import price column").selectOption("buy_cost");
+  await page.getByLabel("Export price column").selectOption("sell_revenue");
+  await page.getByRole("button", { name: "Save mapping" }).click();
+  await expect(page.getByText("Valid mapped rows: 2")).toBeVisible();
+
+  await page.getByLabel("Row 1 load_1_demand_mw").fill("-1");
+  await page.getByRole("button", { name: "Save rows" }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "row 2: load load_1 demand must be nonnegative",
+  );
+  await page.getByLabel("Row 1 load_1_demand_mw").fill("2.25");
+  await page.getByRole("button", { name: "Save rows" }).click();
+  await expect(page.getByText("Rows saved")).toBeVisible();
+  await expect(page.getByText("Valid mapped rows: 2")).toBeVisible();
+
+  await page.getByLabel("XLSX sheet").fill("Inputs");
+  await page.getByLabel("Source file").setInputFiles({
+    name: "source.xlsx",
+    mimeType:
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    buffer: workbook,
+  });
+  await page.getByRole("button", { name: "Upload source" }).click();
+  await expect(page.getByText("source.xlsx")).toBeVisible();
+  await expect(page.getByText("Selected sheet: Inputs")).toBeVisible();
+  await expect(page.getByText("2026-01-02T00:00:00")).toBeVisible();
 });
