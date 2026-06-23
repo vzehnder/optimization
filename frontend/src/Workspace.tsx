@@ -1,0 +1,484 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { FormEvent, ReactNode, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+
+import {
+  ApiError,
+  createProject,
+  createScenario,
+  getProject,
+  getScenario,
+  listProjects,
+  listScenarioRuns,
+  listScenarios,
+  listScenarioVersions,
+  type Project,
+  type ProjectCreatePayload,
+  type Scenario,
+  type ScenarioCreatePayload,
+  type ScenarioRun,
+  type ScenarioVersion,
+} from "./api/client";
+
+const projectsQueryKey = ["projects"] as const;
+const projectQueryKey = (projectId: number) => ["project", projectId] as const;
+const scenariosQueryKey = (projectId: number) =>
+  ["project-scenarios", projectId] as const;
+const scenarioQueryKey = (scenarioId: number) =>
+  ["scenario", scenarioId] as const;
+const scenarioVersionsQueryKey = (scenarioId: number) =>
+  ["scenario-versions", scenarioId] as const;
+const scenarioRunsQueryKey = (scenarioId: number) =>
+  ["scenario-runs", scenarioId] as const;
+
+function errorMessage(error: unknown): string {
+  if (error instanceof ApiError) return error.message;
+  return "No se pudo completar la accion.";
+}
+
+function appendUnique<T extends { id: number }>(
+  items: T[] | undefined,
+  item: T,
+): T[] {
+  if (!items) return [item];
+  if (items.some((existing) => existing.id === item.id)) return items;
+  return [...items, item];
+}
+
+function useNumericParam(name: string): number | null {
+  const params = useParams();
+  const rawValue = params[name];
+  const value = Number(rawValue);
+  if (!rawValue || !Number.isInteger(value) || value < 1) return null;
+  return value;
+}
+
+function LoadingView({ label }: { label: string }) {
+  return <p role="status">{label}</p>;
+}
+
+export function ForbiddenView() {
+  return (
+    <section className="content-panel">
+      <h1>Forbidden</h1>
+      <p>No tienes acceso a esta area.</p>
+    </section>
+  );
+}
+
+export function NotFoundView({ children }: { children?: ReactNode }) {
+  return (
+    <section className="content-panel">
+      <h1>No encontrado</h1>
+      <p>{children || "El recurso solicitado no existe."}</p>
+      <Link className="button-link" to="/projects">
+        Volver a proyectos
+      </Link>
+    </section>
+  );
+}
+
+function RequestErrorView({
+  error,
+  retry,
+}: {
+  error: unknown;
+  retry?: () => void;
+}) {
+  if (error instanceof ApiError && error.status === 404) {
+    return <NotFoundView>El recurso solicitado no existe.</NotFoundView>;
+  }
+  if (error instanceof ApiError && error.status === 403) {
+    return <ForbiddenView />;
+  }
+  return (
+    <section className="content-panel">
+      <h1>No se pudo cargar</h1>
+      <p>{errorMessage(error)}</p>
+      {retry ? (
+        <button type="button" onClick={retry}>
+          Reintentar
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
+function EmptyState({ children }: { children: ReactNode }) {
+  return <p className="empty-state">{children}</p>;
+}
+
+function Breadcrumbs({ children }: { children: ReactNode }) {
+  return (
+    <nav className="breadcrumbs" aria-label="Ruta">
+      {children}
+    </nav>
+  );
+}
+
+function ProjectList({ projects }: { projects: Project[] }) {
+  if (projects.length === 0) {
+    return (
+      <EmptyState>
+        Crea un proyecto para comenzar a modelar escenarios.
+      </EmptyState>
+    );
+  }
+  return (
+    <ul className="resource-list">
+      {projects.map((project) => (
+        <li key={project.id}>
+          <Link to={`/projects/${project.id}`}>{project.name}</Link>
+          <p>{project.description || "Sin descripcion."}</p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function CreateProjectForm() {
+  const queryClient = useQueryClient();
+  const [error, setError] = useState("");
+  const mutation = useMutation({
+    mutationFn: createProject,
+    onSuccess: (project) => {
+      setError("");
+      queryClient.setQueryData<Project[]>(projectsQueryKey, (projects) =>
+        appendUnique(projects, project),
+      );
+      void queryClient.invalidateQueries({ queryKey: projectsQueryKey });
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError)),
+  });
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const payload: ProjectCreatePayload = {
+      name: String(form.get("name") || ""),
+      description: String(form.get("description") || ""),
+    };
+    mutation.mutate(payload, {
+      onSuccess: () => formElement.reset(),
+    });
+  }
+
+  return (
+    <form className="workspace-form" onSubmit={submit}>
+      <h2>Nuevo proyecto</h2>
+      {error ? <p role="alert">{error}</p> : null}
+      <label htmlFor="project-name">Nombre del proyecto</label>
+      <input id="project-name" name="name" type="text" required />
+      <label htmlFor="project-description">Descripcion del proyecto</label>
+      <textarea id="project-description" name="description" rows={3} />
+      <button type="submit" disabled={mutation.isPending}>
+        Crear proyecto
+      </button>
+    </form>
+  );
+}
+
+export function ProjectListView() {
+  const projects = useQuery({
+    queryKey: projectsQueryKey,
+    queryFn: ({ signal }) => listProjects(signal),
+    retry: false,
+  });
+
+  if (projects.isPending) {
+    return <LoadingView label="Cargando proyectos" />;
+  }
+  if (projects.isError) {
+    return (
+      <RequestErrorView
+        error={projects.error}
+        retry={() => void projects.refetch()}
+      />
+    );
+  }
+
+  return (
+    <section className="workspace-view">
+      <header className="workspace-heading">
+        <p className="eyebrow">Analyst workspace</p>
+        <h1>Proyectos</h1>
+      </header>
+      <div className="workspace-grid">
+        <section className="workspace-section" aria-labelledby="project-list">
+          <h2 id="project-list">Proyectos activos</h2>
+          <ProjectList projects={projects.data} />
+        </section>
+        <CreateProjectForm />
+      </div>
+    </section>
+  );
+}
+
+function ScenarioList({ scenarios }: { scenarios: Scenario[] }) {
+  if (scenarios.length === 0) {
+    return (
+      <EmptyState>
+        Crea un escenario para guardar variantes del proyecto.
+      </EmptyState>
+    );
+  }
+  return (
+    <ul className="resource-list">
+      {scenarios.map((scenario) => (
+        <li key={scenario.id}>
+          <Link to={`/scenarios/${scenario.id}`}>{scenario.name}</Link>
+          <p>{scenario.description || "Sin descripcion."}</p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function CreateScenarioForm({ projectId }: { projectId: number }) {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [error, setError] = useState("");
+  const mutation = useMutation({
+    mutationFn: (payload: ScenarioCreatePayload) =>
+      createScenario(projectId, payload),
+    onSuccess: (scenario) => {
+      setError("");
+      queryClient.setQueryData<Scenario[]>(
+        scenariosQueryKey(projectId),
+        (scenarios) => appendUnique(scenarios, scenario),
+      );
+      void queryClient.invalidateQueries({
+        queryKey: scenariosQueryKey(projectId),
+      });
+      navigate(`/scenarios/${scenario.id}`);
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError)),
+  });
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    const form = new FormData(event.currentTarget);
+    mutation.mutate({
+      name: String(form.get("name") || ""),
+      description: String(form.get("description") || ""),
+    });
+  }
+
+  return (
+    <form className="workspace-form" onSubmit={submit}>
+      <h2>Nuevo escenario</h2>
+      {error ? <p role="alert">{error}</p> : null}
+      <label htmlFor="scenario-name">Nombre del escenario</label>
+      <input id="scenario-name" name="name" type="text" required />
+      <label htmlFor="scenario-description">Descripcion del escenario</label>
+      <textarea id="scenario-description" name="description" rows={3} />
+      <button type="submit" disabled={mutation.isPending}>
+        Crear escenario
+      </button>
+    </form>
+  );
+}
+
+export function ProjectDetailView() {
+  const projectId = useNumericParam("projectId");
+  const project = useQuery({
+    queryKey: projectQueryKey(projectId || 0),
+    queryFn: ({ signal }) => getProject(projectId || 0, signal),
+    enabled: projectId !== null,
+    retry: false,
+  });
+  const scenarios = useQuery({
+    queryKey: scenariosQueryKey(projectId || 0),
+    queryFn: ({ signal }) => listScenarios(projectId || 0, signal),
+    enabled: projectId !== null,
+    retry: false,
+  });
+
+  if (projectId === null) {
+    return <NotFoundView>El proyecto solicitado no existe.</NotFoundView>;
+  }
+  if (project.isPending || scenarios.isPending) {
+    return <LoadingView label="Cargando proyecto" />;
+  }
+  if (project.isError) {
+    return (
+      <RequestErrorView
+        error={project.error}
+        retry={() => void project.refetch()}
+      />
+    );
+  }
+  if (scenarios.isError) {
+    return (
+      <RequestErrorView
+        error={scenarios.error}
+        retry={() => void scenarios.refetch()}
+      />
+    );
+  }
+
+  return (
+    <section className="workspace-view">
+      <Breadcrumbs>
+        <Link to="/projects">Proyectos</Link>
+        <span aria-hidden="true">/</span>
+        <span>{project.data.name}</span>
+      </Breadcrumbs>
+      <header className="workspace-heading">
+        <h1>{project.data.name}</h1>
+        <p>{project.data.description || "Sin descripcion."}</p>
+      </header>
+      <div className="workspace-grid">
+        <section className="workspace-section" aria-labelledby="scenario-list">
+          <h2 id="scenario-list">Escenarios</h2>
+          <ScenarioList scenarios={scenarios.data} />
+        </section>
+        <CreateScenarioForm projectId={projectId} />
+      </div>
+    </section>
+  );
+}
+
+function formatAssetCounts(counts: Record<string, number>): string {
+  const entries = Object.entries(counts);
+  if (entries.length === 0) return "sin activos";
+  return entries
+    .map(([assetType, count]) => `${assetType}: ${count}`)
+    .join(", ");
+}
+
+function VersionList({ versions }: { versions: ScenarioVersion[] }) {
+  if (versions.length === 0) {
+    return <EmptyState>Aun no hay versiones inmutables.</EmptyState>;
+  }
+  return (
+    <ul className="resource-list">
+      {versions.map((version) => (
+        <li key={version.id}>
+          <strong>Version {version.version_number}</strong>
+          <p>
+            {version.case_name} | {version.schema_version} |{" "}
+            {version.period_count} periodos |{" "}
+            {formatAssetCounts(version.asset_counts)}
+          </p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function RunList({
+  runs,
+  versions,
+}: {
+  runs: ScenarioRun[];
+  versions: ScenarioVersion[];
+}) {
+  if (runs.length === 0) {
+    return <EmptyState>Aun no hay corridas para este escenario.</EmptyState>;
+  }
+  const versionNumbers = new Map(
+    versions.map((version) => [version.id, version.version_number]),
+  );
+  return (
+    <ul className="resource-list">
+      {runs.map((run) => (
+        <li key={run.id}>
+          <a href={`/runs/${run.id}`}>Run {run.id}</a>
+          <p>
+            Estado: {run.status} | Version{" "}
+            {versionNumbers.get(run.scenario_version_id) || "desconocida"} |
+            creado {run.created_at}
+          </p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function ScenarioDetailView() {
+  const scenarioId = useNumericParam("scenarioId");
+  const scenario = useQuery({
+    queryKey: scenarioQueryKey(scenarioId || 0),
+    queryFn: ({ signal }) => getScenario(scenarioId || 0, signal),
+    enabled: scenarioId !== null,
+    retry: false,
+  });
+  const versions = useQuery({
+    queryKey: scenarioVersionsQueryKey(scenarioId || 0),
+    queryFn: ({ signal }) => listScenarioVersions(scenarioId || 0, signal),
+    enabled: scenarioId !== null,
+    retry: false,
+  });
+  const runs = useQuery({
+    queryKey: scenarioRunsQueryKey(scenarioId || 0),
+    queryFn: ({ signal }) => listScenarioRuns(scenarioId || 0, signal),
+    enabled: scenarioId !== null,
+    retry: false,
+  });
+  const project = useQuery({
+    queryKey: projectQueryKey(scenario.data?.project_id || 0),
+    queryFn: ({ signal }) => getProject(scenario.data!.project_id, signal),
+    enabled: scenario.data !== undefined,
+    retry: false,
+  });
+
+  if (scenarioId === null) {
+    return <NotFoundView>El escenario solicitado no existe.</NotFoundView>;
+  }
+  if (scenario.isPending || versions.isPending || runs.isPending) {
+    return <LoadingView label="Cargando escenario" />;
+  }
+  if (scenario.isError) {
+    return (
+      <RequestErrorView
+        error={scenario.error}
+        retry={() => void scenario.refetch()}
+      />
+    );
+  }
+  if (versions.isError) {
+    return (
+      <RequestErrorView
+        error={versions.error}
+        retry={() => void versions.refetch()}
+      />
+    );
+  }
+  if (runs.isError) {
+    return (
+      <RequestErrorView error={runs.error} retry={() => void runs.refetch()} />
+    );
+  }
+
+  return (
+    <section className="workspace-view">
+      <Breadcrumbs>
+        <Link to="/projects">Proyectos</Link>
+        <span aria-hidden="true">/</span>
+        <Link to={`/projects/${scenario.data.project_id}`}>
+          {project.data?.name || "Proyecto"}
+        </Link>
+        <span aria-hidden="true">/</span>
+        <span>{scenario.data.name}</span>
+      </Breadcrumbs>
+      <header className="workspace-heading">
+        <h1>{scenario.data.name}</h1>
+        <p>{scenario.data.description || "Sin descripcion."}</p>
+      </header>
+      <div className="workspace-stack">
+        <section className="workspace-section" aria-labelledby="version-list">
+          <h2 id="version-list">Versiones inmutables</h2>
+          <VersionList versions={versions.data} />
+        </section>
+        <section className="workspace-section" aria-labelledby="run-list">
+          <h2 id="run-list">Corridas</h2>
+          <RunList runs={runs.data} versions={versions.data} />
+        </section>
+      </div>
+    </section>
+  );
+}

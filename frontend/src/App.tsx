@@ -28,6 +28,13 @@ import {
 } from "./api/client";
 import { ErrorBoundary } from "./ErrorBoundary";
 import "./styles.css";
+import {
+  ForbiddenView,
+  NotFoundView,
+  ProjectDetailView,
+  ProjectListView,
+  ScenarioDetailView,
+} from "./Workspace";
 
 const identityQueryKey = ["current-user"];
 
@@ -178,24 +185,6 @@ function LoginView() {
   );
 }
 
-function ForbiddenView() {
-  return (
-    <section className="content-panel">
-      <h1>Forbidden</h1>
-      <p>No tienes acceso a esta area.</p>
-    </section>
-  );
-}
-
-function AnalystHome() {
-  return (
-    <section className="content-panel">
-      <h1>Area analista</h1>
-      <p>Workspace interno listo para migrar proyectos y escenarios.</p>
-    </section>
-  );
-}
-
 function ClientHome() {
   return (
     <section className="content-panel">
@@ -274,7 +263,15 @@ function AuthenticatedRoutes({ user }: { user: CurrentUser }) {
           <Route index element={<Navigate to={landingRoute(user)} replace />} />
           <Route
             path="projects"
-            element={isClient ? <ForbiddenView /> : <AnalystHome />}
+            element={isClient ? <ForbiddenView /> : <ProjectListView />}
+          />
+          <Route
+            path="projects/:projectId"
+            element={isClient ? <ForbiddenView /> : <ProjectDetailView />}
+          />
+          <Route
+            path="scenarios/:scenarioId"
+            element={isClient ? <ForbiddenView /> : <ScenarioDetailView />}
           />
           <Route
             path="system"
@@ -284,7 +281,7 @@ function AuthenticatedRoutes({ user }: { user: CurrentUser }) {
             path="client"
             element={isClient ? <ClientHome /> : <ForbiddenView />}
           />
-          <Route path="*" element={<ForbiddenView />} />
+          <Route path="*" element={<NotFoundView />} />
         </Routes>
       </main>
     </div>

@@ -2,6 +2,10 @@ import type { components } from "./schema";
 
 export type CurrentUser = components["schemas"]["CurrentUser"];
 export type CurrentUserResponse = components["schemas"]["CurrentUserResponse"];
+export type ProjectCreatePayload =
+  components["schemas"]["ProjectCreateRequest"];
+export type ScenarioCreatePayload =
+  components["schemas"]["ScenarioCreateRequest"];
 
 export interface AuthSessionResponse {
   user: CurrentUser;
@@ -18,6 +22,49 @@ export interface LoginPayload {
   email: string;
   password: string;
   next: string;
+}
+
+export interface Project {
+  id: number;
+  name: string;
+  description: string;
+  created_at: string;
+  created_by?: string;
+}
+
+export interface Scenario {
+  id: number;
+  project_id: number;
+  name: string;
+  description: string;
+  created_at: string;
+  created_by?: string;
+}
+
+export interface ScenarioVersion {
+  id: number;
+  scenario_id: number;
+  version_number: number;
+  case_name: string;
+  schema_version: string;
+  period_count: number;
+  asset_counts: Record<string, number>;
+  created_at: string;
+  created_by?: string;
+}
+
+export interface ScenarioRun {
+  id: number;
+  scenario_version_id: number;
+  status: string;
+  created_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_seconds?: number | null;
+  exit_code?: number | null;
+  error_message?: string | null;
+  triggered_by?: string;
+  trigger_type?: string;
 }
 
 interface StructuredErrorBody {
@@ -171,4 +218,82 @@ export async function login(
 
 export async function logout(): Promise<void> {
   await postJsonWithCsrf<void>("/api/auth/logout");
+}
+
+export async function listProjects(signal?: AbortSignal): Promise<Project[]> {
+  const response = await requestJson<{ projects: Project[] }>("/api/projects", {
+    signal,
+  });
+  return response.projects;
+}
+
+export async function createProject(
+  payload: ProjectCreatePayload,
+): Promise<Project> {
+  return postJsonWithCsrf<Project>("/api/projects", payload);
+}
+
+export async function getProject(
+  projectId: number,
+  signal?: AbortSignal,
+): Promise<Project> {
+  const response = await requestJson<{ project: Project }>(
+    `/api/projects/${projectId}`,
+    { signal },
+  );
+  return response.project;
+}
+
+export async function listScenarios(
+  projectId: number,
+  signal?: AbortSignal,
+): Promise<Scenario[]> {
+  const response = await requestJson<{ scenarios: Scenario[] }>(
+    `/api/projects/${projectId}/scenarios`,
+    { signal },
+  );
+  return response.scenarios;
+}
+
+export async function createScenario(
+  projectId: number,
+  payload: ScenarioCreatePayload,
+): Promise<Scenario> {
+  return postJsonWithCsrf<Scenario>(
+    `/api/projects/${projectId}/scenarios`,
+    payload,
+  );
+}
+
+export async function getScenario(
+  scenarioId: number,
+  signal?: AbortSignal,
+): Promise<Scenario> {
+  const response = await requestJson<{ scenario: Scenario }>(
+    `/api/scenarios/${scenarioId}`,
+    { signal },
+  );
+  return response.scenario;
+}
+
+export async function listScenarioVersions(
+  scenarioId: number,
+  signal?: AbortSignal,
+): Promise<ScenarioVersion[]> {
+  const response = await requestJson<{ versions: ScenarioVersion[] }>(
+    `/api/scenarios/${scenarioId}/versions`,
+    { signal },
+  );
+  return response.versions;
+}
+
+export async function listScenarioRuns(
+  scenarioId: number,
+  signal?: AbortSignal,
+): Promise<ScenarioRun[]> {
+  const response = await requestJson<{ runs: ScenarioRun[] }>(
+    `/api/scenarios/${scenarioId}/runs`,
+    { signal },
+  );
+  return response.runs;
 }

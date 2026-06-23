@@ -242,6 +242,132 @@ button:focus-visible {
   box-shadow: none;
 }
 
+.workspace-view {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.workspace-heading {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.workspace-heading h1,
+.workspace-heading p {
+  margin: 0;
+}
+
+.workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 24rem);
+  gap: 1rem;
+  align-items: start;
+}
+
+.workspace-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.workspace-section,
+.workspace-form {
+  padding: 1rem;
+  border: 1px solid #d8e2eb;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgb(16 42 67 / 7%);
+}
+
+.workspace-section h2,
+.workspace-form h2 {
+  margin: 0 0 0.9rem;
+  color: #17324d;
+  font-size: 1.05rem;
+}
+
+.workspace-form {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.workspace-form label {
+  font-weight: 700;
+}
+
+.workspace-form input,
+.workspace-form textarea {
+  width: 100%;
+  border: 1px solid #b8c7d6;
+  border-radius: 8px;
+  padding: 0.7rem 0.8rem;
+  color: #102a43;
+  font: inherit;
+  background: #fff;
+}
+
+.workspace-form button {
+  justify-self: start;
+}
+
+.workspace-form [role="alert"] {
+  width: auto;
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border-left: 4px solid #c2410c;
+  border-radius: 8px;
+  background: #fff7ed;
+  box-shadow: none;
+}
+
+.resource-list {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.resource-list li {
+  padding: 0.75rem;
+  border: 1px solid #d8e2eb;
+  border-radius: 8px;
+  background: #f8fbfd;
+}
+
+.resource-list a,
+.button-link {
+  color: #075985;
+  font-weight: 750;
+}
+
+.resource-list p {
+  margin: 0.25rem 0 0;
+  color: #486581;
+}
+
+.empty-state {
+  margin: 0;
+  padding: 0.85rem;
+  border: 1px dashed #9fb3c8;
+  border-radius: 8px;
+  color: #486581;
+  background: #f8fbfd;
+}
+
+.breadcrumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  color: #486581;
+  font-size: 0.9rem;
+}
+
+.breadcrumbs a {
+  color: #075985;
+  font-weight: 700;
+  text-decoration: none;
+}
+
 @media (max-width: 620px) {
   .topbar,
   .identity {
@@ -250,5 +376,9 @@ button:focus-visible {
 
   .topbar {
     flex-direction: column;
+  }
+
+  .workspace-grid {
+    grid-template-columns: 1fr;
   }
 }

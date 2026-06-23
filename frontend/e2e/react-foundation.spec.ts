@@ -3,6 +3,7 @@ import {
   request as requestFactory,
   test,
   type APIRequestContext,
+  type Page,
 } from "@playwright/test";
 
 async function csrfToken(api: APIRequestContext): Promise<string> {
@@ -35,6 +36,31 @@ async function apiLogin(
   expect(response.ok()).toBeTruthy();
 }
 
+async function ensureAdminSession(page: Page) {
+  await page.goto("/react");
+  await expect(
+    page.getByRole("heading", {
+      name: /Crear admin|Iniciar sesion|Proyectos/,
+    }),
+  ).toBeVisible();
+  const bootstrapHeading = page.getByRole("heading", { name: "Crear admin" });
+  const loginHeading = page.getByRole("heading", { name: "Iniciar sesion" });
+  if (await bootstrapHeading.isVisible()) {
+    await page.getByLabel("Email").fill("admin@example.local");
+    await page.getByLabel("Nombre").fill("Admin User");
+    await page.getByLabel("Password").fill("admin-pass");
+    await page.getByRole("button", { name: "Crear admin" }).click();
+  } else if (await loginHeading.isVisible()) {
+    await page.getByLabel("Email").fill("admin@example.local");
+    await page.getByLabel("Password").fill("admin-pass");
+    await page.getByRole("button", { name: "Entrar" }).click();
+  }
+  await expect(page).toHaveURL(/\/react\/projects$/);
+  await expect(
+    page.getByRole("heading", { name: "Proyectos", exact: true }),
+  ).toBeVisible();
+}
+
 test("React auth handles bootstrap, login, refresh, roles, logout, and deactivation", async ({
   page,
   baseURL,
@@ -50,7 +76,7 @@ test("React auth handles bootstrap, login, refresh, roles, logout, and deactivat
 
   await expect(page).toHaveURL(/\/react\/projects$/);
   await expect(
-    page.getByRole("heading", { name: "Area analista" }),
+    page.getByRole("heading", { name: "Proyectos", exact: true }),
   ).toBeVisible();
   await expect(page.getByText("Admin User")).toBeVisible();
 
@@ -128,4 +154,51 @@ test("React auth handles bootstrap, login, refresh, roles, logout, and deactivat
   await expect(page.getByRole("alert")).toContainText(
     "Invalid email or password.",
   );
+});
+
+test("React analyst workspace creates a project and scenario, then preserves direct scenario refresh", async ({
+  page,
+}) => {
+  await ensureAdminSession(page);
+  const suffix = Date.now();
+  const projectName = `Hybrid PMGD ${suffix}`;
+  const scenarioName = `Base case ${suffix}`;
+
+  await page.getByLabel("Nombre del proyecto").fill(projectName);
+  await page
+    .getByLabel("Descripcion del proyecto")
+    .fill("Browser acceptance workspace");
+  await page.getByRole("button", { name: "Crear proyecto" }).click();
+
+  await expect(page.getByRole("link", { name: projectName })).toBeVisible();
+  await page.getByRole("link", { name: projectName }).click();
+  await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
+  await expect(
+    page.getByText("Crea un escenario para guardar variantes del proyecto."),
+  ).toBeVisible();
+
+  await page.getByLabel("Nombre del escenario").fill(scenarioName);
+  await page
+    .getByLabel("Descripcion del escenario")
+    .fill("Initial modeling branch");
+  await page.getByRole("button", { name: "Crear escenario" }).click();
+
+  await expect(page).toHaveURL(/\/react\/scenarios\/\d+$/);
+  await expect(page.getByRole("heading", { name: scenarioName })).toBeVisible();
+  await expect(
+    page.getByText("Aun no hay versiones inmutables."),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Aun no hay corridas para este escenario."),
+  ).toBeVisible();
+
+  const scenarioUrl = page.url();
+  await page.reload();
+  await expect(page).toHaveURL(scenarioUrl);
+  await expect(page.getByRole("heading", { name: scenarioName })).toBeVisible();
+
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
+  await page.goForward();
+  await expect(page.getByRole("heading", { name: scenarioName })).toBeVisible();
 });

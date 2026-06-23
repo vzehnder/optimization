@@ -1,6 +1,6 @@
 # BESS-REACT-002: Migrate Project And Scenario Workspace
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/react_migration/prd_react_ui_migration.md`
@@ -44,4 +44,3 @@ flows.
 ## Blocked by
 
 - BESS-REACT-001
-

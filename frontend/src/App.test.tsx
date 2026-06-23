@@ -1,10 +1,194 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
 
 describe("application shell", () => {
+  it("lets internal users create projects and scenarios, then refresh a direct scenario link", async () => {
+    window.history.replaceState({}, "", "/react/projects");
+    const projects: Array<{
+      id: number;
+      name: string;
+      description: string;
+      created_at: string;
+    }> = [];
+    const scenarios: Array<{
+      id: number;
+      project_id: number;
+      name: string;
+      description: string;
+      created_at: string;
+    }> = [];
+    let transientProjectFailure = true;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects" && method === "GET") {
+          return new Response(JSON.stringify({ projects }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects" && method === "POST") {
+          if (transientProjectFailure) {
+            transientProjectFailure = false;
+            return new Response(
+              JSON.stringify({ detail: "temporary outage" }),
+              {
+                status: 503,
+                headers: { "Content-Type": "application/json" },
+              },
+            );
+          }
+          const body = JSON.parse(String(init?.body));
+          const project = {
+            id: 1,
+            name: body.name,
+            description: body.description,
+            created_at: "2026-06-23T12:00:00Z",
+          };
+          projects.push(project);
+          return new Response(JSON.stringify(project), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project: projects[0] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/scenarios" && method === "GET") {
+          return new Response(JSON.stringify({ scenarios }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/scenarios" && method === "POST") {
+          const body = JSON.parse(String(init?.body));
+          const scenario = {
+            id: 10,
+            project_id: 1,
+            name: body.name,
+            description: body.description,
+            created_at: "2026-06-23T12:05:00Z",
+          };
+          scenarios.push(scenario);
+          return new Response(JSON.stringify(scenario), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario: scenarios[0] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Proyectos" }),
+    ).toBeVisible();
+    expect(
+      screen.getByText("Crea un proyecto para comenzar a modelar escenarios."),
+    ).toBeVisible();
+
+    await user.type(
+      screen.getByLabelText("Nombre del proyecto"),
+      "Hybrid PMGD",
+    );
+    await user.type(
+      screen.getByLabelText("Descripcion del proyecto"),
+      "Analyst workspace",
+    );
+    await user.click(screen.getByRole("button", { name: "Crear proyecto" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "temporary outage",
+    );
+    expect(screen.getByLabelText("Nombre del proyecto")).toHaveValue(
+      "Hybrid PMGD",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Crear proyecto" }));
+    expect(
+      await screen.findByRole("link", { name: "Hybrid PMGD" }),
+    ).toBeVisible();
+
+    await user.click(screen.getByRole("link", { name: "Hybrid PMGD" }));
+    expect(
+      await screen.findByRole("heading", { name: "Hybrid PMGD" }),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "Crea un escenario para guardar variantes del proyecto.",
+      ),
+    ).toBeVisible();
+
+    await user.type(screen.getByLabelText("Nombre del escenario"), "Base case");
+    await user.type(
+      screen.getByLabelText("Descripcion del escenario"),
+      "Initial modeling branch",
+    );
+    await user.click(screen.getByRole("button", { name: "Crear escenario" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Base case" }),
+    ).toBeVisible();
+    expect(window.location.pathname).toBe("/react/scenarios/10");
+    expect(screen.getByText("Aun no hay versiones inmutables.")).toBeVisible();
+    expect(
+      screen.getByText("Aun no hay corridas para este escenario."),
+    ).toBeVisible();
+
+    window.history.pushState({}, "", "/react/scenarios/10");
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Base case" })).toBeVisible();
+    });
+  });
+
   it("bootstraps the first admin through the JSON contract", async () => {
     window.history.replaceState({}, "", "/react");
     const fetchMock = vi
@@ -33,6 +217,11 @@ describe("application shell", () => {
           }),
           { status: 201, headers: { "Content-Type": "application/json" } },
         ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ projects: [] }), {
+          headers: { "Content-Type": "application/json" },
+        }),
       );
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
@@ -48,10 +237,11 @@ describe("application shell", () => {
     await user.click(screen.getByRole("button", { name: "Crear admin" }));
 
     expect(
-      await screen.findByRole("heading", { name: "Area analista" }),
+      await screen.findByRole("heading", { name: "Proyectos" }),
     ).toBeVisible();
     expect(screen.getByText("Admin User")).toBeVisible();
-    expect(fetchMock).toHaveBeenLastCalledWith(
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
       "/api/auth/bootstrap",
       expect.objectContaining({
         method: "POST",
@@ -254,22 +444,27 @@ describe("application shell", () => {
 
   it("navigates within the shell without a document reload", async () => {
     window.history.replaceState({}, "", "/react");
-    const fetchMock = vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({
-            user: {
-              id: 7,
-              email: "ada@example.local",
-              display_name: "Ada Analyst",
-              role: "analyst",
-              is_active: true,
-            },
-            bootstrap_required: false,
-          }),
-          { headers: { "Content-Type": "application/json" } },
-        ),
-    );
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/api/projects") {
+        return new Response(JSON.stringify({ projects: [] }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          user: {
+            id: 7,
+            email: "ada@example.local",
+            display_name: "Ada Analyst",
+            role: "analyst",
+            is_active: true,
+          },
+          bootstrap_required: false,
+        }),
+        { headers: { "Content-Type": "application/json" } },
+      );
+    });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     render(<App />);
@@ -281,6 +476,6 @@ describe("application shell", () => {
       screen.getByRole("heading", { name: "Estado del sistema" }),
     ).toBeVisible();
     expect(window.location.pathname).toBe("/react/system");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
