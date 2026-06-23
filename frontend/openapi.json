@@ -1,6 +1,23 @@
 {
   "components": {
     "schemas": {
+      "AuthSessionResponse": {
+        "properties": {
+          "redirect_path": {
+            "title": "Redirect Path",
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/CurrentUser"
+          }
+        },
+        "required": [
+          "user",
+          "redirect_path"
+        ],
+        "title": "AuthSessionResponse",
+        "type": "object"
+      },
       "Body_upload_draft_time_series_source_api_scenarios__scenario_id__draft_time_series_sources_upload_post": {
         "properties": {
           "sheet_name": {
@@ -65,6 +82,44 @@
         "title": "Body_upload_scenario_version_api_scenarios__scenario_id__versions_upload_post",
         "type": "object"
       },
+      "BootstrapAdminRequest": {
+        "properties": {
+          "display_name": {
+            "default": "",
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "minLength": 1,
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "BootstrapAdminRequest",
+        "type": "object"
+      },
+      "CsrfTokenResponse": {
+        "properties": {
+          "csrf_token": {
+            "title": "Csrf Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "csrf_token"
+        ],
+        "title": "CsrfTokenResponse",
+        "type": "object"
+      },
       "CurrentUser": {
         "properties": {
           "display_name": {
@@ -105,6 +160,11 @@
       },
       "CurrentUserResponse": {
         "properties": {
+          "bootstrap_required": {
+            "default": false,
+            "title": "Bootstrap Required",
+            "type": "boolean"
+          },
           "user": {
             "anyOf": [
               {
@@ -198,6 +258,31 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "LoginRequest": {
+        "properties": {
+          "email": {
+            "minLength": 1,
+            "title": "Email",
+            "type": "string"
+          },
+          "next": {
+            "default": "",
+            "title": "Next",
+            "type": "string"
+          },
+          "password": {
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "LoginRequest",
         "type": "object"
       },
       "ProjectClientAccessRequest": {
@@ -754,6 +839,111 @@
           }
         },
         "summary": "Admin Deactivate User"
+      }
+    },
+    "/api/auth/bootstrap": {
+      "post": {
+        "operationId": "api_bootstrap_first_admin_api_auth_bootstrap_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BootstrapAdminRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Bootstrap First Admin"
+      }
+    },
+    "/api/auth/csrf": {
+      "get": {
+        "operationId": "csrf_token_api_auth_csrf_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CsrfTokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Csrf Token"
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "operationId": "api_login_api_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Login"
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "operationId": "api_logout_api_auth_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api Logout"
       }
     },
     "/api/auth/me": {

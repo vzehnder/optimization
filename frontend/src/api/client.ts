@@ -3,6 +3,23 @@ import type { components } from "./schema";
 export type CurrentUser = components["schemas"]["CurrentUser"];
 export type CurrentUserResponse = components["schemas"]["CurrentUserResponse"];
 
+export interface AuthSessionResponse {
+  user: CurrentUser;
+  redirect_path: string;
+}
+
+export interface BootstrapAdminPayload {
+  email: string;
+  display_name: string;
+  password: string;
+}
+
+export interface LoginPayload {
+  email: string;
+  password: string;
+  next: string;
+}
+
 interface StructuredErrorBody {
   error?: {
     category?: string;
@@ -118,7 +135,40 @@ export async function getCurrentUser(
     return await requestJson<CurrentUserResponse>("/api/auth/me", { signal });
   } catch (error) {
     if (error instanceof ApiError && error.status === 401)
-      return { user: null };
+      return { user: null, bootstrap_required: false };
     throw error;
   }
+}
+
+export async function getCsrfToken(): Promise<string> {
+  const response = await requestJson<{ csrf_token: string }>("/api/auth/csrf");
+  return response.csrf_token;
+}
+
+async function postJsonWithCsrf<T>(path: string, body?: unknown): Promise<T> {
+  const csrfToken = await getCsrfToken();
+  return requestJson<T>(path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrfToken,
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+export async function bootstrapAdmin(
+  payload: BootstrapAdminPayload,
+): Promise<AuthSessionResponse> {
+  return postJsonWithCsrf<AuthSessionResponse>("/api/auth/bootstrap", payload);
+}
+
+export async function login(
+  payload: LoginPayload,
+): Promise<AuthSessionResponse> {
+  return postJsonWithCsrf<AuthSessionResponse>("/api/auth/login", payload);
+}
+
+export async function logout(): Promise<void> {
+  await postJsonWithCsrf<void>("/api/auth/logout");
 }

@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import secrets
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from html import escape
@@ -68,6 +69,18 @@ class UserCreateRequest(BaseModel):
     display_name: str = ""
 
 
+class BootstrapAdminRequest(BaseModel):
+    email: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+    display_name: str = ""
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+    next: str = ""
+
+
 class CurrentUser(BaseModel):
     id: int
     email: str
@@ -78,6 +91,16 @@ class CurrentUser(BaseModel):
 
 class CurrentUserResponse(BaseModel):
     user: CurrentUser | None
+    bootstrap_required: bool = False
+
+
+class AuthSessionResponse(BaseModel):
+    user: CurrentUser
+    redirect_path: str
+
+
+class CsrfTokenResponse(BaseModel):
+    csrf_token: str
 
 
 class ProjectClientAccessRequest(BaseModel):
@@ -137,7 +160,9 @@ def create_app(
     frontend_dist: Path | str | None = None,
     auth_enabled: bool | None = None,
     session_cookie_name: str = "bess_session",
+    csrf_cookie_name: str = "bess_csrf",
     session_hours: int = 12,
+    session_cookie_secure: bool | None = None,
 ) -> FastAPI:
     service = validation_service or JuliaValidationService()
     analyst_store = store or AnalystStore(database_url)
@@ -160,6 +185,11 @@ def create_app(
     local_run_queue = run_queue or LocalRunQueue(
         executor=JuliaRunExecutor(store=analyst_store, artifact_root=configured_artifact_root)
     )
+    cookie_secure = (
+        cookie_secure_from_env(False)
+        if session_cookie_secure is None
+        else bool(session_cookie_secure)
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -180,6 +210,15 @@ def create_app(
         if not token:
             return None
         return authorization.user_for_session_token_hash(hash_session_token(token))
+
+    def public_current_user(user: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": user["id"],
+            "email": user["email"],
+            "display_name": user["display_name"],
+            "role": user["role"],
+            "is_active": user["is_active"],
+        }
 
     def auth_redirect(request: Request) -> RedirectResponse:
         target = request.url.path
@@ -240,6 +279,17 @@ def create_app(
             max_age=session_hours * 60 * 60,
             httponly=True,
             samesite="lax",
+            secure=cookie_secure,
+        )
+
+    def set_csrf_cookie(response: Response, token: str) -> None:
+        response.set_cookie(
+            csrf_cookie_name,
+            token,
+            max_age=session_hours * 60 * 60,
+            httponly=False,
+            samesite="lax",
+            secure=cookie_secure,
         )
 
     def authenticated_landing_path(user: dict[str, Any], next_path: str = "") -> str:
@@ -250,6 +300,37 @@ def create_app(
             return safe_next
         return "/projects"
 
+    def react_authenticated_landing_path(user: dict[str, Any], next_path: str = "") -> str:
+        safe_next = safe_react_next_path(next_path)
+        if user["role"] == "client":
+            return safe_next if safe_next.startswith("/react/client") else "/react/client"
+        if safe_next and not safe_next.startswith("/react/client"):
+            return safe_next
+        return "/react/projects"
+
+    def require_csrf_token(request: Request) -> None:
+        expected = request.cookies.get(csrf_cookie_name)
+        provided = request.headers.get("x-csrf-token")
+        if not expected or not provided or not secrets.compare_digest(expected, provided):
+            raise HTTPException(status_code=403, detail="csrf token required")
+
+    def auth_session_response(
+        user: dict[str, Any],
+        token: str,
+        *,
+        redirect_path: str,
+        status_code: int = 200,
+    ) -> JSONResponse:
+        response = JSONResponse(
+            {
+                "user": public_current_user(user),
+                "redirect_path": redirect_path,
+            },
+            status_code=status_code,
+        )
+        set_session_cookie(response, token)
+        return response
+
     @app.middleware("http")
     async def require_authenticated_app_boundary(request: Request, call_next):
         request.state.current_user = None
@@ -257,6 +338,19 @@ def create_app(
             return await call_next(request)
 
         path = request.url.path
+        if path.startswith("/api/auth/"):
+            request.state.current_user = current_user_from_request(request)
+            if request.method not in {"GET", "HEAD", "OPTIONS"} and path != "/api/auth/csrf":
+                try:
+                    require_csrf_token(request)
+                except HTTPException as error:
+                    return JSONResponse({"detail": error.detail}, status_code=error.status_code)
+            return await call_next(request)
+
+        if path == "/react" or path.startswith("/react/"):
+            request.state.current_user = current_user_from_request(request)
+            return await call_next(request)
+
         if path in {"/favicon.ico", "/login", "/bootstrap", "/logout", "/assets/plotly.min.js"}:
             return await call_next(request)
 
@@ -266,6 +360,12 @@ def create_app(
             if analyst_store.count_users() == 0 and not path.startswith("/api/"):
                 return RedirectResponse("/bootstrap", status_code=303)
             return auth_required_response(request)
+
+        if path.startswith("/api/") and request.method not in {"GET", "HEAD", "OPTIONS"}:
+            try:
+                require_csrf_token(request)
+            except HTTPException as error:
+                return JSONResponse({"detail": error.detail}, status_code=error.status_code)
 
         if path == "/" or path == "/api/auth/me":
             return await call_next(request)
@@ -408,6 +508,82 @@ def create_app(
     @app.get("/react/{spa_path:path}", include_in_schema=False)
     async def react_spa_fallback(spa_path: str):
         return react_entry_response()
+
+    @app.get("/api/auth/csrf", response_model=CsrfTokenResponse)
+    async def csrf_token(request: Request):
+        token = request.cookies.get(csrf_cookie_name) or secrets.token_urlsafe(32)
+        response = JSONResponse({"csrf_token": token})
+        set_csrf_cookie(response, token)
+        return response
+
+    @app.post("/api/auth/bootstrap", response_model=AuthSessionResponse, status_code=201)
+    async def api_bootstrap_first_admin(payload: BootstrapAdminRequest):
+        if not auth_required:
+            raise HTTPException(status_code=403, detail="authentication is disabled")
+        if analyst_store.count_users() > 0:
+            raise HTTPException(status_code=403, detail="bootstrap is closed")
+
+        email = payload.email.strip().lower()
+        password = payload.password
+        display_name = payload.display_name.strip()
+        if not email or not password:
+            raise HTTPException(status_code=400, detail="email and password are required")
+
+        user = analyst_store.create_user(
+            email=email,
+            display_name=display_name,
+            role="admin",
+            password_hash=hash_password(password),
+            created_by="bootstrap",
+        )
+        token = new_session_token()
+        analyst_store.create_auth_session(
+            user_id=user["id"],
+            token_hash=hash_session_token(token),
+            expires_at=session_expires_at(hours=session_hours),
+        )
+        return auth_session_response(
+            user,
+            token,
+            redirect_path=react_authenticated_landing_path(user),
+            status_code=201,
+        )
+
+    @app.post("/api/auth/login", response_model=AuthSessionResponse)
+    async def api_login(payload: LoginRequest):
+        if not auth_required:
+            raise HTTPException(status_code=403, detail="authentication is disabled")
+
+        email = payload.email.strip().lower()
+        user = None
+        try:
+            user = analyst_store.get_user_by_email(email)
+        except KeyError:
+            pass
+
+        if user is None or not user["is_active"] or not verify_password(payload.password, user["password_hash"]):
+            raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+        token = new_session_token()
+        analyst_store.create_auth_session(
+            user_id=user["id"],
+            token_hash=hash_session_token(token),
+            expires_at=session_expires_at(hours=session_hours),
+        )
+        return auth_session_response(
+            user,
+            token,
+            redirect_path=react_authenticated_landing_path(user, payload.next),
+        )
+
+    @app.post("/api/auth/logout", status_code=204)
+    async def api_logout(request: Request):
+        token = request.cookies.get(session_cookie_name)
+        if token:
+            analyst_store.revoke_auth_session(hash_session_token(token))
+        response = Response(status_code=204)
+        response.delete_cookie(session_cookie_name)
+        return response
 
     @app.get("/bootstrap", response_class=HTMLResponse)
     async def bootstrap_page():
@@ -627,15 +803,13 @@ def create_app(
     async def current_auth_user(request: Request):
         user = request.state.current_user
         if user is None:
-            return {"user": None}
-        return {
-            "user": {
-                "id": user["id"],
-                "email": user["email"],
-                "display_name": user["display_name"],
-                "role": user["role"],
-                "is_active": user["is_active"],
+            return {
+                "user": None,
+                "bootstrap_required": auth_required and analyst_store.count_users() == 0,
             }
+        return {
+            "user": public_current_user(user),
+            "bootstrap_required": False,
         }
 
     @app.get("/api/admin/users")
@@ -3359,6 +3533,13 @@ def auth_enabled_from_env(default: bool) -> bool:
     return raw_value.strip().lower() not in {"0", "false", "no", "off"}
 
 
+def cookie_secure_from_env(default: bool) -> bool:
+    raw_value = os.environ.get("BESS_SESSION_COOKIE_SECURE")
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() not in {"0", "false", "no", "off"}
+
+
 def safe_internal_next_path(next_path: str) -> str:
     if not next_path:
         return ""
@@ -3367,6 +3548,17 @@ def safe_internal_next_path(next_path: str) -> str:
     if next_path in {"/login", "/bootstrap", "/logout"}:
         return ""
     return next_path
+
+
+def safe_react_next_path(next_path: str) -> str:
+    safe_next = safe_internal_next_path(next_path)
+    if not safe_next:
+        return ""
+    if safe_next in {"/react/login", "/react/bootstrap", "/react/logout"}:
+        return ""
+    if safe_next == "/react" or safe_next.startswith("/react/"):
+        return safe_next
+    return ""
 
 
 def render_auth_shell(title: str, content: str) -> str:

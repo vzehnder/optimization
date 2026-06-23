@@ -109,7 +109,7 @@ main {
 .content-panel {
   padding: clamp(1.5rem, 5vw, 4rem);
   border: 1px solid #d8e2eb;
-  border-radius: 1.25rem;
+  border-radius: 8px;
   background: #fff;
   box-shadow: 0 24px 60px rgb(16 42 67 / 8%);
 }
@@ -179,6 +179,67 @@ button:focus-visible {
   background: #0369a1;
   outline: 3px solid #bae6fd;
   outline-offset: 2px;
+}
+
+.secondary-button {
+  border: 1px solid #8fb6cf;
+  color: #d9eaf5;
+  background: transparent;
+}
+
+.secondary-button:hover,
+.secondary-button:focus-visible {
+  color: #102a43;
+  background: #d9eaf5;
+}
+
+.auth-main {
+  width: min(28rem, calc(100% - 2rem));
+  padding-top: clamp(3rem, 12vh, 7rem);
+}
+
+.auth-panel {
+  padding: 1.25rem;
+  border: 1px solid #d8e2eb;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 16px 40px rgb(16 42 67 / 10%);
+}
+
+.auth-panel h1 {
+  margin-bottom: 1.25rem;
+  font-size: 2rem;
+}
+
+.auth-form {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.auth-form label {
+  font-weight: 700;
+}
+
+.auth-form input {
+  width: 100%;
+  border: 1px solid #b8c7d6;
+  border-radius: 8px;
+  padding: 0.7rem 0.8rem;
+  color: #102a43;
+  font: inherit;
+  background: #fff;
+}
+
+.auth-form button {
+  justify-self: start;
+}
+
+.auth-panel [role="alert"] {
+  width: auto;
+  margin: 0 0 1rem;
+  border-left: 4px solid #c2410c;
+  border-radius: 8px;
+  box-shadow: none;
 }
 
 @media (max-width: 620px) {

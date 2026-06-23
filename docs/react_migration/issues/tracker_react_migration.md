@@ -20,7 +20,7 @@ stored as a Markdown file in this folder. All issues carry the
 | ID | Title | Type | Triage | Status | Blocked by | Issue file |
 | --- | --- | --- | --- | --- | --- | --- |
 | BESS-REACT-000 | Establish React Application Foundation | AFK | ready-for-agent | Done | None | [BESS-REACT-000-establish-react-application-foundation.md](BESS-REACT-000-establish-react-application-foundation.md) |
-| BESS-REACT-001 | Migrate Authentication And Role-Gated Entry | AFK | ready-for-agent | Todo | BESS-REACT-000 | [BESS-REACT-001-migrate-authentication-and-role-gated-entry.md](BESS-REACT-001-migrate-authentication-and-role-gated-entry.md) |
+| BESS-REACT-001 | Migrate Authentication And Role-Gated Entry | AFK | ready-for-agent | Done | BESS-REACT-000 | [BESS-REACT-001-migrate-authentication-and-role-gated-entry.md](BESS-REACT-001-migrate-authentication-and-role-gated-entry.md) |
 | BESS-REACT-002 | Migrate Project And Scenario Workspace | AFK | ready-for-agent | Todo | BESS-REACT-001 | [BESS-REACT-002-migrate-project-and-scenario-workspace.md](BESS-REACT-002-migrate-project-and-scenario-workspace.md) |
 | BESS-REACT-003 | Migrate Structured Scenario Draft Editor | AFK | ready-for-agent | Todo | BESS-REACT-002 | [BESS-REACT-003-migrate-structured-scenario-draft-editor.md](BESS-REACT-003-migrate-structured-scenario-draft-editor.md) |
 | BESS-REACT-004 | Migrate Time-Series Ingestion And Editing | AFK | ready-for-agent | Todo | BESS-REACT-003 | [BESS-REACT-004-migrate-time-series-ingestion-and-editing.md](BESS-REACT-004-migrate-time-series-ingestion-and-editing.md) |
@@ -75,6 +75,7 @@ BESS-REACT-010.
 | 2026-06-22 | All | Created | Initial local issue set generated from the React UI Migration PRD using tracer-bullet vertical slices. |
 | 2026-06-22 | BESS-REACT-000 | Todo -> In Progress | Implementation and non-browser verification complete; Chrome smoke verification pending plugin recovery. |
 | 2026-06-22 | BESS-REACT-000 | In Progress -> Done | Chrome and automated Chromium smoke tests pass; foundation accepted. |
+| 2026-06-23 | BESS-REACT-001 | Todo -> Done | JSON auth contracts, React bootstrap/login/logout/role entry, CSRF defense, regression updates, Playwright acceptance, and Chrome smoke pass. |
 
 ## Acceptance Seam
 

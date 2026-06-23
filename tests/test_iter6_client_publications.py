@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from app.auth import hash_password
 from app.main import create_app
 from app.persistence import AnalystStore
+from tests.auth_test_helpers import post_json_with_csrf
 from tests.test_results_review import create_completed_run_with_result_artifacts
 
 
@@ -45,15 +46,16 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
             )
             analyst = TestClient(create_app(store=self.store, artifact_root=artifact_root, auth_enabled=True))
             self.login(analyst, "analyst@example.local", "analyst pass")
-            publication = analyst.post(
+            publication = post_json_with_csrf(
+                analyst,
                 f"/api/runs/{run['id']}/publications",
-                json={
+                {
                     "dashboard_template_id": template["id"],
                     "public_title": "Download Review",
                     "allowed_artifact_types": ["summary_json"],
                 },
             ).json()["publication"]
-            analyst.post(f"/api/publications/{publication['id']}/publish")
+            post_json_with_csrf(analyst, f"/api/publications/{publication['id']}/publish")
 
             client = TestClient(create_app(store=self.store, artifact_root=artifact_root, auth_enabled=True))
             self.login(client, "client@example.local", "client pass")
@@ -99,9 +101,10 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
                 404,
             )
 
-            draft = analyst.post(
+            draft = post_json_with_csrf(
+                analyst,
                 f"/api/runs/{run['id']}/publications",
-                json={
+                {
                     "dashboard_template_id": template["id"],
                     "public_title": "Draft Download Review",
                     "allowed_artifact_types": ["summary_json"],
@@ -149,24 +152,26 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
             )
             analyst = TestClient(create_app(store=self.store, artifact_root=artifact_root, auth_enabled=True))
             self.login(analyst, "analyst@example.local", "analyst pass")
-            draft = analyst.post(
+            draft = post_json_with_csrf(
+                analyst,
                 f"/api/runs/{run['id']}/publications",
-                json={
+                {
                     "dashboard_template_id": template["id"],
                     "public_title": "June Dispatch Review",
                     "analyst_notes": "Approved for client review.",
                 },
             ).json()["publication"]
-            hidden_draft = analyst.post(
+            hidden_draft = post_json_with_csrf(
+                analyst,
                 f"/api/runs/{run['id']}/publications",
-                json={
+                {
                     "dashboard_template_id": template["id"],
                     "public_title": "Draft Only",
                     "analyst_notes": "Still internal.",
                 },
             ).json()["publication"]
 
-            publish_response = analyst.post(f"/api/publications/{draft['id']}/publish")
+            publish_response = post_json_with_csrf(analyst, f"/api/publications/{draft['id']}/publish")
 
             self.assertEqual(publish_response.status_code, 200)
             published = publish_response.json()["publication"]
@@ -218,15 +223,16 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
             )
             analyst = TestClient(create_app(store=self.store, artifact_root=artifact_root, auth_enabled=True))
             self.login(analyst, "analyst@example.local", "analyst pass")
-            publication = analyst.post(
+            publication = post_json_with_csrf(
+                analyst,
                 f"/api/runs/{run['id']}/publications",
-                json={
+                {
                     "dashboard_template_id": template["id"],
                     "public_title": "Revocable Review",
                     "analyst_notes": "Visible while published.",
                 },
             ).json()["publication"]
-            analyst.post(f"/api/publications/{publication['id']}/publish")
+            post_json_with_csrf(analyst, f"/api/publications/{publication['id']}/publish")
 
             client = TestClient(create_app(store=self.store, artifact_root=artifact_root, auth_enabled=True))
             self.login(client, "client@example.local", "client pass")
@@ -235,7 +241,7 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
                 200,
             )
 
-            unpublish_response = analyst.post(f"/api/publications/{publication['id']}/unpublish")
+            unpublish_response = post_json_with_csrf(analyst, f"/api/publications/{publication['id']}/unpublish")
 
             self.assertEqual(unpublish_response.status_code, 200)
             unpublished = unpublish_response.json()["publication"]
@@ -276,9 +282,10 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
             )
             analyst = TestClient(create_app(store=self.store, artifact_root=artifact_root, auth_enabled=True))
             self.login(analyst, "analyst@example.local", "analyst pass")
-            publication = analyst.post(
+            publication = post_json_with_csrf(
+                analyst,
                 f"/api/runs/{run['id']}/publications",
-                json={
+                {
                     "dashboard_template_id": template["id"],
                     "public_title": "Previewable Review",
                     "analyst_notes": "Preview these assumptions.",
@@ -310,7 +317,7 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
             self.assertNotIn("Asset Dispatch", preview.text)
             self.assertEqual(client.get(f"/publications/{publication['id']}/preview").status_code, 403)
 
-            analyst.post(f"/api/publications/{publication['id']}/publish")
+            post_json_with_csrf(analyst, f"/api/publications/{publication['id']}/publish")
             live = client.get(f"/client/projects/{project_id}/publications/{publication['id']}")
             self.assertEqual(live.status_code, 200)
             for snippet in ["Previewable Review", "Interactive Plots", "System Dispatch"]:
@@ -328,9 +335,10 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
             )
             analyst = TestClient(create_app(store=self.store, artifact_root=artifact_root, auth_enabled=True))
             self.login(analyst, "analyst@example.local", "analyst pass")
-            publication = analyst.post(
+            publication = post_json_with_csrf(
+                analyst,
                 f"/api/runs/{run['id']}/publications",
-                json={
+                {
                     "dashboard_template_id": template["id"],
                     "public_title": "Control Review",
                     "analyst_notes": "Use page controls.",

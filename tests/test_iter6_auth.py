@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from app.auth import hash_password
 from app.main import create_app
 from app.persistence import AnalystStore
+from tests.auth_test_helpers import post_json_with_csrf
 
 
 class Iteration6AuthTests(unittest.TestCase):
@@ -51,9 +52,10 @@ class Iteration6AuthTests(unittest.TestCase):
         self.assertEqual(login_response.status_code, 303)
         self.assertEqual(login_response.headers["location"], "/projects")
 
-        project_response = self.client.post(
+        project_response = post_json_with_csrf(
+            self.client,
             "/api/projects",
-            json={"name": "Authenticated project", "description": "Auth smoke"},
+            {"name": "Authenticated project", "description": "Auth smoke"},
         )
         self.assertEqual(project_response.status_code, 201)
         self.assertEqual(project_response.json()["name"], "Authenticated project")

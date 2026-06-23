@@ -10,6 +10,7 @@ from app.main import create_app
 from app.persistence import AnalystStore
 from app.runner import JuliaRunExecutor
 from app.validation import ValidationResult
+from tests.auth_test_helpers import delete_with_csrf, post_json_with_csrf
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -59,18 +60,20 @@ class Iteration6AcceptanceTests(unittest.TestCase):
                 self.assertTrue(admin_user["password_hash"].startswith("pbkdf2_sha256$"))
                 self.assertNotEqual(admin_user["password_hash"], "admin pass")
 
-                analyst_user = client.post(
+                analyst_user = post_json_with_csrf(
+                    client,
                     "/api/admin/users",
-                    json={
+                    {
                         "email": "analyst@example.local",
                         "display_name": "Analyst",
                         "role": "analyst",
                         "password": "analyst pass",
                     },
                 ).json()["user"]
-                client_user = client.post(
+                client_user = post_json_with_csrf(
+                    client,
                     "/api/admin/users",
-                    json={
+                    {
                         "email": "client@example.local",
                         "display_name": "Client",
                         "role": "client",
@@ -80,37 +83,45 @@ class Iteration6AcceptanceTests(unittest.TestCase):
                 self.assertEqual(analyst_user["role"], "analyst")
                 self.assertEqual(client_user["role"], "client")
 
-                project = client.post(
+                project = post_json_with_csrf(
+                    client,
                     "/api/projects",
-                    json={"name": "Iter6 Client Publication", "description": "Acceptance"},
+                    {"name": "Iter6 Client Publication", "description": "Acceptance"},
                 ).json()
-                private_project = client.post(
+                private_project = post_json_with_csrf(
+                    client,
                     "/api/projects",
-                    json={"name": "Unassigned Internal Project", "description": ""},
+                    {"name": "Unassigned Internal Project", "description": ""},
                 ).json()
-                assign = client.post(
+                assign = post_json_with_csrf(
+                    client,
                     f"/api/admin/projects/{project['id']}/client-access",
-                    json={"user_id": client_user["id"]},
+                    {"user_id": client_user["id"]},
                 )
                 self.assertEqual(assign.status_code, 201)
 
                 client.post("/logout", follow_redirects=False)
                 self.login(client, "analyst@example.local", "analyst pass")
 
-                scenario = client.post(
+                scenario = post_json_with_csrf(
+                    client,
                     f"/api/projects/{project['id']}/scenarios",
-                    json={"name": "Published Scenario", "description": "Accepted result"},
+                    {"name": "Published Scenario", "description": "Accepted result"},
                 ).json()
                 sample_text = (REPO_ROOT / "data" / "cases" / "hybrid_system" / "system_case.json").read_text(
                     encoding="utf-8"
                 )
-                version_response = client.post(
+                version_response = post_json_with_csrf(
+                    client,
                     f"/api/scenarios/{scenario['id']}/versions",
-                    json={"system_case_json": sample_text},
+                    {"system_case_json": sample_text},
                 )
                 self.assertEqual(version_response.status_code, 201)
                 version = version_response.json()
-                run_response = client.post(f"/api/scenario-versions/{version['id']}/runs")
+                run_response = post_json_with_csrf(
+                    client,
+                    f"/api/scenario-versions/{version['id']}/runs",
+                )
                 self.assertEqual(run_response.status_code, 201)
                 run_id = run_response.json()["id"]
                 run = client.get(f"/api/runs/{run_id}").json()["run"]
@@ -122,9 +133,10 @@ class Iteration6AcceptanceTests(unittest.TestCase):
                 self.assertIn("Interactive Plots", run_page.text)
                 self.assertIn("Publication Drafts", run_page.text)
 
-                template_response = client.post(
+                template_response = post_json_with_csrf(
+                    client,
                     f"/api/projects/{project['id']}/dashboard-templates",
-                    json={
+                    {
                         "name": "Client Summary Template",
                         "show_summary": True,
                         "show_price_chart": False,
@@ -141,9 +153,10 @@ class Iteration6AcceptanceTests(unittest.TestCase):
                 self.assertEqual(template_response.status_code, 201)
                 template = template_response.json()["dashboard_template"]
 
-                publication_response = client.post(
+                publication_response = post_json_with_csrf(
+                    client,
                     f"/api/runs/{run_id}/publications",
-                    json={
+                    {
                         "dashboard_template_id": template["id"],
                         "public_title": "January Hybrid Dispatch Results",
                         "analyst_notes": "Approved assumptions for client review.",
@@ -152,9 +165,10 @@ class Iteration6AcceptanceTests(unittest.TestCase):
                 )
                 self.assertEqual(publication_response.status_code, 201)
                 publication = publication_response.json()["publication"]
-                hidden_draft = client.post(
+                hidden_draft = post_json_with_csrf(
+                    client,
                     f"/api/runs/{run_id}/publications",
-                    json={
+                    {
                         "dashboard_template_id": template["id"],
                         "public_title": "Internal Draft Only",
                         "allowed_artifact_types": ["summary_json"],
@@ -177,7 +191,7 @@ class Iteration6AcceptanceTests(unittest.TestCase):
                 self.assertNotIn("Publication Drafts", preview.text)
                 self.assertNotIn("dispatch.csv", preview.text)
 
-                publish = client.post(f"/api/publications/{publication['id']}/publish")
+                publish = post_json_with_csrf(client, f"/api/publications/{publication['id']}/publish")
                 self.assertEqual(publish.status_code, 200)
                 self.assertEqual(publish.json()["publication"]["status"], "published")
 
@@ -247,7 +261,7 @@ class Iteration6AcceptanceTests(unittest.TestCase):
 
                 client.post("/logout", follow_redirects=False)
                 self.login(client, "analyst@example.local", "analyst pass")
-                unpublish = client.post(f"/api/publications/{publication['id']}/unpublish")
+                unpublish = post_json_with_csrf(client, f"/api/publications/{publication['id']}/unpublish")
                 self.assertEqual(unpublish.status_code, 200)
                 self.assertEqual(unpublish.json()["publication"]["status"], "unpublished")
 
@@ -260,11 +274,14 @@ class Iteration6AcceptanceTests(unittest.TestCase):
 
                 client.post("/logout", follow_redirects=False)
                 self.login(client, "analyst@example.local", "analyst pass")
-                client.post(f"/api/publications/{publication['id']}/publish")
+                post_json_with_csrf(client, f"/api/publications/{publication['id']}/publish")
 
                 client.post("/logout", follow_redirects=False)
                 self.login(client, "admin@example.local", "admin pass")
-                remove = client.delete(f"/api/admin/projects/{project['id']}/client-access/{client_user['id']}")
+                remove = delete_with_csrf(
+                    client,
+                    f"/api/admin/projects/{project['id']}/client-access/{client_user['id']}",
+                )
                 self.assertEqual(remove.status_code, 200)
 
                 client.post("/logout", follow_redirects=False)
@@ -274,9 +291,10 @@ class Iteration6AcceptanceTests(unittest.TestCase):
 
                 client.post("/logout", follow_redirects=False)
                 self.login(client, "admin@example.local", "admin pass")
-                client.post(
+                post_json_with_csrf(
+                    client,
                     f"/api/admin/projects/{project['id']}/client-access",
-                    json={"user_id": client_user["id"]},
+                    {"user_id": client_user["id"]},
                 )
                 client.post("/logout", follow_redirects=False)
                 self.login(client, "client@example.local", "client pass")
@@ -284,7 +302,7 @@ class Iteration6AcceptanceTests(unittest.TestCase):
 
                 client.post("/logout", follow_redirects=False)
                 self.login(client, "admin@example.local", "admin pass")
-                deactivate = client.post(f"/api/admin/users/{client_user['id']}/deactivate")
+                deactivate = post_json_with_csrf(client, f"/api/admin/users/{client_user['id']}/deactivate")
                 self.assertEqual(deactivate.status_code, 200)
                 client.post("/logout", follow_redirects=False)
                 inactive_login = client.post(

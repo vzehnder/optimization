@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from app.auth import hash_password
 from app.main import create_app
 from app.persistence import AnalystStore
+from tests.auth_test_helpers import post_json_with_csrf, put_json_with_csrf
 
 
 class Iteration6PublicationDraftTests(unittest.TestCase):
@@ -27,9 +28,10 @@ class Iteration6PublicationDraftTests(unittest.TestCase):
         before_version = self.store.get_scenario_version(version["id"])
         before_run = self.store.get_run(run["id"])
 
-        response = self.client.post(
+        response = post_json_with_csrf(
+            self.client,
             f"/api/runs/{run['id']}/publications",
-            json={
+            {
                 "dashboard_template_id": template["id"],
                 "public_title": "June Dispatch Review",
                 "analyst_notes": "Approved for client review.",
@@ -78,9 +80,10 @@ class Iteration6PublicationDraftTests(unittest.TestCase):
             show_price_chart=False,
             created_by="analyst@example.local",
         )
-        publication = self.client.post(
+        publication = post_json_with_csrf(
+            self.client,
             f"/api/runs/{run['id']}/publications",
-            json={
+            {
                 "dashboard_template_id": first_template["id"],
                 "public_title": "Initial Title",
                 "analyst_notes": "Initial notes",
@@ -89,9 +92,10 @@ class Iteration6PublicationDraftTests(unittest.TestCase):
         before_version = self.store.get_scenario_version(version["id"])
         before_run = self.store.get_run(run["id"])
 
-        response = self.client.put(
+        response = put_json_with_csrf(
+            self.client,
             f"/api/publications/{publication['id']}",
-            json={
+            {
                 "dashboard_template_id": second_template["id"],
                 "public_title": "Updated Client Title",
                 "analyst_notes": "Updated assumptions.",
@@ -171,9 +175,10 @@ class Iteration6PublicationDraftTests(unittest.TestCase):
         )
 
         for run in [queued_run, running_run, failed_run]:
-            response = self.client.post(
+            response = post_json_with_csrf(
+                self.client,
                 f"/api/runs/{run['id']}/publications",
-                json={
+                {
                     "dashboard_template_id": template["id"],
                     "public_title": "Blocked Publication",
                 },
@@ -186,9 +191,10 @@ class Iteration6PublicationDraftTests(unittest.TestCase):
             name="Other Project Template",
             created_by="test",
         )
-        scoped_response = self.client.post(
+        scoped_response = post_json_with_csrf(
+            self.client,
             f"/api/runs/{succeeded_run['id']}/publications",
-            json={
+            {
                 "dashboard_template_id": other_template["id"],
                 "public_title": "Wrong Template",
             },
@@ -198,9 +204,10 @@ class Iteration6PublicationDraftTests(unittest.TestCase):
         self.create_user("client@example.local", role="client", password="client pass")
         client_session = TestClient(create_app(store=self.store, auth_enabled=True))
         self.login(client_session, "client@example.local", "client pass")
-        client_response = client_session.post(
+        client_response = post_json_with_csrf(
+            client_session,
             f"/api/runs/{succeeded_run['id']}/publications",
-            json={
+            {
                 "dashboard_template_id": template["id"],
                 "public_title": "Client Attempt",
             },
