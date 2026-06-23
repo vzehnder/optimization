@@ -259,7 +259,7 @@ class AnalystPersistenceTests(unittest.TestCase):
         page = self.client.get(f"/scenarios/{scenario['id']}")
         self.assertIn(f'action="/scenario-versions/{first["id"]}/delete"', page.text)
         self.assertIn("Delete Version", page.text)
-        self.assertIn("completed runs, results, and publications", page.text)
+        self.assertIn("Versions referenced by runs or publications are protected", page.text)
 
         delete_response = self.client.delete(f"/api/scenario-versions/{first['id']}")
 
@@ -295,7 +295,41 @@ class AnalystPersistenceTests(unittest.TestCase):
         delete_response = self.client.delete(f"/api/scenario-versions/{version['id']}")
 
         self.assertEqual(delete_response.status_code, 409)
-        self.assertIn("queued or running", delete_response.json()["detail"])
+        self.assertIn("referenced by runs", delete_response.json()["detail"])
+        self.assertEqual(self.client.get(f"/api/scenario-versions/{version['id']}").status_code, 200)
+
+    def test_scenario_version_with_completed_run_cannot_be_deleted(self):
+        project = self.client.post("/api/projects", json={"name": "Hybrid PMGD"}).json()
+        scenario = self.client.post(
+            f"/api/projects/{project['id']}/scenarios",
+            json={"name": "Base case"},
+        ).json()
+        sample_text = (REPO_ROOT / "data" / "cases" / "hybrid_system" / "system_case.json").read_text()
+        version = self.client.post(
+            f"/api/scenarios/{scenario['id']}/versions",
+            json={"system_case_json": sample_text},
+        ).json()
+        store = self.client.app.state.analyst_store
+        run = store.create_run(scenario_version_id=version["id"])
+        store.mark_run_running(
+            run["id"],
+            workspace_path="workspace/run-1",
+            input_snapshot_path="workspace/run-1/input/system_case.json",
+        )
+        store.mark_run_succeeded(
+            run["id"],
+            exit_code=0,
+            stdout="",
+            stderr="",
+            success_payload={"status": "ok"},
+            output_dir="workspace/run-1/output",
+            summary_path="workspace/run-1/output/summary.json",
+        )
+
+        delete_response = self.client.delete(f"/api/scenario-versions/{version['id']}")
+
+        self.assertEqual(delete_response.status_code, 409)
+        self.assertIn("referenced by runs", delete_response.json()["detail"])
         self.assertEqual(self.client.get(f"/api/scenario-versions/{version['id']}").status_code, 200)
 
     def test_project_and_scenario_pages_render_persisted_workflow(self):

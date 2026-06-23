@@ -1,23 +1,28 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FormEvent, ReactNode, useState } from "react";
+import { FormEvent, ReactNode, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import {
   ApiError,
   createProject,
   createScenario,
+  createScenarioVersionFromJson,
+  deleteScenarioVersion,
   getProject,
   getScenario,
+  getScenarioVersion,
   listProjects,
   listScenarioRuns,
   listScenarios,
   listScenarioVersions,
+  uploadScenarioVersion,
   type Project,
   type ProjectCreatePayload,
   type Scenario,
   type ScenarioCreatePayload,
   type ScenarioRun,
   type ScenarioVersion,
+  type ScenarioVersionDetail,
 } from "./api/client";
 
 const projectsQueryKey = ["projects"] as const;
@@ -34,6 +39,10 @@ const scenarioRunsQueryKey = (scenarioId: number) =>
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
   return "No se pudo completar la accion.";
+}
+
+function prettyJson(value: unknown): string {
+  return JSON.stringify(value ?? {}, null, 2);
 }
 
 function appendUnique<T extends { id: number }>(
@@ -350,7 +359,81 @@ function formatAssetCounts(counts: Record<string, number>): string {
     .join(", ");
 }
 
-function VersionList({ versions }: { versions: ScenarioVersion[] }) {
+function ScenarioVersionDeleteControl({
+  scenarioId,
+  version,
+}: {
+  scenarioId: number;
+  version: ScenarioVersion;
+}) {
+  const queryClient = useQueryClient();
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState("");
+  const mutation = useMutation({
+    mutationFn: () => deleteScenarioVersion(version.id),
+    onSuccess: () => {
+      setError("");
+      setConfirming(false);
+      queryClient.setQueryData<ScenarioVersion[]>(
+        scenarioVersionsQueryKey(scenarioId),
+        (versions) =>
+          versions?.filter((candidate) => candidate.id !== version.id) || [],
+      );
+      void queryClient.invalidateQueries({
+        queryKey: scenarioVersionsQueryKey(scenarioId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: scenarioRunsQueryKey(scenarioId),
+      });
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError)),
+  });
+
+  return (
+    <div className="version-actions">
+      {error ? <p role="alert">{error}</p> : null}
+      {confirming ? (
+        <div className="remove-confirmation">
+          <p>Confirma eliminar version {version.version_number}</p>
+          <button
+            type="button"
+            className="danger-button"
+            disabled={mutation.isPending}
+            onClick={() => mutation.mutate()}
+          >
+            Confirmar eliminar version {version.version_number}
+          </button>
+          <button
+            type="button"
+            className="secondary-action"
+            onClick={() => {
+              setConfirming(false);
+              setError("");
+            }}
+          >
+            Mantener
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="danger-button"
+          onClick={() => setConfirming(true)}
+        >
+          Eliminar version {version.version_number}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function VersionList({
+  scenarioId,
+  versions,
+}: {
+  scenarioId: number;
+  versions: ScenarioVersion[];
+}) {
   if (versions.length === 0) {
     return <EmptyState>Aun no hay versiones inmutables.</EmptyState>;
   }
@@ -358,15 +441,128 @@ function VersionList({ versions }: { versions: ScenarioVersion[] }) {
     <ul className="resource-list">
       {versions.map((version) => (
         <li key={version.id}>
-          <strong>Version {version.version_number}</strong>
+          <Link to={`/scenario-versions/${version.id}`}>
+            Version {version.version_number}
+          </Link>
           <p>
             {version.case_name} | {version.schema_version} |{" "}
             {version.period_count} periodos |{" "}
             {formatAssetCounts(version.asset_counts)}
           </p>
+          <ScenarioVersionDeleteControl
+            scenarioId={scenarioId}
+            version={version}
+          />
         </li>
       ))}
     </ul>
+  );
+}
+
+function ExpertVersionForm({ scenarioId }: { scenarioId: number }) {
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [systemCaseJson, setSystemCaseJson] = useState("");
+  const [error, setError] = useState("");
+  const [status, setStatus] = useState("");
+
+  function acceptVersion(version: ScenarioVersion) {
+    queryClient.setQueryData<ScenarioVersion[]>(
+      scenarioVersionsQueryKey(scenarioId),
+      (versions) => appendUnique(versions, version),
+    );
+    void queryClient.invalidateQueries({
+      queryKey: scenarioVersionsQueryKey(scenarioId),
+    });
+    setError("");
+    setStatus(`Version ${version.version_number} creada.`);
+  }
+
+  const pasteMutation = useMutation({
+    mutationFn: () => createScenarioVersionFromJson(scenarioId, systemCaseJson),
+    onSuccess: (version) => {
+      acceptVersion(version);
+      setSystemCaseJson("");
+    },
+    onError: (mutationError) => {
+      setStatus("");
+      setError(errorMessage(mutationError));
+    },
+  });
+
+  const uploadMutation = useMutation({
+    mutationFn: (file: File) => uploadScenarioVersion(scenarioId, file),
+    onSuccess: (version) => {
+      acceptVersion(version);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    },
+    onError: (mutationError) => {
+      setStatus("");
+      setError(errorMessage(mutationError));
+    },
+  });
+
+  function upload() {
+    const file = fileInputRef.current?.files?.[0];
+    if (!file) {
+      setStatus("");
+      setError("Selecciona un archivo JSON UTF-8.");
+      return;
+    }
+    uploadMutation.mutate(file);
+  }
+
+  return (
+    <section className="workspace-section" aria-labelledby="expert-version">
+      <h2 id="expert-version">Version experta</h2>
+      {error ? <p role="alert">{error}</p> : null}
+      {status ? <p className="source-ok">{status}</p> : null}
+      <div className="expert-version-grid">
+        <label className="field-row field-row-wide" htmlFor="system_case_json">
+          <span>system_case JSON</span>
+          <textarea
+            id="system_case_json"
+            rows={8}
+            spellCheck={false}
+            value={systemCaseJson}
+            onChange={(event) => {
+              setSystemCaseJson(event.target.value);
+              setError("");
+              setStatus("");
+            }}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => pasteMutation.mutate()}
+          disabled={pasteMutation.isPending || !systemCaseJson.trim()}
+        >
+          {pasteMutation.isPending ? "Creando version" : "Crear version"}
+        </button>
+      </div>
+      <div className="source-upload expert-upload">
+        <label className="field-row" htmlFor="system_case_upload">
+          <span>Subir system_case JSON</span>
+          <input
+            id="system_case_upload"
+            ref={fileInputRef}
+            type="file"
+            accept="application/json,.json"
+            onChange={() => {
+              setError("");
+              setStatus("");
+            }}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={upload}
+          disabled={uploadMutation.isPending}
+        >
+          {uploadMutation.isPending ? "Subiendo version" : "Subir version"}
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -478,11 +674,132 @@ export function ScenarioDetailView() {
       <div className="workspace-stack">
         <section className="workspace-section" aria-labelledby="version-list">
           <h2 id="version-list">Versiones inmutables</h2>
-          <VersionList versions={versions.data} />
+          <VersionList scenarioId={scenario.data.id} versions={versions.data} />
         </section>
+        <ExpertVersionForm scenarioId={scenario.data.id} />
         <section className="workspace-section" aria-labelledby="run-list">
           <h2 id="run-list">Corridas</h2>
           <RunList runs={runs.data} versions={versions.data} />
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function VersionMetadata({ version }: { version: ScenarioVersionDetail }) {
+  return (
+    <dl className="source-metadata version-metadata">
+      <div>
+        <dt>Case</dt>
+        <dd>{version.case_name}</dd>
+      </div>
+      <div>
+        <dt>Schema</dt>
+        <dd>{version.schema_version}</dd>
+      </div>
+      <div>
+        <dt>Periodos</dt>
+        <dd>{version.period_count}</dd>
+      </div>
+      <div>
+        <dt>Assets</dt>
+        <dd>{formatAssetCounts(version.asset_counts)}</dd>
+      </div>
+      <div>
+        <dt>Creada</dt>
+        <dd>{version.created_at}</dd>
+      </div>
+      <div>
+        <dt>Scenario ID</dt>
+        <dd>{version.scenario_id}</dd>
+      </div>
+    </dl>
+  );
+}
+
+export function ScenarioVersionDetailView() {
+  const versionId = useNumericParam("versionId");
+  const version = useQuery({
+    queryKey: ["scenario-version", versionId || 0] as const,
+    queryFn: ({ signal }) => getScenarioVersion(versionId || 0, signal),
+    enabled: versionId !== null,
+    retry: false,
+  });
+  const scenario = useQuery({
+    queryKey: scenarioQueryKey(version.data?.scenario_id || 0),
+    queryFn: ({ signal }) => getScenario(version.data!.scenario_id, signal),
+    enabled: version.data !== undefined,
+    retry: false,
+  });
+
+  if (versionId === null) {
+    return <NotFoundView>La version solicitada no existe.</NotFoundView>;
+  }
+  if (version.isPending) {
+    return <LoadingView label="Cargando version" />;
+  }
+  if (version.isError) {
+    return (
+      <RequestErrorView
+        error={version.error}
+        retry={() => void version.refetch()}
+      />
+    );
+  }
+
+  return (
+    <section className="workspace-view">
+      <Breadcrumbs>
+        <Link to="/projects">Proyectos</Link>
+        <span aria-hidden="true">/</span>
+        <Link to={`/scenarios/${version.data.scenario_id}`}>
+          {scenario.data?.name || "Escenario"}
+        </Link>
+        <span aria-hidden="true">/</span>
+        <span>Version {version.data.version_number}</span>
+      </Breadcrumbs>
+      <header className="workspace-heading">
+        <h1>Version {version.data.version_number}</h1>
+        <p>{version.data.case_name}</p>
+      </header>
+      <div className="workspace-stack">
+        <section className="workspace-section" aria-labelledby="version-meta">
+          <h2 id="version-meta">Metadata</h2>
+          <VersionMetadata version={version.data} />
+        </section>
+        <section
+          className="workspace-section"
+          aria-labelledby="version-validation"
+        >
+          <h2 id="version-validation">Validation payload</h2>
+          <pre className="json-panel">
+            {prettyJson(version.data.validation_payload)}
+          </pre>
+        </section>
+        <section
+          className="workspace-section"
+          aria-labelledby="version-generation"
+        >
+          <h2 id="version-generation">Generation metadata</h2>
+          <pre className="json-panel">
+            {prettyJson(version.data.generation_metadata)}
+          </pre>
+        </section>
+        <section className="workspace-section" aria-labelledby="version-input">
+          <h2 id="version-input">Immutable input</h2>
+          <label
+            className="field-row field-row-wide"
+            htmlFor="immutable_system_case"
+          >
+            <span>Immutable system_case</span>
+            <textarea
+              id="immutable_system_case"
+              value={prettyJson(version.data.system_case_json)}
+              readOnly
+              spellCheck={false}
+              rows={16}
+            />
+          </label>
         </section>
       </div>
     </section>

@@ -1121,18 +1121,6 @@ class AnalystStore:
     def delete_scenario_version(self, scenario_version_id: int) -> dict[str, Any]:
         with self._lock:
             version = self.get_scenario_version(scenario_version_id, include_document=False)
-            active_run_row = self.connection.execute(
-                """
-                SELECT COUNT(*) AS active_run_count
-                FROM runs
-                WHERE scenario_version_id = ? AND status IN ('queued', 'running')
-                """,
-                (scenario_version_id,),
-            ).fetchone()
-            active_run_count = int(active_run_row["active_run_count"])
-            if active_run_count:
-                raise ValueError("scenario versions with queued or running runs cannot be deleted")
-
             run_row = self.connection.execute(
                 "SELECT COUNT(*) AS run_count FROM runs WHERE scenario_version_id = ?",
                 (scenario_version_id,),
@@ -1141,6 +1129,12 @@ class AnalystStore:
                 "SELECT COUNT(*) AS publication_count FROM publications WHERE scenario_version_id = ?",
                 (scenario_version_id,),
             ).fetchone()
+            run_count = int(run_row["run_count"])
+            publication_count = int(publication_row["publication_count"])
+            if run_count:
+                raise ValueError("scenario versions referenced by runs cannot be deleted")
+            if publication_count:
+                raise ValueError("scenario versions referenced by publications cannot be deleted")
             self.connection.execute(
                 "DELETE FROM scenario_versions WHERE id = ?",
                 (scenario_version_id,),
@@ -1148,8 +1142,8 @@ class AnalystStore:
             self.connection.commit()
             return {
                 **version,
-                "deleted_run_count": int(run_row["run_count"]),
-                "deleted_publication_count": int(publication_row["publication_count"]),
+                "deleted_run_count": run_count,
+                "deleted_publication_count": publication_count,
             }
 
     def create_or_replace_scenario_draft(

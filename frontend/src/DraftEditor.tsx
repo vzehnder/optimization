@@ -12,16 +12,20 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ApiError,
   createScenarioDraft,
+  getGeneratedSystemCasePreview,
   getProject,
   getScenario,
   getScenarioDraft,
   getTimeSeriesRows,
+  promoteGeneratedSystemCase,
   saveTimeSeriesMapping,
   saveTimeSeriesRows,
   updateScenarioDraft,
   uploadTimeSeriesSource,
+  validateGeneratedSystemCase,
   type DraftAsset,
   type DraftAssetType,
+  type GeneratedSystemCaseSnapshot,
   type Project,
   type Scenario,
   type ScenarioDraft,
@@ -37,6 +41,8 @@ const scenarioQueryKey = (scenarioId: number) =>
 const projectQueryKey = (projectId: number) => ["project", projectId] as const;
 const draftQueryKey = (scenarioId: number) =>
   ["scenario-draft", scenarioId] as const;
+const scenarioVersionsQueryKey = (scenarioId: number) =>
+  ["scenario-versions", scenarioId] as const;
 
 type ValidationErrors = Record<string, string>;
 
@@ -127,6 +133,10 @@ function stableJson(value: unknown): string {
         return sorted;
       }, {});
   });
+}
+
+function prettyJson(value: unknown): string {
+  return JSON.stringify(value ?? {}, null, 2);
 }
 
 function cloneDocument(document: ScenarioDraftDocument): ScenarioDraftDocument {
@@ -308,12 +318,31 @@ function fieldErrorId(field: string): string {
   return `${field}-error`;
 }
 
-function withNoGeneratedSnapshot(
+function preserveGeneratedSnapshot(
   document: ScenarioDraftDocument,
 ): ScenarioDraftDocument {
-  const updated = { ...document };
-  delete updated.generated_system_case;
-  return updated;
+  return document;
+}
+
+function generatedSnapshotFromDocument(
+  document: ScenarioDraftDocument,
+): GeneratedSystemCaseSnapshot | null {
+  const snapshot = document.generated_system_case;
+  if (!isRecord(snapshot) || !isRecord(snapshot.validation)) return null;
+  return snapshot as GeneratedSystemCaseSnapshot;
+}
+
+function generatedCaseErrorTarget(category: string): {
+  href: string;
+  label: string;
+} {
+  if (category === "mapping" || category === "time_series") {
+    return { href: "#time-series-metadata", label: "Ir a source data" };
+  }
+  if (category === "asset" || category === "assets") {
+    return { href: "#asset-settings", label: "Ir a assets" };
+  }
+  return { href: "#case-settings", label: "Ir a configuracion" };
 }
 
 function setNestedValue(
@@ -322,7 +351,7 @@ function setNestedValue(
   key: string,
   value: unknown,
 ): ScenarioDraftDocument {
-  return withNoGeneratedSnapshot({
+  return preserveGeneratedSnapshot({
     ...document,
     [section]: {
       ...(document[section] as Record<string, unknown> | undefined),
@@ -338,7 +367,7 @@ function replaceAsset(
 ): ScenarioDraftDocument {
   const assets = [...(document.assets || [])];
   assets[assetIndex] = { ...assets[assetIndex], ...patch };
-  return withNoGeneratedSnapshot({ ...document, assets });
+  return preserveGeneratedSnapshot({ ...document, assets });
 }
 
 function parseJsonField<T>(
@@ -1187,6 +1216,178 @@ function TimeSeriesWorkflow({
   );
 }
 
+function GeneratedSystemCasePanel({
+  scenario,
+  document,
+  dirty,
+  validationStale,
+  onSnapshotPersisted,
+}: {
+  scenario: Scenario;
+  document: ScenarioDraftDocument;
+  dirty: boolean;
+  validationStale: boolean;
+  onSnapshotPersisted: (snapshot: GeneratedSystemCaseSnapshot) => void;
+}) {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const snapshot = generatedSnapshotFromDocument(document);
+  const [previewCase, setPreviewCase] = useState<unknown | null>(
+    () => snapshot?.system_case ?? null,
+  );
+  const [actionError, setActionError] = useState<{
+    message: string;
+    category: string;
+  } | null>(null);
+  const validation = snapshot?.validation;
+  const hasCurrentValidation =
+    Boolean(validation?.ok) && !dirty && !validationStale;
+  const hasStaleValidation = Boolean(snapshot) && (dirty || validationStale);
+
+  function setError(error: unknown) {
+    if (error instanceof ApiError) {
+      setActionError({ message: error.message, category: error.category });
+      return;
+    }
+    setActionError({
+      message: "No se pudo completar la accion.",
+      category: "validation",
+    });
+  }
+
+  const previewMutation = useMutation({
+    mutationFn: () => getGeneratedSystemCasePreview(scenario.id),
+    onSuccess: (systemCase) => {
+      setPreviewCase(systemCase);
+      setActionError(null);
+    },
+    onError: setError,
+  });
+
+  const validateMutation = useMutation({
+    mutationFn: () => validateGeneratedSystemCase(scenario.id),
+    onSuccess: (response) => {
+      const nextSnapshot = response.generated_system_case;
+      if (nextSnapshot) {
+        onSnapshotPersisted(nextSnapshot);
+        setPreviewCase(nextSnapshot.system_case);
+      } else if (response.system_case) {
+        setPreviewCase(response.system_case);
+      }
+      setActionError(null);
+    },
+    onError: setError,
+  });
+
+  const promoteMutation = useMutation({
+    mutationFn: () => promoteGeneratedSystemCase(scenario.id),
+    onSuccess: () => {
+      setActionError(null);
+      void queryClient.invalidateQueries({
+        queryKey: scenarioVersionsQueryKey(scenario.id),
+      });
+      navigate(`/scenarios/${scenario.id}`);
+    },
+    onError: setError,
+  });
+
+  const target = actionError
+    ? generatedCaseErrorTarget(actionError.category)
+    : null;
+
+  return (
+    <section className="workspace-section" aria-labelledby="generated-case">
+      <div className="draft-section-heading">
+        <h2 id="generated-case">Caso generado</h2>
+        <div className="draft-actions">
+          <button
+            type="button"
+            className="secondary-action"
+            onClick={() => previewMutation.mutate()}
+            disabled={previewMutation.isPending}
+          >
+            {previewMutation.isPending
+              ? "Generando preview"
+              : "Generar preview"}
+          </button>
+          <button
+            type="button"
+            onClick={() => validateMutation.mutate()}
+            disabled={dirty || validateMutation.isPending}
+          >
+            {validateMutation.isPending ? "Validando" : "Validar con Julia"}
+          </button>
+          <button
+            type="button"
+            onClick={() => promoteMutation.mutate()}
+            disabled={
+              !hasCurrentValidation ||
+              promoteMutation.isPending ||
+              validateMutation.isPending
+            }
+          >
+            {promoteMutation.isPending ? "Promoviendo" : "Promover version"}
+          </button>
+        </div>
+      </div>
+      {dirty ? (
+        <p className="source-note">
+          Guarda el draft antes de validar o promover.
+        </p>
+      ) : null}
+      {snapshot ? (
+        <dl className="generated-validation">
+          <div>
+            <dt>Ultima validacion guardada</dt>
+            <dd>{validation?.phase || "validation"}</dd>
+          </div>
+          <div>
+            <dt>Status</dt>
+            <dd>{validation?.ok ? "ok" : "error"}</dd>
+          </div>
+          <div>
+            <dt>Mensaje</dt>
+            <dd>{validation?.message || "Sin mensaje."}</dd>
+          </div>
+        </dl>
+      ) : (
+        <p className="empty-state">
+          Genera y valida el caso antes de crear una version.
+        </p>
+      )}
+      {hasStaleValidation ? (
+        <p className="validation-stale">
+          Validacion stale; valida de nuevo antes de promover.
+        </p>
+      ) : null}
+      {hasCurrentValidation ? (
+        <p className="source-ok">Validacion vigente</p>
+      ) : null}
+      {actionError ? (
+        <p role="alert">
+          {actionError.message}
+          {target ? (
+            <>
+              {" "}
+              <a href={target.href}>{target.label}</a>
+            </>
+          ) : null}
+        </p>
+      ) : null}
+      <label className="field-row field-row-wide" htmlFor="generated_case_json">
+        <span>Generated system_case</span>
+        <textarea
+          id="generated_case_json"
+          value={prettyJson(previewCase)}
+          readOnly
+          spellCheck={false}
+          rows={12}
+        />
+      </label>
+    </section>
+  );
+}
+
 function AssetShell({
   asset,
   pendingRemovalId,
@@ -1708,6 +1909,8 @@ function DraftEditor({
     {},
   );
   const [saveError, setSaveError] = useState("");
+  const [generatedValidationStale, setGeneratedValidationStale] =
+    useState(false);
   const [pendingRemovalId, setPendingRemovalId] = useState<string | null>(null);
   const [pendingNavigation, setPendingNavigation] = useState<string | null>(
     null,
@@ -1780,12 +1983,55 @@ function DraftEditor({
     onError: (mutationError) => setSaveError(errorMessage(mutationError)),
   });
 
+  function updateDocumentState(
+    value: React.SetStateAction<ScenarioDraftDocument>,
+  ) {
+    setDocument((current) => {
+      if (generatedSnapshotFromDocument(current)) {
+        setGeneratedValidationStale(true);
+      }
+      return typeof value === "function" ? value(current) : value;
+    });
+    setSaveError("");
+    setValidationErrors({});
+  }
+
   function updateDocument(
     updater: (current: ScenarioDraftDocument) => ScenarioDraftDocument,
   ) {
-    setDocument((current) => updater(current));
+    updateDocumentState((current) => updater(current));
+  }
+
+  function updateJsonTexts(value: React.SetStateAction<JsonTextState>) {
+    if (generatedSnapshotFromDocument(document)) {
+      setGeneratedValidationStale(true);
+    }
+    setJsonTexts(value);
     setSaveError("");
     setValidationErrors({});
+  }
+
+  function acceptGeneratedSnapshot(snapshot: GeneratedSystemCaseSnapshot) {
+    const updatedDocument: ScenarioDraftDocument = {
+      ...document,
+      generated_system_case: snapshot,
+    };
+    const updatedTexts = jsonTextsFromDocument(updatedDocument);
+    setDocument(cloneDocument(updatedDocument));
+    setJsonTexts(updatedTexts);
+    setPersistedSignature(editorSignature(updatedDocument, updatedTexts));
+    setGeneratedValidationStale(false);
+    queryClient.setQueryData<ScenarioDraft>(
+      draftQueryKey(scenario.id),
+      (current) =>
+        current
+          ? {
+              ...current,
+              document: updatedDocument,
+              updated_at: new Date().toISOString(),
+            }
+          : current,
+    );
   }
 
   function addAsset(assetType: DraftAssetType) {
@@ -1793,7 +2039,7 @@ function DraftEditor({
       if ((current.assets || []).some((asset) => asset.type === assetType)) {
         return current;
       }
-      return withNoGeneratedSnapshot({
+      return preserveGeneratedSnapshot({
         ...current,
         assets: [
           ...(current.assets || []),
@@ -1802,7 +2048,7 @@ function DraftEditor({
       });
     });
     if (assetType === "hydro") {
-      setJsonTexts((current) => ({
+      updateJsonTexts((current) => ({
         ...current,
         hydroGenerationCurve: jsonText(
           defaultAssets.hydro.generation_curve,
@@ -1815,7 +2061,7 @@ function DraftEditor({
 
   function confirmRemoveAsset(assetId: string) {
     updateDocument((current) =>
-      withNoGeneratedSnapshot({
+      preserveGeneratedSnapshot({
         ...current,
         assets: (current.assets || []).filter(
           (asset) => String(asset.id || "") !== assetId,
@@ -1852,6 +2098,9 @@ function DraftEditor({
     setPersistedSignature(editorSignature(updatedDocument, updatedTexts));
     setSaveError("");
     setValidationErrors({});
+    if (generatedSnapshotFromDocument(document)) {
+      setGeneratedValidationStale(true);
+    }
     queryClient.setQueryData<ScenarioDraft>(
       draftQueryKey(scenario.id),
       (current) =>
@@ -1954,7 +2203,7 @@ function DraftEditor({
               )}
               onChange={(value) =>
                 updateDocument((current) =>
-                  withNoGeneratedSnapshot({
+                  preserveGeneratedSnapshot({
                     ...current,
                     schema_version: value,
                   }),
@@ -2082,7 +2331,10 @@ function DraftEditor({
             label="Solver options (JSON)"
             value={jsonTexts.solverOptions}
             onChange={(value) =>
-              setJsonTexts((current) => ({ ...current, solverOptions: value }))
+              updateJsonTexts((current) => ({
+                ...current,
+                solverOptions: value,
+              }))
             }
             errors={validationErrors}
           />
@@ -2125,10 +2377,10 @@ function DraftEditor({
               asset,
               assetIndex,
               document,
-              setDocument,
+              setDocument: updateDocumentState,
               errors: validationErrors,
               jsonTexts,
-              setJsonTexts,
+              setJsonTexts: updateJsonTexts,
               removalProps,
             };
             if (asset.type === "battery")
@@ -2142,6 +2394,13 @@ function DraftEditor({
             return null;
           })}
         </section>
+        <GeneratedSystemCasePanel
+          scenario={scenario}
+          document={document}
+          dirty={dirty}
+          validationStale={generatedValidationStale}
+          onSnapshotPersisted={acceptGeneratedSnapshot}
+        />
       </form>
     </>
   );

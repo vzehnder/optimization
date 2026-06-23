@@ -1,6 +1,6 @@
 # BESS-REACT-005: Migrate Case Validation And Versioning
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/react_migration/prd_react_ui_migration.md`
@@ -51,4 +51,3 @@ optimizer contract.
 ## Blocked by
 
 - BESS-REACT-004
-

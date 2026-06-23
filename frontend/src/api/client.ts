@@ -53,6 +53,12 @@ export interface ScenarioVersion {
   created_by?: string;
 }
 
+export interface ScenarioVersionDetail extends ScenarioVersion {
+  system_case_json: unknown;
+  validation_payload: unknown;
+  generation_metadata: Record<string, unknown>;
+}
+
 export interface ScenarioRun {
   id: number;
   scenario_version_id: number;
@@ -115,6 +121,20 @@ export interface TimeSeriesSource {
   [key: string]: unknown;
 }
 
+export interface GeneratedCaseValidation {
+  ok?: boolean;
+  phase?: string;
+  message?: string;
+  payload?: unknown;
+  error_category?: string;
+  [key: string]: unknown;
+}
+
+export interface GeneratedSystemCaseSnapshot {
+  system_case: unknown;
+  validation: GeneratedCaseValidation;
+}
+
 export interface ScenarioDraftDocument {
   schema_version?: string;
   case?: {
@@ -147,7 +167,7 @@ export interface ScenarioDraftDocument {
     options?: Record<string, unknown>;
     [key: string]: unknown;
   };
-  generated_system_case?: unknown;
+  generated_system_case?: GeneratedSystemCaseSnapshot;
   system_case_seed?: unknown;
   [key: string]: unknown;
 }
@@ -175,8 +195,21 @@ interface StructuredErrorBody {
     details?: unknown;
   };
   category?: string;
+  error_category?: string;
+  phase?: string;
   message?: string;
   detail?: unknown;
+}
+
+export interface GeneratedSystemCaseValidationResponse {
+  status: string;
+  phase?: string;
+  message?: string;
+  error_category?: string;
+  detail?: string;
+  validation?: unknown;
+  system_case?: unknown;
+  generated_system_case?: GeneratedSystemCaseSnapshot;
 }
 
 export class ApiError extends Error {
@@ -218,8 +251,11 @@ async function errorFromResponse(response: Response): Promise<ApiError> {
       detailMessage ||
       `Request failed (${response.status})`,
     response.status,
-    structured?.category || body.category || `http_${response.status}`,
-    structured?.details ?? body.detail,
+    structured?.category ||
+      body.error_category ||
+      body.category ||
+      `http_${response.status}`,
+    structured?.details ?? body.detail ?? body,
   );
 }
 
@@ -388,6 +424,56 @@ export async function listScenarioVersions(
   return response.versions;
 }
 
+export async function getScenarioVersion(
+  scenarioVersionId: number,
+  signal?: AbortSignal,
+): Promise<ScenarioVersionDetail> {
+  const response = await requestJson<{
+    scenario_version: ScenarioVersionDetail;
+  }>(`/api/scenario-versions/${scenarioVersionId}`, { signal });
+  return response.scenario_version;
+}
+
+export async function deleteScenarioVersion(
+  scenarioVersionId: number,
+): Promise<ScenarioVersionDetail> {
+  const csrfToken = await getCsrfToken();
+  const response = await requestJson<{
+    deleted_version: ScenarioVersionDetail;
+  }>(`/api/scenario-versions/${scenarioVersionId}`, {
+    method: "DELETE",
+    headers: { "X-CSRF-Token": csrfToken },
+  });
+  return response.deleted_version;
+}
+
+export async function createScenarioVersionFromJson(
+  scenarioId: number,
+  systemCaseJson: string,
+): Promise<ScenarioVersion> {
+  return postJsonWithCsrf<ScenarioVersion>(
+    `/api/scenarios/${scenarioId}/versions`,
+    { system_case_json: systemCaseJson },
+  );
+}
+
+export async function uploadScenarioVersion(
+  scenarioId: number,
+  file: File,
+): Promise<ScenarioVersion> {
+  const csrfToken = await getCsrfToken();
+  const body = new FormData();
+  body.append("system_case_file", file);
+  return requestJson<ScenarioVersion>(
+    `/api/scenarios/${scenarioId}/versions/upload`,
+    {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken },
+      body,
+    },
+  );
+}
+
 export async function listScenarioRuns(
   scenarioId: number,
   signal?: AbortSignal,
@@ -433,6 +519,31 @@ export async function updateScenarioDraft(
     },
     body: JSON.stringify({ document }),
   });
+}
+
+export async function getGeneratedSystemCasePreview(
+  scenarioId: number,
+): Promise<unknown> {
+  const response = await requestJson<{ system_case: unknown }>(
+    `/api/scenarios/${scenarioId}/draft/generated-system-case`,
+  );
+  return response.system_case;
+}
+
+export async function validateGeneratedSystemCase(
+  scenarioId: number,
+): Promise<GeneratedSystemCaseValidationResponse> {
+  return postJsonWithCsrf<GeneratedSystemCaseValidationResponse>(
+    `/api/scenarios/${scenarioId}/draft/generated-system-case/validate`,
+  );
+}
+
+export async function promoteGeneratedSystemCase(
+  scenarioId: number,
+): Promise<ScenarioVersion> {
+  return postJsonWithCsrf<ScenarioVersion>(
+    `/api/scenarios/${scenarioId}/draft/generated-system-case/promote`,
+  );
 }
 
 export async function uploadTimeSeriesSource(

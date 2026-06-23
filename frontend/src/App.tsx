@@ -35,6 +35,7 @@ import {
   ProjectDetailView,
   ProjectListView,
   ScenarioDetailView,
+  ScenarioVersionDetailView,
 } from "./Workspace";
 
 const identityQueryKey = ["current-user"];
@@ -277,6 +278,12 @@ function AuthenticatedRoutes({ user }: { user: CurrentUser }) {
           <Route
             path="scenarios/:scenarioId/draft"
             element={isClient ? <ForbiddenView /> : <ScenarioDraftEditorView />}
+          />
+          <Route
+            path="scenario-versions/:versionId"
+            element={
+              isClient ? <ForbiddenView /> : <ScenarioVersionDetailView />
+            }
           />
           <Route
             path="system"

@@ -24,7 +24,7 @@ stored as a Markdown file in this folder. All issues carry the
 | BESS-REACT-002 | Migrate Project And Scenario Workspace | AFK | ready-for-agent | Done | BESS-REACT-001 | [BESS-REACT-002-migrate-project-and-scenario-workspace.md](BESS-REACT-002-migrate-project-and-scenario-workspace.md) |
 | BESS-REACT-003 | Migrate Structured Scenario Draft Editor | AFK | ready-for-agent | Done | BESS-REACT-002 | [BESS-REACT-003-migrate-structured-scenario-draft-editor.md](BESS-REACT-003-migrate-structured-scenario-draft-editor.md) |
 | BESS-REACT-004 | Migrate Time-Series Ingestion And Editing | AFK | ready-for-agent | Done | BESS-REACT-003 | [BESS-REACT-004-migrate-time-series-ingestion-and-editing.md](BESS-REACT-004-migrate-time-series-ingestion-and-editing.md) |
-| BESS-REACT-005 | Migrate Case Validation And Versioning | AFK | ready-for-agent | Todo | BESS-REACT-004 | [BESS-REACT-005-migrate-case-validation-and-versioning.md](BESS-REACT-005-migrate-case-validation-and-versioning.md) |
+| BESS-REACT-005 | Migrate Case Validation And Versioning | AFK | ready-for-agent | Done | BESS-REACT-004 | [BESS-REACT-005-migrate-case-validation-and-versioning.md](BESS-REACT-005-migrate-case-validation-and-versioning.md) |
 | BESS-REACT-006 | Migrate Manual Run Lifecycle | AFK | ready-for-agent | Todo | BESS-REACT-005 | [BESS-REACT-006-migrate-manual-run-lifecycle.md](BESS-REACT-006-migrate-manual-run-lifecycle.md) |
 | BESS-REACT-007 | Migrate Results Charts And Artifacts | AFK | ready-for-agent | Todo | BESS-REACT-006 | [BESS-REACT-007-migrate-results-charts-and-artifacts.md](BESS-REACT-007-migrate-results-charts-and-artifacts.md) |
 | BESS-REACT-008 | Migrate Dashboard Templates And Publications | AFK | ready-for-agent | Todo | BESS-REACT-002, BESS-REACT-007 | [BESS-REACT-008-migrate-dashboard-templates-and-publications.md](BESS-REACT-008-migrate-dashboard-templates-and-publications.md) |
@@ -79,6 +79,7 @@ BESS-REACT-010.
 | 2026-06-23 | BESS-REACT-002 | Todo -> Done | React analyst project/scenario workspace, direct detail routes, empty/error states, browser acceptance, and Chrome smoke pass. |
 | 2026-06-23 | BESS-REACT-003 | Todo -> Done | React structured draft editor, multi-asset save/reopen/removal, dirty/saving/saved/failed states, stale-save guard, navigation guard, browser acceptance, backend regressions, and Chrome smoke pass. |
 | 2026-06-23 | BESS-REACT-004 | Todo -> Done | React time-series source workflow, CSV/XLSX upload with sheet selection, source preview, corrected mapping, row editing, validation context, bounded table rendering, browser acceptance, backend regressions, and Chrome smoke pass. |
+| 2026-06-23 | BESS-REACT-005 | Todo -> Done | React generated-case preview, Julia validation status, stale-validation guard, promotion, expert paste/upload versions, immutable detail, protected delete, browser acceptance, backend regressions, Julia regressions, and Chrome smoke pass. |
 
 ## Acceptance Seam
 

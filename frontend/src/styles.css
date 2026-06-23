@@ -562,6 +562,16 @@ button:focus-visible {
   align-items: end;
 }
 
+.expert-version-grid,
+.version-actions {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.expert-upload {
+  grid-template-columns: minmax(14rem, 1fr) auto;
+}
+
 .source-summary,
 .source-mapping,
 .source-rows {
@@ -666,6 +676,35 @@ button:focus-visible {
 .source-validation ul {
   margin: 0;
   padding-left: 1.15rem;
+}
+
+.generated-validation,
+.version-metadata {
+  margin: 0;
+}
+
+.validation-stale {
+  margin: 0;
+  color: #9a3412;
+  font-weight: 800;
+}
+
+.json-panel {
+  max-height: 24rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0.85rem;
+  border: 1px solid #d8e2eb;
+  border-radius: 8px;
+  color: #102a43;
+  background: #f8fbfd;
+  font:
+    0.9rem/1.45 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  white-space: pre-wrap;
 }
 
 .modal-backdrop {

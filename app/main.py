@@ -2715,7 +2715,7 @@ def render_scenario_page(
         f'<button type="submit">Launch Run</button>'
         f"</form>"
         f'<form class="inline-form" method="post" action="/scenario-versions/{version["id"]}/delete" '
-        'onsubmit="return confirm(\'Delete this version and its completed runs, results, and publications?\')">'
+        'onsubmit="return confirm(\'Delete this eligible version? Versions referenced by runs or publications are protected.\')">'
         f'<button type="submit" class="button-danger" aria-label="Delete version {version["version_number"]}">'
         "Delete Version</button>"
         "</form>"

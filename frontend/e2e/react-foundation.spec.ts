@@ -419,3 +419,133 @@ test("React draft editor uploads, maps, edits, and validates time-series sources
   await expect(page.getByText("Selected sheet: Inputs")).toBeVisible();
   await expect(page.getByText("2026-01-02T00:00:00")).toBeVisible();
 });
+
+test("React case validation and versioning covers generated and expert paths", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await ensureAdminSession(page);
+  const suffix = Date.now();
+  const projectName = `Validation PMGD ${suffix}`;
+  const scenarioName = `Version loop ${suffix}`;
+  const sampleCasePath = resolve(
+    "..",
+    "data/cases/hybrid_system/system_case.json",
+  );
+  const sampleCase = readFileSync(sampleCasePath, "utf-8");
+
+  await page.getByLabel("Nombre del proyecto").fill(projectName);
+  await page
+    .getByLabel("Descripcion del proyecto")
+    .fill("Browser validation acceptance");
+  await page.getByRole("button", { name: "Crear proyecto" }).click();
+  await page.getByRole("link", { name: projectName }).click();
+  await page.getByLabel("Nombre del escenario").fill(scenarioName);
+  await page
+    .getByLabel("Descripcion del escenario")
+    .fill("Generate validate promote branch");
+  await page.getByRole("button", { name: "Crear escenario" }).click();
+
+  await page.getByRole("link", { name: "Abrir draft" }).click();
+  await page.getByRole("button", { name: "Crear draft" }).click();
+  await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Agregar BESS" }).click();
+  await page.getByRole("button", { name: "Agregar load" }).click();
+  await page.getByRole("button", { name: "Agregar renewable" }).click();
+  await page.getByRole("button", { name: "Guardar draft" }).click();
+  await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
+
+  const csvText = [
+    "period_start,hours,buy_cost,sell_revenue,solar_1_available_mw,load_1_demand_mw",
+    "2026-01-01T00:00:00,1.0,55.0,42.0,3.5,2.0",
+    "2026-01-01T01:00:00,1.0,60.0,48.0,4.0,2.5",
+    "",
+  ].join("\n");
+  await page.getByLabel("Source file").setInputFiles({
+    name: "validation-source.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from(csvText),
+  });
+  await page.getByRole("button", { name: "Upload source" }).click();
+  await expect(page.getByText("validation-source.csv")).toBeVisible();
+  await page.getByLabel("Import price column").selectOption("buy_cost");
+  await page.getByLabel("Export price column").selectOption("sell_revenue");
+  await page.getByRole("button", { name: "Save mapping" }).click();
+  await expect(page.getByText("Valid mapped rows: 2")).toBeVisible();
+
+  await page.getByRole("button", { name: "Generar preview" }).click();
+  await expect(page.getByLabel("Generated system_case")).toHaveValue(
+    /import_price_usd_per_mwh/,
+  );
+  await page.getByRole("button", { name: "Validar con Julia" }).click();
+  await expect(page.getByText("Validacion vigente")).toBeVisible({
+    timeout: 30_000,
+  });
+  await page.getByRole("button", { name: "Promover version" }).click();
+  await expect(page.locator("a", { hasText: "Version 1" })).toBeVisible();
+  await page.locator("a", { hasText: "Version 1" }).click();
+  await expect(page.getByLabel("Immutable system_case")).toHaveValue(
+    /import_price_usd_per_mwh/,
+  );
+
+  await page.getByRole("link", { name: scenarioName }).click();
+  await page.getByRole("link", { name: "Abrir draft" }).click();
+  await page.getByLabel("Nombre del caso").fill(`${scenarioName} stale`);
+  await expect(
+    page.getByText("Validacion stale; valida de nuevo antes de promover."),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Promover version" }),
+  ).toBeDisabled();
+  await page.getByRole("link", { name: scenarioName }).click();
+  await page.getByRole("button", { name: "Descartar cambios" }).click();
+
+  await page.locator("#system_case_json").fill("{bad");
+  await page.getByRole("button", { name: "Crear version" }).click();
+  await expect(page.getByRole("alert")).toContainText("Malformed JSON");
+  await page.locator("#system_case_json").fill(sampleCase);
+  await page.getByRole("button", { name: "Crear version" }).click();
+  await expect(page.locator("a", { hasText: "Version 2" })).toBeVisible();
+
+  await page.getByLabel("Subir system_case JSON").setInputFiles(sampleCasePath);
+  const uploadResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/scenarios/") &&
+      response.url().endsWith("/versions/upload") &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Subir version" }).click();
+  const uploadedVersion = (await (await uploadResponse).json()) as {
+    id: number;
+    version_number: number;
+  };
+  await expect(
+    page.locator("a", {
+      hasText: `Version ${uploadedVersion.version_number}`,
+    }),
+  ).toBeVisible();
+
+  const runResponse = await postWithCsrf(
+    page.context().request,
+    `/api/scenario-versions/${uploadedVersion.id}/runs`,
+  );
+  expect(runResponse.status()).toBe(201);
+
+  await page
+    .getByRole("button", {
+      name: `Eliminar version ${uploadedVersion.version_number}`,
+    })
+    .click();
+  await page
+    .getByRole("button", {
+      name: `Confirmar eliminar version ${uploadedVersion.version_number}`,
+    })
+    .click();
+  await expect(page.getByRole("alert")).toContainText("referenced by runs");
+
+  await page.getByRole("button", { name: "Eliminar version 2" }).click();
+  await page
+    .getByRole("button", { name: "Confirmar eliminar version 2" })
+    .click();
+  await expect(page.locator("a", { hasText: "Version 2" })).toHaveCount(0);
+});
