@@ -1,0 +1,6 @@
+dist/
+node_modules/
+openapi.check.json
+src/api/schema.check.ts
+playwright-report/
+test-results/

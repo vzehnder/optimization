@@ -12,6 +12,37 @@ From the repository root:
 julia --project=. -e "import Pkg; Pkg.test()"
 ```
 
+## React UI Foundation
+
+The migration frontend coexists with the legacy UI under `/react`. FastAPI
+serves `frontend/dist`, including direct React Router paths such as
+`/react/system`; existing server-rendered routes remain unchanged.
+
+Install the locked frontend dependencies and run local development:
+
+```powershell
+cd frontend
+npm ci
+$env:BESS_API_ORIGIN = "http://127.0.0.1:8000"
+npm run dev
+```
+
+Stable verification commands, run from `frontend/`:
+
+```powershell
+npm run api:generate  # regenerate OpenAPI document and TypeScript API types
+npm run api:check     # fail when committed API types drift
+npm run check         # TypeScript, ESLint, and formatting checks
+npm test              # focused behavior tests
+npm run browser:install # install isolated Chromium once
+npm run test:browser  # production build + isolated FastAPI/Chromium smoke test
+npm run build         # reproducible production bundle in frontend/dist
+```
+
+After `npm run build`, the normal FastAPI service serves the production React
+application at `http://127.0.0.1:8000/react`. The browser smoke test uses an
+isolated in-memory database and port `8123`; it does not modify application data.
+
 ## Run The Sample Case
 
 This command loads `data/cases/arbitrage_mvp`, solves the dispatch model with

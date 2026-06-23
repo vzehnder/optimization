@@ -1,0 +1,45 @@
+{
+  "name": "bess-react-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "check": "tsc -b --pretty false && eslint . && prettier --check .",
+    "format": "prettier --write .",
+    "test": "vitest run",
+    "browser:install": "playwright install chromium",
+    "test:browser": "npm run build && playwright test",
+    "api:generate": "node scripts/export-openapi.mjs openapi.json && openapi-typescript openapi.json -o src/api/schema.ts",
+    "api:check": "node scripts/export-openapi.mjs openapi.check.json && openapi-typescript openapi.check.json -o src/api/schema.check.ts && node scripts/check-generated.mjs"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.101.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-router-dom": "^7.18.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.61.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^26.0.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "eslint": "^10.5.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.7.0",
+    "jsdom": "^29.1.1",
+    "openapi-typescript": "^7.13.0",
+    "prettier": "^3.8.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.62.0",
+    "vite": "^8.0.16",
+    "vitest": "^4.1.9"
+  }
+}

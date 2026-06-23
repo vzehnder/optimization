@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from functools import lru_cache
 from html import escape
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
@@ -68,6 +68,18 @@ class UserCreateRequest(BaseModel):
     display_name: str = ""
 
 
+class CurrentUser(BaseModel):
+    id: int
+    email: str
+    display_name: str
+    role: Literal["admin", "analyst", "client"]
+    is_active: bool
+
+
+class CurrentUserResponse(BaseModel):
+    user: CurrentUser | None
+
+
 class ProjectClientAccessRequest(BaseModel):
     user_id: int
 
@@ -122,6 +134,7 @@ def create_app(
     run_queue=None,
     artifact_root: Path | str | None = None,
     input_source_root: Path | str | None = None,
+    frontend_dist: Path | str | None = None,
     auth_enabled: bool | None = None,
     session_cookie_name: str = "bess_session",
     session_hours: int = 12,
@@ -138,6 +151,11 @@ def create_app(
         input_source_root
         or os.environ.get("INPUT_SOURCE_ROOT")
         or Path(__file__).resolve().parents[1] / ".tmp" / "input_sources"
+    )
+    configured_frontend_dist = Path(
+        frontend_dist
+        or os.environ.get("FRONTEND_DIST")
+        or Path(__file__).resolve().parents[1] / "frontend" / "dist"
     )
     local_run_queue = run_queue or LocalRunQueue(
         executor=JuliaRunExecutor(store=analyst_store, artifact_root=configured_artifact_root)
@@ -362,6 +380,35 @@ def create_app(
     async def favicon():
         return Response(status_code=204)
 
+    def react_entry_response() -> FileResponse:
+        entry_path = configured_frontend_dist / "index.html"
+        if not entry_path.is_file():
+            raise HTTPException(status_code=503, detail="React application has not been built")
+        return FileResponse(
+            entry_path,
+            media_type="text/html",
+            headers={"Cache-Control": "no-cache"},
+        )
+
+    @app.get("/react", include_in_schema=False)
+    async def react_entry():
+        return react_entry_response()
+
+    @app.get("/react/assets/{asset_path:path}", include_in_schema=False)
+    async def react_asset(asset_path: str):
+        assets_root = (configured_frontend_dist / "assets").resolve(strict=False)
+        candidate = (assets_root / asset_path).resolve(strict=False)
+        if not candidate.is_relative_to(assets_root) or not candidate.is_file():
+            raise HTTPException(status_code=404, detail="React asset not found")
+        return FileResponse(
+            candidate,
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
+
+    @app.get("/react/{spa_path:path}", include_in_schema=False)
+    async def react_spa_fallback(spa_path: str):
+        return react_entry_response()
+
     @app.get("/bootstrap", response_class=HTMLResponse)
     async def bootstrap_page():
         if auth_required and analyst_store.count_users() > 0:
@@ -576,7 +623,7 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         return RedirectResponse("/admin/users", status_code=303)
 
-    @app.get("/api/auth/me")
+    @app.get("/api/auth/me", response_model=CurrentUserResponse)
     async def current_auth_user(request: Request):
         user = request.state.current_user
         if user is None:

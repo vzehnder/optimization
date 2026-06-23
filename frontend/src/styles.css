@@ -1,0 +1,193 @@
+:root {
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  color: #102a43;
+  background: #f4f7fa;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+}
+
+.app-frame {
+  min-height: 100vh;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem clamp(1rem, 4vw, 3rem);
+  color: #fff;
+  background: #102a43;
+}
+
+.brand,
+.primary-nav a {
+  text-decoration: none;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-weight: 750;
+  letter-spacing: 0.01em;
+}
+
+.brand-mark {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 0.6rem;
+  color: #102a43;
+  background: #52d3aa;
+}
+
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.role-badge {
+  padding: 0.25rem 0.6rem;
+  border: 1px solid #8fb6cf;
+  border-radius: 999px;
+  color: #d9eaf5;
+}
+
+.primary-nav {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.7rem clamp(1rem, 4vw, 3rem);
+  border-bottom: 1px solid #d8e2eb;
+  background: #fff;
+}
+
+.primary-nav a {
+  padding: 0.55rem 0.85rem;
+  border-radius: 0.5rem;
+  font-weight: 650;
+}
+
+.primary-nav a:hover,
+.primary-nav a:focus-visible {
+  color: #075985;
+  background: #eaf5fb;
+  outline: none;
+}
+
+main {
+  width: min(1100px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: clamp(2rem, 7vw, 5rem) 0;
+}
+
+.hero-panel,
+.content-panel {
+  padding: clamp(1.5rem, 5vw, 4rem);
+  border: 1px solid #d8e2eb;
+  border-radius: 1.25rem;
+  background: #fff;
+  box-shadow: 0 24px 60px rgb(16 42 67 / 8%);
+}
+
+.hero-panel {
+  overflow: hidden;
+  background:
+    radial-gradient(
+      circle at 90% 10%,
+      rgb(82 211 170 / 30%),
+      transparent 28rem
+    ),
+    #fff;
+}
+
+.eyebrow {
+  margin: 0 0 0.75rem;
+  color: #047857;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+h1 {
+  max-width: 18ch;
+  margin: 0 0 1rem;
+  font-size: clamp(2rem, 6vw, 4rem);
+  line-height: 1.03;
+}
+
+.content-panel h1 {
+  font-size: clamp(1.8rem, 4vw, 2.8rem);
+}
+
+[role="status"],
+[role="alert"] {
+  width: min(34rem, calc(100% - 2rem));
+  margin: 20vh auto 0;
+  padding: 1rem 1.25rem;
+  border-radius: 0.75rem;
+  background: #fff;
+  box-shadow: 0 16px 40px rgb(16 42 67 / 10%);
+}
+
+[role="alert"] {
+  border-left: 4px solid #c2410c;
+}
+
+[role="alert"] p {
+  margin-top: 0;
+}
+
+button {
+  padding: 0.55rem 0.9rem;
+  border: 0;
+  border-radius: 0.5rem;
+  color: #fff;
+  background: #075985;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:hover,
+button:focus-visible {
+  background: #0369a1;
+  outline: 3px solid #bae6fd;
+  outline-offset: 2px;
+}
+
+@media (max-width: 620px) {
+  .topbar,
+  .identity {
+    align-items: flex-start;
+  }
+
+  .topbar {
+    flex-direction: column;
+  }
+}
