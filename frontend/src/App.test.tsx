@@ -5,6 +5,272 @@ import { describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 
 describe("application shell", () => {
+  it("renders succeeded run results with Plotly charts, bounded tables, and safe artifacts", async () => {
+    window.history.replaceState({}, "", "/react/runs/99");
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-06-23T12:00:00Z",
+    };
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Initial modeling branch",
+      created_at: "2026-06-23T12:05:00Z",
+    };
+    const version = {
+      id: 41,
+      scenario_id: 10,
+      version_number: 3,
+      case_name: "dispatch_case",
+      schema_version: "bess_system_dispatch.v2",
+      period_count: 2,
+      asset_counts: { battery: 1, hydro: 1 },
+      created_at: "2026-06-23T12:14:00Z",
+      system_case_json: { case_name: "dispatch_case" },
+      validation_payload: { status: "ok" },
+      generation_metadata: {},
+    };
+    const run = {
+      id: 99,
+      scenario_version_id: 41,
+      status: "succeeded",
+      created_at: "2026-06-23T12:15:00Z",
+      started_at: "2026-06-23T12:15:01Z",
+      finished_at: "2026-06-23T12:15:03Z",
+      duration_seconds: 2,
+      exit_code: 0,
+      error_message: "",
+      stdout: "",
+      stderr: "",
+      trigger_type: "manual",
+      triggered_by: "internal_analyst",
+    };
+    const results = {
+      summary: {
+        case_name: "hybrid_system",
+        solver_name: "HiGHS",
+        solver_status: "OPTIMAL",
+        termination_status: "OPTIMAL",
+        objective_value_usd: 1250.5,
+        total_market_value_usd: 1500,
+        hydro_totals: {
+          total_hydro_generation_mwh: 5,
+        },
+      },
+      dispatch_table: {
+        columns: [
+          "timestamp",
+          "price_usd_per_mwh",
+          "grid_import_mw",
+          "grid_export_mw",
+          "renewable_used_mw",
+          "battery_energy_mwh",
+          "period_profit_usd",
+        ],
+        rows: [
+          {
+            timestamp: "2026-01-01T00:00:00",
+            price_usd_per_mwh: "45.0",
+            grid_import_mw: "2.5",
+            grid_export_mw: "0.0",
+            renewable_used_mw: "4.0",
+            battery_energy_mwh: "20.0",
+            period_profit_usd: "-112.5",
+          },
+        ],
+      },
+      asset_dispatch_table: {
+        columns: [
+          "timestamp",
+          "asset_id",
+          "asset_type",
+          "grid_import_mw",
+          "battery_energy_mwh",
+        ],
+        rows: [
+          {
+            timestamp: "2026-01-01T00:00:00",
+            asset_id: "grid_1",
+            asset_type: "grid",
+            grid_import_mw: "2.5",
+            battery_energy_mwh: "0.0",
+          },
+        ],
+      },
+      charts: {
+        price: {
+          id: "price",
+          title: "Energy Price",
+          available: true,
+          labels: ["2026-01-01T00:00:00"],
+          series: [
+            {
+              key: "price_usd_per_mwh",
+              label: "Price USD/MWh",
+              unit: "USD/MWh",
+              values: [45],
+            },
+          ],
+          missing_columns: [],
+          message: "",
+        },
+        grid_import_export: {
+          id: "grid-import-export",
+          title: "Grid Import / Export",
+          available: true,
+          labels: ["2026-01-01T00:00:00"],
+          series: [
+            {
+              key: "grid_import_mw",
+              label: "Grid Import MW",
+              unit: "MW",
+              values: [2.5],
+            },
+          ],
+          missing_columns: [],
+          message: "",
+        },
+        hydro_power: {
+          id: "hydro-power",
+          title: "Hydro Power",
+          available: false,
+          labels: [],
+          series: [],
+          missing_columns: ["total_hydro_power_mw"],
+          message: "Missing columns: total_hydro_power_mw",
+        },
+      },
+      plot_series: [],
+    };
+    const artifacts = [
+      {
+        id: 11,
+        run_id: 99,
+        artifact_type: "summary_json",
+        path: "safe/artifacts/runs/99/outputs/summary.json",
+        display_name: "summary.json",
+        media_type: "application/json",
+        byte_size: 92,
+        created_at: "2026-06-23T12:15:03Z",
+        download_url: "/api/run-artifacts/11/download",
+      },
+    ];
+    const plotlyMock = {
+      react: vi.fn().mockResolvedValue(undefined),
+      purge: vi.fn(),
+    };
+    vi.stubGlobal("Plotly", plotlyMock);
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/runs/99") {
+          return new Response(JSON.stringify({ run }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/runs/99/results") {
+          return new Response(JSON.stringify({ results }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/runs/99/artifacts") {
+          return new Response(JSON.stringify({ artifacts }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenario-versions/41" && method === "GET") {
+          return new Response(JSON.stringify({ scenario_version: version }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects") {
+          return new Response(JSON.stringify({ projects: [project] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Run Results" }),
+    ).toBeVisible();
+    expect(await screen.findByText("hybrid_system")).toBeVisible();
+    expect(screen.getByText("1250.5")).toBeVisible();
+    expect(screen.getByText("total_market_value_usd")).toBeVisible();
+    expect(screen.getByText("total_hydro_generation_mwh")).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "System Dispatch" }),
+    ).toBeVisible();
+    expect(screen.getAllByText("grid_import_mw").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("2.5").length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("heading", { name: "Asset Dispatch" }),
+    ).toBeVisible();
+    expect(screen.getByText("grid_1")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Energy Price" })).toBeVisible();
+    expect(screen.getByText("Price USD/MWh")).toBeVisible();
+    expect(screen.getAllByText("Hydro Power").length).toBeGreaterThan(0);
+    expect(
+      screen.getByText("Missing columns: total_hydro_power_mw"),
+    ).toBeVisible();
+    const artifactLink = screen.getByRole("link", { name: "summary.json" });
+    expect(artifactLink).toHaveAttribute(
+      "href",
+      "/api/run-artifacts/11/download",
+    );
+    await waitFor(() => expect(plotlyMock.react).toHaveBeenCalled());
+    expect(plotlyMock.react.mock.calls[0][1][0]).toMatchObject({
+      name: "Price USD/MWh",
+      y: [45],
+    });
+
+    await user.click(screen.getByRole("link", { name: "Analista" }));
+    expect(
+      await screen.findByRole("heading", { name: "Proyectos" }),
+    ).toBeVisible();
+    await waitFor(() => expect(plotlyMock.purge).toHaveBeenCalled());
+  });
+
   it("launches one manual run from an immutable version and navigates before completion", async () => {
     window.history.replaceState({}, "", "/react/scenario-versions/41");
     const project = {

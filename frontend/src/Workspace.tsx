@@ -26,6 +26,7 @@ import {
   type ScenarioVersion,
   type ScenarioVersionDetail,
 } from "./api/client";
+import { RunArtifactsSection, RunResultsSection } from "./RunResults";
 
 const projectsQueryKey = ["projects"] as const;
 const projectQueryKey = (projectId: number) => ["project", projectId] as const;
@@ -1078,6 +1079,8 @@ export function RunDetailView() {
           />
         </section>
         <RunFailureDetails run={runData} />
+        <RunResultsSection run={runData} />
+        <RunArtifactsSection run={runData} />
       </div>
     </section>
   );

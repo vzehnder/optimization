@@ -77,6 +77,51 @@ export interface ScenarioRun {
   trigger_type?: string;
 }
 
+export type ResultCell = string | number | boolean | null;
+
+export interface ResultTable {
+  columns: string[];
+  rows: Array<Record<string, ResultCell>>;
+}
+
+export interface ResultChartSeries {
+  key: string;
+  label: string;
+  unit?: string;
+  source?: string;
+  values: Array<number | null>;
+}
+
+export interface ResultChart {
+  id: string;
+  title: string;
+  available: boolean;
+  labels: string[];
+  series: ResultChartSeries[];
+  missing_columns?: string[];
+  message?: string;
+}
+
+export interface RunResults {
+  summary: Record<string, unknown>;
+  dispatch_table: ResultTable;
+  asset_dispatch_table: ResultTable;
+  charts: Record<string, ResultChart | unknown>;
+  plot_series?: unknown[];
+}
+
+export interface RunArtifact {
+  id: number;
+  run_id: number;
+  artifact_type: string;
+  path: string;
+  display_name: string;
+  media_type: string;
+  byte_size: number;
+  created_at: string;
+  download_url: string;
+}
+
 export type DraftAssetType = "battery" | "load" | "renewable" | "hydro";
 
 export interface DraftAsset {
@@ -506,6 +551,28 @@ export async function getRun(
     { signal },
   );
   return response.run;
+}
+
+export async function getRunResults(
+  runId: number,
+  signal?: AbortSignal,
+): Promise<RunResults> {
+  const response = await requestJson<{ results: RunResults }>(
+    `/api/runs/${runId}/results`,
+    { signal },
+  );
+  return response.results;
+}
+
+export async function listRunArtifacts(
+  runId: number,
+  signal?: AbortSignal,
+): Promise<RunArtifact[]> {
+  const response = await requestJson<{ artifacts: RunArtifact[] }>(
+    `/api/runs/${runId}/artifacts`,
+    { signal },
+  );
+  return response.artifacts;
 }
 
 export async function getScenarioDraft(
