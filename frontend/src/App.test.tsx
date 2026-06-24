@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
+import type { AdminUser } from "./api/client";
 
 describe("application shell", () => {
   it("renders succeeded run results with Plotly charts, bounded tables, and safe artifacts", async () => {
@@ -1570,6 +1571,246 @@ describe("application shell", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Base case" })).toBeVisible();
     });
+  });
+
+  it("lets admins manage users and project client access without a document reload", async () => {
+    window.history.replaceState({}, "", "/react/admin/users");
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Client assignment workspace",
+      created_at: "2026-06-24T12:00:00Z",
+    };
+    const users: AdminUser[] = [
+      {
+        id: 7,
+        email: "admin@example.local",
+        display_name: "Admin User",
+        role: "admin",
+        is_active: true,
+        created_at: "2026-06-24T11:00:00Z",
+        updated_at: "2026-06-24T11:00:00Z",
+        created_by: "system",
+        deactivated_at: null,
+      },
+    ];
+    const assignments: Array<{
+      project_id: number;
+      user_id: number;
+      email: string;
+      display_name: string;
+      role: string;
+      is_active: boolean;
+      assigned_at: string;
+      assigned_by: string;
+    }> = [];
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "admin@example.local",
+                display_name: "Admin User",
+                role: "admin",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/admin/users" && method === "GET") {
+          return new Response(JSON.stringify({ users }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/admin/users" && method === "POST") {
+          const body = JSON.parse(String(init?.body));
+          const created = {
+            id: users.length + 7,
+            email: String(body.email).trim().toLowerCase(),
+            display_name: body.display_name,
+            role: body.role,
+            is_active: true,
+            created_at: "2026-06-24T12:05:00Z",
+            updated_at: "2026-06-24T12:05:00Z",
+            created_by: "admin@example.local",
+            deactivated_at: null,
+          };
+          users.push(created);
+          return new Response(JSON.stringify({ user: created }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/admin/users/8/deactivate" && method === "POST") {
+          users[1] = {
+            ...users[1],
+            is_active: false,
+            deactivated_at: "2026-06-24T12:10:00Z",
+          };
+          return new Response(JSON.stringify({ user: users[1] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects" && method === "GET") {
+          return new Response(JSON.stringify({ projects: [project] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/scenarios") {
+          return new Response(JSON.stringify({ scenarios: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/dashboard-templates") {
+          return new Response(JSON.stringify({ dashboard_templates: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/admin/projects/1/client-access" &&
+          method === "GET"
+        ) {
+          return new Response(JSON.stringify({ client_access: assignments }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/admin/projects/1/client-access" &&
+          method === "POST"
+        ) {
+          const body = JSON.parse(String(init?.body));
+          const client = users.find(
+            (candidate) => candidate.id === body.user_id,
+          );
+          if (!client) {
+            return new Response(JSON.stringify({ detail: "user not found" }), {
+              status: 404,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          const assignment = {
+            project_id: 1,
+            user_id: client.id,
+            email: client.email,
+            display_name: client.display_name,
+            role: client.role,
+            is_active: client.is_active,
+            assigned_at: "2026-06-24T12:06:00Z",
+            assigned_by: "admin@example.local",
+          };
+          assignments.push(assignment);
+          return new Response(JSON.stringify({ client_access: assignment }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/admin/projects/1/client-access/8" &&
+          method === "DELETE"
+        ) {
+          assignments.splice(0, assignments.length);
+          return new Response(JSON.stringify({ removed: true }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Usuarios" }),
+    ).toBeVisible();
+    expect(screen.getByText("admin@example.local")).toBeVisible();
+
+    await user.type(screen.getByLabelText("Email"), "client@example.local");
+    await user.type(screen.getByLabelText("Nombre"), "Client User");
+    await user.type(screen.getByLabelText("Password"), "client pass");
+    await user.selectOptions(screen.getByLabelText("Rol"), "client");
+    await user.click(screen.getByRole("button", { name: "Crear usuario" }));
+    expect(await screen.findByText("client@example.local")).toBeVisible();
+    expect(screen.getByText("client@example.local creado.")).toBeVisible();
+    expect(screen.getByLabelText("Email")).toHaveFocus();
+
+    await user.click(screen.getByRole("link", { name: "Analista" }));
+    await user.click(await screen.findByRole("link", { name: "Hybrid PMGD" }));
+    expect(
+      await screen.findByRole("heading", { name: "Hybrid PMGD" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Acceso cliente" }),
+    ).toBeVisible();
+
+    await user.selectOptions(screen.getByLabelText("Cliente elegible"), "8");
+    await user.click(screen.getByRole("button", { name: "Asignar cliente" }));
+    expect(
+      await screen.findByText("client@example.local asignado a Hybrid PMGD."),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Quitar client@example.local" }),
+    ).toBeVisible();
+
+    await user.click(
+      screen.getByRole("button", { name: "Quitar client@example.local" }),
+    );
+    expect(
+      screen.getByText("Confirma quitar client@example.local"),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("button", {
+        name: "Confirmar quitar client@example.local",
+      }),
+    );
+    expect(
+      await screen.findByText("client@example.local sin acceso a Hybrid PMGD."),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Quitar client@example.local" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("link", { name: "Admin" }));
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Desactivar client@example.local",
+      }),
+    );
+    expect(
+      screen.getByText("Confirma desactivar client@example.local"),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("button", {
+        name: "Confirmar desactivar client@example.local",
+      }),
+    );
+    expect(
+      await screen.findByText("client@example.local desactivado."),
+    ).toHaveFocus();
+    expect(screen.getByText("deactivated")).toBeVisible();
   });
 
   it("bootstraps the first admin through the JSON contract", async () => {

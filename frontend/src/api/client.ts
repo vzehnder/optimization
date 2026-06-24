@@ -6,6 +6,7 @@ export type ProjectCreatePayload =
   components["schemas"]["ProjectCreateRequest"];
 export type ScenarioCreatePayload =
   components["schemas"]["ScenarioCreateRequest"];
+export type UserCreatePayload = components["schemas"]["UserCreateRequest"];
 
 export interface AuthSessionResponse {
   user: CurrentUser;
@@ -22,6 +23,24 @@ export interface LoginPayload {
   email: string;
   password: string;
   next: string;
+}
+
+export interface AdminUser extends CurrentUser {
+  created_at: string;
+  updated_at: string;
+  created_by?: string;
+  deactivated_at?: string | null;
+}
+
+export interface ProjectClientAccess {
+  project_id: number;
+  user_id: number;
+  email: string;
+  display_name: string;
+  role: string;
+  is_active: boolean;
+  assigned_at: string;
+  assigned_by: string;
 }
 
 export interface Project {
@@ -470,6 +489,33 @@ export async function logout(): Promise<void> {
   await postJsonWithCsrf<void>("/api/auth/logout");
 }
 
+export async function listAdminUsers(
+  signal?: AbortSignal,
+): Promise<AdminUser[]> {
+  const response = await requestJson<{ users: AdminUser[] }>(
+    "/api/admin/users",
+    { signal },
+  );
+  return response.users;
+}
+
+export async function createAdminUser(
+  payload: UserCreatePayload,
+): Promise<AdminUser> {
+  const response = await postJsonWithCsrf<{ user: AdminUser }>(
+    "/api/admin/users",
+    payload,
+  );
+  return response.user;
+}
+
+export async function deactivateAdminUser(userId: number): Promise<AdminUser> {
+  const response = await postJsonWithCsrf<{ user: AdminUser }>(
+    `/api/admin/users/${userId}/deactivate`,
+  );
+  return response.user;
+}
+
 export async function listProjects(signal?: AbortSignal): Promise<Project[]> {
   const response = await requestJson<{ projects: Project[] }>("/api/projects", {
     signal,
@@ -492,6 +538,40 @@ export async function getProject(
     { signal },
   );
   return response.project;
+}
+
+export async function listProjectClientAccess(
+  projectId: number,
+  signal?: AbortSignal,
+): Promise<ProjectClientAccess[]> {
+  const response = await requestJson<{
+    client_access: ProjectClientAccess[];
+  }>(`/api/admin/projects/${projectId}/client-access`, { signal });
+  return response.client_access;
+}
+
+export async function assignProjectClientAccess(
+  projectId: number,
+  userId: number,
+): Promise<ProjectClientAccess> {
+  const response = await postJsonWithCsrf<{
+    client_access: ProjectClientAccess;
+  }>(`/api/admin/projects/${projectId}/client-access`, { user_id: userId });
+  return response.client_access;
+}
+
+export async function removeProjectClientAccess(
+  projectId: number,
+  userId: number,
+): Promise<void> {
+  const csrfToken = await getCsrfToken();
+  await requestJson<{ removed: boolean }>(
+    `/api/admin/projects/${projectId}/client-access/${userId}`,
+    {
+      method: "DELETE",
+      headers: { "X-CSRF-Token": csrfToken },
+    },
+  );
 }
 
 export async function listScenarios(

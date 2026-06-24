@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FormEvent, ReactNode, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
+import { ProjectClientAccessSection } from "./Admin";
 import {
   ApiError,
   createManualRun,
@@ -621,7 +622,11 @@ function DashboardTemplatesSection({ projectId }: { projectId: number }) {
   );
 }
 
-export function ProjectDetailView() {
+export function ProjectDetailView({
+  canManageClientAccess = false,
+}: {
+  canManageClientAccess?: boolean;
+}) {
   const projectId = useNumericParam("projectId");
   const project = useQuery({
     queryKey: projectQueryKey(projectId || 0),
@@ -681,6 +686,12 @@ export function ProjectDetailView() {
           </section>
           <CreateScenarioForm projectId={projectId} />
         </div>
+        {canManageClientAccess ? (
+          <ProjectClientAccessSection
+            projectId={projectId}
+            projectName={project.data.name}
+          />
+        ) : null}
         <DashboardTemplatesSection projectId={projectId} />
       </div>
     </section>

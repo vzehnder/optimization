@@ -107,6 +107,45 @@ class Iteration6ProjectAccessTests(unittest.TestCase):
         )
         self.assertEqual(login_response.status_code, 401)
 
+    def test_admin_user_creation_rejects_invalid_and_duplicate_input_safely(self):
+        invalid_email = post_json_with_csrf(
+            self.client,
+            "/api/admin/users",
+            {
+                "email": "not-an-email",
+                "display_name": "Invalid User",
+                "role": "client",
+                "password": "client pass",
+            },
+        )
+        self.assertEqual(invalid_email.status_code, 400)
+        self.assertEqual(invalid_email.json()["detail"], "valid email is required")
+
+        first_create = post_json_with_csrf(
+            self.client,
+            "/api/admin/users",
+            {
+                "email": "client@example.local",
+                "display_name": "Client User",
+                "role": "client",
+                "password": "client pass",
+            },
+        )
+        self.assertEqual(first_create.status_code, 201)
+
+        duplicate = post_json_with_csrf(
+            self.client,
+            "/api/admin/users",
+            {
+                "email": "CLIENT@example.local",
+                "display_name": "Duplicate User",
+                "role": "client",
+                "password": "client pass",
+            },
+        )
+        self.assertEqual(duplicate.status_code, 400)
+        self.assertEqual(duplicate.json()["detail"], "email already exists")
+
     def test_admin_assigns_clients_to_projects_and_client_portal_filters_access(self):
         first_project = post_json_with_csrf(
             self.client,

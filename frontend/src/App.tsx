@@ -16,6 +16,7 @@ import {
   useNavigate,
 } from "react-router-dom";
 
+import { AdminUsersView } from "./Admin";
 import {
   ApiError,
   bootstrapAdmin,
@@ -247,6 +248,9 @@ function ShellHeader({ user }: { user: CurrentUser }) {
         {user.role !== "client" ? (
           <>
             <Link to="/projects">Analista</Link>
+            {user.role === "admin" ? (
+              <Link to="/admin/users">Admin</Link>
+            ) : null}
             <Link to="/system">Sistema</Link>
           </>
         ) : (
@@ -271,7 +275,15 @@ function AuthenticatedRoutes({ user }: { user: CurrentUser }) {
           />
           <Route
             path="projects/:projectId"
-            element={isClient ? <ForbiddenView /> : <ProjectDetailView />}
+            element={
+              isClient ? (
+                <ForbiddenView />
+              ) : (
+                <ProjectDetailView
+                  canManageClientAccess={user.role === "admin"}
+                />
+              )
+            }
           />
           <Route
             path="scenarios/:scenarioId"
@@ -298,6 +310,12 @@ function AuthenticatedRoutes({ user }: { user: CurrentUser }) {
           <Route
             path="system"
             element={isClient ? <ForbiddenView /> : <SystemStatus />}
+          />
+          <Route
+            path="admin/users"
+            element={
+              user.role === "admin" ? <AdminUsersView /> : <ForbiddenView />
+            }
           />
           <Route
             path="client"

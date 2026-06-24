@@ -201,6 +201,117 @@ test("React auth handles bootstrap, login, refresh, roles, logout, and deactivat
   );
 });
 
+test("React admin users and project access cover assignment, removal, deactivation, and denials", async ({
+  page,
+}) => {
+  await ensureAdminSession(page);
+  const suffix = Date.now();
+  const clientEmail = `portal-client-${suffix}@example.local`;
+  const analystEmail = `ops-analyst-${suffix}@example.local`;
+  const secondAdminEmail = `second-admin-${suffix}@example.local`;
+  const projectName = `Access PMGD ${suffix}`;
+
+  async function createUser(
+    email: string,
+    name: string,
+    role: "admin" | "analyst" | "client",
+    password: string,
+  ) {
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Nombre").fill(name);
+    await page.getByLabel("Password").fill(password);
+    await page.getByLabel("Rol").selectOption(role);
+    await page.getByRole("button", { name: "Crear usuario" }).click();
+    await expect(page.getByText(`${email} creado.`)).toBeVisible();
+  }
+
+  async function login(email: string, password: string) {
+    await expect(
+      page.getByRole("heading", { name: "Iniciar sesion" }),
+    ).toBeVisible();
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill(password);
+    await page.getByRole("button", { name: "Entrar" }).click();
+  }
+
+  await page.getByRole("link", { name: "Admin" }).click();
+  await expect(page.getByRole("heading", { name: "Usuarios" })).toBeVisible();
+  await createUser(clientEmail, "Portal Client", "client", "client-pass");
+  await createUser(analystEmail, "Ops Analyst", "analyst", "analyst-pass");
+  await createUser(secondAdminEmail, "Second Admin", "admin", "admin-pass");
+
+  await page.getByLabel("Email").fill(clientEmail);
+  await page.getByLabel("Nombre").fill("Duplicate Client");
+  await page.getByLabel("Password").fill("client-pass");
+  await page.getByLabel("Rol").selectOption("client");
+  await page.getByRole("button", { name: "Crear usuario" }).click();
+  await expect(page.getByRole("alert")).toContainText("email already exists");
+
+  await page.getByRole("link", { name: "Analista" }).click();
+  await page.getByLabel("Nombre del proyecto").fill(projectName);
+  await page
+    .getByLabel("Descripcion del proyecto")
+    .fill("Client access browser acceptance");
+  await page.getByRole("button", { name: "Crear proyecto" }).click();
+  await page.getByRole("link", { name: projectName }).click();
+  await expect(
+    page.getByRole("heading", { name: "Acceso cliente" }),
+  ).toBeVisible();
+
+  await page
+    .getByLabel("Cliente elegible")
+    .selectOption({ label: clientEmail });
+  await page.getByRole("button", { name: "Asignar cliente" }).click();
+  await expect(
+    page.getByText(`${clientEmail} asignado a ${projectName}.`),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: `Quitar ${clientEmail}` }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: `Quitar ${clientEmail}` }).click();
+  await expect(page.getByText(`Confirma quitar ${clientEmail}`)).toBeVisible();
+  await page
+    .getByRole("button", { name: `Confirmar quitar ${clientEmail}` })
+    .click();
+  await expect(
+    page.getByText(`${clientEmail} sin acceso a ${projectName}.`),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: `Quitar ${clientEmail}` }),
+  ).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Salir" }).click();
+  await login(analystEmail, "analyst-pass");
+  await expect(page).toHaveURL(/\/react\/projects$/);
+  await page.goto("/react/admin/users");
+  await expect(page.getByRole("heading", { name: "Forbidden" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Salir" }).click();
+  await login(clientEmail, "client-pass");
+  await expect(page).toHaveURL(/\/react\/client$/);
+  await page.goto("/react/admin/users");
+  await expect(page.getByRole("heading", { name: "Forbidden" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Salir" }).click();
+  await login("admin@example.local", "admin-pass");
+  await page.getByRole("link", { name: "Admin" }).click();
+  await page.getByRole("button", { name: `Desactivar ${clientEmail}` }).click();
+  await expect(
+    page.getByText(`Confirma desactivar ${clientEmail}`),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: `Confirmar desactivar ${clientEmail}` })
+    .click();
+  await expect(page.getByText(`${clientEmail} desactivado.`)).toBeFocused();
+
+  await page.getByRole("button", { name: "Salir" }).click();
+  await login(clientEmail, "client-pass");
+  await expect(page.getByRole("alert")).toContainText(
+    "Invalid email or password.",
+  );
+});
+
 test("React analyst workspace creates a project and scenario, then preserves direct scenario refresh", async ({
   page,
 }) => {
@@ -645,7 +756,9 @@ test("React manual run lifecycle launches, polls success, and exposes failure lo
   await expect(page.getByText("2026-06-23T12:15:01Z")).toBeVisible();
   await expect(page.getByText("2026-06-23T12:15:03Z")).toBeVisible();
   await expect(page.getByText("2.00 s")).toBeVisible();
-  await expect(page.getByText("0", { exact: true })).toBeVisible();
+  await expect(
+    page.getByLabel("Run state").getByText("0", { exact: true }),
+  ).toBeVisible();
   await expect(
     page
       .getByRole("link", {

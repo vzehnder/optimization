@@ -826,8 +826,16 @@ def create_app(
         display_name = payload.display_name.strip()
         if not email or not password:
             raise HTTPException(status_code=400, detail="email and password are required")
+        if not is_valid_email(email):
+            raise HTTPException(status_code=400, detail="valid email is required")
         if role not in VALID_USER_ROLES:
             raise HTTPException(status_code=400, detail="unsupported user role")
+        try:
+            analyst_store.get_user_by_email(email)
+        except KeyError:
+            pass
+        else:
+            raise HTTPException(status_code=400, detail="email already exists")
         try:
             user = analyst_store.create_user(
                 email=email,
@@ -3901,6 +3909,16 @@ def public_user_dict(user: dict[str, Any]) -> dict[str, Any]:
         "created_by": user["created_by"],
         "deactivated_at": user["deactivated_at"],
     }
+
+
+def is_valid_email(value: str) -> bool:
+    local_part, separator, domain = value.partition("@")
+    return (
+        bool(local_part)
+        and bool(separator)
+        and "." in domain
+        and not any(character.isspace() for character in value)
+    )
 
 
 def render_app_page(title: str, content: str) -> str:
