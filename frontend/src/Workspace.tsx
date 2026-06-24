@@ -5,28 +5,47 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ApiError,
   createManualRun,
+  createDashboardTemplate,
   createProject,
+  createRunPublicationDraft,
   createScenario,
   createScenarioVersionFromJson,
   deleteScenarioVersion,
+  getPublicationPreview,
   getRun,
   getProject,
   getScenario,
   getScenarioVersion,
+  listDashboardTemplates,
   listProjects,
+  listRunArtifacts,
+  listRunPublications,
   listScenarioRuns,
   listScenarios,
   listScenarioVersions,
+  publishPublication,
+  unpublishPublication,
   uploadScenarioVersion,
+  updateDashboardTemplate,
+  updatePublicationDraft,
+  type DashboardTemplate,
+  type DashboardTemplatePayload,
+  type Publication,
+  type PublicationPayload,
   type Project,
   type ProjectCreatePayload,
+  type RunArtifact,
   type Scenario,
   type ScenarioCreatePayload,
   type ScenarioRun,
   type ScenarioVersion,
   type ScenarioVersionDetail,
 } from "./api/client";
-import { RunArtifactsSection, RunResultsSection } from "./RunResults";
+import {
+  DashboardResultsContent,
+  RunArtifactsSection,
+  RunResultsSection,
+} from "./RunResults";
 
 const projectsQueryKey = ["projects"] as const;
 const projectQueryKey = (projectId: number) => ["project", projectId] as const;
@@ -39,6 +58,14 @@ const scenarioVersionsQueryKey = (scenarioId: number) =>
 const scenarioRunsQueryKey = (scenarioId: number) =>
   ["scenario-runs", scenarioId] as const;
 const runQueryKey = (runId: number) => ["run", runId] as const;
+const dashboardTemplatesQueryKey = (projectId: number) =>
+  ["dashboard-templates", projectId] as const;
+const runPublicationsQueryKey = (runId: number) =>
+  ["run-publications", runId] as const;
+const runArtifactsQueryKey = (runId: number) =>
+  ["publication-run-artifacts", runId] as const;
+const publicationPreviewQueryKey = (publicationId: number) =>
+  ["publication-preview", publicationId] as const;
 const terminalRunStatuses = new Set(["succeeded", "failed"]);
 
 function errorMessage(error: unknown): string {
@@ -67,6 +94,50 @@ function appendUnique<T extends { id: number }>(
   if (!items) return [item];
   if (items.some((existing) => existing.id === item.id)) return items;
   return [...items, item];
+}
+
+function replaceById<T extends { id: number }>(
+  items: T[] | undefined,
+  item: T,
+): T[] {
+  if (!items) return [item];
+  if (!items.some((existing) => existing.id === item.id))
+    return [...items, item];
+  return items.map((existing) => (existing.id === item.id ? item : existing));
+}
+
+function defaultDashboardTemplatePayload(): DashboardTemplatePayload {
+  return {
+    name: "",
+    show_summary: true,
+    show_price_chart: true,
+    show_grid_chart: true,
+    show_renewable_chart: true,
+    show_bess_chart: true,
+    show_hydro_chart: true,
+    show_profit_chart: true,
+    show_system_dispatch_table: true,
+    show_asset_dispatch_table: true,
+    table_preview_limit: 10,
+  };
+}
+
+function payloadFromTemplate(
+  template: DashboardTemplate,
+): DashboardTemplatePayload {
+  return {
+    name: template.name,
+    show_summary: template.show_summary,
+    show_price_chart: template.show_price_chart,
+    show_grid_chart: template.show_grid_chart,
+    show_renewable_chart: template.show_renewable_chart,
+    show_bess_chart: template.show_bess_chart,
+    show_hydro_chart: template.show_hydro_chart,
+    show_profit_chart: template.show_profit_chart,
+    show_system_dispatch_table: template.show_system_dispatch_table,
+    show_asset_dispatch_table: template.show_asset_dispatch_table,
+    table_preview_limit: template.table_preview_limit,
+  };
 }
 
 function useNumericParam(name: string): number | null {
@@ -306,6 +377,250 @@ function CreateScenarioForm({ projectId }: { projectId: number }) {
   );
 }
 
+const templateBooleanFields: Array<[keyof DashboardTemplatePayload, string]> = [
+  ["show_summary", "Summary"],
+  ["show_price_chart", "Price chart"],
+  ["show_grid_chart", "Grid chart"],
+  ["show_renewable_chart", "Renewable chart"],
+  ["show_bess_chart", "BESS chart"],
+  ["show_hydro_chart", "Hydro chart"],
+  ["show_profit_chart", "Profit chart"],
+  ["show_system_dispatch_table", "System dispatch table"],
+  ["show_asset_dispatch_table", "Asset dispatch table"],
+];
+
+function DashboardTemplateFields({
+  value,
+  onChange,
+  nameLabel,
+}: {
+  value: DashboardTemplatePayload;
+  onChange: (value: DashboardTemplatePayload) => void;
+  nameLabel: string;
+}) {
+  return (
+    <>
+      <label htmlFor={`${nameLabel}-name`}>{nameLabel}</label>
+      <input
+        id={`${nameLabel}-name`}
+        type="text"
+        value={value.name}
+        required
+        onChange={(event) => onChange({ ...value, name: event.target.value })}
+      />
+      <div className="template-toggle-grid">
+        {templateBooleanFields.map(([field, label]) => (
+          <label key={field} className="checkbox-row">
+            <input
+              type="checkbox"
+              aria-label={label}
+              checked={Boolean(value[field])}
+              onChange={(event) =>
+                onChange({ ...value, [field]: event.target.checked })
+              }
+            />
+            <span>{label}</span>
+          </label>
+        ))}
+      </div>
+      <label htmlFor={`${nameLabel}-row-limit`}>Table row limit</label>
+      <input
+        id={`${nameLabel}-row-limit`}
+        type="number"
+        min="1"
+        value={value.table_preview_limit}
+        onChange={(event) =>
+          onChange({
+            ...value,
+            table_preview_limit: Math.max(1, Number(event.target.value) || 1),
+          })
+        }
+      />
+    </>
+  );
+}
+
+function CreateDashboardTemplateForm({ projectId }: { projectId: number }) {
+  const queryClient = useQueryClient();
+  const [payload, setPayload] = useState(defaultDashboardTemplatePayload);
+  const [error, setError] = useState("");
+  const mutation = useMutation({
+    mutationFn: () =>
+      createDashboardTemplate(projectId, {
+        ...payload,
+        name: payload.name.trim(),
+      }),
+    onSuccess: (template) => {
+      setError("");
+      setPayload(defaultDashboardTemplatePayload());
+      queryClient.setQueryData<DashboardTemplate[]>(
+        dashboardTemplatesQueryKey(projectId),
+        (templates) => appendUnique(templates, template),
+      );
+      void queryClient.invalidateQueries({
+        queryKey: dashboardTemplatesQueryKey(projectId),
+      });
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError)),
+  });
+
+  return (
+    <form
+      className="workspace-form template-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        setError("");
+        mutation.mutate();
+      }}
+    >
+      <h3>Nuevo template</h3>
+      {error ? <p role="alert">{error}</p> : null}
+      <DashboardTemplateFields
+        value={payload}
+        onChange={setPayload}
+        nameLabel="Nombre nuevo template"
+      />
+      <button type="submit" disabled={mutation.isPending}>
+        Crear template
+      </button>
+    </form>
+  );
+}
+
+function EditDashboardTemplateForm({
+  template,
+  onDone,
+}: {
+  template: DashboardTemplate;
+  onDone: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [payload, setPayload] = useState(() => payloadFromTemplate(template));
+  const [error, setError] = useState("");
+  const mutation = useMutation({
+    mutationFn: () =>
+      updateDashboardTemplate(template.id, {
+        ...payload,
+        name: payload.name.trim(),
+      }),
+    onSuccess: (updated) => {
+      setError("");
+      queryClient.setQueryData<DashboardTemplate[]>(
+        dashboardTemplatesQueryKey(updated.project_id),
+        (templates) => replaceById(templates, updated),
+      );
+      void queryClient.invalidateQueries({
+        queryKey: dashboardTemplatesQueryKey(updated.project_id),
+      });
+      onDone();
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError)),
+  });
+
+  return (
+    <form
+      className="workspace-form template-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        setError("");
+        mutation.mutate();
+      }}
+    >
+      {error ? <p role="alert">{error}</p> : null}
+      <DashboardTemplateFields
+        value={payload}
+        onChange={setPayload}
+        nameLabel="Nombre del template editado"
+      />
+      <div className="inline-actions">
+        <button type="submit" disabled={mutation.isPending}>
+          Actualizar template
+        </button>
+        <button type="button" className="secondary-action" onClick={onDone}>
+          Cancelar
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function DashboardTemplateList({
+  templates,
+}: {
+  templates: DashboardTemplate[];
+}) {
+  const [editingId, setEditingId] = useState<number | null>(null);
+  if (!templates.length) {
+    return <EmptyState>Aun no hay templates de dashboard.</EmptyState>;
+  }
+  return (
+    <ul className="resource-list template-list">
+      {templates.map((template) => (
+        <li key={template.id}>
+          <strong>{template.name}</strong>
+          <p>
+            Summary {template.show_summary ? "on" : "off"} | Charts{" "}
+            {[
+              template.show_price_chart ? "price" : "",
+              template.show_grid_chart ? "grid" : "",
+              template.show_renewable_chart ? "renewable" : "",
+              template.show_bess_chart ? "BESS" : "",
+              template.show_hydro_chart ? "hydro" : "",
+              template.show_profit_chart ? "profit" : "",
+            ]
+              .filter(Boolean)
+              .join(", ") || "none"}{" "}
+            | rows {template.table_preview_limit}
+          </p>
+          <button
+            type="button"
+            className="secondary-action"
+            onClick={() => setEditingId(template.id)}
+          >
+            Editar {template.name}
+          </button>
+          {editingId === template.id ? (
+            <EditDashboardTemplateForm
+              template={template}
+              onDone={() => setEditingId(null)}
+            />
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function DashboardTemplatesSection({ projectId }: { projectId: number }) {
+  const templates = useQuery({
+    queryKey: dashboardTemplatesQueryKey(projectId),
+    queryFn: ({ signal }) => listDashboardTemplates(projectId, signal),
+    retry: false,
+  });
+
+  return (
+    <section
+      className="workspace-section"
+      aria-labelledby="dashboard-templates"
+    >
+      <h2 id="dashboard-templates">Dashboard templates</h2>
+      {templates.isPending ? (
+        <p role="status">Cargando templates</p>
+      ) : templates.isError ? (
+        <div role="alert">
+          <p>{errorMessage(templates.error)}</p>
+          <button type="button" onClick={() => void templates.refetch()}>
+            Reintentar
+          </button>
+        </div>
+      ) : (
+        <DashboardTemplateList templates={templates.data} />
+      )}
+      <CreateDashboardTemplateForm projectId={projectId} />
+    </section>
+  );
+}
+
 export function ProjectDetailView() {
   const projectId = useNumericParam("projectId");
   const project = useQuery({
@@ -355,12 +670,18 @@ export function ProjectDetailView() {
         <h1>{project.data.name}</h1>
         <p>{project.data.description || "Sin descripcion."}</p>
       </header>
-      <div className="workspace-grid">
-        <section className="workspace-section" aria-labelledby="scenario-list">
-          <h2 id="scenario-list">Escenarios</h2>
-          <ScenarioList scenarios={scenarios.data} />
-        </section>
-        <CreateScenarioForm projectId={projectId} />
+      <div className="workspace-stack">
+        <div className="workspace-grid">
+          <section
+            className="workspace-section"
+            aria-labelledby="scenario-list"
+          >
+            <h2 id="scenario-list">Escenarios</h2>
+            <ScenarioList scenarios={scenarios.data} />
+          </section>
+          <CreateScenarioForm projectId={projectId} />
+        </div>
+        <DashboardTemplatesSection projectId={projectId} />
       </div>
     </section>
   );
@@ -980,6 +1301,584 @@ function RunFailureDetails({ run }: { run: ScenarioRun }) {
   );
 }
 
+const defaultPublicationArtifactTypes = [
+  "summary_json",
+  "dispatch_csv",
+  "asset_dispatch_csv",
+];
+
+function artifactTypeOptions(artifacts: RunArtifact[]): string[] {
+  return [
+    ...new Set(artifacts.map((artifact) => artifact.artifact_type)),
+  ].sort();
+}
+
+function initialAllowedArtifactTypes(
+  artifactTypes: string[],
+  publication?: Publication,
+): string[] {
+  if (publication) return publication.allowed_artifact_types;
+  const defaults = defaultPublicationArtifactTypes.filter((artifactType) =>
+    artifactTypes.includes(artifactType),
+  );
+  return defaults.length ? defaults : artifactTypes;
+}
+
+function PublicationEditorForm({
+  templates,
+  artifacts,
+  publication,
+  titleLabel,
+  notesLabel,
+  templateLabel,
+  submitLabel,
+  pending,
+  error,
+  onSubmit,
+  onCancel,
+}: {
+  templates: DashboardTemplate[];
+  artifacts: RunArtifact[];
+  publication?: Publication;
+  titleLabel: string;
+  notesLabel: string;
+  templateLabel: string;
+  submitLabel: string;
+  pending: boolean;
+  error: string;
+  onSubmit: (payload: PublicationPayload) => void;
+  onCancel?: () => void;
+}) {
+  const artifactTypes = artifactTypeOptions(artifacts);
+  const [dashboardTemplateId, setDashboardTemplateId] = useState(
+    publication?.dashboard_template_id || templates[0]?.id || 0,
+  );
+  const [publicTitle, setPublicTitle] = useState(
+    publication?.public_title || "",
+  );
+  const [analystNotes, setAnalystNotes] = useState(
+    publication?.analyst_notes || "",
+  );
+  const [allowedArtifactTypes, setAllowedArtifactTypes] = useState<string[]>(
+    () => initialAllowedArtifactTypes(artifactTypes, publication),
+  );
+
+  function toggleArtifact(artifactType: string, checked: boolean) {
+    setAllowedArtifactTypes((current) => {
+      if (checked && !current.includes(artifactType)) {
+        return [...current, artifactType];
+      }
+      if (!checked) {
+        return current.filter((candidate) => candidate !== artifactType);
+      }
+      return current;
+    });
+  }
+
+  return (
+    <form
+      className="workspace-form publication-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit({
+          dashboard_template_id: dashboardTemplateId,
+          public_title: publicTitle.trim(),
+          analyst_notes: analystNotes,
+          allowed_artifact_types: allowedArtifactTypes,
+        });
+      }}
+    >
+      {error ? <p role="alert">{error}</p> : null}
+      <label htmlFor={`${titleLabel}-template`}>{templateLabel}</label>
+      <select
+        id={`${titleLabel}-template`}
+        value={dashboardTemplateId || ""}
+        required
+        onChange={(event) => setDashboardTemplateId(Number(event.target.value))}
+      >
+        <option value="" disabled>
+          Selecciona template
+        </option>
+        {templates.map((template) => (
+          <option key={template.id} value={template.id}>
+            {template.name}
+          </option>
+        ))}
+      </select>
+      <label htmlFor={`${titleLabel}-title`}>{titleLabel}</label>
+      <input
+        id={`${titleLabel}-title`}
+        type="text"
+        value={publicTitle}
+        required
+        onChange={(event) => setPublicTitle(event.target.value)}
+      />
+      <label htmlFor={`${titleLabel}-notes`}>{notesLabel}</label>
+      <textarea
+        id={`${titleLabel}-notes`}
+        rows={3}
+        value={analystNotes}
+        onChange={(event) => setAnalystNotes(event.target.value)}
+      />
+      <fieldset className="artifact-fieldset">
+        <legend>Allowed artifact types</legend>
+        {artifactTypes.length ? (
+          artifactTypes.map((artifactType) => (
+            <label key={artifactType} className="checkbox-row">
+              <input
+                type="checkbox"
+                aria-label={artifactType}
+                checked={allowedArtifactTypes.includes(artifactType)}
+                onChange={(event) =>
+                  toggleArtifact(artifactType, event.target.checked)
+                }
+              />
+              <span>{artifactType}</span>
+            </label>
+          ))
+        ) : (
+          <p className="empty-state">No hay artifacts registrados.</p>
+        )}
+      </fieldset>
+      <div className="inline-actions">
+        <button type="submit" disabled={pending || !templates.length}>
+          {submitLabel}
+        </button>
+        {onCancel ? (
+          <button type="button" className="secondary-action" onClick={onCancel}>
+            Cancelar
+          </button>
+        ) : null}
+      </div>
+    </form>
+  );
+}
+
+function CreatePublicationForm({
+  runId,
+  templates,
+  artifacts,
+}: {
+  runId: number;
+  templates: DashboardTemplate[];
+  artifacts: RunArtifact[];
+}) {
+  const queryClient = useQueryClient();
+  const [error, setError] = useState("");
+  const mutation = useMutation({
+    mutationFn: (payload: PublicationPayload) =>
+      createRunPublicationDraft(runId, payload),
+    onSuccess: (publication) => {
+      setError("");
+      queryClient.setQueryData<Publication[]>(
+        runPublicationsQueryKey(runId),
+        (publications) => appendUnique(publications, publication),
+      );
+      void queryClient.invalidateQueries({
+        queryKey: runPublicationsQueryKey(runId),
+      });
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError)),
+  });
+
+  if (!templates.length) {
+    return (
+      <p className="empty-state">
+        Crea un dashboard template del proyecto antes de publicar.
+      </p>
+    );
+  }
+
+  return (
+    <div className="publication-create">
+      <h3>Nueva publicacion</h3>
+      <PublicationEditorForm
+        templates={templates}
+        artifacts={artifacts}
+        titleLabel="Public Title"
+        notesLabel="Analyst Notes"
+        templateLabel="Dashboard Template"
+        submitLabel="Crear publicacion"
+        pending={mutation.isPending}
+        error={error}
+        onSubmit={(payload) => {
+          setError("");
+          mutation.mutate(payload);
+        }}
+      />
+    </div>
+  );
+}
+
+function PublicationAudit({ publication }: { publication: Publication }) {
+  return (
+    <dl className="source-metadata version-metadata publication-audit">
+      <div>
+        <dt>Status</dt>
+        <dd>{publication.status}</dd>
+      </div>
+      <div>
+        <dt>Updated by</dt>
+        <dd>{displayValue(publication.updated_by)}</dd>
+      </div>
+      <div>
+        <dt>Updated at</dt>
+        <dd>{displayValue(publication.updated_at)}</dd>
+      </div>
+      <div>
+        <dt>Published by</dt>
+        <dd>{displayValue(publication.published_by)}</dd>
+      </div>
+      <div>
+        <dt>Published at</dt>
+        <dd>{displayValue(publication.published_at)}</dd>
+      </div>
+      <div>
+        <dt>Unpublished at</dt>
+        <dd>{displayValue(publication.unpublished_at)}</dd>
+      </div>
+    </dl>
+  );
+}
+
+function PublicationItem({
+  publication,
+  templates,
+  artifacts,
+}: {
+  publication: Publication;
+  templates: DashboardTemplate[];
+  artifacts: RunArtifact[];
+}) {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [transitionError, setTransitionError] = useState("");
+
+  function acceptPublication(updated: Publication) {
+    queryClient.setQueryData<Publication[]>(
+      runPublicationsQueryKey(updated.run_id),
+      (publications) => replaceById(publications, updated),
+    );
+    void queryClient.invalidateQueries({
+      queryKey: runPublicationsQueryKey(updated.run_id),
+    });
+    void queryClient.invalidateQueries({
+      queryKey: publicationPreviewQueryKey(updated.id),
+    });
+  }
+
+  const editMutation = useMutation({
+    mutationFn: (payload: PublicationPayload) =>
+      updatePublicationDraft(publication.id, payload),
+    onSuccess: (updated) => {
+      setEditError("");
+      setEditing(false);
+      acceptPublication(updated);
+    },
+    onError: (mutationError) => setEditError(errorMessage(mutationError)),
+  });
+  const publishMutation = useMutation({
+    mutationFn: () => publishPublication(publication.id),
+    onSuccess: (updated) => {
+      setTransitionError("");
+      acceptPublication(updated);
+    },
+    onError: (mutationError) => setTransitionError(errorMessage(mutationError)),
+  });
+  const unpublishMutation = useMutation({
+    mutationFn: () => unpublishPublication(publication.id),
+    onSuccess: (updated) => {
+      setTransitionError("");
+      acceptPublication(updated);
+    },
+    onError: (mutationError) => setTransitionError(errorMessage(mutationError)),
+  });
+
+  return (
+    <li>
+      <div className="publication-heading-row">
+        <strong>{publication.public_title}</strong>
+        <span className="role-badge">{publication.status}</span>
+      </div>
+      <p>{publication.analyst_notes || "Sin notas."}</p>
+      <p>{publication.allowed_artifact_types.join(", ") || "Sin downloads"}</p>
+      <PublicationAudit publication={publication} />
+      {transitionError ? <p role="alert">{transitionError}</p> : null}
+      <div className="inline-actions">
+        <Link
+          className="button-link"
+          to={`/publications/${publication.id}/preview`}
+        >
+          Preview as client {publication.public_title}
+        </Link>
+        {publication.status === "draft" ? (
+          <button
+            type="button"
+            className="secondary-action"
+            onClick={() => setEditing(true)}
+          >
+            Editar publicacion {publication.public_title}
+          </button>
+        ) : null}
+        {publication.status !== "published" ? (
+          <button
+            type="button"
+            disabled={publishMutation.isPending}
+            onClick={() => {
+              setTransitionError("");
+              publishMutation.mutate();
+            }}
+          >
+            Publicar {publication.public_title}
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={unpublishMutation.isPending}
+            onClick={() => {
+              setTransitionError("");
+              unpublishMutation.mutate();
+            }}
+          >
+            Unpublicar {publication.public_title}
+          </button>
+        )}
+      </div>
+      {editing ? (
+        <PublicationEditorForm
+          templates={templates}
+          artifacts={artifacts}
+          publication={publication}
+          titleLabel="Public Title editado"
+          notesLabel="Analyst Notes editadas"
+          templateLabel="Dashboard Template editado"
+          submitLabel="Actualizar publicacion"
+          pending={editMutation.isPending}
+          error={editError}
+          onCancel={() => {
+            setEditing(false);
+            setEditError("");
+          }}
+          onSubmit={(payload) => {
+            setEditError("");
+            editMutation.mutate(payload);
+          }}
+        />
+      ) : null}
+    </li>
+  );
+}
+
+function PublicationList({
+  publications,
+  templates,
+  artifacts,
+}: {
+  publications: Publication[];
+  templates: DashboardTemplate[];
+  artifacts: RunArtifact[];
+}) {
+  if (!publications.length) {
+    return <EmptyState>No publication drafts yet.</EmptyState>;
+  }
+  return (
+    <ul className="resource-list publication-list">
+      {publications.map((publication) => (
+        <PublicationItem
+          key={publication.id}
+          publication={publication}
+          templates={templates}
+          artifacts={artifacts}
+        />
+      ))}
+    </ul>
+  );
+}
+
+function PublicationSection({
+  run,
+  projectId,
+}: {
+  run: ScenarioRun;
+  projectId?: number;
+}) {
+  const templates = useQuery({
+    queryKey: dashboardTemplatesQueryKey(projectId || 0),
+    queryFn: ({ signal }) => listDashboardTemplates(projectId || 0, signal),
+    enabled: run.status === "succeeded" && projectId !== undefined,
+    retry: false,
+  });
+  const publications = useQuery({
+    queryKey: runPublicationsQueryKey(run.id),
+    queryFn: ({ signal }) => listRunPublications(run.id, signal),
+    enabled: run.status === "succeeded",
+    retry: false,
+  });
+  const artifacts = useQuery({
+    queryKey: runArtifactsQueryKey(run.id),
+    queryFn: ({ signal }) => listRunArtifacts(run.id, signal),
+    enabled: run.status === "succeeded",
+    retry: false,
+  });
+
+  if (run.status !== "succeeded") return null;
+  if (
+    projectId === undefined ||
+    templates.isPending ||
+    publications.isPending ||
+    artifacts.isPending
+  ) {
+    return (
+      <section className="workspace-section" aria-labelledby="publications">
+        <h2 id="publications">Publication Drafts</h2>
+        <p role="status">Cargando publicaciones</p>
+      </section>
+    );
+  }
+  if (templates.isError || publications.isError || artifacts.isError) {
+    return (
+      <section className="workspace-section" aria-labelledby="publications">
+        <h2 id="publications">Publication Drafts</h2>
+        <p role="alert">
+          {errorMessage(
+            templates.error || publications.error || artifacts.error,
+          )}
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="workspace-section" aria-labelledby="publications">
+      <h2 id="publications">Publication Drafts</h2>
+      <PublicationList
+        publications={publications.data}
+        templates={templates.data}
+        artifacts={artifacts.data}
+      />
+      <CreatePublicationForm
+        runId={run.id}
+        templates={templates.data}
+        artifacts={artifacts.data}
+      />
+    </section>
+  );
+}
+
+function PublicationDownloads({
+  downloads,
+}: {
+  downloads: Array<{
+    artifact_type: string;
+    display_name: string;
+    media_type: string;
+    byte_size: number;
+    download_url: string;
+  }>;
+}) {
+  return (
+    <section
+      className="workspace-section"
+      aria-labelledby="publication-downloads"
+    >
+      <h2 id="publication-downloads">Downloads</h2>
+      {downloads.length ? (
+        <ul className="resource-list artifact-list">
+          {downloads.map((download) => (
+            <li key={download.artifact_type}>
+              <a href={download.download_url} download={download.display_name}>
+                {download.display_name}
+              </a>
+              <p>
+                {download.artifact_type} | {download.media_type} |{" "}
+                {download.byte_size} bytes
+              </p>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="empty-state">
+          No downloads enabled for this publication.
+        </p>
+      )}
+    </section>
+  );
+}
+
+export function PublicationPreviewView() {
+  const publicationId = useNumericParam("publicationId");
+  const preview = useQuery({
+    queryKey: publicationPreviewQueryKey(publicationId || 0),
+    queryFn: ({ signal }) => getPublicationPreview(publicationId || 0, signal),
+    enabled: publicationId !== null,
+    retry: false,
+  });
+
+  if (publicationId === null) {
+    return <NotFoundView>La publicacion solicitada no existe.</NotFoundView>;
+  }
+  if (preview.isPending) {
+    return <LoadingView label="Cargando preview" />;
+  }
+  if (preview.isError) {
+    return (
+      <RequestErrorView
+        error={preview.error}
+        retry={() => void preview.refetch()}
+      />
+    );
+  }
+
+  const data = preview.data;
+  return (
+    <section className="workspace-view">
+      <Breadcrumbs>
+        <Link to="/projects">Proyectos</Link>
+        <span aria-hidden="true">/</span>
+        <Link to={`/projects/${data.project.id}`}>{data.project.name}</Link>
+        <span aria-hidden="true">/</span>
+        <Link to={`/runs/${data.run.id}`}>Run {data.run.id}</Link>
+        <span aria-hidden="true">/</span>
+        <span>Preview</span>
+      </Breadcrumbs>
+      <header className="workspace-heading">
+        <p className="eyebrow">Client preview</p>
+        <h1>{data.publication.public_title}</h1>
+        <p>{data.publication.analyst_notes || "Sin notas."}</p>
+      </header>
+      <div className="workspace-stack">
+        <section className="workspace-section" aria-labelledby="preview-meta">
+          <h2 id="preview-meta">Publication</h2>
+          <dl className="source-metadata version-metadata">
+            <div>
+              <dt>Template</dt>
+              <dd>{data.template.name}</dd>
+            </div>
+            <div>
+              <dt>Status</dt>
+              <dd>{data.publication.status}</dd>
+            </div>
+            <div>
+              <dt>Run Status</dt>
+              <dd>{data.run.status}</dd>
+            </div>
+            <div>
+              <dt>Scenario Version</dt>
+              <dd>{data.scenario_version.version_number}</dd>
+            </div>
+          </dl>
+        </section>
+        <DashboardResultsContent
+          results={data.results}
+          resultsError={data.results_error}
+        />
+        <PublicationDownloads downloads={data.downloads} />
+      </div>
+    </section>
+  );
+}
+
 export function RunDetailView() {
   const runId = useNumericParam("runId");
   const run = useQuery({
@@ -1080,6 +1979,7 @@ export function RunDetailView() {
         </section>
         <RunFailureDetails run={runData} />
         <RunResultsSection run={runData} />
+        <PublicationSection run={runData} projectId={project.data?.id} />
         <RunArtifactsSection run={runData} />
       </div>
     </section>

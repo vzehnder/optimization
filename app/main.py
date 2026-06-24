@@ -2015,6 +2015,48 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"publications": publications}
 
+    @app.get("/api/publications/{publication_id}/preview")
+    async def get_publication_preview(publication_id: int):
+        try:
+            publication = analyst_store.get_publication(publication_id)
+            project = analyst_store.get_project(publication["project_id"])
+            scenario = analyst_store.get_scenario(publication["scenario_id"])
+            version = analyst_store.get_scenario_version(
+                publication["scenario_version_id"],
+                include_document=False,
+            )
+            run = analyst_store.get_run(publication["run_id"])
+            template = analyst_store.get_dashboard_template(
+                publication["dashboard_template_id"]
+            )
+            artifacts = analyst_store.list_run_artifacts(run["id"])
+            downloads = publication_download_artifacts(
+                publication,
+                artifacts,
+                lambda artifact: f"/api/run-artifacts/{artifact['id']}/download",
+            )
+            results = apply_dashboard_template(
+                read_run_results(run, artifacts, configured_artifact_root),
+                template,
+            )
+            results_error = ""
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ResultReadError as error:
+            results = None
+            results_error = error.message
+        return {
+            "project": project,
+            "scenario": scenario,
+            "scenario_version": version,
+            "run": run,
+            "publication": publication,
+            "template": template,
+            "results": results,
+            "results_error": results_error,
+            "downloads": downloads,
+        }
+
     @app.post("/api/runs/{run_id}/publications", status_code=201)
     async def create_run_publication_draft(
         run_id: int,

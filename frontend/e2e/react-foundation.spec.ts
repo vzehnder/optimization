@@ -1065,6 +1065,171 @@ test("React run results renders Plotly charts, tables, missing legacy columns, a
   ).toBeVisible();
 });
 
+test("React dashboard templates and publications cover draft preview publish and unpublish", async ({
+  page,
+}) => {
+  await ensureAdminSession(page);
+  const suffix = Date.now();
+  const api = page.context().request;
+  const sampleCase = readFileSync(
+    resolve("..", "data/cases/hybrid_system/system_case.json"),
+    "utf-8",
+  );
+
+  const projectResponse = await postWithCsrf(api, "/api/projects", {
+    name: `Publication PMGD ${suffix}`,
+    description: "Publication curation browser acceptance",
+  });
+  expect(projectResponse.ok()).toBeTruthy();
+  const project = (await projectResponse.json()) as { id: number };
+  const scenarioResponse = await postWithCsrf(
+    api,
+    `/api/projects/${project.id}/scenarios`,
+    {
+      name: `Publication case ${suffix}`,
+      description: "Dashboard template and publication branch",
+    },
+  );
+  expect(scenarioResponse.ok()).toBeTruthy();
+  const scenario = (await scenarioResponse.json()) as { id: number };
+  const versionResponse = await postWithCsrf(
+    api,
+    `/api/scenarios/${scenario.id}/versions`,
+    { system_case_json: sampleCase },
+  );
+  expect(versionResponse.status()).toBe(201);
+  const version = (await versionResponse.json()) as {
+    id: number;
+    version_number: number;
+  };
+  const runResponse = await postWithCsrf(
+    api,
+    `/api/scenario-versions/${version.id}/runs`,
+  );
+  expect(runResponse.status()).toBe(201);
+  const run = (await runResponse.json()) as { id: number };
+
+  await page.goto(`/react/projects/${project.id}`);
+  await expect(
+    page.getByRole("heading", { name: "Dashboard templates" }),
+  ).toBeVisible();
+
+  const templateName = `Client Summary ${suffix}`;
+  const updatedTemplateName = `Client Board ${suffix}`;
+  await page.getByLabel("Nombre nuevo template").fill(templateName);
+  await page.getByLabel("Renewable chart").uncheck();
+  await page.getByLabel("Asset dispatch table").uncheck();
+  await page.getByLabel("Table row limit").fill("1");
+  await page.getByRole("button", { name: "Crear template" }).click();
+  await expect(page.getByText(templateName, { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: `Editar ${templateName}` }).click();
+  await page
+    .getByLabel("Nombre del template editado")
+    .fill(updatedTemplateName);
+  await page.getByRole("button", { name: "Actualizar template" }).click();
+  await expect(
+    page.getByText(updatedTemplateName, { exact: true }),
+  ).toBeVisible();
+
+  await page.goto(`/react/runs/${run.id}`);
+  await expect(page.getByText("succeeded", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Publication Drafts" }),
+  ).toBeVisible();
+  await page.getByLabel("Dashboard Template").selectOption({
+    label: updatedTemplateName,
+  });
+  await page.getByLabel("Public Title").fill("Board Dispatch Review");
+  await page
+    .getByLabel("Analyst Notes")
+    .fill("Approved assumptions for preview.");
+  await page.getByLabel("model_metadata_json").check();
+  const createPublication = page.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/api/runs/${run.id}/publications`) &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Crear publicacion" }).click();
+  const publication = (await (await createPublication).json()) as {
+    publication: { id: number };
+  };
+  await expect(
+    page.getByText("Board Dispatch Review", { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".role-badge", { hasText: "draft" })).toBeVisible();
+
+  let failNextPublicationUpdate = true;
+  await page.route("**/api/publications/*", async (route) => {
+    if (route.request().method() === "PUT" && failNextPublicationUpdate) {
+      failNextPublicationUpdate = false;
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "synthetic publication save failure" }),
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page
+    .getByRole("button", { name: "Editar publicacion Board Dispatch Review" })
+    .click();
+  await page.getByLabel("Public Title editado").fill("Board Dispatch Final");
+  await page.getByLabel("Analyst Notes editadas").fill("Final preview notes.");
+  await page.getByRole("button", { name: "Actualizar publicacion" }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "synthetic publication save failure",
+  );
+  await expect(page.getByLabel("Public Title editado")).toHaveValue(
+    "Board Dispatch Final",
+  );
+  await page.getByRole("button", { name: "Actualizar publicacion" }).click();
+  await expect(
+    page.getByText("Board Dispatch Final", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Final preview notes.", { exact: true }),
+  ).toBeVisible();
+
+  await page
+    .getByRole("link", { name: "Preview as client Board Dispatch Final" })
+    .click();
+  await expect(page).toHaveURL(
+    new RegExp(`/react/publications/${publication.publication.id}/preview$`),
+  );
+  await expect(
+    page.getByRole("heading", { name: "Board Dispatch Final" }),
+  ).toBeVisible();
+  await expect(page.getByText("Final preview notes.")).toBeVisible();
+  await expect(page.getByText("Objective Value")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "System Dispatch" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Asset Dispatch" }),
+  ).toHaveCount(0);
+  await expect(page.getByText("Publication Drafts")).toHaveCount(0);
+
+  await page.goto(`/react/runs/${run.id}`);
+  await page
+    .getByRole("button", { name: "Publicar Board Dispatch Final" })
+    .click();
+  await expect(
+    page.locator(".role-badge", { hasText: "published" }),
+  ).toBeVisible();
+  await expect(page.getByText("Published by")).toBeVisible();
+  await expect(page.getByText("admin@example.local").first()).toBeVisible();
+  await page
+    .getByRole("button", { name: "Unpublicar Board Dispatch Final" })
+    .click();
+  await expect(
+    page.locator(".role-badge", { hasText: "unpublished" }),
+  ).toBeVisible();
+  await expect(page.getByText("Unpublished at")).toBeVisible();
+});
+
 function chart(
   id: string,
   title: string,

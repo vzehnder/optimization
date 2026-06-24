@@ -285,6 +285,13 @@ button:focus-visible {
   font-size: 1.05rem;
 }
 
+.workspace-section h3,
+.workspace-form h3 {
+  margin: 0;
+  color: #17324d;
+  font-size: 0.95rem;
+}
+
 .workspace-form {
   display: grid;
   gap: 0.7rem;
@@ -295,6 +302,7 @@ button:focus-visible {
 }
 
 .workspace-form input,
+.workspace-form select,
 .workspace-form textarea {
   width: 100%;
   border: 1px solid #b8c7d6;
@@ -307,6 +315,55 @@ button:focus-visible {
 
 .workspace-form button {
   justify-self: start;
+}
+
+.template-form,
+.publication-form,
+.publication-create {
+  margin-top: 0.8rem;
+}
+
+.template-toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem 0.8rem;
+}
+
+.inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.artifact-fieldset {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.85rem;
+  border: 1px solid #d8e2eb;
+  border-radius: 8px;
+}
+
+.artifact-fieldset legend {
+  padding: 0 0.35rem;
+  color: #17324d;
+  font-weight: 800;
+}
+
+.publication-heading-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.publication-list .publication-form {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .workspace-form [role="alert"] {

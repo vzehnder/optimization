@@ -32,6 +32,7 @@ import "./styles.css";
 import {
   ForbiddenView,
   NotFoundView,
+  PublicationPreviewView,
   ProjectDetailView,
   ProjectListView,
   RunDetailView,
@@ -289,6 +290,10 @@ function AuthenticatedRoutes({ user }: { user: CurrentUser }) {
           <Route
             path="runs/:runId"
             element={isClient ? <ForbiddenView /> : <RunDetailView />}
+          />
+          <Route
+            path="publications/:publicationId/preview"
+            element={isClient ? <ForbiddenView /> : <PublicationPreviewView />}
           />
           <Route
             path="system"

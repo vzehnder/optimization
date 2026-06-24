@@ -110,6 +110,14 @@ export interface RunResults {
   plot_series?: unknown[];
 }
 
+export interface DashboardResults {
+  summary: Record<string, unknown> | null;
+  dispatch_table: ResultTable | null;
+  asset_dispatch_table: ResultTable | null;
+  charts: Record<string, ResultChart | unknown>;
+  plot_series?: unknown[];
+}
+
 export interface RunArtifact {
   id: number;
   run_id: number;
@@ -120,6 +128,62 @@ export interface RunArtifact {
   byte_size: number;
   created_at: string;
   download_url: string;
+}
+
+export type DashboardTemplatePayload =
+  components["schemas"]["DashboardTemplateWriteRequest"];
+
+export interface DashboardTemplate extends DashboardTemplatePayload {
+  id: number;
+  project_id: number;
+  created_at: string;
+  updated_at: string;
+  created_by?: string | null;
+  updated_by?: string | null;
+}
+
+export type PublicationPayload =
+  components["schemas"]["PublicationDraftWriteRequest"];
+
+export interface Publication {
+  id: number;
+  project_id: number;
+  scenario_id: number;
+  scenario_version_id: number;
+  run_id: number;
+  dashboard_template_id: number;
+  public_title: string;
+  analyst_notes: string;
+  allowed_artifact_types: string[];
+  status: "draft" | "published" | "unpublished" | string;
+  created_at: string;
+  updated_at: string;
+  published_at?: string | null;
+  unpublished_at?: string | null;
+  created_by?: string | null;
+  updated_by?: string | null;
+  published_by?: string | null;
+  unpublished_by?: string | null;
+}
+
+export interface PublicationDownload {
+  artifact_type: string;
+  display_name: string;
+  media_type: string;
+  byte_size: number;
+  download_url: string;
+}
+
+export interface PublicationPreview {
+  project: Project;
+  scenario: Scenario;
+  scenario_version: ScenarioVersion;
+  run: ScenarioRun;
+  publication: Publication;
+  template: DashboardTemplate;
+  results: DashboardResults | null;
+  results_error: string;
+  downloads: PublicationDownload[];
 }
 
 export type DraftAssetType = "battery" | "load" | "renewable" | "hydro";
@@ -573,6 +637,113 @@ export async function listRunArtifacts(
     { signal },
   );
   return response.artifacts;
+}
+
+export async function listDashboardTemplates(
+  projectId: number,
+  signal?: AbortSignal,
+): Promise<DashboardTemplate[]> {
+  const response = await requestJson<{
+    dashboard_templates: DashboardTemplate[];
+  }>(`/api/projects/${projectId}/dashboard-templates`, { signal });
+  return response.dashboard_templates;
+}
+
+export async function createDashboardTemplate(
+  projectId: number,
+  payload: DashboardTemplatePayload,
+): Promise<DashboardTemplate> {
+  const response = await postJsonWithCsrf<{
+    dashboard_template: DashboardTemplate;
+  }>(`/api/projects/${projectId}/dashboard-templates`, payload);
+  return response.dashboard_template;
+}
+
+export async function updateDashboardTemplate(
+  templateId: number,
+  payload: DashboardTemplatePayload,
+): Promise<DashboardTemplate> {
+  const csrfToken = await getCsrfToken();
+  const response = await requestJson<{
+    dashboard_template: DashboardTemplate;
+  }>(`/api/dashboard-templates/${templateId}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrfToken,
+    },
+    body: JSON.stringify(payload),
+  });
+  return response.dashboard_template;
+}
+
+export async function listRunPublications(
+  runId: number,
+  signal?: AbortSignal,
+): Promise<Publication[]> {
+  const response = await requestJson<{ publications: Publication[] }>(
+    `/api/runs/${runId}/publications`,
+    { signal },
+  );
+  return response.publications;
+}
+
+export async function createRunPublicationDraft(
+  runId: number,
+  payload: PublicationPayload,
+): Promise<Publication> {
+  const response = await postJsonWithCsrf<{ publication: Publication }>(
+    `/api/runs/${runId}/publications`,
+    payload,
+  );
+  return response.publication;
+}
+
+export async function updatePublicationDraft(
+  publicationId: number,
+  payload: PublicationPayload,
+): Promise<Publication> {
+  const csrfToken = await getCsrfToken();
+  const response = await requestJson<{ publication: Publication }>(
+    `/api/publications/${publicationId}`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrfToken,
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+  return response.publication;
+}
+
+export async function publishPublication(
+  publicationId: number,
+): Promise<Publication> {
+  const response = await postJsonWithCsrf<{ publication: Publication }>(
+    `/api/publications/${publicationId}/publish`,
+  );
+  return response.publication;
+}
+
+export async function unpublishPublication(
+  publicationId: number,
+): Promise<Publication> {
+  const response = await postJsonWithCsrf<{ publication: Publication }>(
+    `/api/publications/${publicationId}/unpublish`,
+  );
+  return response.publication;
+}
+
+export async function getPublicationPreview(
+  publicationId: number,
+  signal?: AbortSignal,
+): Promise<PublicationPreview> {
+  return requestJson<PublicationPreview>(
+    `/api/publications/${publicationId}/preview`,
+    { signal },
+  );
 }
 
 export async function getScenarioDraft(

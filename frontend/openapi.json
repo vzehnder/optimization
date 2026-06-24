@@ -1390,6 +1390,43 @@
         "summary": "Update Publication Draft"
       }
     },
+    "/api/publications/{publication_id}/preview": {
+      "get": {
+        "operationId": "get_publication_preview_api_publications__publication_id__preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "publication_id",
+            "required": true,
+            "schema": {
+              "title": "Publication Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Publication Preview"
+      }
+    },
     "/api/publications/{publication_id}/publish": {
       "post": {
         "operationId": "publish_publication_api_publications__publication_id__publish_post",

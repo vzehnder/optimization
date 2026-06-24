@@ -1,6 +1,6 @@
 # BESS-REACT-008: Migrate Dashboard Templates And Publications
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/react_migration/prd_react_ui_migration.md`
@@ -21,29 +21,28 @@ internal users.
 
 ## Acceptance criteria
 
-- [ ] Analysts can list, create, and update dashboard templates within the
+- [x] Analysts can list, create, and update dashboard templates within the
       active project.
-- [ ] Template controls cover the existing summary, chart, table, and table-row
+- [x] Template controls cover the existing summary, chart, table, and table-row
       limit options.
-- [ ] Templates cannot be read or applied across project boundaries.
-- [ ] Analysts can create publication drafts only from succeeded runs.
-- [ ] Publication drafts support public title, analyst notes, selected dashboard
+- [x] Templates cannot be read or applied across project boundaries.
+- [x] Analysts can create publication drafts only from succeeded runs.
+- [x] Publication drafts support public title, analyst notes, selected dashboard
       template, and allowed artifact types.
-- [ ] Publication edit errors preserve recoverable form state.
-- [ ] Preview uses the same client-safe data contract and result presentation as
+- [x] Publication edit errors preserve recoverable form state.
+- [x] Preview uses the same client-safe data contract and result presentation as
       a live publication without granting client access to the draft.
-- [ ] Analysts can publish eligible drafts and unpublish active publications.
-- [ ] Publication state, timestamps, and user attribution refresh after each
+- [x] Analysts can publish eligible drafts and unpublish active publications.
+- [x] Publication state, timestamps, and user attribution refresh after each
       transition.
-- [ ] Missing optional result sections degrade gracefully in preview.
-- [ ] Client users cannot access template or publication write contracts.
-- [ ] Browser acceptance covers template creation, publication draft, edit,
+- [x] Missing optional result sections degrade gracefully in preview.
+- [x] Client users cannot access template or publication write contracts.
+- [x] Browser acceptance covers template creation, publication draft, edit,
       preview, publish, and unpublish.
-- [ ] Existing template, publication, result filtering, and authorization tests
+- [x] Existing template, publication, result filtering, and authorization tests
       remain green.
 
 ## Blocked by
 
 - BESS-REACT-002
 - BESS-REACT-007
-

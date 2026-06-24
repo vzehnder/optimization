@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ApiError,
+  type DashboardResults,
   getRunResults,
   listRunArtifacts,
   type ResultCell,
@@ -10,7 +11,6 @@ import {
   type ResultChartSeries,
   type ResultTable,
   type RunArtifact,
-  type RunResults,
   type ScenarioRun,
 } from "./api/client";
 
@@ -129,7 +129,9 @@ function chartIsResultChart(value: unknown): value is ResultChart {
   );
 }
 
-function resultCharts(results: RunResults): ResultChart[] {
+function resultCharts(
+  results: Pick<DashboardResults, "charts">,
+): ResultChart[] {
   return Object.values(results.charts).filter(chartIsResultChart);
 }
 
@@ -167,7 +169,7 @@ function SummarySection({ summary }: { summary: Record<string, unknown> }) {
         <dl className="source-metadata version-metadata">
           {scalarEntries.map(([key, value]) => (
             <div key={key}>
-              <dt>{key}</dt>
+              <dt>{summaryLabel(key)}</dt>
               <dd>{displayValue(value)}</dd>
             </div>
           ))}
@@ -180,6 +182,20 @@ function SummarySection({ summary }: { summary: Record<string, unknown> }) {
       ))}
     </section>
   );
+}
+
+function summaryLabel(key: string): string {
+  const labels: Record<string, string> = {
+    case_name: "Case Name",
+    run_timestamp: "Run Timestamp",
+    solver_name: "Solver",
+    solver_status: "Solver Status",
+    termination_status: "Termination Status",
+    objective_value_usd: "Objective Value",
+    model_version: "Model Version",
+    schema_version: "Schema Version",
+  };
+  return labels[key] || key;
 }
 
 function NestedKpiBlock({ title, value }: { title: string; value: unknown }) {
@@ -403,7 +419,11 @@ function SeriesSummary({ series }: { series: ResultChartSeries[] }) {
   );
 }
 
-function ChartsSection({ results }: { results: RunResults }) {
+function ChartsSection({
+  results,
+}: {
+  results: Pick<DashboardResults, "charts">;
+}) {
   const charts = resultCharts(results);
   const availableCharts = charts.filter(
     (chart) => chart.available && chart.series.length > 0,
@@ -439,16 +459,61 @@ function ChartsSection({ results }: { results: RunResults }) {
   );
 }
 
-function ResultsContent({ results }: { results: RunResults }) {
+export function DashboardResultsContent({
+  results,
+  resultsError = "",
+}: {
+  results: DashboardResults | null;
+  resultsError?: string;
+}) {
+  if (resultsError) {
+    return (
+      <section className="workspace-section" aria-labelledby="dashboard-error">
+        <h2 id="dashboard-error">Results Error</h2>
+        <div className="result-alert" role="alert">
+          <strong>No se pudieron cargar resultados</strong>
+          <p>{resultsError}</p>
+        </div>
+      </section>
+    );
+  }
+  if (results === null) return null;
+
+  const hasCharts = resultCharts(results).length > 0;
+  const hasAnySection =
+    results.summary !== null ||
+    hasCharts ||
+    results.dispatch_table !== null ||
+    results.asset_dispatch_table !== null;
+  if (!hasAnySection) {
+    return (
+      <section className="workspace-section" aria-labelledby="dashboard-empty">
+        <h2 id="dashboard-empty">Dashboard</h2>
+        <p className="empty-state">
+          No hay secciones habilitadas para esta publicacion.
+        </p>
+      </section>
+    );
+  }
+
   return (
     <>
-      <SummarySection summary={results.summary} />
-      <ChartsSection results={results} />
-      <ResultTableView title="System Dispatch" table={results.dispatch_table} />
-      <ResultTableView
-        title="Asset Dispatch"
-        table={results.asset_dispatch_table}
-      />
+      {results.summary !== null ? (
+        <SummarySection summary={results.summary} />
+      ) : null}
+      {hasCharts ? <ChartsSection results={results} /> : null}
+      {results.dispatch_table !== null ? (
+        <ResultTableView
+          title="System Dispatch"
+          table={results.dispatch_table}
+        />
+      ) : null}
+      {results.asset_dispatch_table !== null ? (
+        <ResultTableView
+          title="Asset Dispatch"
+          table={results.asset_dispatch_table}
+        />
+      ) : null}
     </>
   );
 }
@@ -492,7 +557,7 @@ export function RunResultsSection({ run }: { run: ScenarioRun }) {
     );
   }
 
-  return <ResultsContent results={results.data} />;
+  return <DashboardResultsContent results={results.data} />;
 }
 
 function ArtifactList({ artifacts }: { artifacts: RunArtifact[] }) {
