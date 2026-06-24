@@ -28,6 +28,12 @@ async function postWithCsrf(
   });
 }
 
+async function deleteWithCsrf(api: APIRequestContext, path: string) {
+  return api.delete(path, {
+    headers: { "X-CSRF-Token": await csrfToken(api) },
+  });
+}
+
 async function apiLogin(
   api: APIRequestContext,
   email: string,
@@ -310,6 +316,222 @@ test("React admin users and project access cover assignment, removal, deactivati
   await expect(page.getByRole("alert")).toContainText(
     "Invalid email or password.",
   );
+});
+
+test("React client portal reviews published results, downloads allowlisted artifacts, and honors revocation", async ({
+  page,
+  baseURL,
+}) => {
+  test.setTimeout(90_000);
+  await ensureAdminSession(page);
+  const suffix = Date.now();
+  const api = page.context().request;
+  const analystEmail = `portal-analyst-${suffix}@example.local`;
+  const clientEmail = `published-client-${suffix}@example.local`;
+  const projectName = `Published PMGD ${suffix}`;
+  const templateName = `Client Summary ${suffix}`;
+  const publicationTitle = `Client Dispatch Review ${suffix}`;
+  const sampleCase = readFileSync(
+    resolve("..", "data/cases/hybrid_system/system_case.json"),
+    "utf-8",
+  );
+
+  async function loginThroughPage(email: string, password: string) {
+    await expect(
+      page.getByRole("heading", { name: "Iniciar sesion" }),
+    ).toBeVisible();
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill(password);
+    await page.getByRole("button", { name: "Entrar" }).click();
+    await expect(page).toHaveURL(/\/react\/(projects|client)$/);
+  }
+
+  const analystResponse = await postWithCsrf(api, "/api/admin/users", {
+    email: analystEmail,
+    display_name: "Portal Analyst",
+    role: "analyst",
+    password: "analyst-pass",
+  });
+  expect(analystResponse.status()).toBe(201);
+  const clientResponse = await postWithCsrf(api, "/api/admin/users", {
+    email: clientEmail,
+    display_name: "Published Client",
+    role: "client",
+    password: "client-pass",
+  });
+  expect(clientResponse.status()).toBe(201);
+  const clientUser = ((await clientResponse.json()) as { user: { id: number } })
+    .user;
+  const projectResponse = await postWithCsrf(api, "/api/projects", {
+    name: projectName,
+    description: "Published client project",
+  });
+  expect(projectResponse.status()).toBe(201);
+  const project = (await projectResponse.json()) as { id: number };
+  const scenarioResponse = await postWithCsrf(
+    api,
+    `/api/projects/${project.id}/scenarios`,
+    {
+      name: `Client scenario ${suffix}`,
+      description: "Published results branch",
+    },
+  );
+  expect(scenarioResponse.status()).toBe(201);
+  const scenario = (await scenarioResponse.json()) as { id: number };
+  const versionResponse = await postWithCsrf(
+    api,
+    `/api/scenarios/${scenario.id}/versions`,
+    { system_case_json: sampleCase },
+  );
+  expect(versionResponse.status()).toBe(201);
+  const version = (await versionResponse.json()) as { id: number };
+  const runResponse = await postWithCsrf(
+    api,
+    `/api/scenario-versions/${version.id}/runs`,
+  );
+  expect(runResponse.status()).toBe(201);
+  const run = (await runResponse.json()) as { id: number };
+
+  await page.goto(`/react/projects/${project.id}`);
+  await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Acceso cliente" }),
+  ).toBeVisible();
+  await page
+    .getByLabel("Cliente elegible")
+    .selectOption({ label: clientEmail });
+  await page.getByRole("button", { name: "Asignar cliente" }).click();
+  await expect(
+    page.getByText(`${clientEmail} asignado a ${projectName}.`),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Salir" }).click();
+  await loginThroughPage(analystEmail, "analyst-pass");
+  await page.goto(`/react/projects/${project.id}`);
+  await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
+  await page.getByLabel("Nombre nuevo template").fill(templateName);
+  await page.getByLabel("Asset dispatch table").uncheck();
+  await page.getByRole("button", { name: "Crear template" }).click();
+  await expect(page.getByText(templateName).first()).toBeVisible();
+
+  await page.goto(`/react/runs/${run.id}`);
+  await expect(
+    page.getByRole("heading", { name: `Run ${run.id}` }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Publication Drafts" }),
+  ).toBeVisible();
+  await page.getByLabel("Public Title").fill(publicationTitle);
+  await page.getByLabel("Analyst Notes").fill("Approved for client review.");
+  await page.getByLabel("dispatch_csv", { exact: true }).uncheck();
+  await page.getByLabel("asset_dispatch_csv", { exact: true }).uncheck();
+  const createPublication = page.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/api/runs/${run.id}/publications`) &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Crear publicacion" }).click();
+  const publication = (
+    (await (await createPublication).json()) as { publication: { id: number } }
+  ).publication;
+  await expect(page.getByText(publicationTitle).first()).toBeVisible();
+  await page
+    .getByRole("button", { name: `Publicar ${publicationTitle}` })
+    .click();
+  await expect(
+    page.getByRole("button", { name: `Unpublicar ${publicationTitle}` }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Salir" }).click();
+  await loginThroughPage(clientEmail, "client-pass");
+  await expect(page).toHaveURL(/\/react\/client$/);
+  await expect(
+    page.getByRole("heading", { name: "Portal cliente" }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: projectName }).click();
+  await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
+  await expect(page.getByText(publicationTitle)).toBeVisible();
+  await page.getByRole("link", { name: publicationTitle }).click();
+  await expect(
+    page.getByRole("heading", { name: publicationTitle }),
+  ).toBeVisible();
+  await expect(page.getByText("Approved for client review.")).toBeVisible();
+  await expect(page.getByText("1250.5")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "System Dispatch" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Energy Price" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Asset Dispatch" }),
+  ).toHaveCount(0);
+  await expect(page.getByText("Publication Drafts")).toHaveCount(0);
+  await expect(page.getByText("Crear publicacion")).toHaveCount(0);
+  await expect(page.getByText("Lanzar run")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "dispatch.csv" })).toHaveCount(0);
+  const summaryDownload = page.waitForEvent("download");
+  await page.getByRole("link", { name: "summary.json" }).click();
+  expect((await summaryDownload).suggestedFilename()).toBe("summary.json");
+
+  const adminApi = await requestFactory.newContext({ baseURL });
+  await apiLogin(adminApi, "admin@example.local", "admin-pass");
+  const removeAccess = await deleteWithCsrf(
+    adminApi,
+    `/api/admin/projects/${project.id}/client-access/${clientUser.id}`,
+  );
+  expect(removeAccess.ok()).toBeTruthy();
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "No encontrado" }),
+  ).toBeVisible();
+  await expect(page.getByText(publicationTitle)).toHaveCount(0);
+
+  const reassign = await postWithCsrf(
+    adminApi,
+    `/api/admin/projects/${project.id}/client-access`,
+    { user_id: clientUser.id },
+  );
+  expect(reassign.status()).toBe(201);
+  await page.goto(
+    `/react/client/projects/${project.id}/publications/${publication.id}`,
+  );
+  await expect(
+    page.getByRole("heading", { name: publicationTitle }),
+  ).toBeVisible();
+  const unpublish = await postWithCsrf(
+    adminApi,
+    `/api/publications/${publication.id}/unpublish`,
+  );
+  expect(unpublish.ok()).toBeTruthy();
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "No encontrado" }),
+  ).toBeVisible();
+  await expect(page.getByText(publicationTitle)).toHaveCount(0);
+
+  const republish = await postWithCsrf(
+    adminApi,
+    `/api/publications/${publication.id}/publish`,
+  );
+  expect(republish.ok()).toBeTruthy();
+  await page.goto(
+    `/react/client/projects/${project.id}/publications/${publication.id}`,
+  );
+  await expect(
+    page.getByRole("heading", { name: publicationTitle }),
+  ).toBeVisible();
+  const deactivate = await postWithCsrf(
+    adminApi,
+    `/api/admin/users/${clientUser.id}/deactivate`,
+  );
+  expect(deactivate.ok()).toBeTruthy();
+  await adminApi.dispose();
+
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Iniciar sesion" }),
+  ).toBeVisible();
 });
 
 test("React analyst workspace creates a project and scenario, then preserves direct scenario refresh", async ({

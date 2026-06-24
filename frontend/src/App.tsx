@@ -27,6 +27,11 @@ import {
   type CurrentUser,
   type CurrentUserResponse,
 } from "./api/client";
+import {
+  ClientPortalHomeView,
+  ClientProjectView,
+  ClientPublicationView,
+} from "./ClientPortal";
 import { ScenarioDraftEditorView } from "./DraftEditor";
 import { ErrorBoundary } from "./ErrorBoundary";
 import "./styles.css";
@@ -190,15 +195,6 @@ function LoginView() {
   );
 }
 
-function ClientHome() {
-  return (
-    <section className="content-panel">
-      <h1>Portal cliente</h1>
-      <p>Vista cliente lista para publicaciones autorizadas.</p>
-    </section>
-  );
-}
-
 function SystemStatus() {
   return (
     <section className="content-panel">
@@ -319,7 +315,15 @@ function AuthenticatedRoutes({ user }: { user: CurrentUser }) {
           />
           <Route
             path="client"
-            element={isClient ? <ClientHome /> : <ForbiddenView />}
+            element={isClient ? <ClientPortalHomeView /> : <ForbiddenView />}
+          />
+          <Route
+            path="client/projects/:projectId"
+            element={isClient ? <ClientProjectView /> : <ForbiddenView />}
+          />
+          <Route
+            path="client/projects/:projectId/publications/:publicationId"
+            element={isClient ? <ClientPublicationView /> : <ForbiddenView />}
           />
           <Route path="*" element={<NotFoundView />} />
         </Routes>

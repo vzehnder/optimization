@@ -964,6 +964,160 @@
         "summary": "Current Auth User"
       }
     },
+    "/api/client/projects": {
+      "get": {
+        "operationId": "api_client_projects_api_client_projects_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api Client Projects"
+      }
+    },
+    "/api/client/projects/{project_id}/publications": {
+      "get": {
+        "operationId": "api_client_project_publications_api_client_projects__project_id__publications_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Client Project Publications"
+      }
+    },
+    "/api/client/projects/{project_id}/publications/{publication_id}": {
+      "get": {
+        "operationId": "api_client_publication_detail_api_client_projects__project_id__publications__publication_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "publication_id",
+            "required": true,
+            "schema": {
+              "title": "Publication Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Client Publication Detail"
+      }
+    },
+    "/api/client/projects/{project_id}/publications/{publication_id}/artifacts/{artifact_type}/download": {
+      "get": {
+        "operationId": "api_download_client_publication_artifact_api_client_projects__project_id__publications__publication_id__artifacts__artifact_type__download_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "publication_id",
+            "required": true,
+            "schema": {
+              "title": "Publication Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_type",
+            "required": true,
+            "schema": {
+              "title": "Artifact Type",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Download Client Publication Artifact"
+      }
+    },
     "/api/dashboard-templates/{template_id}": {
       "get": {
         "operationId": "get_dashboard_template_api_dashboard_templates__template_id__get",

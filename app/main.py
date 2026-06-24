@@ -369,6 +369,12 @@ def create_app(
 
         if path == "/" or path == "/api/auth/me":
             return await call_next(request)
+        if path.startswith("/api/client"):
+            try:
+                authorization.require_client(user)
+            except PermissionError:
+                return forbidden_response(request)
+            return await call_next(request)
         if path.startswith("/client"):
             try:
                 authorization.require_client(user)
@@ -436,7 +442,7 @@ def create_app(
                 continue
             if not Path(artifact["path"]).is_file():
                 continue
-            body = artifact_response_body(artifact)
+            body = publication_download_response_body(artifact)
             body["download_url"] = url_builder(artifact)
             downloads.append(body)
         return downloads
@@ -457,6 +463,52 @@ def create_app(
                 raise KeyError(f"artifact {artifact_type} file not found")
             return artifact
         raise KeyError(f"artifact {artifact_type} not found for publication {publication_id}")
+
+    def client_publication_payload(project_id: int, publication_id: int, request: Request) -> dict[str, Any]:
+        try:
+            project = analyst_store.get_project(project_id)
+            publication = require_client_publication_access(request, project_id, publication_id)
+            if publication is None:
+                publication = analyst_store.get_publication(publication_id)
+                if publication["project_id"] != project_id or publication["status"] != "published":
+                    raise KeyError(f"publication {publication_id} not found")
+            scenario = analyst_store.get_scenario(publication["scenario_id"])
+            version = analyst_store.get_scenario_version(
+                publication["scenario_version_id"],
+                include_document=False,
+            )
+            run = analyst_store.get_run(publication["run_id"])
+            template = analyst_store.get_dashboard_template(publication["dashboard_template_id"])
+            artifacts = analyst_store.list_run_artifacts(run["id"])
+            downloads = publication_download_artifacts(
+                publication,
+                artifacts,
+                lambda artifact: (
+                    f"/api/client/projects/{project_id}/publications/{publication_id}/artifacts/"
+                    f"{quote(artifact['artifact_type'], safe='')}/download"
+                ),
+            )
+            results = apply_dashboard_template(
+                read_run_results(run, artifacts, configured_artifact_root),
+                template,
+            )
+            results_error = ""
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ResultReadError as error:
+            results = None
+            results_error = error.message
+        return {
+            "project": project,
+            "scenario": scenario,
+            "scenario_version": version,
+            "run": run,
+            "publication": publication,
+            "template": template,
+            "results": results,
+            "results_error": results_error,
+            "downloads": downloads,
+        }
 
     def get_or_create_scenario_draft(scenario_id: int) -> dict:
         try:
@@ -675,6 +727,48 @@ def create_app(
         user = request.state.current_user
         projects = analyst_store.list_client_projects(user["id"])
         return HTMLResponse(render_client_home_page(user, projects))
+
+    @app.get("/api/client/projects")
+    async def api_client_projects(request: Request):
+        user = request.state.current_user
+        projects = (
+            analyst_store.list_client_projects(user["id"])
+            if user is not None
+            else analyst_store.list_projects()
+        )
+        return {"projects": projects}
+
+    @app.get("/api/client/projects/{project_id}/publications")
+    async def api_client_project_publications(project_id: int, request: Request):
+        require_client_project_access(request, project_id)
+        try:
+            project = analyst_store.get_project(project_id)
+            publications = analyst_store.list_published_project_publications(project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"project": project, "publications": publications}
+
+    @app.get("/api/client/projects/{project_id}/publications/{publication_id}")
+    async def api_client_publication_detail(project_id: int, publication_id: int, request: Request):
+        return client_publication_payload(project_id, publication_id, request)
+
+    @app.get("/api/client/projects/{project_id}/publications/{publication_id}/artifacts/{artifact_type}/download")
+    async def api_download_client_publication_artifact(
+        project_id: int,
+        publication_id: int,
+        artifact_type: str,
+        request: Request,
+    ):
+        require_client_publication_access(request, project_id, publication_id)
+        try:
+            artifact = get_client_publication_download(project_id, publication_id, artifact_type)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return FileResponse(
+            Path(artifact["path"]),
+            media_type=artifact["media_type"],
+            filename=artifact["display_name"],
+        )
 
     @app.get("/client/projects/{project_id}", response_class=HTMLResponse)
     async def client_project_detail(project_id: int, request: Request):
@@ -2334,6 +2428,15 @@ def artifact_response_body(artifact: dict) -> dict:
         "byte_size": artifact["byte_size"],
         "created_at": artifact["created_at"],
         "download_url": f"/api/run-artifacts/{artifact['id']}/download",
+    }
+
+
+def publication_download_response_body(artifact: dict) -> dict:
+    return {
+        "artifact_type": artifact["artifact_type"],
+        "display_name": artifact["display_name"],
+        "media_type": artifact["media_type"],
+        "byte_size": artifact["byte_size"],
     }
 
 

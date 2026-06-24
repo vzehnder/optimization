@@ -205,6 +205,13 @@ export interface PublicationPreview {
   downloads: PublicationDownload[];
 }
 
+export interface ClientProjectPublications {
+  project: Project;
+  publications: Publication[];
+}
+
+export type ClientPublicationDetail = PublicationPreview;
+
 export type DraftAssetType = "battery" | "load" | "renewable" | "hydro";
 
 export interface DraftAsset {
@@ -822,6 +829,37 @@ export async function getPublicationPreview(
 ): Promise<PublicationPreview> {
   return requestJson<PublicationPreview>(
     `/api/publications/${publicationId}/preview`,
+    { signal },
+  );
+}
+
+export async function listClientProjects(
+  signal?: AbortSignal,
+): Promise<Project[]> {
+  const response = await requestJson<{ projects: Project[] }>(
+    "/api/client/projects",
+    { signal },
+  );
+  return response.projects;
+}
+
+export async function listClientProjectPublications(
+  projectId: number,
+  signal?: AbortSignal,
+): Promise<ClientProjectPublications> {
+  return requestJson<ClientProjectPublications>(
+    `/api/client/projects/${projectId}/publications`,
+    { signal },
+  );
+}
+
+export async function getClientPublication(
+  projectId: number,
+  publicationId: number,
+  signal?: AbortSignal,
+): Promise<ClientPublicationDetail> {
+  return requestJson<ClientPublicationDetail>(
+    `/api/client/projects/${projectId}/publications/${publicationId}`,
     { signal },
   );
 }

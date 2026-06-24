@@ -1813,6 +1813,232 @@ describe("application shell", () => {
     expect(screen.getByText("deactivated")).toBeVisible();
   });
 
+  it("renders the read-only client portal and clears protected data after authorization failure", async () => {
+    window.history.replaceState({}, "", "/react/client");
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Client assignment workspace",
+      created_at: "2026-06-24T12:00:00Z",
+    };
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Published scenario",
+      created_at: "2026-06-24T12:01:00Z",
+    };
+    const version = {
+      id: 41,
+      scenario_id: 10,
+      version_number: 3,
+      case_name: "dispatch_case",
+      schema_version: "bess_system_dispatch.v2",
+      period_count: 1,
+      asset_counts: { battery: 1 },
+      created_at: "2026-06-24T12:02:00Z",
+    };
+    const run = {
+      id: 99,
+      scenario_version_id: 41,
+      status: "succeeded",
+      created_at: "2026-06-24T12:03:00Z",
+      started_at: "2026-06-24T12:03:01Z",
+      finished_at: "2026-06-24T12:03:03Z",
+      duration_seconds: 2,
+      exit_code: 0,
+      error_message: "",
+      stdout: "",
+      stderr: "",
+    };
+    const publication = {
+      id: 9,
+      project_id: 1,
+      scenario_id: 10,
+      scenario_version_id: 41,
+      run_id: 99,
+      dashboard_template_id: 5,
+      public_title: "Client Dispatch Review",
+      analyst_notes: "Approved for client.",
+      allowed_artifact_types: ["summary_json"],
+      status: "published",
+      created_at: "2026-06-24T12:04:00Z",
+      updated_at: "2026-06-24T12:05:00Z",
+      published_at: "2026-06-24T12:05:00Z",
+    };
+    const template = {
+      id: 5,
+      project_id: 1,
+      name: "Client Summary",
+      show_summary: true,
+      show_price_chart: true,
+      show_grid_chart: true,
+      show_renewable_chart: false,
+      show_bess_chart: false,
+      show_hydro_chart: false,
+      show_profit_chart: false,
+      show_system_dispatch_table: true,
+      show_asset_dispatch_table: false,
+      table_preview_limit: 1,
+      created_at: "2026-06-24T12:04:00Z",
+      updated_at: "2026-06-24T12:04:00Z",
+    };
+    const results = {
+      summary: {
+        case_name: "hybrid_system",
+        objective_value_usd: 1250.5,
+      },
+      dispatch_table: {
+        columns: ["timestamp", "grid_import_mw"],
+        rows: [{ timestamp: "2026-01-01T00:00:00", grid_import_mw: "2.5" }],
+      },
+      asset_dispatch_table: null,
+      charts: {
+        price: {
+          id: "price",
+          title: "Energy Price",
+          available: true,
+          labels: ["2026-01-01T00:00:00"],
+          series: [
+            {
+              key: "price_usd_per_mwh",
+              label: "Price USD/MWh",
+              unit: "USD/MWh",
+              values: [45],
+            },
+          ],
+        },
+      },
+    };
+    const downloads = [
+      {
+        artifact_type: "summary_json",
+        display_name: "summary.json",
+        media_type: "application/json",
+        byte_size: 92,
+        download_url:
+          "/api/client/projects/1/publications/9/artifacts/summary_json/download",
+      },
+    ];
+    const plotlyMock = {
+      react: vi.fn().mockResolvedValue(undefined),
+      purge: vi.fn(),
+    };
+    let revoked = false;
+    vi.stubGlobal("Plotly", plotlyMock);
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 8,
+                email: "client@example.local",
+                display_name: "Client User",
+                role: "client",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (revoked && path.startsWith("/api/client")) {
+          return new Response(JSON.stringify({ detail: "forbidden" }), {
+            status: 403,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/client/projects") {
+          return new Response(JSON.stringify({ projects: [project] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/client/projects/1/publications") {
+          return new Response(
+            JSON.stringify({ project, publications: [publication] }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/client/projects/1/publications/9") {
+          return new Response(
+            JSON.stringify({
+              project,
+              scenario,
+              scenario_version: version,
+              run,
+              publication,
+              template,
+              results,
+              results_error: "",
+              downloads,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Portal cliente" }),
+    ).toBeVisible();
+    await user.click(screen.getByRole("link", { name: "Hybrid PMGD" }));
+    expect(
+      await screen.findByRole("heading", { name: "Hybrid PMGD" }),
+    ).toBeVisible();
+    expect(screen.getByText("Client Dispatch Review")).toBeVisible();
+
+    await user.click(
+      screen.getByRole("link", { name: "Client Dispatch Review" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Client Dispatch Review" }),
+    ).toBeVisible();
+    expect(screen.getByText("Approved for client.")).toBeVisible();
+    expect(screen.getByText("succeeded")).toBeVisible();
+    expect(screen.getByText("1250.5")).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "System Dispatch" }),
+    ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Energy Price" })).toBeVisible();
+    expect(
+      screen.queryByRole("heading", { name: "Asset Dispatch" }),
+    ).toBeNull();
+    const downloadLink = screen.getByRole("link", { name: "summary.json" });
+    expect(downloadLink).toHaveAttribute(
+      "href",
+      "/api/client/projects/1/publications/9/artifacts/summary_json/download",
+    );
+    expect(screen.queryByText("Publication Drafts")).not.toBeInTheDocument();
+    expect(screen.queryByText("Crear publicacion")).not.toBeInTheDocument();
+    expect(screen.queryByText("Lanzar run")).not.toBeInTheDocument();
+
+    revoked = true;
+    await user.click(screen.getByRole("link", { name: "Cliente" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "No se pudo cargar" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByText("Client Dispatch Review"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Hybrid PMGD")).not.toBeInTheDocument();
+  });
+
   it("bootstraps the first admin through the JSON contract", async () => {
     window.history.replaceState({}, "", "/react");
     const fetchMock = vi
