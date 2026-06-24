@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from app.auth import hash_password
 from app.main import create_app
 from app.persistence import AnalystStore
-from tests.auth_test_helpers import post_json_with_csrf
+from tests.auth_test_helpers import login_json_with_csrf, post_json_with_csrf
 from tests.test_results_review import create_completed_run_with_result_artifacts
 
 
@@ -236,12 +236,8 @@ class ReactClientPortalApiTests(unittest.TestCase):
         )
 
     def login(self, client, email, password):
-        response = client.post(
-            "/login",
-            data={"email": email, "password": password},
-            follow_redirects=False,
-        )
-        self.assertEqual(response.status_code, 303)
+        response = login_json_with_csrf(client, email, password)
+        self.assertEqual(response.status_code, 200)
 
 
 if __name__ == "__main__":

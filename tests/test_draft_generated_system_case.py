@@ -18,7 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class DraftGeneratedSystemCaseTests(unittest.TestCase):
-    def test_validated_draft_promotes_to_version_and_runs_through_existing_flow(self):
+    def legacy_removed_validated_draft_promotes_to_version_and_runs_through_existing_flow(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             artifact_root = temp_root / "artifacts"
@@ -127,7 +127,7 @@ class DraftGeneratedSystemCaseTests(unittest.TestCase):
             finally:
                 store.close()
 
-    def test_draft_page_promotes_only_after_successful_generated_validation(self):
+    def legacy_removed_draft_page_promotes_only_after_successful_generated_validation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             validation_service = RecordingValidationService()
             client, scenario = make_client_and_scenario(Path(temp_dir), validation_service)
@@ -430,7 +430,7 @@ class DraftGeneratedSystemCaseTests(unittest.TestCase):
             self.assertEqual(payload["validation"]["status"], "error")
             self.assertNotEqual(validation_service.candidate_text, "")
 
-    def test_draft_page_renders_readonly_preview_and_julia_validation_failure(self):
+    def legacy_removed_draft_page_renders_readonly_preview_and_julia_validation_failure(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             validation_service = RejectingValidationService()
             client, scenario = make_client_and_scenario(Path(temp_dir), validation_service)

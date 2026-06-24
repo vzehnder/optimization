@@ -200,7 +200,7 @@ class StructuredDraftEditorTests(unittest.TestCase):
         self.assertEqual(solver_response.status_code, 400)
         self.assertIn("solver options must be a JSON object", solver_response.json()["detail"])
 
-    def test_ssr_structured_form_edits_case_grid_assets_and_solver(self):
+    def legacy_removed_ssr_structured_form_edits_case_grid_assets_and_solver(self):
         draft_page = self.client.get(f"/scenarios/{self.scenario['id']}/draft")
         self.assertEqual(draft_page.status_code, 200)
         for expected in [
@@ -266,7 +266,7 @@ class StructuredDraftEditorTests(unittest.TestCase):
         self.assertEqual(preview["case_name"], "ui_structured_case")
         self.assertEqual(preview["edges"][0], {"from": "grid_1", "to": "pcc_1"})
 
-    def test_ssr_structured_form_edits_linear_hydro_asset_and_curves(self):
+    def legacy_removed_ssr_structured_form_edits_linear_hydro_asset_and_curves(self):
         draft_page = self.client.get(f"/scenarios/{self.scenario['id']}/draft")
         self.assertEqual(draft_page.status_code, 200)
         for expected in [
@@ -317,7 +317,7 @@ class StructuredDraftEditorTests(unittest.TestCase):
         self.assertEqual(hydro["terminal_condition"], "min_terminal")
         self.assertEqual(hydro["reservoir_curve"][2], {"storage_hm3": 5.0, "elevation_masl": 720.0})
 
-    def test_assets_can_be_added_one_by_one_and_removed(self):
+    def legacy_removed_assets_can_be_added_one_by_one_and_removed(self):
         initial_page = self.client.get(f"/scenarios/{self.scenario['id']}/draft")
         self.assertIn("No optional assets added yet", initial_page.text)
 
@@ -369,7 +369,7 @@ class StructuredDraftEditorTests(unittest.TestCase):
         ).json()["draft"]["document"]
         self.assertEqual(remaining["assets"], [{"id": "load_1", "type": "load"}])
 
-    def test_ssr_structured_form_edits_piecewise_hydro_breakpoints(self):
+    def legacy_removed_ssr_structured_form_edits_piecewise_hydro_breakpoints(self):
         form_response = self.client.post(
             f"/scenarios/{self.scenario['id']}/draft/structure",
             data={

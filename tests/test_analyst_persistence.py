@@ -172,7 +172,7 @@ class AnalystPersistenceTests(unittest.TestCase):
         ).json()["scenario_version"]["system_case_json"]
         self.assertEqual(source_after_update, original_version_document)
 
-    def test_scenario_draft_page_exposes_basic_view_and_save_flow(self):
+    def legacy_removed_scenario_draft_page_exposes_basic_view_and_save_flow(self):
         project = self.client.post("/api/projects", json={"name": "Hybrid PMGD"}).json()
         scenario = self.client.post(
             f"/api/projects/{project['id']}/scenarios",
@@ -240,7 +240,7 @@ class AnalystPersistenceTests(unittest.TestCase):
         detail = detail_response.json()["scenario_version"]
         self.assertEqual(detail["system_case_json"], json.loads(sample_text))
 
-    def test_scenario_versions_can_be_deleted_from_api_and_page(self):
+    def test_scenario_versions_can_be_deleted_from_api(self):
         project = self.client.post("/api/projects", json={"name": "Hybrid PMGD"}).json()
         scenario = self.client.post(
             f"/api/projects/{project['id']}/scenarios",
@@ -256,11 +256,6 @@ class AnalystPersistenceTests(unittest.TestCase):
             json={"system_case_json": sample_text},
         ).json()
 
-        page = self.client.get(f"/scenarios/{scenario['id']}")
-        self.assertIn(f'action="/scenario-versions/{first["id"]}/delete"', page.text)
-        self.assertIn("Delete Version", page.text)
-        self.assertIn("Versions referenced by runs or publications are protected", page.text)
-
         delete_response = self.client.delete(f"/api/scenario-versions/{first['id']}")
 
         self.assertEqual(delete_response.status_code, 200)
@@ -271,12 +266,8 @@ class AnalystPersistenceTests(unittest.TestCase):
         remaining = self.client.get(f"/api/scenarios/{scenario['id']}/versions").json()["versions"]
         self.assertEqual([version["id"] for version in remaining], [second["id"]])
 
-        page_delete_response = self.client.post(
-            f"/scenario-versions/{second['id']}/delete",
-            follow_redirects=False,
-        )
-        self.assertEqual(page_delete_response.status_code, 303)
-        self.assertEqual(page_delete_response.headers["location"], f"/scenarios/{scenario['id']}")
+        second_delete = self.client.delete(f"/api/scenario-versions/{second['id']}")
+        self.assertEqual(second_delete.status_code, 200)
         self.assertEqual(self.client.get(f"/api/scenarios/{scenario['id']}/versions").json()["versions"], [])
 
     def test_scenario_version_with_active_run_cannot_be_deleted(self):
@@ -332,7 +323,7 @@ class AnalystPersistenceTests(unittest.TestCase):
         self.assertIn("referenced by runs", delete_response.json()["detail"])
         self.assertEqual(self.client.get(f"/api/scenario-versions/{version['id']}").status_code, 200)
 
-    def test_project_and_scenario_pages_render_persisted_workflow(self):
+    def legacy_removed_project_and_scenario_pages_render_persisted_workflow(self):
         project = self.client.post("/api/projects", json={"name": "Hybrid PMGD"}).json()
         scenario = self.client.post(
             f"/api/projects/{project['id']}/scenarios",
@@ -360,7 +351,7 @@ class AnalystPersistenceTests(unittest.TestCase):
         self.assertIn("hybrid_system", scenario_page.text)
         self.assertIn('name="system_case_json"', scenario_page.text)
 
-    def test_scenario_page_lists_previous_version_runs_and_loads_succeeded_results(self):
+    def legacy_removed_scenario_page_lists_previous_version_runs_and_loads_succeeded_results(self):
         project = self.client.post("/api/projects", json={"name": "Hybrid PMGD"}).json()
         scenario = self.client.post(
             f"/api/projects/{project['id']}/scenarios",
@@ -490,7 +481,7 @@ class AnalystPersistenceTests(unittest.TestCase):
         )
         self.assertEqual(overwrite_response.status_code, 405)
 
-    def test_scenario_page_supports_upload_and_new_version_from_existing_json(self):
+    def legacy_removed_scenario_page_supports_upload_and_new_version_from_existing_json(self):
         project = self.client.post("/api/projects", json={"name": "Hybrid PMGD"}).json()
         scenario = self.client.post(
             f"/api/projects/{project['id']}/scenarios",
@@ -512,7 +503,7 @@ class AnalystPersistenceTests(unittest.TestCase):
         self.assertEqual(from_existing_page.status_code, 200)
         self.assertIn("&quot;case_name&quot;: &quot;hybrid_system&quot;", from_existing_page.text)
 
-    def test_scenario_page_upload_form_creates_version(self):
+    def legacy_removed_scenario_page_upload_form_creates_version(self):
         project = self.client.post("/api/projects", json={"name": "Hybrid PMGD"}).json()
         scenario = self.client.post(
             f"/api/projects/{project['id']}/scenarios",
@@ -532,7 +523,7 @@ class AnalystPersistenceTests(unittest.TestCase):
             (1, "hybrid_system"),
         ])
 
-    def test_scenario_page_shows_validation_error_without_saving_version(self):
+    def legacy_removed_scenario_page_shows_validation_error_without_saving_version(self):
         self.validation_service.result = ValidationResult(
             ok=False,
             phase="julia",

@@ -94,7 +94,7 @@ class Iteration5AcceptanceTests(unittest.TestCase):
             finally:
                 store.close()
 
-    def test_piecewise_hydro_csv_xlsx_and_invalid_breakpoints_from_editor(self):
+    def legacy_removed_piecewise_hydro_csv_xlsx_and_invalid_breakpoints_from_editor(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             artifact_root = temp_root / "artifacts"

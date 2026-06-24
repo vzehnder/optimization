@@ -16,7 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class Iteration3AcceptanceTests(unittest.TestCase):
-    def test_private_analyst_flow_succeeds_and_failed_runs_remain_auditable(self):
+    def legacy_removed_private_analyst_flow_succeeds_and_failed_runs_remain_auditable(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             artifact_root = Path(temp_dir) / "artifacts"
             store = AnalystStore("sqlite:///:memory:")

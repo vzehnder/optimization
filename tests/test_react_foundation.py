@@ -8,7 +8,7 @@ from app.main import create_app
 
 
 class ReactFoundationTests(unittest.TestCase):
-    def test_fastapi_serves_react_entry_and_client_route_without_replacing_legacy_ui(self):
+    def test_fastapi_serves_react_entry_and_redirects_legacy_bookmarks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             frontend_dist = Path(temp_dir)
             (frontend_dist / "assets").mkdir()
@@ -22,15 +22,31 @@ class ReactFoundationTests(unittest.TestCase):
             )
 
             with TestClient(create_app(frontend_dist=frontend_dist)) as client:
+                root = client.get("/", follow_redirects=False)
                 entry = client.get("/react")
                 deep_link = client.get("/react/workspace")
-                legacy = client.get("/projects")
+                legacy_project_list = client.get("/projects", follow_redirects=False)
+                legacy_project = client.get("/projects/17?tab=access", follow_redirects=False)
+                legacy_scenario = client.get("/scenarios/23/draft", follow_redirects=False)
+                legacy_run = client.get("/runs/42#results", follow_redirects=False)
+                legacy_login = client.get("/login?next=/projects/17", follow_redirects=False)
 
+            self.assertEqual(root.status_code, 303)
+            self.assertEqual(root.headers["location"], "/react")
             self.assertEqual(entry.status_code, 200)
             self.assertIn("React application", entry.text)
             self.assertEqual(deep_link.status_code, 200)
             self.assertIn("React application", deep_link.text)
-            self.assertIn("Projects", legacy.text)
+            self.assertEqual(legacy_project_list.status_code, 303)
+            self.assertEqual(legacy_project_list.headers["location"], "/react/projects")
+            self.assertEqual(legacy_project.status_code, 303)
+            self.assertEqual(legacy_project.headers["location"], "/react/projects/17?tab=access")
+            self.assertEqual(legacy_scenario.status_code, 303)
+            self.assertEqual(legacy_scenario.headers["location"], "/react/scenarios/23/draft")
+            self.assertEqual(legacy_run.status_code, 303)
+            self.assertEqual(legacy_run.headers["location"], "/react/runs/42")
+            self.assertEqual(legacy_login.status_code, 303)
+            self.assertEqual(legacy_login.headers["location"], "/react/projects/17")
 
     def test_react_assets_and_entry_use_safe_production_cache_rules(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -80,6 +96,34 @@ class ReactFoundationTests(unittest.TestCase):
         )
         user_schema = schema["components"]["schemas"]["CurrentUser"]
         self.assertEqual(user_schema["properties"]["role"]["enum"], ["admin", "analyst", "client"])
+
+    def test_legacy_html_routes_are_absent_from_openapi(self):
+        with TestClient(create_app()) as client:
+            schema = client.get("/openapi.json").json()
+
+        paths = set(schema["paths"])
+        self.assertFalse(
+            {
+                "/projects",
+                "/projects/{project_id}",
+                "/scenarios/{scenario_id}",
+                "/scenarios/{scenario_id}/draft",
+                "/runs/{run_id}",
+                "/login",
+                "/bootstrap",
+                "/client",
+                "/admin/users",
+                "/system-cases/validate",
+            }
+            & paths
+        )
+        self.assertNotIn('"text/html"', client_serialized_schema(schema))
+
+
+def client_serialized_schema(schema):
+    import json
+
+    return json.dumps(schema, sort_keys=True)
 
 
 if __name__ == "__main__":

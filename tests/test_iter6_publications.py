@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from app.auth import hash_password
 from app.main import create_app
 from app.persistence import AnalystStore
-from tests.auth_test_helpers import post_json_with_csrf, put_json_with_csrf
+from tests.auth_test_helpers import login_json_with_csrf, post_json_with_csrf, put_json_with_csrf
 
 
 class Iteration6PublicationDraftTests(unittest.TestCase):
@@ -117,7 +117,7 @@ class Iteration6PublicationDraftTests(unittest.TestCase):
         self.assertEqual(self.store.get_scenario_version(version["id"]), before_version)
         self.assertEqual(self.store.get_run(run["id"]), before_run)
 
-    def test_run_page_can_create_publication_draft_with_default_downloads(self):
+    def test_publication_api_creates_draft_with_default_downloads(self):
         project, _scenario, _version, run = self.create_succeeded_run()
         template = self.store.create_dashboard_template(
             project_id=project["id"],
@@ -125,31 +125,36 @@ class Iteration6PublicationDraftTests(unittest.TestCase):
             created_by="analyst@example.local",
         )
 
-        page = self.client.get(f"/runs/{run['id']}")
-        self.assertEqual(page.status_code, 200)
-        self.assertIn("Publication Drafts", page.text)
-        self.assertIn("Client Portal View", page.text)
-        self.assertIn("summary_json", page.text)
-        self.assertIn("input_snapshot", page.text)
+        artifacts = self.store.list_run_artifacts(run["id"])
+        self.assertEqual(
+            [artifact["artifact_type"] for artifact in artifacts],
+            [
+                "input_snapshot",
+                "stdout_log",
+                "stderr_log",
+                "summary_json",
+                "dispatch_csv",
+                "asset_dispatch_csv",
+                "model_metadata_json",
+            ],
+        )
 
-        response = self.client.post(
-            f"/runs/{run['id']}/publications",
-            data={
-                "dashboard_template_id": str(template["id"]),
+        response = post_json_with_csrf(
+            self.client,
+            f"/api/runs/{run['id']}/publications",
+            {
+                "dashboard_template_id": template["id"],
                 "public_title": "Board Review",
                 "analyst_notes": "Visible notes.",
                 "allowed_artifact_types": ["summary_json", "dispatch_csv", "asset_dispatch_csv"],
             },
-            follow_redirects=False,
         )
 
-        self.assertEqual(response.status_code, 303)
-        self.assertEqual(response.headers["location"], f"/runs/{run['id']}")
-        updated_page = self.client.get(f"/runs/{run['id']}")
-        self.assertEqual(updated_page.status_code, 200)
-        self.assertIn("Board Review", updated_page.text)
-        self.assertIn("draft", updated_page.text)
-        self.assertIn("summary_json, dispatch_csv, asset_dispatch_csv", updated_page.text)
+        self.assertEqual(response.status_code, 201)
+        publication = response.json()["publication"]
+        self.assertEqual(publication["public_title"], "Board Review")
+        self.assertEqual(publication["status"], "draft")
+        self.assertEqual(publication["allowed_artifact_types"], ["summary_json", "dispatch_csv", "asset_dispatch_csv"])
 
     def test_only_internal_users_can_publish_succeeded_runs_with_project_template(self):
         project, _scenario, version, succeeded_run = self.create_succeeded_run()
@@ -267,12 +272,8 @@ class Iteration6PublicationDraftTests(unittest.TestCase):
         )
 
     def login(self, client, email, password):
-        response = client.post(
-            "/login",
-            data={"email": email, "password": password},
-            follow_redirects=False,
-        )
-        self.assertEqual(response.status_code, 303)
+        response = login_json_with_csrf(client, email, password)
+        self.assertEqual(response.status_code, 200)
 
 
 if __name__ == "__main__":
