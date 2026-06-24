@@ -4,10 +4,12 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import {
   ApiError,
+  createManualRun,
   createProject,
   createScenario,
   createScenarioVersionFromJson,
   deleteScenarioVersion,
+  getRun,
   getProject,
   getScenario,
   getScenarioVersion,
@@ -35,6 +37,8 @@ const scenarioVersionsQueryKey = (scenarioId: number) =>
   ["scenario-versions", scenarioId] as const;
 const scenarioRunsQueryKey = (scenarioId: number) =>
   ["scenario-runs", scenarioId] as const;
+const runQueryKey = (runId: number) => ["run", runId] as const;
+const terminalRunStatuses = new Set(["succeeded", "failed"]);
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
@@ -43,6 +47,16 @@ function errorMessage(error: unknown): string {
 
 function prettyJson(value: unknown): string {
   return JSON.stringify(value ?? {}, null, 2);
+}
+
+function displayValue(value: unknown, fallback = "Pendiente"): string {
+  if (value === null || value === undefined || value === "") return fallback;
+  return String(value);
+}
+
+function displayDuration(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined) return "Pendiente";
+  return `${Number(seconds).toFixed(2)} s`;
 }
 
 function appendUnique<T extends { id: number }>(
@@ -583,7 +597,7 @@ function RunList({
     <ul className="resource-list">
       {runs.map((run) => (
         <li key={run.id}>
-          <a href={`/runs/${run.id}`}>Run {run.id}</a>
+          <Link to={`/runs/${run.id}`}>Run {run.id}</Link>
           <p>
             Estado: {run.status} | Version{" "}
             {versionNumbers.get(run.scenario_version_id) || "desconocida"} |
@@ -686,6 +700,47 @@ export function ScenarioDetailView() {
   );
 }
 
+function ScenarioVersionRunControl({
+  version,
+}: {
+  version: ScenarioVersionDetail;
+}) {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [error, setError] = useState("");
+  const mutation = useMutation({
+    mutationFn: () => createManualRun(version.id),
+    onSuccess: (run) => {
+      setError("");
+      queryClient.setQueryData<ScenarioRun>(runQueryKey(run.id), run);
+      void queryClient.invalidateQueries({
+        queryKey: scenarioRunsQueryKey(version.scenario_id),
+      });
+      navigate(`/runs/${run.id}`);
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError)),
+  });
+
+  return (
+    <section className="workspace-section" aria-labelledby="version-run-launch">
+      <h2 id="version-run-launch">Manual run</h2>
+      {error ? <p role="alert">{error}</p> : null}
+      <p className="source-note">
+        Lanza una corrida manual desde esta version inmutable.
+      </p>
+      <button
+        type="button"
+        disabled={mutation.isPending}
+        onClick={() => {
+          if (!mutation.isPending) mutation.mutate();
+        }}
+      >
+        {mutation.isPending ? "Lanzando run" : "Lanzar run"}
+      </button>
+    </section>
+  );
+}
+
 function VersionMetadata({ version }: { version: ScenarioVersionDetail }) {
   return (
     <dl className="source-metadata version-metadata">
@@ -763,6 +818,7 @@ export function ScenarioVersionDetailView() {
         <p>{version.data.case_name}</p>
       </header>
       <div className="workspace-stack">
+        <ScenarioVersionRunControl version={version.data} />
         <section className="workspace-section" aria-labelledby="version-meta">
           <h2 id="version-meta">Metadata</h2>
           <VersionMetadata version={version.data} />
@@ -801,6 +857,227 @@ export function ScenarioVersionDetailView() {
             />
           </label>
         </section>
+      </div>
+    </section>
+  );
+}
+
+function isTerminalRun(run: ScenarioRun | undefined): boolean {
+  return terminalRunStatuses.has(run?.status || "");
+}
+
+function RunMetadata({ run }: { run: ScenarioRun }) {
+  return (
+    <dl className="source-metadata version-metadata">
+      <div>
+        <dt>Estado</dt>
+        <dd>{run.status}</dd>
+      </div>
+      <div>
+        <dt>Creado</dt>
+        <dd>{run.created_at}</dd>
+      </div>
+      <div>
+        <dt>Iniciado</dt>
+        <dd>{displayValue(run.started_at)}</dd>
+      </div>
+      <div>
+        <dt>Finalizado</dt>
+        <dd>{displayValue(run.finished_at)}</dd>
+      </div>
+      <div>
+        <dt>Duracion</dt>
+        <dd>{displayDuration(run.duration_seconds)}</dd>
+      </div>
+      <div>
+        <dt>Exit code</dt>
+        <dd>{displayValue(run.exit_code)}</dd>
+      </div>
+      <div>
+        <dt>Trigger</dt>
+        <dd>{displayValue(run.trigger_type, "manual")}</dd>
+      </div>
+      <div>
+        <dt>Triggered by</dt>
+        <dd>{displayValue(run.triggered_by, "internal_analyst")}</dd>
+      </div>
+    </dl>
+  );
+}
+
+function RunLineage({
+  run,
+  version,
+  scenario,
+  project,
+}: {
+  run: ScenarioRun;
+  version?: ScenarioVersionDetail;
+  scenario?: Scenario;
+  project?: Project;
+}) {
+  return (
+    <dl className="source-metadata version-metadata">
+      <div>
+        <dt>Proyecto</dt>
+        <dd>
+          {project ? (
+            <Link to={`/projects/${project.id}`}>{project.name}</Link>
+          ) : (
+            "Cargando"
+          )}
+        </dd>
+      </div>
+      <div>
+        <dt>Escenario</dt>
+        <dd>
+          {scenario ? (
+            <Link to={`/scenarios/${scenario.id}`}>{scenario.name}</Link>
+          ) : (
+            "Cargando"
+          )}
+        </dd>
+      </div>
+      <div>
+        <dt>Version</dt>
+        <dd>
+          {version ? (
+            <Link to={`/scenario-versions/${version.id}`}>
+              Version {version.version_number}
+            </Link>
+          ) : (
+            `ID ${run.scenario_version_id}`
+          )}
+        </dd>
+      </div>
+      <div>
+        <dt>Immutable version ID</dt>
+        <dd>{run.scenario_version_id}</dd>
+      </div>
+    </dl>
+  );
+}
+
+function RunFailureDetails({ run }: { run: ScenarioRun }) {
+  if (run.status !== "failed") return null;
+  return (
+    <section className="workspace-section" aria-labelledby="run-failure">
+      <h2 id="run-failure">Failure context</h2>
+      <dl className="source-metadata version-metadata">
+        <div>
+          <dt>Error</dt>
+          <dd>{displayValue(run.error_message, "Sin mensaje")}</dd>
+        </div>
+      </dl>
+      <h3>Structured error</h3>
+      <pre className="json-panel">{prettyJson(run.error_payload)}</pre>
+      <h3>Stdout</h3>
+      <pre className="json-panel">{displayValue(run.stdout, "Sin stdout")}</pre>
+      <h3>Stderr</h3>
+      <pre className="json-panel">{displayValue(run.stderr, "Sin stderr")}</pre>
+    </section>
+  );
+}
+
+export function RunDetailView() {
+  const runId = useNumericParam("runId");
+  const run = useQuery({
+    queryKey: runQueryKey(runId || 0),
+    queryFn: ({ signal }) => getRun(runId || 0, signal),
+    enabled: runId !== null,
+    refetchInterval: (query) =>
+      isTerminalRun(query.state.data as ScenarioRun | undefined) ? false : 1000,
+    retry: (failureCount, error) =>
+      failureCount < 2 && (!(error instanceof ApiError) || error.status >= 500),
+    retryDelay: 750,
+  });
+  const version = useQuery({
+    queryKey: ["scenario-version", run.data?.scenario_version_id || 0] as const,
+    queryFn: ({ signal }) =>
+      getScenarioVersion(run.data!.scenario_version_id, signal),
+    enabled: run.data !== undefined,
+    retry: false,
+  });
+  const scenario = useQuery({
+    queryKey: scenarioQueryKey(version.data?.scenario_id || 0),
+    queryFn: ({ signal }) => getScenario(version.data!.scenario_id, signal),
+    enabled: version.data !== undefined,
+    retry: false,
+  });
+  const project = useQuery({
+    queryKey: projectQueryKey(scenario.data?.project_id || 0),
+    queryFn: ({ signal }) => getProject(scenario.data!.project_id, signal),
+    enabled: scenario.data !== undefined,
+    retry: false,
+  });
+
+  if (runId === null) {
+    return <NotFoundView>La corrida solicitada no existe.</NotFoundView>;
+  }
+  if (run.isPending) {
+    return <LoadingView label="Cargando run" />;
+  }
+  if (run.isError && !run.data) {
+    return (
+      <RequestErrorView error={run.error} retry={() => void run.refetch()} />
+    );
+  }
+
+  const runData = run.data!;
+  const terminal = isTerminalRun(runData);
+
+  return (
+    <section className="workspace-view">
+      <Breadcrumbs>
+        <Link to="/projects">Proyectos</Link>
+        <span aria-hidden="true">/</span>
+        {scenario.data ? (
+          <Link to={`/scenarios/${scenario.data.id}`}>
+            {scenario.data.name}
+          </Link>
+        ) : (
+          <span>Escenario</span>
+        )}
+        <span aria-hidden="true">/</span>
+        {version.data ? (
+          <Link to={`/scenario-versions/${version.data.id}`}>
+            Version {version.data.version_number}
+          </Link>
+        ) : (
+          <span>Version</span>
+        )}
+        <span aria-hidden="true">/</span>
+        <span>Run {runData.id}</span>
+      </Breadcrumbs>
+      <header className="workspace-heading">
+        <h1>Run {runData.id}</h1>
+        <p>{terminal ? "Estado terminal" : "Monitoreando ejecucion"}</p>
+      </header>
+      <div className="workspace-stack">
+        {!terminal && run.isFetching ? (
+          <p className="source-note" aria-live="polite">
+            Actualizando estado del run.
+          </p>
+        ) : null}
+        {!terminal && run.failureCount > 0 ? (
+          <p className="polling-recovery" aria-live="polite">
+            Reintentando actualizacion de run.
+          </p>
+        ) : null}
+        <section className="workspace-section" aria-labelledby="run-state">
+          <h2 id="run-state">Run state</h2>
+          <RunMetadata run={runData} />
+        </section>
+        <section className="workspace-section" aria-labelledby="run-lineage">
+          <h2 id="run-lineage">Lineage</h2>
+          <RunLineage
+            run={runData}
+            version={version.data}
+            scenario={scenario.data}
+            project={project.data}
+          />
+        </section>
+        <RunFailureDetails run={runData} />
       </div>
     </section>
   );

@@ -34,6 +34,7 @@ import {
   NotFoundView,
   ProjectDetailView,
   ProjectListView,
+  RunDetailView,
   ScenarioDetailView,
   ScenarioVersionDetailView,
 } from "./Workspace";
@@ -284,6 +285,10 @@ function AuthenticatedRoutes({ user }: { user: CurrentUser }) {
             element={
               isClient ? <ForbiddenView /> : <ScenarioVersionDetailView />
             }
+          />
+          <Route
+            path="runs/:runId"
+            element={isClient ? <ForbiddenView /> : <RunDetailView />}
           />
           <Route
             path="system"

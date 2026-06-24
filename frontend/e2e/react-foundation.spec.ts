@@ -549,3 +549,187 @@ test("React case validation and versioning covers generated and expert paths", a
     .click();
   await expect(page.locator("a", { hasText: "Version 2" })).toHaveCount(0);
 });
+
+test("React manual run lifecycle launches, polls success, and exposes failure logs", async ({
+  page,
+}) => {
+  await ensureAdminSession(page);
+  const suffix = Date.now();
+  const api = page.context().request;
+  const sampleCase = readFileSync(
+    resolve("..", "data/cases/hybrid_system/system_case.json"),
+    "utf-8",
+  );
+
+  const projectResponse = await postWithCsrf(api, "/api/projects", {
+    name: `Run PMGD ${suffix}`,
+    description: "Manual run browser acceptance",
+  });
+  expect(projectResponse.ok()).toBeTruthy();
+  const project = (await projectResponse.json()) as { id: number };
+  const scenarioResponse = await postWithCsrf(
+    api,
+    `/api/projects/${project.id}/scenarios`,
+    {
+      name: `Run lifecycle ${suffix}`,
+      description: "Success and failure run states",
+    },
+  );
+  expect(scenarioResponse.ok()).toBeTruthy();
+  const scenario = (await scenarioResponse.json()) as { id: number };
+
+  const successVersionResponse = await postWithCsrf(
+    api,
+    `/api/scenarios/${scenario.id}/versions`,
+    { system_case_json: sampleCase },
+  );
+  expect(successVersionResponse.status()).toBe(201);
+  const successVersion = (await successVersionResponse.json()) as {
+    id: number;
+    version_number: number;
+  };
+
+  await page.goto(`/react/scenario-versions/${successVersion.id}`);
+  await expect(
+    page.getByRole("heading", {
+      name: `Version ${successVersion.version_number}`,
+    }),
+  ).toBeVisible();
+  const successLaunch = page.waitForResponse(
+    (response) =>
+      response
+        .url()
+        .endsWith(`/api/scenario-versions/${successVersion.id}/runs`) &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Lanzar run" }).click();
+  const successRun = (await (await successLaunch).json()) as {
+    id: number;
+    scenario_version_id: number;
+    created_at: string;
+  };
+  let successPollCount = 0;
+  await page.route(`**/api/runs/${successRun.id}`, async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    successPollCount += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        run: {
+          ...successRun,
+          status: successPollCount < 2 ? "running" : "succeeded",
+          started_at: "2026-06-23T12:15:01Z",
+          finished_at: successPollCount < 2 ? null : "2026-06-23T12:15:03Z",
+          duration_seconds: successPollCount < 2 ? null : 2,
+          exit_code: successPollCount < 2 ? null : 0,
+          error_message: "",
+          stdout: "",
+          stderr: "",
+          trigger_type: "manual",
+          triggered_by: "internal_analyst",
+        },
+      }),
+    });
+  });
+  await expect(page).toHaveURL(new RegExp(`/react/runs/${successRun.id}$`));
+  await expect(
+    page.getByRole("heading", { name: `Run ${successRun.id}` }),
+  ).toBeVisible();
+  await expect(page.getByText("succeeded", { exact: true })).toBeVisible({
+    timeout: 5000,
+  });
+  await expect(page.getByText("2026-06-23T12:15:01Z")).toBeVisible();
+  await expect(page.getByText("2026-06-23T12:15:03Z")).toBeVisible();
+  await expect(page.getByText("2.00 s")).toBeVisible();
+  await expect(page.getByText("0", { exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByRole("link", {
+        name: `Version ${successVersion.version_number}`,
+      })
+      .first(),
+  ).toBeVisible();
+
+  const failureVersionResponse = await postWithCsrf(
+    api,
+    `/api/scenarios/${scenario.id}/versions`,
+    { system_case_json: sampleCase },
+  );
+  expect(failureVersionResponse.status()).toBe(201);
+  const failureVersion = (await failureVersionResponse.json()) as {
+    id: number;
+    version_number: number;
+  };
+
+  await page.goto(`/react/scenario-versions/${failureVersion.id}`);
+  const failureLaunch = page.waitForResponse(
+    (response) =>
+      response
+        .url()
+        .endsWith(`/api/scenario-versions/${failureVersion.id}/runs`) &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Lanzar run" }).click();
+  const failureRun = (await (await failureLaunch).json()) as {
+    id: number;
+    scenario_version_id: number;
+    created_at: string;
+  };
+  let failurePollCount = 0;
+  await page.route(`**/api/runs/${failureRun.id}`, async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    failurePollCount += 1;
+    if (failurePollCount === 1) {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "temporary polling outage" }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        run: {
+          ...failureRun,
+          status: failurePollCount === 2 ? "running" : "failed",
+          started_at: "2026-06-23T12:16:01Z",
+          finished_at: failurePollCount === 2 ? null : "2026-06-23T12:16:03Z",
+          duration_seconds: failurePollCount === 2 ? null : 2,
+          exit_code: failurePollCount === 2 ? null : 23,
+          error_message: "optimization failed before solve",
+          error_payload: {
+            status: "error",
+            message: "optimization failed before solve",
+          },
+          stdout: "solver stdout\nsecond line\n",
+          stderr:
+            '{"status":"error","message":"optimization failed before solve"}\n',
+          trigger_type: "manual",
+          triggered_by: "internal_analyst",
+        },
+      }),
+    });
+  });
+  await expect(page).toHaveURL(new RegExp(`/react/runs/${failureRun.id}$`));
+  await expect(
+    page.getByText("Reintentando actualizacion de run."),
+  ).toBeVisible({ timeout: 5000 });
+  await expect(page.getByText("failed", { exact: true })).toBeVisible({
+    timeout: 6000,
+  });
+  await expect(
+    page.getByText("optimization failed before solve").first(),
+  ).toBeVisible();
+  await expect(page.getByText(/solver stdout/)).toBeVisible();
+  await expect(page.getByText(/second line/)).toBeVisible();
+  await expect(page.getByText(/"status":"error"/)).toBeVisible();
+});

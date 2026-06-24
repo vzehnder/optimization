@@ -5,6 +5,305 @@ import { describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 
 describe("application shell", () => {
+  it("launches one manual run from an immutable version and navigates before completion", async () => {
+    window.history.replaceState({}, "", "/react/scenario-versions/41");
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-06-23T12:00:00Z",
+    };
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Initial modeling branch",
+      created_at: "2026-06-23T12:05:00Z",
+    };
+    const version = {
+      id: 41,
+      scenario_id: 10,
+      version_number: 3,
+      case_name: "dispatch_case",
+      schema_version: "bess_system_dispatch.v1",
+      period_count: 2,
+      asset_counts: { battery: 1 },
+      created_at: "2026-06-23T12:14:00Z",
+      system_case_json: { case_name: "dispatch_case" },
+      validation_payload: { status: "ok" },
+      generation_metadata: {},
+    };
+    const run = {
+      id: 99,
+      scenario_version_id: 41,
+      status: "queued",
+      created_at: "2026-06-23T12:15:00Z",
+      started_at: null,
+      finished_at: null,
+      duration_seconds: null,
+      exit_code: null,
+      error_message: "",
+      stdout: "",
+      stderr: "",
+    };
+    let launchCalls = 0;
+    let resolveLaunch: ((response: Response) => void) | undefined;
+    const launchPromise = new Promise<Response>((resolve) => {
+      resolveLaunch = resolve;
+    });
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenario-versions/41" && method === "GET") {
+          return new Response(JSON.stringify({ scenario_version: version }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenario-versions/41/runs" && method === "POST") {
+          launchCalls += 1;
+          return launchPromise;
+        }
+        if (path === "/api/runs/99") {
+          return new Response(JSON.stringify({ run }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Version 3" }),
+    ).toBeVisible();
+    const launchButton = screen.getByRole("button", { name: "Lanzar run" });
+    await user.click(launchButton);
+    await waitFor(() => expect(launchButton).toBeDisabled());
+    await user.click(launchButton);
+    await waitFor(() => expect(launchCalls).toBe(1));
+    resolveLaunch!(
+      new Response(JSON.stringify(run), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Run 99" }),
+    ).toBeVisible();
+    expect(window.location.pathname).toBe("/react/runs/99");
+    expect(screen.getByText("queued")).toBeVisible();
+    expect(screen.getAllByText("Version 3").length).toBeGreaterThan(0);
+    expect(screen.getByText("Creado")).toBeVisible();
+    expect(screen.getByText("2026-06-23T12:15:00Z")).toBeVisible();
+  });
+
+  it("polls nonterminal runs, recovers from a temporary polling failure, and shows failure logs", async () => {
+    window.history.replaceState({}, "", "/react/runs/99");
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-06-23T12:00:00Z",
+    };
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Initial modeling branch",
+      created_at: "2026-06-23T12:05:00Z",
+    };
+    const version = {
+      id: 41,
+      scenario_id: 10,
+      version_number: 3,
+      case_name: "dispatch_case",
+      schema_version: "bess_system_dispatch.v1",
+      period_count: 2,
+      asset_counts: { battery: 1 },
+      created_at: "2026-06-23T12:14:00Z",
+      system_case_json: { case_name: "dispatch_case" },
+      validation_payload: { status: "ok" },
+      generation_metadata: {},
+    };
+    const runStates = [
+      {
+        id: 99,
+        scenario_version_id: 41,
+        status: "queued",
+        created_at: "2026-06-23T12:15:00Z",
+        started_at: null,
+        finished_at: null,
+        duration_seconds: null,
+        exit_code: null,
+        error_message: "",
+        stdout: "",
+        stderr: "",
+      },
+      {
+        id: 99,
+        scenario_version_id: 41,
+        status: "running",
+        created_at: "2026-06-23T12:15:00Z",
+        started_at: "2026-06-23T12:15:01Z",
+        finished_at: null,
+        duration_seconds: null,
+        exit_code: null,
+        error_message: "",
+        stdout: "",
+        stderr: "",
+      },
+      {
+        id: 99,
+        scenario_version_id: 41,
+        status: "failed",
+        created_at: "2026-06-23T12:15:00Z",
+        started_at: "2026-06-23T12:15:01Z",
+        finished_at: "2026-06-23T12:15:03Z",
+        duration_seconds: 2.0,
+        exit_code: 23,
+        error_message: "optimization failed before solve",
+        error_payload: {
+          status: "error",
+          message: "optimization failed before solve",
+        },
+        stdout: "solver stdout\nsecond line\n",
+        stderr:
+          '{"status":"error","message":"optimization failed before solve"}\n',
+      },
+    ];
+    let runGetCount = 0;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/runs/99") {
+          runGetCount += 1;
+          if (runGetCount === 2) {
+            return new Response(
+              JSON.stringify({ detail: "temporary outage" }),
+              {
+                status: 503,
+                headers: { "Content-Type": "application/json" },
+              },
+            );
+          }
+          const run =
+            runGetCount === 1
+              ? runStates[0]
+              : runGetCount === 3
+                ? runStates[1]
+                : runStates[2];
+          return new Response(JSON.stringify({ run }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenario-versions/41" && method === "GET") {
+          return new Response(JSON.stringify({ scenario_version: version }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText("queued")).toBeVisible();
+    expect(
+      await screen.findByText("Reintentando actualizacion de run.", undefined, {
+        timeout: 2500,
+      }),
+    ).toBeVisible();
+    expect(
+      await screen.findByText("running", undefined, { timeout: 4000 }),
+    ).toBeVisible();
+    expect(
+      await screen.findByText("failed", undefined, { timeout: 4000 }),
+    ).toBeVisible();
+    expect(
+      screen.getAllByText("optimization failed before solve").length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText(/solver stdout/)).toBeVisible();
+    expect(screen.getByText(/second line/)).toBeVisible();
+    expect(screen.getByText(/"status":"error"/)).toBeVisible();
+    const requestsAtTerminal = runGetCount;
+    await new Promise((resolve) => setTimeout(resolve, 1300));
+    expect(runGetCount).toBe(requestsAtTerminal);
+  });
+
   it("lets analysts create, edit, save, recover, remove, and reopen a structured draft", async () => {
     window.history.replaceState({}, "", "/react/scenarios/10");
     const scenario = {

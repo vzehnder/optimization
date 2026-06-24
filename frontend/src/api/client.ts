@@ -69,6 +69,10 @@ export interface ScenarioRun {
   duration_seconds?: number | null;
   exit_code?: number | null;
   error_message?: string | null;
+  success_payload?: unknown;
+  error_payload?: unknown;
+  stdout?: string;
+  stderr?: string;
   triggered_by?: string;
   trigger_type?: string;
 }
@@ -483,6 +487,25 @@ export async function listScenarioRuns(
     { signal },
   );
   return response.runs;
+}
+
+export async function createManualRun(
+  scenarioVersionId: number,
+): Promise<ScenarioRun> {
+  return postJsonWithCsrf<ScenarioRun>(
+    `/api/scenario-versions/${scenarioVersionId}/runs`,
+  );
+}
+
+export async function getRun(
+  runId: number,
+  signal?: AbortSignal,
+): Promise<ScenarioRun> {
+  const response = await requestJson<{ run: ScenarioRun }>(
+    `/api/runs/${runId}`,
+    { signal },
+  );
+  return response.run;
 }
 
 export async function getScenarioDraft(
