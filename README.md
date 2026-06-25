@@ -12,11 +12,17 @@ From the repository root:
 julia --project=. -e "import Pkg; Pkg.test()"
 ```
 
-## React UI Foundation
+## React UI
 
-The migration frontend coexists with the legacy UI under `/react`. FastAPI
-serves `frontend/dist`, including direct React Router paths such as
-`/react/system`; existing server-rendered routes remain unchanged.
+React is the only supported application UI. FastAPI serves the compiled
+`frontend/dist` bundle under `/react`, including direct React Router paths such
+as `/react/system`, and keeps owning the JSON API, authentication, uploads,
+orchestration, downloads, and static hosting. There is no legacy server-rendered
+fallback: the obsolete HTML forms and presentation helpers have been removed, and
+established bookmarks (`/login`, `/projects`, `/scenarios/:id`, `/runs/:id`,
+`/client/...`, and the rest) now redirect to their `/react` equivalents. API,
+generated asset, health, and artifact-download URLs are never captured by the SPA
+fallback.
 
 Install the locked frontend dependencies and run local development:
 
@@ -38,6 +44,19 @@ npm run browser:install # install isolated Chromium once
 npm run test:browser  # production build + isolated FastAPI/Chromium smoke test
 npm run build         # reproducible production bundle in frontend/dist
 ```
+
+The browser suite under `frontend/e2e/` includes
+`smoke-accessibility.spec.ts`, which runs automated axe-core accessibility
+audits and keyboard-only smoke checks against representative auth, admin,
+editor, results, and client portal pages. The isolated smoke app uses an
+in-memory database; set `DATABASE_URL=sqlite:///:memory:` when a local
+PostgreSQL instance is not running so the FastAPI import path does not require a
+live database.
+
+Cache headers support safe frontend deployment and rollback: the SPA entry
+(`/react`) is served with `Cache-Control: no-cache` so a new build is picked up
+immediately, while fingerprinted assets under `/react/assets` are served
+`public, max-age=31536000, immutable`.
 
 After `npm run build`, the normal FastAPI service serves the production React
 application at `http://127.0.0.1:8000/react`. The browser smoke test uses an

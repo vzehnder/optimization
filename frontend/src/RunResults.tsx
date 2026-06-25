@@ -394,11 +394,7 @@ function PlotlyChart({ chart }: { chart: ResultChart }) {
   return (
     <section className="result-chart" aria-labelledby={`${chart.id}-chart`}>
       <h3 id={`${chart.id}-chart`}>{chart.title}</h3>
-      <div
-        ref={chartRef}
-        className="plotly-chart"
-        aria-label={`${chart.title} Plotly chart`}
-      />
+      <div ref={chartRef} className="plotly-chart" />
       {renderError ? <p className="field-error">{renderError}</p> : null}
       <SeriesSummary series={chart.series} />
     </section>

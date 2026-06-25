@@ -30,7 +30,7 @@ stored as a Markdown file in this folder. All issues carry the
 | BESS-REACT-008 | Migrate Dashboard Templates And Publications | AFK | ready-for-agent | Done | BESS-REACT-002, BESS-REACT-007 | [BESS-REACT-008-migrate-dashboard-templates-and-publications.md](BESS-REACT-008-migrate-dashboard-templates-and-publications.md) |
 | BESS-REACT-009 | Migrate Admin Users And Project Access | AFK | ready-for-agent | Done | BESS-REACT-001, BESS-REACT-002 | [BESS-REACT-009-migrate-admin-users-and-project-access.md](BESS-REACT-009-migrate-admin-users-and-project-access.md) |
 | BESS-REACT-010 | Migrate Read-Only Client Portal | AFK | ready-for-agent | Done | BESS-REACT-008, BESS-REACT-009 | [BESS-REACT-010-migrate-read-only-client-portal.md](BESS-REACT-010-migrate-read-only-client-portal.md) |
-| BESS-REACT-011 | Cut Over To React And Remove Legacy UI | AFK | ready-for-agent | Todo | BESS-REACT-000 through BESS-REACT-010 | [BESS-REACT-011-cut-over-to-react-and-remove-legacy-ui.md](BESS-REACT-011-cut-over-to-react-and-remove-legacy-ui.md) |
+| BESS-REACT-011 | Cut Over To React And Remove Legacy UI | AFK | ready-for-agent | Done | BESS-REACT-000 through BESS-REACT-010 | [BESS-REACT-011-cut-over-to-react-and-remove-legacy-ui.md](BESS-REACT-011-cut-over-to-react-and-remove-legacy-ui.md) |
 
 ## Recommended Execution Order
 
@@ -85,6 +85,7 @@ BESS-REACT-010.
 | 2026-06-24 | BESS-REACT-008 | Todo -> Done | React dashboard template curation, publication draft/edit state, client-safe preview, publish/unpublish transitions, browser acceptance, backend regressions, and Chrome smoke pass. |
 | 2026-06-24 | BESS-REACT-009 | Todo -> Done | React admin user management, role-specific account creation, safe duplicate/invalid input errors, client project assignment/removal with confirmation, analyst/client denial, browser acceptance, backend regressions, and Chrome smoke pass. |
 | 2026-06-24 | BESS-REACT-010 | Todo -> Done | React read-only client portal, client-scoped JSON contracts, publication result/download views, cache invalidation on authorization failure, revocation coverage, browser acceptance, backend regressions, and Chrome smoke pass. |
+| 2026-06-24 | BESS-REACT-011 | Todo -> Done | Completed cutover started in `issue11_intermedio`: legacy HTML/forms already removed, bookmarks redirect to `/react`. Added `frontend/e2e/smoke-accessibility.spec.ts` (axe-core a11y audit + keyboard smoke on auth/admin/editor/results/client) and fixed surfaced violations (chart `aria-prohibited-attr`, `.role-badge` contrast). Full Python (103), vitest (21), and Chromium browser (11) suites pass; live HTTP smoke confirms no-cache SPA entry, immutable assets, safe bookmark redirects, and API/health never SPA-captured. README updated to the React-only end state. |
 
 ## Acceptance Seam
 
