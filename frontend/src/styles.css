@@ -246,6 +246,7 @@ button:focus-visible {
 .workspace-view {
   display: grid;
   gap: 1.25rem;
+  min-width: 0;
 }
 
 .workspace-heading {
@@ -268,10 +269,12 @@ button:focus-visible {
 .workspace-stack {
   display: grid;
   gap: 1rem;
+  min-width: 0;
 }
 
 .workspace-section,
 .workspace-form {
+  min-width: 0;
   padding: 1rem;
   border: 1px solid #d8e2eb;
   border-radius: 8px;
@@ -682,6 +685,7 @@ button:focus-visible {
 .source-metadata div {
   display: grid;
   gap: 0.15rem;
+  min-width: 0;
 }
 
 .source-metadata dt {
@@ -712,6 +716,8 @@ button:focus-visible {
 }
 
 .time-series-table-scroll {
+  max-width: 100%;
+  min-width: 0;
   max-height: 22rem;
   overflow: auto;
   border: 1px solid #d8e2eb;
@@ -832,6 +838,7 @@ button:focus-visible {
 .result-chart {
   display: grid;
   gap: 0.65rem;
+  min-width: 0;
   padding: 0.85rem;
   border: 1px solid #d8e2eb;
   border-radius: 8px;
@@ -839,6 +846,8 @@ button:focus-visible {
 }
 
 .plotly-chart {
+  max-width: 100%;
+  min-width: 0;
   min-height: 22rem;
   overflow: hidden;
   border: 1px solid #d8e2eb;
@@ -881,8 +890,21 @@ button:focus-visible {
   margin-top: 0.65rem;
 }
 
-.result-table-scroll th {
+.result-table-scroll table {
+  width: max-content;
+  min-width: 100%;
+  table-layout: auto;
+}
+
+.result-table-scroll th,
+.result-table-scroll td {
   white-space: nowrap;
+}
+
+.result-table-scroll td {
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .result-table-scroll th small {
