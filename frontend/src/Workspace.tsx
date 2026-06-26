@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FormEvent, ReactNode, useRef, useState } from "react";
+import { DragEvent, FormEvent, ReactNode, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { ProjectClientAccessSection } from "./Admin";
@@ -32,12 +32,16 @@ import {
   uploadScenarioVersion,
   updateDashboardTemplate,
   updatePublicationDraft,
+  validateHydraulicDiagram,
   type DashboardTemplate,
   type DashboardTemplatePayload,
   type HydraulicComponentType,
   type HydraulicDiagram,
   type HydraulicDiagramNodeWrite,
+  type HydraulicDiagramReachWrite,
+  type HydraulicDiagramValidation,
   type HydraulicDiagramViewport,
+  type HydraulicReachType,
   type Publication,
   type PublicationPayload,
   type Project,
@@ -965,6 +969,17 @@ const hydraulicComponentButtonLabels: Record<HydraulicComponentType, string> = {
   plant: "Agregar central",
 };
 
+const hydraulicReachTypes: HydraulicReachType[] = [
+  "river",
+  "canal",
+  "tunnel",
+  "gate",
+  "spillway",
+  "bypass",
+  "tailrace",
+  "other",
+];
+
 function editableHydraulicNodes(
   diagram: HydraulicDiagram,
 ): HydraulicDiagramNodeWrite[] {
@@ -974,6 +989,18 @@ function editableHydraulicNodes(
     display_name: node.display_name,
     x: node.x,
     y: node.y,
+  }));
+}
+
+function editableHydraulicReaches(
+  diagram: HydraulicDiagram,
+): HydraulicDiagramReachWrite[] {
+  return (diagram.reaches || []).map((reach) => ({
+    technical_key: reach.technical_key,
+    display_name: reach.display_name,
+    from_node_key: reach.from_node_key,
+    to_node_key: reach.to_node_key,
+    reach_type: reach.reach_type,
   }));
 }
 
@@ -996,6 +1023,21 @@ function nextHydraulicNodeKey(
   return candidate;
 }
 
+function nextHydraulicReachKey(
+  reaches: HydraulicDiagramReachWrite[],
+  fromNodeKey: string,
+  toNodeKey: string,
+): string {
+  const base = `reach_${fromNodeKey}_${toNodeKey}`;
+  let candidate = base;
+  let index = 2;
+  while (reaches.some((reach) => reach.technical_key === candidate)) {
+    candidate = `${base}_${index}`;
+    index += 1;
+  }
+  return candidate;
+}
+
 function defaultHydraulicNodeLabel(
   componentType: HydraulicComponentType,
   technicalKey: string,
@@ -1009,12 +1051,18 @@ function defaultHydraulicNodeLabel(
 function HydraulicNodeList({
   nodes,
   updateNode,
+  createReach,
+  beginReachDrag,
+  completeReachDrag,
 }: {
   nodes: HydraulicDiagramNodeWrite[];
   updateNode: (
     technicalKey: string,
     patch: Partial<HydraulicDiagramNodeWrite>,
   ) => void;
+  createReach: (fromNodeKey: string, toNodeKey: string) => void;
+  beginReachDrag: (fromNodeKey: string) => void;
+  completeReachDrag: (toNodeKey: string) => void;
 }) {
   if (!nodes.length) {
     return (
@@ -1026,7 +1074,31 @@ function HydraulicNodeList({
   return (
     <ul className="resource-list hydraulic-node-list">
       {nodes.map((node) => (
-        <li key={node.technical_key}>
+        <li
+          key={node.technical_key}
+          data-testid={`hydraulic-node-${node.technical_key}`}
+          draggable={node.component_type !== "plant"}
+          onDragStart={(event: DragEvent<HTMLLIElement>) => {
+            event.dataTransfer.setData("text/plain", node.technical_key);
+            event.dataTransfer.effectAllowed = "link";
+          }}
+          onPointerDown={() => {
+            beginReachDrag(node.technical_key);
+          }}
+          onPointerUp={() => {
+            completeReachDrag(node.technical_key);
+          }}
+          onDragOver={(event: DragEvent<HTMLLIElement>) => {
+            event.preventDefault();
+          }}
+          onDrop={(event: DragEvent<HTMLLIElement>) => {
+            event.preventDefault();
+            const fromNodeKey = event.dataTransfer.getData("text/plain");
+            if (fromNodeKey) {
+              createReach(fromNodeKey, node.technical_key);
+            }
+          }}
+        >
           <strong>{node.display_name}</strong>
           <p>
             {hydraulicComponentLabels[node.component_type]} |{" "}
@@ -1088,6 +1160,123 @@ function HydraulicNodeList({
   );
 }
 
+function HydraulicReachList({
+  nodes,
+  reaches,
+  updateReach,
+}: {
+  nodes: HydraulicDiagramNodeWrite[];
+  reaches: HydraulicDiagramReachWrite[];
+  updateReach: (
+    technicalKey: string,
+    patch: Partial<HydraulicDiagramReachWrite>,
+  ) => void;
+}) {
+  const nodeKeys = nodes
+    .filter((node) => node.component_type !== "plant")
+    .map((node) => node.technical_key);
+  function endpointOptions(currentKey: string) {
+    return nodeKeys.includes(currentKey) ? nodeKeys : [...nodeKeys, currentKey];
+  }
+  if (!reaches.length) {
+    return <EmptyState>No hay tramos hidraulicos.</EmptyState>;
+  }
+  return (
+    <ul className="resource-list hydraulic-reach-list">
+      {reaches.map((reach) => (
+        <li key={reach.technical_key}>
+          <strong>{reach.display_name}</strong>
+          <p>
+            {reach.technical_key} | {reach.from_node_key} -&gt;{" "}
+            {reach.to_node_key} | {reach.reach_type}
+          </p>
+          <div className="draft-field-grid">
+            <label
+              className="field-row"
+              htmlFor={`hydraulic-reach-label-${reach.technical_key}`}
+            >
+              <span>Etiqueta {reach.technical_key}</span>
+              <input
+                id={`hydraulic-reach-label-${reach.technical_key}`}
+                type="text"
+                value={reach.display_name}
+                onChange={(event) =>
+                  updateReach(reach.technical_key, {
+                    display_name: event.target.value,
+                  })
+                }
+              />
+            </label>
+            <label
+              className="field-row"
+              htmlFor={`hydraulic-reach-from-${reach.technical_key}`}
+            >
+              <span>Origen {reach.technical_key}</span>
+              <select
+                id={`hydraulic-reach-from-${reach.technical_key}`}
+                value={reach.from_node_key}
+                onChange={(event) =>
+                  updateReach(reach.technical_key, {
+                    from_node_key: event.target.value,
+                  })
+                }
+              >
+                {endpointOptions(reach.from_node_key).map((nodeKey) => (
+                  <option key={nodeKey} value={nodeKey}>
+                    {nodeKey}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label
+              className="field-row"
+              htmlFor={`hydraulic-reach-to-${reach.technical_key}`}
+            >
+              <span>Destino {reach.technical_key}</span>
+              <select
+                id={`hydraulic-reach-to-${reach.technical_key}`}
+                value={reach.to_node_key}
+                onChange={(event) =>
+                  updateReach(reach.technical_key, {
+                    to_node_key: event.target.value,
+                  })
+                }
+              >
+                {endpointOptions(reach.to_node_key).map((nodeKey) => (
+                  <option key={nodeKey} value={nodeKey}>
+                    {nodeKey}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label
+              className="field-row"
+              htmlFor={`hydraulic-reach-type-${reach.technical_key}`}
+            >
+              <span>Tipo {reach.technical_key}</span>
+              <select
+                id={`hydraulic-reach-type-${reach.technical_key}`}
+                value={reach.reach_type}
+                onChange={(event) =>
+                  updateReach(reach.technical_key, {
+                    reach_type: event.target.value as HydraulicReachType,
+                  })
+                }
+              >
+                {hydraulicReachTypes.map((reachType) => (
+                  <option key={reachType} value={reachType}>
+                    {reachType}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function HydraulicDiagramEditor({
   scenario,
   project,
@@ -1101,12 +1290,20 @@ function HydraulicDiagramEditor({
   const [nodes, setNodes] = useState<HydraulicDiagramNodeWrite[]>(() =>
     editableHydraulicNodes(initialDiagram),
   );
+  const [reaches, setReaches] = useState<HydraulicDiagramReachWrite[]>(() =>
+    editableHydraulicReaches(initialDiagram),
+  );
   const [revision, setRevision] = useState(initialDiagram.revision);
   const [viewport, setViewport] = useState<HydraulicDiagramViewport>(() =>
     defaultHydraulicViewport(initialDiagram),
   );
   const [saveStatus, setSaveStatus] = useState<HydraulicSaveStatus>("saved");
   const [error, setError] = useState("");
+  const [validation, setValidation] =
+    useState<HydraulicDiagramValidation | null>(null);
+  const [pendingReachSource, setPendingReachSource] = useState<string | null>(
+    null,
+  );
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -1114,6 +1311,7 @@ function HydraulicDiagramEditor({
         revision,
         viewport,
         nodes,
+        reaches,
       }),
     onMutate: () => {
       setSaveStatus("saving");
@@ -1125,6 +1323,7 @@ function HydraulicDiagramEditor({
         savedDiagram,
       );
       setNodes(editableHydraulicNodes(savedDiagram));
+      setReaches(editableHydraulicReaches(savedDiagram));
       setRevision(savedDiagram.revision);
       setViewport(defaultHydraulicViewport(savedDiagram));
       setSaveStatus("saved");
@@ -1143,6 +1342,7 @@ function HydraulicDiagramEditor({
         serverDiagram,
       );
       setNodes(editableHydraulicNodes(serverDiagram));
+      setReaches(editableHydraulicReaches(serverDiagram));
       setRevision(serverDiagram.revision);
       setViewport(defaultHydraulicViewport(serverDiagram));
       setSaveStatus("saved");
@@ -1153,10 +1353,21 @@ function HydraulicDiagramEditor({
       setError(errorMessage(mutationError));
     },
   });
+  const validateMutation = useMutation({
+    mutationFn: () => validateHydraulicDiagram(scenario.id),
+    onSuccess: (serverValidation) => {
+      setValidation(serverValidation);
+      setError("");
+    },
+    onError: (mutationError) => {
+      setError(errorMessage(mutationError));
+    },
+  });
 
   function markDirty() {
     setSaveStatus("dirty");
     setError("");
+    setValidation(null);
   }
 
   function addNode(componentType: HydraulicComponentType) {
@@ -1184,6 +1395,59 @@ function HydraulicDiagramEditor({
       ),
     );
     markDirty();
+  }
+
+  function createReach(fromNodeKey: string, toNodeKey: string) {
+    if (fromNodeKey === toNodeKey) return;
+    const validNodeKeys = new Set(
+      nodes
+        .filter((node) => node.component_type !== "plant")
+        .map((node) => node.technical_key),
+    );
+    if (!validNodeKeys.has(fromNodeKey) || !validNodeKeys.has(toNodeKey)) {
+      return;
+    }
+    setReaches((current) => {
+      const technicalKey = nextHydraulicReachKey(
+        current,
+        fromNodeKey,
+        toNodeKey,
+      );
+      return [
+        ...current,
+        {
+          technical_key: technicalKey,
+          display_name: technicalKey,
+          from_node_key: fromNodeKey,
+          to_node_key: toNodeKey,
+          reach_type: "river",
+        },
+      ];
+    });
+    markDirty();
+  }
+
+  function updateReach(
+    technicalKey: string,
+    patch: Partial<HydraulicDiagramReachWrite>,
+  ) {
+    setReaches((current) =>
+      current.map((reach) =>
+        reach.technical_key === technicalKey ? { ...reach, ...patch } : reach,
+      ),
+    );
+    markDirty();
+  }
+
+  function beginReachDrag(fromNodeKey: string) {
+    setPendingReachSource(fromNodeKey);
+  }
+
+  function completeReachDrag(toNodeKey: string) {
+    if (pendingReachSource) {
+      createReach(pendingReachSource, toNodeKey);
+    }
+    setPendingReachSource(null);
   }
 
   return (
@@ -1226,8 +1490,44 @@ function HydraulicDiagramEditor({
           >
             Recargar diagrama
           </button>
+          <button
+            type="button"
+            className="secondary-action"
+            disabled={validateMutation.isPending || saveMutation.isPending}
+            onClick={() => validateMutation.mutate()}
+          >
+            Validar topologia
+          </button>
         </div>
         {error ? <p role="alert">{error}</p> : null}
+        {validation ? (
+          <section
+            className="workspace-section validation-summary"
+            aria-labelledby="hydraulic-validation-summary"
+          >
+            <h2 id="hydraulic-validation-summary">{validation.summary}</h2>
+            {validation.errors.length ? (
+              <ul className="resource-list">
+                {validation.errors.map((issue) => (
+                  <li key={`${issue.code}-${issue.entity_id}`}>
+                    <strong>{issue.technical_key}</strong>
+                    <p>{issue.message}</p>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {validation.warnings.length ? (
+              <ul className="resource-list">
+                {validation.warnings.map((issue) => (
+                  <li key={`${issue.code}-${issue.entity_id}`}>
+                    <strong>{issue.technical_key}</strong>
+                    <p>{issue.message}</p>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </section>
+        ) : null}
         <section className="workspace-section" aria-labelledby="node-tools">
           <div className="draft-section-heading">
             <h2 id="node-tools">Nodos visibles</h2>
@@ -1245,7 +1545,23 @@ function HydraulicDiagramEditor({
               ))}
             </div>
           </div>
-          <HydraulicNodeList nodes={nodes} updateNode={updateNode} />
+          <HydraulicNodeList
+            nodes={nodes}
+            updateNode={updateNode}
+            createReach={createReach}
+            beginReachDrag={beginReachDrag}
+            completeReachDrag={completeReachDrag}
+          />
+        </section>
+        <section className="workspace-section" aria-labelledby="reach-tools">
+          <div className="draft-section-heading">
+            <h2 id="reach-tools">Tramos dirigidos</h2>
+          </div>
+          <HydraulicReachList
+            nodes={nodes}
+            reaches={reaches}
+            updateReach={updateReach}
+          />
         </section>
       </form>
     </section>

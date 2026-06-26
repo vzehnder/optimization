@@ -235,6 +235,138 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HydraulicDiagramNodeRequest": {
+        "properties": {
+          "component_type": {
+            "enum": [
+              "reservoir",
+              "junction",
+              "plant"
+            ],
+            "title": "Component Type",
+            "type": "string"
+          },
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "technical_key": {
+            "minLength": 1,
+            "title": "Technical Key",
+            "type": "string"
+          },
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "component_type",
+          "technical_key",
+          "display_name",
+          "x",
+          "y"
+        ],
+        "title": "HydraulicDiagramNodeRequest",
+        "type": "object"
+      },
+      "HydraulicDiagramReachRequest": {
+        "properties": {
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "from_node_key": {
+            "minLength": 1,
+            "title": "From Node Key",
+            "type": "string"
+          },
+          "reach_type": {
+            "minLength": 1,
+            "title": "Reach Type",
+            "type": "string"
+          },
+          "technical_key": {
+            "minLength": 1,
+            "title": "Technical Key",
+            "type": "string"
+          },
+          "to_node_key": {
+            "minLength": 1,
+            "title": "To Node Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "technical_key",
+          "display_name",
+          "from_node_key",
+          "to_node_key",
+          "reach_type"
+        ],
+        "title": "HydraulicDiagramReachRequest",
+        "type": "object"
+      },
+      "HydraulicDiagramSaveRequest": {
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/HydraulicDiagramNodeRequest"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "reaches": {
+            "items": {
+              "$ref": "#/components/schemas/HydraulicDiagramReachRequest"
+            },
+            "title": "Reaches",
+            "type": "array"
+          },
+          "revision": {
+            "minLength": 1,
+            "title": "Revision",
+            "type": "string"
+          },
+          "viewport": {
+            "$ref": "#/components/schemas/HydraulicDiagramViewportRequest"
+          }
+        },
+        "required": [
+          "revision",
+          "nodes"
+        ],
+        "title": "HydraulicDiagramSaveRequest",
+        "type": "object"
+      },
+      "HydraulicDiagramViewportRequest": {
+        "properties": {
+          "x": {
+            "default": 0.0,
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "default": 0.0,
+            "title": "Y",
+            "type": "number"
+          },
+          "zoom": {
+            "default": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Zoom",
+            "type": "number"
+          }
+        },
+        "title": "HydraulicDiagramViewportRequest",
+        "type": "object"
+      },
       "LoginRequest": {
         "properties": {
           "email": {
@@ -2376,6 +2508,160 @@
           }
         },
         "summary": "Save Draft Time Series Rows"
+      }
+    },
+    "/api/scenarios/{scenario_id}/hydraulic-diagram": {
+      "get": {
+        "operationId": "get_hydraulic_diagram_api_scenarios__scenario_id__hydraulic_diagram_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Hydraulic Diagram"
+      },
+      "post": {
+        "operationId": "create_hydraulic_diagram_api_scenarios__scenario_id__hydraulic_diagram_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Hydraulic Diagram"
+      },
+      "put": {
+        "operationId": "save_hydraulic_diagram_api_scenarios__scenario_id__hydraulic_diagram_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HydraulicDiagramSaveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Hydraulic Diagram"
+      }
+    },
+    "/api/scenarios/{scenario_id}/hydraulic-diagram/validate": {
+      "post": {
+        "operationId": "validate_hydraulic_diagram_api_scenarios__scenario_id__hydraulic_diagram_validate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Hydraulic Diagram"
       }
     },
     "/api/scenarios/{scenario_id}/runs": {

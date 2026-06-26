@@ -22,7 +22,7 @@ stored as a Markdown file in this folder. All issues carry the
 | --- | --- | --- | --- | --- | --- | --- |
 | BESS-HYDRO-DIAGRAM-000 | Review Hydro Diagram PRD And DB Extension | HITL | ready-for-agent | Done | None | [BESS-HYDRO-DIAGRAM-000-review-hydro-diagram-prd-and-db-extension.md](BESS-HYDRO-DIAGRAM-000-review-hydro-diagram-prd-and-db-extension.md) |
 | BESS-HYDRO-DIAGRAM-001 | Create A Minimal Persisted Hydraulic Diagram Case | AFK | ready-for-agent | Done | BESS-HYDRO-DIAGRAM-000 | [BESS-HYDRO-DIAGRAM-001-create-a-minimal-persisted-hydraulic-diagram-case.md](BESS-HYDRO-DIAGRAM-001-create-a-minimal-persisted-hydraulic-diagram-case.md) |
-| BESS-HYDRO-DIAGRAM-002 | Draw And Validate Directed Hydraulic Reaches | AFK | ready-for-agent | Todo | BESS-HYDRO-DIAGRAM-001 | [BESS-HYDRO-DIAGRAM-002-draw-and-validate-directed-hydraulic-reaches.md](BESS-HYDRO-DIAGRAM-002-draw-and-validate-directed-hydraulic-reaches.md) |
+| BESS-HYDRO-DIAGRAM-002 | Draw And Validate Directed Hydraulic Reaches | AFK | ready-for-agent | Done | BESS-HYDRO-DIAGRAM-001 | [BESS-HYDRO-DIAGRAM-002-draw-and-validate-directed-hydraulic-reaches.md](BESS-HYDRO-DIAGRAM-002-draw-and-validate-directed-hydraulic-reaches.md) |
 | BESS-HYDRO-DIAGRAM-003 | Edit Reservoir Parameters And Storage-Elevation Curves | AFK | ready-for-agent | Todo | BESS-HYDRO-DIAGRAM-002 | [BESS-HYDRO-DIAGRAM-003-edit-reservoir-parameters-and-storage-elevation-curves.md](BESS-HYDRO-DIAGRAM-003-edit-reservoir-parameters-and-storage-elevation-curves.md) |
 | BESS-HYDRO-DIAGRAM-004 | Edit Plants, Units, And Flow-Power Curves | AFK | ready-for-agent | Todo | BESS-HYDRO-DIAGRAM-003 | [BESS-HYDRO-DIAGRAM-004-edit-plants-units-and-flow-power-curves.md](BESS-HYDRO-DIAGRAM-004-edit-plants-units-and-flow-power-curves.md) |
 | BESS-HYDRO-DIAGRAM-005 | Generate And Validate A v3 Network Payload | AFK | ready-for-agent | Todo | BESS-HYDRO-DIAGRAM-004 | [BESS-HYDRO-DIAGRAM-005-generate-and-validate-a-v3-network-payload.md](BESS-HYDRO-DIAGRAM-005-generate-and-validate-a-v3-network-payload.md) |
@@ -56,6 +56,7 @@ stored as a Markdown file in this folder. All issues carry the
 | 2026-06-26 | All | Created | Initial local issue set generated from the hydro diagram PRD, database extension and approved grill-me decisions. |
 | 2026-06-26 | BESS-HYDRO-DIAGRAM-000 | Todo -> Done | Reviewed and accepted the hydro diagram PRD, database extension, `bess_system_dispatch.v3` decision, MVP solver limitations, issue granularity and DB checkpoint rule against the final objective, completed Iteration 5 hydro workflow, Iteration 6 publication boundary, React migration plan and central database proposal. No corrections were required. |
 | 2026-06-26 | BESS-HYDRO-DIAGRAM-001 | Todo -> Done | Implemented the first persisted hydraulic diagram path with normalized optimization-case tables, base/active hydraulic nodes and plants, editable layout persistence, stale revision rejection, React editor controls and focused backend/React tests. |
+| 2026-06-26 | BESS-HYDRO-DIAGRAM-002 | Todo -> Done | Added directed hydraulic reaches with base/active tables, diagram layout items, edit-save-reload API contract, topology validation endpoint, React drag/drop creation, fallback reach editing form, validation display, Playwright coverage and DB checkpoint update. |
 
 ## Regression Guard
 

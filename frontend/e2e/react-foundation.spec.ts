@@ -240,10 +240,49 @@ test("React hydraulic diagram persists reservoir junction and plant nodes across
   await page.getByRole("button", { name: "Agregar embalse" }).click();
   await page.getByRole("button", { name: "Agregar union" }).click();
   await page.getByRole("button", { name: "Agregar central" }).click();
+  await page.evaluate(() => {
+    const source = document.querySelector(
+      '[data-testid="hydraulic-node-reservoir_1"]',
+    );
+    const target = document.querySelector(
+      '[data-testid="hydraulic-node-junction_1"]',
+    );
+    if (!source || !target) throw new Error("hydraulic drag nodes not found");
+    const dataTransfer = new DataTransfer();
+    source.dispatchEvent(
+      new DragEvent("dragstart", {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer,
+      }),
+    );
+    target.dispatchEvent(
+      new DragEvent("dragover", {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer,
+      }),
+    );
+    target.dispatchEvent(
+      new DragEvent("drop", {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer,
+      }),
+    );
+  });
+  await expect(
+    page.getByText("reach_reservoir_1_junction_1", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByLabel("Tipo reach_reservoir_1_junction_1")
+    .selectOption("canal");
   await page.getByLabel("Etiqueta plant_1").fill("Plant Laja");
   await expect(page.getByText("Estado: dirty")).toBeVisible();
   await page.getByRole("button", { name: "Guardar diagrama" }).click();
   await expect(page.getByText("Estado: saved")).toBeVisible();
+  await page.getByRole("button", { name: "Validar topologia" }).click();
+  await expect(page.getByText("Hydraulic topology valid")).toBeVisible();
 
   await page.reload();
   await expect(
@@ -256,6 +295,12 @@ test("React hydraulic diagram persists reservoir junction and plant nodes across
     "Junction 1",
   );
   await expect(page.getByLabel("Etiqueta plant_1")).toHaveValue("Plant Laja");
+  await expect(
+    page.getByText("reach_reservoir_1_junction_1", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByLabel("Tipo reach_reservoir_1_junction_1"),
+  ).toHaveValue("canal");
 });
 
 test("React admin users and project access cover assignment, removal, deactivation, and denials", async ({

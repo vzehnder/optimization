@@ -328,6 +328,15 @@ export interface ScenarioDraftWritePayload {
 }
 
 export type HydraulicComponentType = "reservoir" | "junction" | "plant";
+export type HydraulicReachType =
+  | "river"
+  | "canal"
+  | "tunnel"
+  | "gate"
+  | "spillway"
+  | "bypass"
+  | "tailrace"
+  | "other";
 
 export interface HydraulicDiagramNodeWrite {
   component_type: HydraulicComponentType;
@@ -339,6 +348,21 @@ export interface HydraulicDiagramNodeWrite {
 
 export interface HydraulicDiagramNode extends HydraulicDiagramNodeWrite {
   layout_item_id: number;
+  entity_type: string;
+  entity_id: number;
+  z_index: number;
+}
+
+export interface HydraulicDiagramReachWrite {
+  technical_key: string;
+  display_name: string;
+  from_node_key: string;
+  to_node_key: string;
+  reach_type: HydraulicReachType;
+}
+
+export interface HydraulicDiagramReach extends HydraulicDiagramReachWrite {
+  layout_item_id: number | null;
   entity_type: string;
   entity_id: number;
   z_index: number;
@@ -378,12 +402,30 @@ export interface HydraulicDiagram {
   };
   revision: string;
   nodes: HydraulicDiagramNode[];
+  reaches: HydraulicDiagramReach[];
 }
 
 export interface HydraulicDiagramSavePayload {
   revision: string;
   viewport: HydraulicDiagramViewport;
   nodes: HydraulicDiagramNodeWrite[];
+  reaches: HydraulicDiagramReachWrite[];
+}
+
+export interface HydraulicDiagramValidationIssue {
+  severity?: "error" | "warning";
+  code: string;
+  message: string;
+  entity_type: string;
+  entity_id: number;
+  technical_key: string;
+}
+
+export interface HydraulicDiagramValidation {
+  ok: boolean;
+  summary: string;
+  errors: HydraulicDiagramValidationIssue[];
+  warnings: HydraulicDiagramValidationIssue[];
 }
 
 interface StructuredErrorBody {
@@ -996,6 +1038,15 @@ export async function saveHydraulicDiagram(
     },
   );
   return response.diagram;
+}
+
+export async function validateHydraulicDiagram(
+  scenarioId: number,
+): Promise<HydraulicDiagramValidation> {
+  const response = await postJsonWithCsrf<{
+    validation: HydraulicDiagramValidation;
+  }>(`/api/scenarios/${scenarioId}/hydraulic-diagram/validate`);
+  return response.validation;
 }
 
 export async function getGeneratedSystemCasePreview(

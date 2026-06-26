@@ -479,6 +479,19 @@ button:focus-visible {
   gap: 0.7rem;
 }
 
+.hydraulic-reach-list li {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.hydraulic-node-list li[draggable="true"] {
+  cursor: grab;
+}
+
+.validation-summary h2 {
+  margin-top: 0;
+}
+
 .draft-toolbar {
   position: sticky;
   top: 0;

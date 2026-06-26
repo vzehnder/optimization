@@ -3,7 +3,8 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 const repoRoot = resolve("..");
-const serverUrl = "http://127.0.0.1:8123/login";
+const serverUrl = "http://127.0.0.1:8123/api/auth/smoke-token";
+const smokeToken = `${process.pid}-${Date.now()}`;
 
 function pythonExecutable(): string {
   return (
@@ -36,7 +37,17 @@ async function waitForServer(server: ChildProcess): Promise<void> {
       throw new Error(`Smoke server exited with ${server.exitCode}`);
     try {
       const response = await fetch(serverUrl);
-      if (response.ok) return;
+      if (response.ok) {
+        const body = (await response.json()) as { token?: string };
+        if (body.token !== smokeToken) {
+          await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+          continue;
+        }
+        await new Promise((resolveWait) => setTimeout(resolveWait, 300));
+        if (server.exitCode !== null)
+          throw new Error(`Smoke server exited with ${server.exitCode}`);
+        return;
+      }
     } catch {
       // Server is still starting.
     }
@@ -51,7 +62,11 @@ export default async function globalSetup() {
     [resolve(repoRoot, "scripts/run_react_smoke_app.py")],
     {
       cwd: repoRoot,
-      env: { ...process.env, REACT_SMOKE_PORT: "8123" },
+      env: {
+        ...process.env,
+        REACT_SMOKE_PORT: "8123",
+        REACT_SMOKE_TOKEN: smokeToken,
+      },
       stdio: "ignore",
       windowsHide: true,
     },

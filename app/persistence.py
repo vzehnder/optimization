@@ -33,6 +33,16 @@ DEFAULT_PUBLICATION_ARTIFACT_TYPES = [
 
 HYDRAULIC_NODE_COMPONENT_TYPES = {"reservoir", "junction"}
 HYDRAULIC_VISIBLE_COMPONENT_TYPES = HYDRAULIC_NODE_COMPONENT_TYPES | {"plant"}
+HYDRAULIC_REACH_TYPES = {
+    "river",
+    "canal",
+    "tunnel",
+    "gate",
+    "spillway",
+    "bypass",
+    "tailrace",
+    "other",
+}
 
 
 def utc_now_iso() -> str:
@@ -125,6 +135,27 @@ class AnalystStore:
                 CHECK (node_type IN ('reservoir', 'junction', 'intake', 'tailrace', 'river_inflow', 'other'))
             );
 
+            CREATE TABLE IF NOT EXISTS hydraulic_reaches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                hydraulic_system_id INTEGER NOT NULL,
+                reach_key TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                from_node_id INTEGER NOT NULL,
+                to_node_id INTEGER NOT NULL,
+                reach_type TEXT NOT NULL,
+                travel_time_hours REAL NOT NULL DEFAULT 0,
+                routing_method TEXT NOT NULL DEFAULT 'none',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (hydraulic_system_id) REFERENCES hydraulic_systems(id) ON DELETE CASCADE,
+                FOREIGN KEY (from_node_id) REFERENCES hydraulic_nodes(id) ON DELETE CASCADE,
+                FOREIGN KEY (to_node_id) REFERENCES hydraulic_nodes(id) ON DELETE CASCADE,
+                UNIQUE (hydraulic_system_id, reach_key),
+                CHECK (reach_type IN ('river', 'canal', 'tunnel', 'gate', 'spillway', 'bypass', 'tailrace', 'other'))
+            );
+
             CREATE TABLE IF NOT EXISTS hydraulic_plants (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 hydraulic_system_id INTEGER NOT NULL,
@@ -165,6 +196,23 @@ class AnalystStore:
                 FOREIGN KEY (case_id) REFERENCES optimization_cases(id) ON DELETE CASCADE,
                 FOREIGN KEY (hydraulic_node_id) REFERENCES hydraulic_nodes(id) ON DELETE CASCADE,
                 UNIQUE (case_id, hydraulic_node_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS case_hydraulic_reaches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id INTEGER NOT NULL,
+                hydraulic_reach_id INTEGER NOT NULL,
+                case_label TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                flow_min_m3s REAL,
+                spill_penalty_usd_per_hm3 REAL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (case_id) REFERENCES optimization_cases(id) ON DELETE CASCADE,
+                FOREIGN KEY (hydraulic_reach_id) REFERENCES hydraulic_reaches(id) ON DELETE CASCADE,
+                UNIQUE (case_id, hydraulic_reach_id)
             );
 
             CREATE TABLE IF NOT EXISTS case_hydraulic_plants (
@@ -217,7 +265,7 @@ class AnalystStore:
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY (diagram_layout_id) REFERENCES case_hydraulic_diagram_layouts(id) ON DELETE CASCADE,
                 UNIQUE (diagram_layout_id, entity_type, entity_id),
-                CHECK (entity_type IN ('case_hydraulic_node', 'case_hydraulic_plant'))
+                CHECK (entity_type IN ('case_hydraulic_node', 'case_hydraulic_reach', 'case_hydraulic_plant'))
             );
 
             CREATE TABLE IF NOT EXISTS scenario_versions (
@@ -384,6 +432,7 @@ class AnalystStore:
         self._ensure_column("runs", "stderr_log_path", "TEXT")
         self._ensure_column("runs", "error_message", "TEXT NOT NULL DEFAULT ''")
         self._ensure_column("scenario_versions", "generation_metadata_json", "TEXT NOT NULL DEFAULT '{}'")
+        self._ensure_hydraulic_diagram_items_support_reaches()
         self.connection.commit()
 
     def _ensure_column(self, table_name: str, column_name: str, definition: str) -> None:
@@ -410,6 +459,79 @@ class AnalystStore:
         }
         if column_name not in columns:
             self.connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
+    def _ensure_hydraulic_diagram_items_support_reaches(self) -> None:
+        if self.database_backend != "sqlite":
+            return
+        row = self.connection.execute(
+            """
+            SELECT sql
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'case_hydraulic_diagram_items'
+            """
+        ).fetchone()
+        if row is None or "case_hydraulic_reach" in str(row["sql"]):
+            return
+        self.connection.execute("PRAGMA foreign_keys = OFF")
+        self.connection.executescript(
+            """
+            ALTER TABLE case_hydraulic_diagram_items
+            RENAME TO case_hydraulic_diagram_items_old;
+
+            CREATE TABLE case_hydraulic_diagram_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                diagram_layout_id INTEGER NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id INTEGER NOT NULL,
+                x REAL NOT NULL,
+                y REAL NOT NULL,
+                width REAL,
+                height REAL,
+                z_index INTEGER NOT NULL DEFAULT 0,
+                collapsed INTEGER NOT NULL DEFAULT 0,
+                style_json TEXT NOT NULL DEFAULT '{}',
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (diagram_layout_id) REFERENCES case_hydraulic_diagram_layouts(id) ON DELETE CASCADE,
+                UNIQUE (diagram_layout_id, entity_type, entity_id),
+                CHECK (entity_type IN ('case_hydraulic_node', 'case_hydraulic_reach', 'case_hydraulic_plant'))
+            );
+
+            INSERT INTO case_hydraulic_diagram_items (
+                id,
+                diagram_layout_id,
+                entity_type,
+                entity_id,
+                x,
+                y,
+                width,
+                height,
+                z_index,
+                collapsed,
+                style_json,
+                metadata_json,
+                updated_at
+            )
+            SELECT
+                id,
+                diagram_layout_id,
+                entity_type,
+                entity_id,
+                x,
+                y,
+                width,
+                height,
+                z_index,
+                collapsed,
+                style_json,
+                metadata_json,
+                updated_at
+            FROM case_hydraulic_diagram_items_old;
+
+            DROP TABLE case_hydraulic_diagram_items_old;
+            """
+        )
+        self.connection.execute("PRAGMA foreign_keys = ON")
 
     def count_users(self) -> int:
         row = self.connection.execute("SELECT COUNT(*) AS user_count FROM users").fetchone()
@@ -1185,6 +1307,7 @@ class AnalystStore:
         scenario_id: int,
         revision: str,
         nodes: list[dict[str, Any]],
+        reaches: list[dict[str, Any]] | None = None,
         viewport: dict[str, Any] | None = None,
         updated_by: str = "internal_analyst",
     ) -> dict[str, Any]:
@@ -1199,6 +1322,7 @@ class AnalystStore:
                 raise ValueError("stale hydraulic diagram revision")
 
             normalized_nodes = normalize_hydraulic_diagram_nodes(nodes)
+            normalized_reaches = normalize_hydraulic_diagram_reaches(reaches or [])
             resolved_viewport = {
                 "x": float(layout["viewport_x"]),
                 "y": float(layout["viewport_y"]),
@@ -1217,6 +1341,10 @@ class AnalystStore:
                 (layout_id,),
             )
             self.connection.execute(
+                "DELETE FROM case_hydraulic_reaches WHERE case_id = ?",
+                (case_id,),
+            )
+            self.connection.execute(
                 "DELETE FROM case_hydraulic_nodes WHERE case_id = ?",
                 (case_id,),
             )
@@ -1225,6 +1353,7 @@ class AnalystStore:
                 (case_id,),
             )
 
+            active_nodes_by_key: dict[str, dict[str, Any]] = {}
             for index, node in enumerate(normalized_nodes):
                 if node["component_type"] == "plant":
                     active_id = self._create_case_hydraulic_plant(
@@ -1237,7 +1366,7 @@ class AnalystStore:
                     )
                     entity_type = "case_hydraulic_plant"
                 else:
-                    active_id = self._create_case_hydraulic_node(
+                    created_node = self._create_case_hydraulic_node(
                         case_id=case_id,
                         system_id=system_id,
                         node_key=node["technical_key"],
@@ -1246,6 +1375,13 @@ class AnalystStore:
                         updated_by=updated_by,
                         now=now,
                     )
+                    active_id = created_node["case_hydraulic_node_id"]
+                    active_nodes_by_key[node["technical_key"]] = {
+                        "case_hydraulic_node_id": active_id,
+                        "hydraulic_node_id": created_node["hydraulic_node_id"],
+                        "x": node["x"],
+                        "y": node["y"],
+                    }
                     entity_type = "case_hydraulic_node"
                 self.connection.execute(
                     """
@@ -1270,6 +1406,65 @@ class AnalystStore:
                         node["x"],
                         node["y"],
                         index,
+                        now,
+                    ),
+                )
+
+            for index, reach in enumerate(normalized_reaches):
+                from_node = self._resolve_hydraulic_node_for_reach(
+                    system_id,
+                    reach["from_node_key"],
+                    active_nodes_by_key,
+                )
+                to_node = self._resolve_hydraulic_node_for_reach(
+                    system_id,
+                    reach["to_node_key"],
+                    active_nodes_by_key,
+                )
+                created_reach = self._create_case_hydraulic_reach(
+                    case_id=case_id,
+                    system_id=system_id,
+                    reach_key=reach["technical_key"],
+                    display_name=reach["display_name"],
+                    from_node_id=from_node["hydraulic_node_id"],
+                    to_node_id=to_node["hydraulic_node_id"],
+                    reach_type=reach["reach_type"],
+                    updated_by=updated_by,
+                    now=now,
+                )
+                active_endpoints = [
+                    node
+                    for node in (from_node, to_node)
+                    if "case_hydraulic_node_id" in node
+                ]
+                if active_endpoints:
+                    x = sum(float(node["x"]) for node in active_endpoints) / len(active_endpoints)
+                    y = sum(float(node["y"]) for node in active_endpoints) / len(active_endpoints)
+                else:
+                    x = 0.0
+                    y = 0.0
+                self.connection.execute(
+                    """
+                    INSERT INTO case_hydraulic_diagram_items (
+                        diagram_layout_id,
+                        entity_type,
+                        entity_id,
+                        x,
+                        y,
+                        z_index,
+                        collapsed,
+                        style_json,
+                        metadata_json,
+                        updated_at
+                    )
+                    VALUES (?, 'case_hydraulic_reach', ?, ?, ?, ?, 0, '{}', '{}', ?)
+                    """,
+                    (
+                        layout_id,
+                        created_reach["case_hydraulic_reach_id"],
+                        x,
+                        y,
+                        len(normalized_nodes) + index,
                         now,
                     ),
                 )
@@ -1300,6 +1495,85 @@ class AnalystStore:
             if updated_context is None:
                 raise KeyError(f"hydraulic diagram for scenario {scenario_id} not found")
             return self._hydraulic_diagram_response(updated_context)
+
+    def validate_hydraulic_diagram(self, scenario_id: int) -> dict[str, Any]:
+        self.get_scenario(scenario_id)
+        context = self._get_hydraulic_diagram_context(scenario_id)
+        if context is None:
+            raise KeyError(f"hydraulic diagram for scenario {scenario_id} not found")
+        case_id = int(context["optimization_case"]["id"])
+        active_node_ids = {
+            int(row["hydraulic_node_id"])
+            for row in self.connection.execute(
+                """
+                SELECT hydraulic_node_id
+                FROM case_hydraulic_nodes
+                WHERE case_id = ? AND is_active = 1
+                """,
+                (case_id,),
+            ).fetchall()
+        }
+        reach_rows = self.connection.execute(
+            """
+            SELECT
+                case_hydraulic_reaches.id AS case_hydraulic_reach_id,
+                case_hydraulic_reaches.case_label,
+                hydraulic_reaches.reach_key,
+                hydraulic_reaches.reach_type,
+                hydraulic_reaches.from_node_id,
+                hydraulic_reaches.to_node_id
+            FROM case_hydraulic_reaches
+            JOIN hydraulic_reaches
+              ON hydraulic_reaches.id = case_hydraulic_reaches.hydraulic_reach_id
+            WHERE case_hydraulic_reaches.case_id = ?
+              AND case_hydraulic_reaches.is_active = 1
+            ORDER BY case_hydraulic_reaches.id
+            """,
+            (case_id,),
+        ).fetchall()
+        errors: list[dict[str, Any]] = []
+        for row in reach_rows:
+            reach_key = str(row["reach_key"])
+            if row["reach_type"] not in HYDRAULIC_REACH_TYPES:
+                errors.append(
+                    {
+                        "severity": "error",
+                        "code": "unsupported_reach_type",
+                        "message": f"Reach {reach_key} has unsupported type {row['reach_type']}.",
+                        "entity_type": "case_hydraulic_reach",
+                        "entity_id": int(row["case_hydraulic_reach_id"]),
+                        "technical_key": reach_key,
+                    }
+                )
+            if int(row["from_node_id"]) not in active_node_ids or int(row["to_node_id"]) not in active_node_ids:
+                errors.append(
+                    {
+                        "severity": "error",
+                        "code": "inactive_or_missing_endpoint",
+                        "message": f"Reach {reach_key} must connect active hydraulic nodes in this case.",
+                        "entity_type": "case_hydraulic_reach",
+                        "entity_id": int(row["case_hydraulic_reach_id"]),
+                        "technical_key": reach_key,
+                    }
+                )
+        validation = {
+            "ok": not errors,
+            "errors": errors,
+            "warnings": [],
+            "summary": "Hydraulic topology valid" if not errors else "Hydraulic topology has errors",
+        }
+        self.connection.execute(
+            """
+            UPDATE optimization_cases
+            SET validation_payload_json = ?,
+                updated_at = ?,
+                updated_by = 'hydraulic_diagram_validator'
+            WHERE id = ?
+            """,
+            (json.dumps(validation, sort_keys=True), utc_now_iso(), case_id),
+        )
+        self.connection.commit()
+        return validation
 
     def create_scenario_version(
         self,
@@ -2169,6 +2443,36 @@ class AnalystStore:
         ).fetchall()
         nodes = [hydraulic_diagram_node_row_to_dict(row) for row in node_rows + plant_rows]
         nodes.sort(key=lambda node: (node["z_index"], node["layout_item_id"]))
+        reach_rows = self.connection.execute(
+            """
+            SELECT
+                case_hydraulic_diagram_items.id AS layout_item_id,
+                case_hydraulic_diagram_items.z_index,
+                case_hydraulic_reaches.id AS entity_id,
+                hydraulic_reaches.reach_key AS technical_key,
+                case_hydraulic_reaches.case_label AS display_name,
+                hydraulic_reaches.reach_type,
+                from_nodes.node_key AS from_node_key,
+                to_nodes.node_key AS to_node_key
+            FROM case_hydraulic_reaches
+            JOIN hydraulic_reaches
+              ON hydraulic_reaches.id = case_hydraulic_reaches.hydraulic_reach_id
+            JOIN hydraulic_nodes AS from_nodes
+              ON from_nodes.id = hydraulic_reaches.from_node_id
+            JOIN hydraulic_nodes AS to_nodes
+              ON to_nodes.id = hydraulic_reaches.to_node_id
+            LEFT JOIN case_hydraulic_diagram_items
+              ON case_hydraulic_diagram_items.entity_type = 'case_hydraulic_reach'
+             AND case_hydraulic_diagram_items.entity_id = case_hydraulic_reaches.id
+             AND case_hydraulic_diagram_items.diagram_layout_id = ?
+            WHERE case_hydraulic_reaches.case_id = ?
+              AND case_hydraulic_reaches.is_active = 1
+            ORDER BY COALESCE(case_hydraulic_diagram_items.z_index, 0),
+                     case_hydraulic_reaches.id
+            """,
+            (layout_id, int(context["optimization_case"]["id"])),
+        ).fetchall()
+        reaches = [hydraulic_diagram_reach_row_to_dict(row) for row in reach_rows]
         return {
             "scenario_id": context["scenario_id"],
             "optimization_case": optimization_case_public_dict(context["optimization_case"]),
@@ -2176,6 +2480,7 @@ class AnalystStore:
             "layout": hydraulic_layout_public_dict(layout),
             "revision": str(layout["layout_version"]),
             "nodes": nodes,
+            "reaches": reaches,
         }
 
     def _create_case_hydraulic_node(
@@ -2188,7 +2493,7 @@ class AnalystStore:
         node_type: str,
         updated_by: str,
         now: str,
-    ) -> int:
+    ) -> dict[str, int]:
         self.connection.execute(
             """
             INSERT INTO hydraulic_nodes (
@@ -2234,7 +2539,110 @@ class AnalystStore:
             """,
             (case_id, int(node_row["id"]), display_name, now, now, updated_by, updated_by),
         )
-        return int(cursor.lastrowid)
+        return {
+            "case_hydraulic_node_id": int(cursor.lastrowid),
+            "hydraulic_node_id": int(node_row["id"]),
+        }
+
+    def _resolve_hydraulic_node_for_reach(
+        self,
+        system_id: int,
+        node_key: str,
+        active_nodes_by_key: Mapping[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        if node_key in active_nodes_by_key:
+            return active_nodes_by_key[node_key]
+        row = self.connection.execute(
+            """
+            SELECT id
+            FROM hydraulic_nodes
+            WHERE hydraulic_system_id = ? AND node_key = ?
+            """,
+            (system_id, node_key),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"hydraulic reach endpoint not found: {node_key}")
+        return {"hydraulic_node_id": int(row["id"])}
+
+    def _create_case_hydraulic_reach(
+        self,
+        *,
+        case_id: int,
+        system_id: int,
+        reach_key: str,
+        display_name: str,
+        from_node_id: int,
+        to_node_id: int,
+        reach_type: str,
+        updated_by: str,
+        now: str,
+    ) -> dict[str, int]:
+        self.connection.execute(
+            """
+            INSERT INTO hydraulic_reaches (
+                hydraulic_system_id,
+                reach_key,
+                display_name,
+                from_node_id,
+                to_node_id,
+                reach_type,
+                travel_time_hours,
+                routing_method,
+                created_at,
+                updated_at,
+                created_by,
+                updated_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 0, 'none', ?, ?, ?, ?)
+            ON CONFLICT (hydraulic_system_id, reach_key) DO UPDATE SET
+                display_name = excluded.display_name,
+                from_node_id = excluded.from_node_id,
+                to_node_id = excluded.to_node_id,
+                reach_type = excluded.reach_type,
+                updated_at = excluded.updated_at,
+                updated_by = excluded.updated_by
+            """,
+            (
+                system_id,
+                reach_key,
+                display_name,
+                from_node_id,
+                to_node_id,
+                reach_type,
+                now,
+                now,
+                updated_by,
+                updated_by,
+            ),
+        )
+        reach_row = self.connection.execute(
+            """
+            SELECT id
+            FROM hydraulic_reaches
+            WHERE hydraulic_system_id = ? AND reach_key = ?
+            """,
+            (system_id, reach_key),
+        ).fetchone()
+        cursor = self.connection.execute(
+            """
+            INSERT INTO case_hydraulic_reaches (
+                case_id,
+                hydraulic_reach_id,
+                case_label,
+                is_active,
+                created_at,
+                updated_at,
+                created_by,
+                updated_by
+            )
+            VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+            """,
+            (case_id, int(reach_row["id"]), display_name, now, now, updated_by, updated_by),
+        )
+        return {
+            "case_hydraulic_reach_id": int(cursor.lastrowid),
+            "hydraulic_reach_id": int(reach_row["id"]),
+        }
 
     def _create_case_hydraulic_plant(
         self,
@@ -2414,6 +2822,35 @@ def normalize_hydraulic_diagram_nodes(nodes: list[dict[str, Any]]) -> list[dict[
     return normalized
 
 
+def normalize_hydraulic_diagram_reaches(reaches: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    for reach in reaches:
+        technical_key = str(reach.get("technical_key") or "").strip()
+        if not technical_key:
+            raise ValueError("hydraulic reach technical_key is required")
+        if technical_key in seen_keys:
+            raise ValueError(f"duplicate hydraulic reach key: {technical_key}")
+        seen_keys.add(technical_key)
+        from_node_key = str(reach.get("from_node_key") or "").strip()
+        to_node_key = str(reach.get("to_node_key") or "").strip()
+        if not from_node_key or not to_node_key:
+            raise ValueError("hydraulic reach endpoints are required")
+        reach_type = str(reach.get("reach_type") or "").strip()
+        if reach_type not in HYDRAULIC_REACH_TYPES:
+            raise ValueError(f"unsupported hydraulic reach type: {reach_type}")
+        normalized.append(
+            {
+                "technical_key": technical_key,
+                "display_name": str(reach.get("display_name") or "").strip() or technical_key,
+                "from_node_key": from_node_key,
+                "to_node_key": to_node_key,
+                "reach_type": reach_type,
+            }
+        )
+    return normalized
+
+
 def optimization_case_public_dict(row: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "id": row["id"],
@@ -2463,6 +2900,21 @@ def hydraulic_diagram_node_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> 
         "x": float(value["x"]),
         "y": float(value["y"]),
         "z_index": int(value["z_index"]),
+    }
+
+
+def hydraulic_diagram_reach_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
+    value = row_to_dict(row)
+    return {
+        "layout_item_id": value["layout_item_id"],
+        "entity_type": "case_hydraulic_reach",
+        "entity_id": value["entity_id"],
+        "technical_key": value["technical_key"],
+        "display_name": value["display_name"],
+        "from_node_key": value["from_node_key"],
+        "to_node_key": value["to_node_key"],
+        "reach_type": value["reach_type"],
+        "z_index": int(value["z_index"] or 0),
     }
 
 

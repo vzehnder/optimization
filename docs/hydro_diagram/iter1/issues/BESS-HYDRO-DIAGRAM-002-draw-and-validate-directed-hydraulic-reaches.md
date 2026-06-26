@@ -1,6 +1,6 @@
 # BESS-HYDRO-DIAGRAM-002: Draw And Validate Directed Hydraulic Reaches
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/hydro_diagram/iter1/prd_hydro_diagram_editor.md`
@@ -23,26 +23,50 @@ the analyst from drawing them.
 
 ## Acceptance criteria
 
-- [ ] The UI supports creating a directed reach by drag-and-drop between
+- [x] The UI supports creating a directed reach by drag-and-drop between
       compatible visible nodes.
-- [ ] The UI supports editing reach origin, destination and type through a form
+- [x] The UI supports editing reach origin, destination and type through a form
       fallback.
-- [ ] Supported reach types include `river`, `canal`, `tunnel`, `gate`,
+- [x] Supported reach types include `river`, `canal`, `tunnel`, `gate`,
       `spillway`, `bypass`, `tailrace` and `other`.
-- [ ] Saved reaches reload with direction and type intact.
-- [ ] Backend validation rejects active reaches whose origin or destination is
+- [x] Saved reaches reload with direction and type intact.
+- [x] Backend validation rejects active reaches whose origin or destination is
       inactive or outside the case.
-- [ ] Validation results identify affected entity type and entity id so the UI
+- [x] Validation results identify affected entity type and entity id so the UI
       can select the component.
-- [ ] The UI displays validation warnings and errors without erasing local
+- [x] The UI displays validation warnings and errors without erasing local
       edits.
-- [ ] Backend tests cover valid directed reaches, missing endpoints, inactive
+- [x] Backend tests cover valid directed reaches, missing endpoints, inactive
       endpoints and type validation.
-- [ ] React tests cover drag creation and form fallback editing.
-- [ ] The DB checkpoint is updated if reach tables, constraints or indices are
+- [x] React tests cover drag creation and form fallback editing.
+- [x] The DB checkpoint is updated if reach tables, constraints or indices are
       changed.
+
+## Implementation notes
+
+Implemented on 2026-06-26.
+
+- Added `hydraulic_reaches` and `case_hydraulic_reaches`, plus reach layout
+  items under `case_hydraulic_diagram_items`.
+- Extended the hydraulic diagram API payload and response with directed
+  reaches and added `/api/scenarios/{scenario_id}/hydraulic-diagram/validate`.
+- Added backend topology validation for allowed reach types and active endpoint
+  membership, with affected `entity_type`, `entity_id` and `technical_key`.
+- Added React drag/drop reach creation, fallback origin/destination/type form
+  editing, validation display, and persisted reload coverage.
+- Hardened Playwright smoke startup so stale servers on port 8123 are rejected.
+
+## Verification
+
+- `.\\.venv\\Scripts\\python.exe -m unittest tests.test_hydraulic_diagram`
+- `.\\.venv\\Scripts\\python.exe -m unittest discover tests`
+- `npm.cmd test`
+- `npm.cmd run api:check`
+- `npm.cmd run test:browser`
+- `npx.cmd tsc -b --pretty false`
+- `npx.cmd eslint src\\Workspace.tsx src\\App.test.tsx src\\api\\client.ts e2e\\react-foundation.spec.ts e2e\\global-setup.ts`
+- `npx.cmd prettier --check src\\Workspace.tsx src\\App.test.tsx src\\api\\client.ts src\\api\\schema.ts src\\styles.css e2e\\react-foundation.spec.ts e2e\\global-setup.ts openapi.json`
 
 ## Blocked by
 
 BESS-HYDRO-DIAGRAM-001
-

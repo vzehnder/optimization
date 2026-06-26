@@ -678,6 +678,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scenarios/{scenario_id}/hydraulic-diagram": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Hydraulic Diagram */
+        get: operations["get_hydraulic_diagram_api_scenarios__scenario_id__hydraulic_diagram_get"];
+        /** Save Hydraulic Diagram */
+        put: operations["save_hydraulic_diagram_api_scenarios__scenario_id__hydraulic_diagram_put"];
+        /** Create Hydraulic Diagram */
+        post: operations["create_hydraulic_diagram_api_scenarios__scenario_id__hydraulic_diagram_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/hydraulic-diagram/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Validate Hydraulic Diagram */
+        post: operations["validate_hydraulic_diagram_api_scenarios__scenario_id__hydraulic_diagram_validate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scenarios/{scenario_id}/runs": {
         parameters: {
             query?: never;
@@ -887,6 +923,63 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** HydraulicDiagramNodeRequest */
+        HydraulicDiagramNodeRequest: {
+            /**
+             * Component Type
+             * @enum {string}
+             */
+            component_type: "reservoir" | "junction" | "plant";
+            /** Display Name */
+            display_name: string;
+            /** Technical Key */
+            technical_key: string;
+            /** X */
+            x: number;
+            /** Y */
+            y: number;
+        };
+        /** HydraulicDiagramReachRequest */
+        HydraulicDiagramReachRequest: {
+            /** Display Name */
+            display_name: string;
+            /** From Node Key */
+            from_node_key: string;
+            /** Reach Type */
+            reach_type: string;
+            /** Technical Key */
+            technical_key: string;
+            /** To Node Key */
+            to_node_key: string;
+        };
+        /** HydraulicDiagramSaveRequest */
+        HydraulicDiagramSaveRequest: {
+            /** Nodes */
+            nodes: components["schemas"]["HydraulicDiagramNodeRequest"][];
+            /** Reaches */
+            reaches?: components["schemas"]["HydraulicDiagramReachRequest"][];
+            /** Revision */
+            revision: string;
+            viewport?: components["schemas"]["HydraulicDiagramViewportRequest"];
+        };
+        /** HydraulicDiagramViewportRequest */
+        HydraulicDiagramViewportRequest: {
+            /**
+             * X
+             * @default 0
+             */
+            x: number;
+            /**
+             * Y
+             * @default 0
+             */
+            y: number;
+            /**
+             * Zoom
+             * @default 1
+             */
+            zoom: number;
         };
         /** LoginRequest */
         LoginRequest: {
@@ -2518,6 +2611,134 @@ export interface operations {
                 "application/json": components["schemas"]["TimeSeriesRowsRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_hydraulic_diagram_api_scenarios__scenario_id__hydraulic_diagram_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_hydraulic_diagram_api_scenarios__scenario_id__hydraulic_diagram_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HydraulicDiagramSaveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_hydraulic_diagram_api_scenarios__scenario_id__hydraulic_diagram_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    validate_hydraulic_diagram_api_scenarios__scenario_id__hydraulic_diagram_validate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

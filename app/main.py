@@ -146,9 +146,18 @@ class HydraulicDiagramNodeRequest(BaseModel):
     y: float
 
 
+class HydraulicDiagramReachRequest(BaseModel):
+    technical_key: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    from_node_key: str = Field(min_length=1)
+    to_node_key: str = Field(min_length=1)
+    reach_type: str = Field(min_length=1)
+
+
 class HydraulicDiagramSaveRequest(BaseModel):
     revision: str = Field(min_length=1)
     nodes: list[HydraulicDiagramNodeRequest]
+    reaches: list[HydraulicDiagramReachRequest] = Field(default_factory=list)
     viewport: HydraulicDiagramViewportRequest = Field(default_factory=HydraulicDiagramViewportRequest)
 
 
@@ -1020,6 +1029,7 @@ def create_app(
                 scenario_id=scenario_id,
                 revision=payload.revision,
                 nodes=[node.model_dump() for node in payload.nodes],
+                reaches=[reach.model_dump() for reach in payload.reaches],
                 viewport=payload.viewport.model_dump(),
             )
         except KeyError as error:
@@ -1028,6 +1038,14 @@ def create_app(
             status_code = 409 if str(error) == "stale hydraulic diagram revision" else 400
             raise HTTPException(status_code=status_code, detail=str(error)) from error
         return {"diagram": diagram}
+
+    @app.post("/api/scenarios/{scenario_id}/hydraulic-diagram/validate")
+    async def validate_hydraulic_diagram(scenario_id: int):
+        try:
+            validation = analyst_store.validate_hydraulic_diagram(scenario_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"validation": validation}
 
     @app.post("/api/scenarios/{scenario_id}/draft", status_code=201)
     async def create_scenario_draft(scenario_id: int, payload: ScenarioDraftWriteRequest):
