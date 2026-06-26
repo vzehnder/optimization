@@ -216,7 +216,10 @@ function NestedKpiBlock({ title, value }: { title: string; value: unknown }) {
     <div className="kpi-block">
       <h3>{title}</h3>
       {scalarRows.length ? (
-        <div className="time-series-table-scroll result-table-scroll">
+        <div
+          className="time-series-table-scroll result-table-scroll"
+          tabIndex={0}
+        >
           <table>
             <thead>
               <tr>
@@ -236,7 +239,10 @@ function NestedKpiBlock({ title, value }: { title: string; value: unknown }) {
         </div>
       ) : null}
       {nestedRows.length ? (
-        <div className="time-series-table-scroll result-table-scroll">
+        <div
+          className="time-series-table-scroll result-table-scroll"
+          tabIndex={0}
+        >
           <table>
             <thead>
               <tr>
@@ -281,7 +287,10 @@ function ResultTableView({
       ) : (
         <p className="empty-state">No hay filas para mostrar.</p>
       )}
-      <div className="time-series-table-scroll result-table-scroll">
+      <div
+        className="time-series-table-scroll result-table-scroll"
+        tabIndex={0}
+      >
         <table>
           <thead>
             <tr>

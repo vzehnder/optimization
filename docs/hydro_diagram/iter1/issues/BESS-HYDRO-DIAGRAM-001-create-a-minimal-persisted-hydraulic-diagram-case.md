@@ -1,6 +1,6 @@
 # BESS-HYDRO-DIAGRAM-001: Create A Minimal Persisted Hydraulic Diagram Case
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/hydro_diagram/iter1/prd_hydro_diagram_editor.md`
@@ -25,23 +25,39 @@ implemented state.
 
 ## Acceptance criteria
 
-- [ ] A scenario can obtain or create an editable normalized optimization case
+- [x] A scenario can obtain or create an editable normalized optimization case
       for the hydraulic diagram.
-- [ ] The React UI opens a hydraulic diagram surface from the scenario context.
-- [ ] The analyst can add at least reservoir, junction and plant visible nodes.
-- [ ] Node creation persists stable technical keys and editable display labels.
-- [ ] Save is explicit and the UI shows dirty, saving, saved and failed states.
-- [ ] Reloading the editor restores the persisted active topology.
-- [ ] Persisted positions are restored or autolayout is applied when positions
+- [x] The React UI opens a hydraulic diagram surface from the scenario context.
+- [x] The analyst can add at least reservoir, junction and plant visible nodes.
+- [x] Node creation persists stable technical keys and editable display labels.
+- [x] Save is explicit and the UI shows dirty, saving, saved and failed states.
+- [x] Reloading the editor restores the persisted active topology.
+- [x] Persisted positions are restored or autolayout is applied when positions
       are missing.
-- [ ] Stale save attempts are rejected using `updated_at` or an equivalent
+- [x] Stale save attempts are rejected using `updated_at` or an equivalent
       revision token.
-- [ ] Backend tests cover create, save, reload and stale update rejection.
-- [ ] React tests cover dirty/save state and reload from server data.
-- [ ] `docs/db/hydro_diagram_db_checkpoint.md` records the tables and fields
+- [x] Backend tests cover create, save, reload and stale update rejection.
+- [x] React tests cover dirty/save state and reload from server data.
+- [x] `docs/db/hydro_diagram_db_checkpoint.md` records the tables and fields
       implemented by this slice.
+
+## Implementation notes
+
+- Added minimal normalized hydraulic diagram persistence in `AnalystStore`:
+  `optimization_cases`, base hydraulic systems/nodes/plants, active
+  case-hydraulic system/node/plant rows and editable layout rows.
+- Added `/api/scenarios/{scenario_id}/hydraulic-diagram` POST, GET and PUT
+  contracts. PUT requires the current layout revision and returns 409 on stale
+  saves.
+- Added a React hydraulic diagram route under
+  `/react/scenarios/:scenarioId/hydraulic-diagram` with explicit save, reload
+  and dirty/saving/saved/failed UI states.
+
+## Verification
+
+- `.\\.venv\\Scripts\\python.exe -m unittest tests.test_hydraulic_diagram`
+- `npm.cmd test -- App.test.tsx -t "opens a persisted hydraulic diagram"`
 
 ## Blocked by
 
 BESS-HYDRO-DIAGRAM-000
-

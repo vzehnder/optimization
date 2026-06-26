@@ -7,11 +7,13 @@ import {
   ApiError,
   createManualRun,
   createDashboardTemplate,
+  createHydraulicDiagram,
   createProject,
   createRunPublicationDraft,
   createScenario,
   createScenarioVersionFromJson,
   deleteScenarioVersion,
+  getHydraulicDiagram,
   getPublicationPreview,
   getRun,
   getProject,
@@ -25,12 +27,17 @@ import {
   listScenarios,
   listScenarioVersions,
   publishPublication,
+  saveHydraulicDiagram,
   unpublishPublication,
   uploadScenarioVersion,
   updateDashboardTemplate,
   updatePublicationDraft,
   type DashboardTemplate,
   type DashboardTemplatePayload,
+  type HydraulicComponentType,
+  type HydraulicDiagram,
+  type HydraulicDiagramNodeWrite,
+  type HydraulicDiagramViewport,
   type Publication,
   type PublicationPayload,
   type Project,
@@ -58,6 +65,8 @@ const scenarioVersionsQueryKey = (scenarioId: number) =>
   ["scenario-versions", scenarioId] as const;
 const scenarioRunsQueryKey = (scenarioId: number) =>
   ["scenario-runs", scenarioId] as const;
+const hydraulicDiagramQueryKey = (scenarioId: number) =>
+  ["hydraulic-diagram", scenarioId] as const;
 const runQueryKey = (runId: number) => ["run", runId] as const;
 const dashboardTemplatesQueryKey = (projectId: number) =>
   ["dashboard-templates", projectId] as const;
@@ -942,6 +951,361 @@ function RunList({
   );
 }
 
+type HydraulicSaveStatus = "saved" | "dirty" | "saving" | "failed";
+
+const hydraulicComponentLabels: Record<HydraulicComponentType, string> = {
+  reservoir: "Embalse",
+  junction: "Union",
+  plant: "Central",
+};
+
+const hydraulicComponentButtonLabels: Record<HydraulicComponentType, string> = {
+  reservoir: "Agregar embalse",
+  junction: "Agregar union",
+  plant: "Agregar central",
+};
+
+function editableHydraulicNodes(
+  diagram: HydraulicDiagram,
+): HydraulicDiagramNodeWrite[] {
+  return diagram.nodes.map((node) => ({
+    component_type: node.component_type,
+    technical_key: node.technical_key,
+    display_name: node.display_name,
+    x: node.x,
+    y: node.y,
+  }));
+}
+
+function defaultHydraulicViewport(
+  diagram: HydraulicDiagram | undefined,
+): HydraulicDiagramViewport {
+  return diagram?.layout.viewport || { x: 0, y: 0, zoom: 1 };
+}
+
+function nextHydraulicNodeKey(
+  nodes: HydraulicDiagramNodeWrite[],
+  componentType: HydraulicComponentType,
+): string {
+  let index = 1;
+  let candidate = `${componentType}_${index}`;
+  while (nodes.some((node) => node.technical_key === candidate)) {
+    index += 1;
+    candidate = `${componentType}_${index}`;
+  }
+  return candidate;
+}
+
+function defaultHydraulicNodeLabel(
+  componentType: HydraulicComponentType,
+  technicalKey: string,
+): string {
+  const suffix = technicalKey.split("_").pop() || "1";
+  if (componentType === "reservoir") return `Reservoir ${suffix}`;
+  if (componentType === "junction") return `Junction ${suffix}`;
+  return `Plant ${suffix}`;
+}
+
+function HydraulicNodeList({
+  nodes,
+  updateNode,
+}: {
+  nodes: HydraulicDiagramNodeWrite[];
+  updateNode: (
+    technicalKey: string,
+    patch: Partial<HydraulicDiagramNodeWrite>,
+  ) => void;
+}) {
+  if (!nodes.length) {
+    return (
+      <EmptyState>
+        Agrega nodos para crear la topologia hidraulica visible.
+      </EmptyState>
+    );
+  }
+  return (
+    <ul className="resource-list hydraulic-node-list">
+      {nodes.map((node) => (
+        <li key={node.technical_key}>
+          <strong>{node.display_name}</strong>
+          <p>
+            {hydraulicComponentLabels[node.component_type]} |{" "}
+            {node.technical_key}
+          </p>
+          <div className="draft-field-grid">
+            <label
+              className="field-row"
+              htmlFor={`hydraulic-label-${node.technical_key}`}
+            >
+              <span>Etiqueta {node.technical_key}</span>
+              <input
+                id={`hydraulic-label-${node.technical_key}`}
+                type="text"
+                value={node.display_name}
+                onChange={(event) =>
+                  updateNode(node.technical_key, {
+                    display_name: event.target.value,
+                  })
+                }
+              />
+            </label>
+            <label
+              className="field-row"
+              htmlFor={`hydraulic-x-${node.technical_key}`}
+            >
+              <span>X {node.technical_key}</span>
+              <input
+                id={`hydraulic-x-${node.technical_key}`}
+                type="number"
+                value={node.x}
+                onChange={(event) =>
+                  updateNode(node.technical_key, {
+                    x: Number(event.target.value) || 0,
+                  })
+                }
+              />
+            </label>
+            <label
+              className="field-row"
+              htmlFor={`hydraulic-y-${node.technical_key}`}
+            >
+              <span>Y {node.technical_key}</span>
+              <input
+                id={`hydraulic-y-${node.technical_key}`}
+                type="number"
+                value={node.y}
+                onChange={(event) =>
+                  updateNode(node.technical_key, {
+                    y: Number(event.target.value) || 0,
+                  })
+                }
+              />
+            </label>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function HydraulicDiagramEditor({
+  scenario,
+  project,
+  initialDiagram,
+}: {
+  scenario: Scenario;
+  project?: Project;
+  initialDiagram: HydraulicDiagram;
+}) {
+  const queryClient = useQueryClient();
+  const [nodes, setNodes] = useState<HydraulicDiagramNodeWrite[]>(() =>
+    editableHydraulicNodes(initialDiagram),
+  );
+  const [revision, setRevision] = useState(initialDiagram.revision);
+  const [viewport, setViewport] = useState<HydraulicDiagramViewport>(() =>
+    defaultHydraulicViewport(initialDiagram),
+  );
+  const [saveStatus, setSaveStatus] = useState<HydraulicSaveStatus>("saved");
+  const [error, setError] = useState("");
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      saveHydraulicDiagram(scenario.id, {
+        revision,
+        viewport,
+        nodes,
+      }),
+    onMutate: () => {
+      setSaveStatus("saving");
+      setError("");
+    },
+    onSuccess: (savedDiagram) => {
+      queryClient.setQueryData(
+        hydraulicDiagramQueryKey(savedDiagram.scenario_id),
+        savedDiagram,
+      );
+      setNodes(editableHydraulicNodes(savedDiagram));
+      setRevision(savedDiagram.revision);
+      setViewport(defaultHydraulicViewport(savedDiagram));
+      setSaveStatus("saved");
+      setError("");
+    },
+    onError: (mutationError) => {
+      setSaveStatus("failed");
+      setError(errorMessage(mutationError));
+    },
+  });
+  const reloadMutation = useMutation({
+    mutationFn: () => getHydraulicDiagram(scenario.id),
+    onSuccess: (serverDiagram) => {
+      queryClient.setQueryData(
+        hydraulicDiagramQueryKey(serverDiagram.scenario_id),
+        serverDiagram,
+      );
+      setNodes(editableHydraulicNodes(serverDiagram));
+      setRevision(serverDiagram.revision);
+      setViewport(defaultHydraulicViewport(serverDiagram));
+      setSaveStatus("saved");
+      setError("");
+    },
+    onError: (mutationError) => {
+      setSaveStatus("failed");
+      setError(errorMessage(mutationError));
+    },
+  });
+
+  function markDirty() {
+    setSaveStatus("dirty");
+    setError("");
+  }
+
+  function addNode(componentType: HydraulicComponentType) {
+    setNodes((current) => {
+      const technicalKey = nextHydraulicNodeKey(current, componentType);
+      const nextNode: HydraulicDiagramNodeWrite = {
+        component_type: componentType,
+        technical_key: technicalKey,
+        display_name: defaultHydraulicNodeLabel(componentType, technicalKey),
+        x: 120 + current.length * 180,
+        y: componentType === "plant" ? 180 : 80 + current.length * 30,
+      };
+      return [...current, nextNode];
+    });
+    markDirty();
+  }
+
+  function updateNode(
+    technicalKey: string,
+    patch: Partial<HydraulicDiagramNodeWrite>,
+  ) {
+    setNodes((current) =>
+      current.map((node) =>
+        node.technical_key === technicalKey ? { ...node, ...patch } : node,
+      ),
+    );
+    markDirty();
+  }
+
+  return (
+    <section className="workspace-view">
+      <Breadcrumbs>
+        <Link to="/projects">Proyectos</Link>
+        <span aria-hidden="true">/</span>
+        <Link to={`/projects/${scenario.project_id}`}>
+          {project?.name || "Proyecto"}
+        </Link>
+        <span aria-hidden="true">/</span>
+        <Link to={`/scenarios/${scenario.id}`}>{scenario.name}</Link>
+        <span aria-hidden="true">/</span>
+        <span>Diagrama hidraulico</span>
+      </Breadcrumbs>
+      <header className="workspace-heading">
+        <h1>Diagrama hidraulico</h1>
+        <p>{scenario.name}</p>
+      </header>
+      <form
+        className="hydraulic-editor"
+        onSubmit={(event) => {
+          event.preventDefault();
+          saveMutation.mutate();
+        }}
+      >
+        <div className="draft-toolbar">
+          <span className="draft-status" aria-live="polite">
+            Estado: {saveStatus}
+          </span>
+          <span>Revision {revision}</span>
+          <button type="submit" disabled={saveMutation.isPending}>
+            Guardar diagrama
+          </button>
+          <button
+            type="button"
+            className="secondary-action"
+            disabled={reloadMutation.isPending || saveMutation.isPending}
+            onClick={() => reloadMutation.mutate()}
+          >
+            Recargar diagrama
+          </button>
+        </div>
+        {error ? <p role="alert">{error}</p> : null}
+        <section className="workspace-section" aria-labelledby="node-tools">
+          <div className="draft-section-heading">
+            <h2 id="node-tools">Nodos visibles</h2>
+            <div className="draft-actions">
+              {(
+                ["reservoir", "junction", "plant"] as HydraulicComponentType[]
+              ).map((componentType) => (
+                <button
+                  key={componentType}
+                  type="button"
+                  onClick={() => addNode(componentType)}
+                >
+                  {hydraulicComponentButtonLabels[componentType]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <HydraulicNodeList nodes={nodes} updateNode={updateNode} />
+        </section>
+      </form>
+    </section>
+  );
+}
+
+export function HydraulicDiagramEditorView() {
+  const scenarioId = useNumericParam("scenarioId");
+  const scenario = useQuery({
+    queryKey: scenarioQueryKey(scenarioId || 0),
+    queryFn: ({ signal }) => getScenario(scenarioId || 0, signal),
+    enabled: scenarioId !== null,
+    retry: false,
+  });
+  const project = useQuery({
+    queryKey: projectQueryKey(scenario.data?.project_id || 0),
+    queryFn: ({ signal }) => getProject(scenario.data!.project_id, signal),
+    enabled: scenario.data !== undefined,
+    retry: false,
+  });
+  const diagram = useQuery({
+    queryKey: hydraulicDiagramQueryKey(scenarioId || 0),
+    queryFn: () => createHydraulicDiagram(scenarioId || 0),
+    enabled: scenarioId !== null,
+    retry: false,
+  });
+
+  if (scenarioId === null) {
+    return <NotFoundView>El escenario solicitado no existe.</NotFoundView>;
+  }
+  if (scenario.isPending || diagram.isPending) {
+    return <LoadingView label="Cargando diagrama hidraulico" />;
+  }
+  if (scenario.isError) {
+    return (
+      <RequestErrorView
+        error={scenario.error}
+        retry={() => void scenario.refetch()}
+      />
+    );
+  }
+  if (diagram.isError) {
+    return (
+      <RequestErrorView
+        error={diagram.error}
+        retry={() => void diagram.refetch()}
+      />
+    );
+  }
+
+  return (
+    <HydraulicDiagramEditor
+      key={diagram.data.revision}
+      scenario={scenario.data}
+      project={project.data}
+      initialDiagram={diagram.data}
+    />
+  );
+}
+
 export function ScenarioDetailView() {
   const scenarioId = useNumericParam("scenarioId");
   const scenario = useQuery({
@@ -1011,12 +1375,20 @@ export function ScenarioDetailView() {
       <header className="workspace-heading">
         <h1>{scenario.data.name}</h1>
         <p>{scenario.data.description || "Sin descripcion."}</p>
-        <Link
-          className="button-link"
-          to={`/scenarios/${scenario.data.id}/draft`}
-        >
-          Abrir draft
-        </Link>
+        <div className="inline-actions">
+          <Link
+            className="button-link"
+            to={`/scenarios/${scenario.data.id}/draft`}
+          >
+            Abrir draft
+          </Link>
+          <Link
+            className="button-link"
+            to={`/scenarios/${scenario.data.id}/hydraulic-diagram`}
+          >
+            Abrir diagrama hidraulico
+          </Link>
+        </div>
       </header>
       <div className="workspace-stack">
         <section className="workspace-section" aria-labelledby="version-list">

@@ -132,6 +132,26 @@ class ScenarioDraftWriteRequest(BaseModel):
     source_version_id: int | None = None
 
 
+class HydraulicDiagramViewportRequest(BaseModel):
+    x: float = 0.0
+    y: float = 0.0
+    zoom: float = Field(default=1.0, gt=0)
+
+
+class HydraulicDiagramNodeRequest(BaseModel):
+    component_type: Literal["reservoir", "junction", "plant"]
+    technical_key: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    x: float
+    y: float
+
+
+class HydraulicDiagramSaveRequest(BaseModel):
+    revision: str = Field(min_length=1)
+    nodes: list[HydraulicDiagramNodeRequest]
+    viewport: HydraulicDiagramViewportRequest = Field(default_factory=HydraulicDiagramViewportRequest)
+
+
 class TimeSeriesMappingRequest(BaseModel):
     mapping: dict[str, Any]
 
@@ -976,6 +996,38 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"scenario": scenario}
+
+    @app.post("/api/scenarios/{scenario_id}/hydraulic-diagram", status_code=201)
+    async def create_hydraulic_diagram(scenario_id: int):
+        try:
+            diagram = analyst_store.get_or_create_hydraulic_diagram(scenario_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"diagram": diagram}
+
+    @app.get("/api/scenarios/{scenario_id}/hydraulic-diagram")
+    async def get_hydraulic_diagram(scenario_id: int):
+        try:
+            diagram = analyst_store.get_hydraulic_diagram(scenario_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"diagram": diagram}
+
+    @app.put("/api/scenarios/{scenario_id}/hydraulic-diagram")
+    async def save_hydraulic_diagram(scenario_id: int, payload: HydraulicDiagramSaveRequest):
+        try:
+            diagram = analyst_store.save_hydraulic_diagram(
+                scenario_id=scenario_id,
+                revision=payload.revision,
+                nodes=[node.model_dump() for node in payload.nodes],
+                viewport=payload.viewport.model_dump(),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            status_code = 409 if str(error) == "stale hydraulic diagram revision" else 400
+            raise HTTPException(status_code=status_code, detail=str(error)) from error
+        return {"diagram": diagram}
 
     @app.post("/api/scenarios/{scenario_id}/draft", status_code=201)
     async def create_scenario_draft(scenario_id: int, payload: ScenarioDraftWriteRequest):

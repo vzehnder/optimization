@@ -459,6 +459,26 @@ button:focus-visible {
   gap: 1rem;
 }
 
+.hydraulic-editor {
+  display: grid;
+  gap: 1rem;
+}
+
+.hydraulic-editor [role="alert"] {
+  width: auto;
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border-left: 4px solid #c2410c;
+  border-radius: 8px;
+  background: #fff7ed;
+  box-shadow: none;
+}
+
+.hydraulic-node-list li {
+  display: grid;
+  gap: 0.7rem;
+}
+
 .draft-toolbar {
   position: sticky;
   top: 0;

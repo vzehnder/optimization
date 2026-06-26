@@ -24,7 +24,16 @@ POSTGRES_ENV_FIELDS = {
 
 ID_TABLES = {
     "auth_sessions",
+    "case_hydraulic_diagram_items",
+    "case_hydraulic_diagram_layouts",
+    "case_hydraulic_nodes",
+    "case_hydraulic_plants",
+    "case_hydraulic_systems",
     "dashboard_templates",
+    "hydraulic_nodes",
+    "hydraulic_plants",
+    "hydraulic_systems",
+    "optimization_cases",
     "projects",
     "publications",
     "run_artifacts",

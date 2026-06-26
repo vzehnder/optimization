@@ -31,6 +31,9 @@ DEFAULT_PUBLICATION_ARTIFACT_TYPES = [
     "asset_dispatch_csv",
 ]
 
+HYDRAULIC_NODE_COMPONENT_TYPES = {"reservoir", "junction"}
+HYDRAULIC_VISIBLE_COMPONENT_TYPES = HYDRAULIC_NODE_COMPONENT_TYPES | {"plant"}
+
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -79,6 +82,142 @@ class AnalystStore:
                 created_at TEXT NOT NULL,
                 created_by TEXT NOT NULL,
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS optimization_cases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scenario_id INTEGER NOT NULL UNIQUE,
+                case_key TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                validation_payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (scenario_id) REFERENCES scenarios(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS hydraulic_systems (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                system_key TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                UNIQUE (project_id, system_key)
+            );
+
+            CREATE TABLE IF NOT EXISTS hydraulic_nodes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                hydraulic_system_id INTEGER NOT NULL,
+                node_key TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                node_type TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (hydraulic_system_id) REFERENCES hydraulic_systems(id) ON DELETE CASCADE,
+                UNIQUE (hydraulic_system_id, node_key),
+                CHECK (node_type IN ('reservoir', 'junction', 'intake', 'tailrace', 'river_inflow', 'other'))
+            );
+
+            CREATE TABLE IF NOT EXISTS hydraulic_plants (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                hydraulic_system_id INTEGER NOT NULL,
+                plant_key TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (hydraulic_system_id) REFERENCES hydraulic_systems(id) ON DELETE CASCADE,
+                UNIQUE (hydraulic_system_id, plant_key)
+            );
+
+            CREATE TABLE IF NOT EXISTS case_hydraulic_systems (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id INTEGER NOT NULL,
+                hydraulic_system_id INTEGER NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (case_id) REFERENCES optimization_cases(id) ON DELETE CASCADE,
+                FOREIGN KEY (hydraulic_system_id) REFERENCES hydraulic_systems(id) ON DELETE CASCADE,
+                UNIQUE (case_id, hydraulic_system_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS case_hydraulic_nodes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id INTEGER NOT NULL,
+                hydraulic_node_id INTEGER NOT NULL,
+                case_label TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (case_id) REFERENCES optimization_cases(id) ON DELETE CASCADE,
+                FOREIGN KEY (hydraulic_node_id) REFERENCES hydraulic_nodes(id) ON DELETE CASCADE,
+                UNIQUE (case_id, hydraulic_node_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS case_hydraulic_plants (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id INTEGER NOT NULL,
+                hydraulic_plant_id INTEGER NOT NULL,
+                case_label TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (case_id) REFERENCES optimization_cases(id) ON DELETE CASCADE,
+                FOREIGN KEY (hydraulic_plant_id) REFERENCES hydraulic_plants(id) ON DELETE CASCADE,
+                UNIQUE (case_id, hydraulic_plant_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS case_hydraulic_diagram_layouts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id INTEGER NOT NULL,
+                layout_key TEXT NOT NULL,
+                viewport_x REAL NOT NULL DEFAULT 0,
+                viewport_y REAL NOT NULL DEFAULT 0,
+                zoom REAL NOT NULL DEFAULT 1,
+                layout_engine TEXT,
+                layout_version INTEGER NOT NULL DEFAULT 1,
+                content_hash TEXT,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (case_id) REFERENCES optimization_cases(id) ON DELETE CASCADE,
+                UNIQUE (case_id, layout_key),
+                CHECK (zoom > 0)
+            );
+
+            CREATE TABLE IF NOT EXISTS case_hydraulic_diagram_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                diagram_layout_id INTEGER NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id INTEGER NOT NULL,
+                x REAL NOT NULL,
+                y REAL NOT NULL,
+                width REAL,
+                height REAL,
+                z_index INTEGER NOT NULL DEFAULT 0,
+                collapsed INTEGER NOT NULL DEFAULT 0,
+                style_json TEXT NOT NULL DEFAULT '{}',
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (diagram_layout_id) REFERENCES case_hydraulic_diagram_layouts(id) ON DELETE CASCADE,
+                UNIQUE (diagram_layout_id, entity_type, entity_id),
+                CHECK (entity_type IN ('case_hydraulic_node', 'case_hydraulic_plant'))
             );
 
             CREATE TABLE IF NOT EXISTS scenario_versions (
@@ -1023,6 +1162,145 @@ class AnalystStore:
             raise KeyError(f"scenario {scenario_id} not found")
         return row_to_dict(row)
 
+    def get_or_create_hydraulic_diagram(self, scenario_id: int) -> dict[str, Any]:
+        with self._lock:
+            scenario = self.get_scenario(scenario_id)
+            case = self._get_or_create_optimization_case(scenario)
+            system = self._get_or_create_hydraulic_system(scenario)
+            self._get_or_create_case_hydraulic_system(case["id"], system["id"])
+            self._get_or_create_hydraulic_layout(case["id"])
+            self.connection.commit()
+            return self.get_hydraulic_diagram(scenario_id)
+
+    def get_hydraulic_diagram(self, scenario_id: int) -> dict[str, Any]:
+        self.get_scenario(scenario_id)
+        context = self._get_hydraulic_diagram_context(scenario_id)
+        if context is None:
+            raise KeyError(f"hydraulic diagram for scenario {scenario_id} not found")
+        return self._hydraulic_diagram_response(context)
+
+    def save_hydraulic_diagram(
+        self,
+        *,
+        scenario_id: int,
+        revision: str,
+        nodes: list[dict[str, Any]],
+        viewport: dict[str, Any] | None = None,
+        updated_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        with self._lock:
+            self.get_or_create_hydraulic_diagram(scenario_id)
+            context = self._get_hydraulic_diagram_context(scenario_id)
+            if context is None:
+                raise KeyError(f"hydraulic diagram for scenario {scenario_id} not found")
+            layout = context["layout"]
+            current_revision = str(layout["layout_version"])
+            if str(revision) != current_revision:
+                raise ValueError("stale hydraulic diagram revision")
+
+            normalized_nodes = normalize_hydraulic_diagram_nodes(nodes)
+            resolved_viewport = {
+                "x": float(layout["viewport_x"]),
+                "y": float(layout["viewport_y"]),
+                "zoom": float(layout["zoom"]),
+            }
+            if viewport is not None:
+                resolved_viewport = normalize_hydraulic_viewport(viewport)
+
+            now = utc_now_iso()
+            layout_id = int(layout["id"])
+            case_id = int(context["optimization_case"]["id"])
+            system_id = int(context["hydraulic_system"]["id"])
+
+            self.connection.execute(
+                "DELETE FROM case_hydraulic_diagram_items WHERE diagram_layout_id = ?",
+                (layout_id,),
+            )
+            self.connection.execute(
+                "DELETE FROM case_hydraulic_nodes WHERE case_id = ?",
+                (case_id,),
+            )
+            self.connection.execute(
+                "DELETE FROM case_hydraulic_plants WHERE case_id = ?",
+                (case_id,),
+            )
+
+            for index, node in enumerate(normalized_nodes):
+                if node["component_type"] == "plant":
+                    active_id = self._create_case_hydraulic_plant(
+                        case_id=case_id,
+                        system_id=system_id,
+                        plant_key=node["technical_key"],
+                        display_name=node["display_name"],
+                        updated_by=updated_by,
+                        now=now,
+                    )
+                    entity_type = "case_hydraulic_plant"
+                else:
+                    active_id = self._create_case_hydraulic_node(
+                        case_id=case_id,
+                        system_id=system_id,
+                        node_key=node["technical_key"],
+                        display_name=node["display_name"],
+                        node_type=node["component_type"],
+                        updated_by=updated_by,
+                        now=now,
+                    )
+                    entity_type = "case_hydraulic_node"
+                self.connection.execute(
+                    """
+                    INSERT INTO case_hydraulic_diagram_items (
+                        diagram_layout_id,
+                        entity_type,
+                        entity_id,
+                        x,
+                        y,
+                        z_index,
+                        collapsed,
+                        style_json,
+                        metadata_json,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, 0, '{}', '{}', ?)
+                    """,
+                    (
+                        layout_id,
+                        entity_type,
+                        active_id,
+                        node["x"],
+                        node["y"],
+                        index,
+                        now,
+                    ),
+                )
+
+            self.connection.execute(
+                """
+                UPDATE case_hydraulic_diagram_layouts
+                SET viewport_x = ?,
+                    viewport_y = ?,
+                    zoom = ?,
+                    layout_engine = 'manual',
+                    layout_version = layout_version + 1,
+                    updated_at = ?,
+                    updated_by = ?
+                WHERE id = ?
+                """,
+                (
+                    resolved_viewport["x"],
+                    resolved_viewport["y"],
+                    resolved_viewport["zoom"],
+                    now,
+                    updated_by,
+                    layout_id,
+                ),
+            )
+            self.connection.commit()
+            updated_context = self._get_hydraulic_diagram_context(scenario_id)
+            if updated_context is None:
+                raise KeyError(f"hydraulic diagram for scenario {scenario_id} not found")
+            return self._hydraulic_diagram_response(updated_context)
+
     def create_scenario_version(
         self,
         *,
@@ -1608,6 +1886,411 @@ class AnalystStore:
             raise KeyError(f"run artifact {artifact_id} not found")
         return row_to_dict(row)
 
+    def _get_or_create_optimization_case(self, scenario: dict[str, Any]) -> dict[str, Any]:
+        row = self.connection.execute(
+            """
+            SELECT id, scenario_id, case_key, display_name, validation_payload_json,
+                   created_at, updated_at, created_by, updated_by
+            FROM optimization_cases
+            WHERE scenario_id = ?
+            """,
+            (scenario["id"],),
+        ).fetchone()
+        if row is not None:
+            return row_to_dict(row)
+
+        now = utc_now_iso()
+        cursor = self.connection.execute(
+            """
+            INSERT INTO optimization_cases (
+                scenario_id,
+                case_key,
+                display_name,
+                validation_payload_json,
+                created_at,
+                updated_at,
+                created_by,
+                updated_by
+            )
+            VALUES (?, ?, ?, '{}', ?, ?, ?, ?)
+            """,
+            (
+                scenario["id"],
+                f"scenario_{scenario['id']}_hydraulic_case",
+                scenario["name"],
+                now,
+                now,
+                scenario.get("created_by") or "internal_analyst",
+                scenario.get("created_by") or "internal_analyst",
+            ),
+        )
+        return row_to_dict(
+            self.connection.execute(
+                """
+                SELECT id, scenario_id, case_key, display_name, validation_payload_json,
+                       created_at, updated_at, created_by, updated_by
+                FROM optimization_cases
+                WHERE id = ?
+                """,
+                (cursor.lastrowid,),
+            ).fetchone()
+        )
+
+    def _get_or_create_hydraulic_system(self, scenario: dict[str, Any]) -> dict[str, Any]:
+        system_key = "default_hydraulic_system"
+        row = self.connection.execute(
+            """
+            SELECT id, project_id, system_key, display_name, created_at, updated_at,
+                   created_by, updated_by
+            FROM hydraulic_systems
+            WHERE project_id = ? AND system_key = ?
+            """,
+            (scenario["project_id"], system_key),
+        ).fetchone()
+        if row is not None:
+            return row_to_dict(row)
+
+        now = utc_now_iso()
+        cursor = self.connection.execute(
+            """
+            INSERT INTO hydraulic_systems (
+                project_id,
+                system_key,
+                display_name,
+                created_at,
+                updated_at,
+                created_by,
+                updated_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                scenario["project_id"],
+                system_key,
+                "Default hydraulic system",
+                now,
+                now,
+                scenario.get("created_by") or "internal_analyst",
+                scenario.get("created_by") or "internal_analyst",
+            ),
+        )
+        return row_to_dict(
+            self.connection.execute(
+                """
+                SELECT id, project_id, system_key, display_name, created_at, updated_at,
+                       created_by, updated_by
+                FROM hydraulic_systems
+                WHERE id = ?
+                """,
+                (cursor.lastrowid,),
+            ).fetchone()
+        )
+
+    def _get_or_create_case_hydraulic_system(self, case_id: int, system_id: int) -> dict[str, Any]:
+        row = self.connection.execute(
+            """
+            SELECT id, case_id, hydraulic_system_id, is_active, created_at, updated_at,
+                   created_by, updated_by
+            FROM case_hydraulic_systems
+            WHERE case_id = ? AND hydraulic_system_id = ?
+            """,
+            (case_id, system_id),
+        ).fetchone()
+        if row is not None:
+            return row_to_dict(row)
+
+        now = utc_now_iso()
+        cursor = self.connection.execute(
+            """
+            INSERT INTO case_hydraulic_systems (
+                case_id,
+                hydraulic_system_id,
+                is_active,
+                created_at,
+                updated_at,
+                created_by,
+                updated_by
+            )
+            VALUES (?, ?, 1, ?, ?, 'internal_analyst', 'internal_analyst')
+            """,
+            (case_id, system_id, now, now),
+        )
+        return row_to_dict(
+            self.connection.execute(
+                """
+                SELECT id, case_id, hydraulic_system_id, is_active, created_at, updated_at,
+                       created_by, updated_by
+                FROM case_hydraulic_systems
+                WHERE id = ?
+                """,
+                (cursor.lastrowid,),
+            ).fetchone()
+        )
+
+    def _get_or_create_hydraulic_layout(self, case_id: int) -> dict[str, Any]:
+        row = self.connection.execute(
+            """
+            SELECT id, case_id, layout_key, viewport_x, viewport_y, zoom,
+                   layout_engine, layout_version, content_hash, metadata_json,
+                   created_at, updated_at, updated_by
+            FROM case_hydraulic_diagram_layouts
+            WHERE case_id = ? AND layout_key = 'default'
+            """,
+            (case_id,),
+        ).fetchone()
+        if row is not None:
+            return row_to_dict(row)
+
+        now = utc_now_iso()
+        cursor = self.connection.execute(
+            """
+            INSERT INTO case_hydraulic_diagram_layouts (
+                case_id,
+                layout_key,
+                viewport_x,
+                viewport_y,
+                zoom,
+                layout_engine,
+                layout_version,
+                metadata_json,
+                created_at,
+                updated_at,
+                updated_by
+            )
+            VALUES (?, 'default', 0, 0, 1, 'auto_dag', 1, '{}', ?, ?, 'internal_analyst')
+            """,
+            (case_id, now, now),
+        )
+        return row_to_dict(
+            self.connection.execute(
+                """
+                SELECT id, case_id, layout_key, viewport_x, viewport_y, zoom,
+                       layout_engine, layout_version, content_hash, metadata_json,
+                       created_at, updated_at, updated_by
+                FROM case_hydraulic_diagram_layouts
+                WHERE id = ?
+                """,
+                (cursor.lastrowid,),
+            ).fetchone()
+        )
+
+    def _get_hydraulic_diagram_context(self, scenario_id: int) -> dict[str, Any] | None:
+        case_row = self.connection.execute(
+            """
+            SELECT id, scenario_id, case_key, display_name, validation_payload_json,
+                   created_at, updated_at, created_by, updated_by
+            FROM optimization_cases
+            WHERE scenario_id = ?
+            """,
+            (scenario_id,),
+        ).fetchone()
+        if case_row is None:
+            return None
+        case = row_to_dict(case_row)
+        system_row = self.connection.execute(
+            """
+            SELECT hydraulic_systems.id, hydraulic_systems.project_id,
+                   hydraulic_systems.system_key, hydraulic_systems.display_name,
+                   hydraulic_systems.created_at, hydraulic_systems.updated_at,
+                   hydraulic_systems.created_by, hydraulic_systems.updated_by
+            FROM case_hydraulic_systems
+            JOIN hydraulic_systems ON hydraulic_systems.id = case_hydraulic_systems.hydraulic_system_id
+            WHERE case_hydraulic_systems.case_id = ?
+              AND case_hydraulic_systems.is_active = 1
+            ORDER BY hydraulic_systems.id
+            """,
+            (case["id"],),
+        ).fetchone()
+        layout_row = self.connection.execute(
+            """
+            SELECT id, case_id, layout_key, viewport_x, viewport_y, zoom,
+                   layout_engine, layout_version, content_hash, metadata_json,
+                   created_at, updated_at, updated_by
+            FROM case_hydraulic_diagram_layouts
+            WHERE case_id = ? AND layout_key = 'default'
+            """,
+            (case["id"],),
+        ).fetchone()
+        if system_row is None or layout_row is None:
+            return None
+        return {
+            "scenario_id": scenario_id,
+            "optimization_case": case,
+            "hydraulic_system": row_to_dict(system_row),
+            "layout": row_to_dict(layout_row),
+        }
+
+    def _hydraulic_diagram_response(self, context: dict[str, Any]) -> dict[str, Any]:
+        layout = context["layout"]
+        layout_id = int(layout["id"])
+        node_rows = self.connection.execute(
+            """
+            SELECT
+                case_hydraulic_diagram_items.id AS layout_item_id,
+                case_hydraulic_diagram_items.entity_type,
+                case_hydraulic_diagram_items.entity_id,
+                case_hydraulic_diagram_items.x,
+                case_hydraulic_diagram_items.y,
+                case_hydraulic_diagram_items.z_index,
+                hydraulic_nodes.node_type AS component_type,
+                hydraulic_nodes.node_key AS technical_key,
+                case_hydraulic_nodes.case_label AS display_name
+            FROM case_hydraulic_diagram_items
+            JOIN case_hydraulic_nodes
+              ON case_hydraulic_nodes.id = case_hydraulic_diagram_items.entity_id
+            JOIN hydraulic_nodes
+              ON hydraulic_nodes.id = case_hydraulic_nodes.hydraulic_node_id
+            WHERE case_hydraulic_diagram_items.diagram_layout_id = ?
+              AND case_hydraulic_diagram_items.entity_type = 'case_hydraulic_node'
+            """,
+            (layout_id,),
+        ).fetchall()
+        plant_rows = self.connection.execute(
+            """
+            SELECT
+                case_hydraulic_diagram_items.id AS layout_item_id,
+                case_hydraulic_diagram_items.entity_type,
+                case_hydraulic_diagram_items.entity_id,
+                case_hydraulic_diagram_items.x,
+                case_hydraulic_diagram_items.y,
+                case_hydraulic_diagram_items.z_index,
+                'plant' AS component_type,
+                hydraulic_plants.plant_key AS technical_key,
+                case_hydraulic_plants.case_label AS display_name
+            FROM case_hydraulic_diagram_items
+            JOIN case_hydraulic_plants
+              ON case_hydraulic_plants.id = case_hydraulic_diagram_items.entity_id
+            JOIN hydraulic_plants
+              ON hydraulic_plants.id = case_hydraulic_plants.hydraulic_plant_id
+            WHERE case_hydraulic_diagram_items.diagram_layout_id = ?
+              AND case_hydraulic_diagram_items.entity_type = 'case_hydraulic_plant'
+            """,
+            (layout_id,),
+        ).fetchall()
+        nodes = [hydraulic_diagram_node_row_to_dict(row) for row in node_rows + plant_rows]
+        nodes.sort(key=lambda node: (node["z_index"], node["layout_item_id"]))
+        return {
+            "scenario_id": context["scenario_id"],
+            "optimization_case": optimization_case_public_dict(context["optimization_case"]),
+            "hydraulic_system": hydraulic_system_public_dict(context["hydraulic_system"]),
+            "layout": hydraulic_layout_public_dict(layout),
+            "revision": str(layout["layout_version"]),
+            "nodes": nodes,
+        }
+
+    def _create_case_hydraulic_node(
+        self,
+        *,
+        case_id: int,
+        system_id: int,
+        node_key: str,
+        display_name: str,
+        node_type: str,
+        updated_by: str,
+        now: str,
+    ) -> int:
+        self.connection.execute(
+            """
+            INSERT INTO hydraulic_nodes (
+                hydraulic_system_id,
+                node_key,
+                display_name,
+                node_type,
+                created_at,
+                updated_at,
+                created_by,
+                updated_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (hydraulic_system_id, node_key) DO UPDATE SET
+                display_name = excluded.display_name,
+                node_type = excluded.node_type,
+                updated_at = excluded.updated_at,
+                updated_by = excluded.updated_by
+            """,
+            (system_id, node_key, display_name, node_type, now, now, updated_by, updated_by),
+        )
+        node_row = self.connection.execute(
+            """
+            SELECT id
+            FROM hydraulic_nodes
+            WHERE hydraulic_system_id = ? AND node_key = ?
+            """,
+            (system_id, node_key),
+        ).fetchone()
+        cursor = self.connection.execute(
+            """
+            INSERT INTO case_hydraulic_nodes (
+                case_id,
+                hydraulic_node_id,
+                case_label,
+                is_active,
+                created_at,
+                updated_at,
+                created_by,
+                updated_by
+            )
+            VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+            """,
+            (case_id, int(node_row["id"]), display_name, now, now, updated_by, updated_by),
+        )
+        return int(cursor.lastrowid)
+
+    def _create_case_hydraulic_plant(
+        self,
+        *,
+        case_id: int,
+        system_id: int,
+        plant_key: str,
+        display_name: str,
+        updated_by: str,
+        now: str,
+    ) -> int:
+        self.connection.execute(
+            """
+            INSERT INTO hydraulic_plants (
+                hydraulic_system_id,
+                plant_key,
+                display_name,
+                created_at,
+                updated_at,
+                created_by,
+                updated_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (hydraulic_system_id, plant_key) DO UPDATE SET
+                display_name = excluded.display_name,
+                updated_at = excluded.updated_at,
+                updated_by = excluded.updated_by
+            """,
+            (system_id, plant_key, display_name, now, now, updated_by, updated_by),
+        )
+        plant_row = self.connection.execute(
+            """
+            SELECT id
+            FROM hydraulic_plants
+            WHERE hydraulic_system_id = ? AND plant_key = ?
+            """,
+            (system_id, plant_key),
+        ).fetchone()
+        cursor = self.connection.execute(
+            """
+            INSERT INTO case_hydraulic_plants (
+                case_id,
+                hydraulic_plant_id,
+                case_label,
+                is_active,
+                created_at,
+                updated_at,
+                created_by,
+                updated_by
+            )
+            VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+            """,
+            (case_id, int(plant_row["id"]), display_name, now, now, updated_by, updated_by),
+        )
+        return int(cursor.lastrowid)
+
     def _next_version_number(self, scenario_id: int) -> int:
         row = self.connection.execute(
             """
@@ -1691,6 +2374,96 @@ def validate_table_preview_limit(value: int) -> int:
     if preview_limit < 1:
         raise ValueError("table preview limit must be a positive integer")
     return preview_limit
+
+
+def normalize_hydraulic_viewport(viewport: Mapping[str, Any]) -> dict[str, float]:
+    zoom = float(viewport.get("zoom", 1.0))
+    if zoom <= 0:
+        raise ValueError("hydraulic diagram zoom must be positive")
+    return {
+        "x": float(viewport.get("x", 0.0)),
+        "y": float(viewport.get("y", 0.0)),
+        "zoom": zoom,
+    }
+
+
+def normalize_hydraulic_diagram_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str]] = set()
+    for node in nodes:
+        component_type = str(node.get("component_type") or "").strip()
+        if component_type not in HYDRAULIC_VISIBLE_COMPONENT_TYPES:
+            raise ValueError(f"unsupported hydraulic component type: {component_type}")
+        technical_key = str(node.get("technical_key") or "").strip()
+        if not technical_key:
+            raise ValueError("hydraulic component technical_key is required")
+        identity = (component_type, technical_key)
+        if identity in seen_keys:
+            raise ValueError(f"duplicate hydraulic component key: {technical_key}")
+        seen_keys.add(identity)
+        display_name = str(node.get("display_name") or "").strip() or technical_key
+        normalized.append(
+            {
+                "component_type": component_type,
+                "technical_key": technical_key,
+                "display_name": display_name,
+                "x": float(node.get("x", 0.0)),
+                "y": float(node.get("y", 0.0)),
+            }
+        )
+    return normalized
+
+
+def optimization_case_public_dict(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "scenario_id": row["scenario_id"],
+        "case_key": row["case_key"],
+        "display_name": row["display_name"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def hydraulic_system_public_dict(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "project_id": row["project_id"],
+        "system_key": row["system_key"],
+        "display_name": row["display_name"],
+    }
+
+
+def hydraulic_layout_public_dict(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "case_id": row["case_id"],
+        "layout_key": row["layout_key"],
+        "layout_engine": row["layout_engine"],
+        "layout_version": row["layout_version"],
+        "revision": str(row["layout_version"]),
+        "viewport": {
+            "x": float(row["viewport_x"]),
+            "y": float(row["viewport_y"]),
+            "zoom": float(row["zoom"]),
+        },
+        "updated_at": row["updated_at"],
+        "updated_by": row["updated_by"],
+    }
+
+
+def hydraulic_diagram_node_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
+    value = row_to_dict(row)
+    return {
+        "layout_item_id": value["layout_item_id"],
+        "entity_type": value["entity_type"],
+        "entity_id": value["entity_id"],
+        "component_type": value["component_type"],
+        "technical_key": value["technical_key"],
+        "display_name": value["display_name"],
+        "x": float(value["x"]),
+        "y": float(value["y"]),
+        "z_index": int(value["z_index"]),
+    }
 
 
 def extract_system_case_metadata(document: dict[str, Any]) -> dict[str, Any]:

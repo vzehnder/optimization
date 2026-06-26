@@ -327,6 +327,65 @@ export interface ScenarioDraftWritePayload {
   source_version_id?: number | null;
 }
 
+export type HydraulicComponentType = "reservoir" | "junction" | "plant";
+
+export interface HydraulicDiagramNodeWrite {
+  component_type: HydraulicComponentType;
+  technical_key: string;
+  display_name: string;
+  x: number;
+  y: number;
+}
+
+export interface HydraulicDiagramNode extends HydraulicDiagramNodeWrite {
+  layout_item_id: number;
+  entity_type: string;
+  entity_id: number;
+  z_index: number;
+}
+
+export interface HydraulicDiagramViewport {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
+export interface HydraulicDiagram {
+  scenario_id: number;
+  optimization_case: {
+    id: number;
+    scenario_id: number;
+    case_key: string;
+    display_name: string;
+    updated_at: string;
+  };
+  hydraulic_system: {
+    id: number;
+    project_id: number;
+    system_key: string;
+    display_name: string;
+  };
+  layout: {
+    id: number;
+    case_id: number;
+    layout_key: string;
+    layout_engine?: string | null;
+    layout_version: number;
+    revision: string;
+    viewport: HydraulicDiagramViewport;
+    updated_at: string;
+    updated_by: string;
+  };
+  revision: string;
+  nodes: HydraulicDiagramNode[];
+}
+
+export interface HydraulicDiagramSavePayload {
+  revision: string;
+  viewport: HydraulicDiagramViewport;
+  nodes: HydraulicDiagramNodeWrite[];
+}
+
 interface StructuredErrorBody {
   error?: {
     category?: string;
@@ -898,6 +957,45 @@ export async function updateScenarioDraft(
     },
     body: JSON.stringify({ document }),
   });
+}
+
+export async function createHydraulicDiagram(
+  scenarioId: number,
+): Promise<HydraulicDiagram> {
+  const response = await postJsonWithCsrf<{ diagram: HydraulicDiagram }>(
+    `/api/scenarios/${scenarioId}/hydraulic-diagram`,
+  );
+  return response.diagram;
+}
+
+export async function getHydraulicDiagram(
+  scenarioId: number,
+  signal?: AbortSignal,
+): Promise<HydraulicDiagram> {
+  const response = await requestJson<{ diagram: HydraulicDiagram }>(
+    `/api/scenarios/${scenarioId}/hydraulic-diagram`,
+    { signal },
+  );
+  return response.diagram;
+}
+
+export async function saveHydraulicDiagram(
+  scenarioId: number,
+  payload: HydraulicDiagramSavePayload,
+): Promise<HydraulicDiagram> {
+  const csrfToken = await getCsrfToken();
+  const response = await requestJson<{ diagram: HydraulicDiagram }>(
+    `/api/scenarios/${scenarioId}/hydraulic-diagram`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrfToken,
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+  return response.diagram;
 }
 
 export async function getGeneratedSystemCasePreview(

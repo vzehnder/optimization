@@ -207,6 +207,57 @@ test("React auth handles bootstrap, login, refresh, roles, logout, and deactivat
   );
 });
 
+test("React hydraulic diagram persists reservoir junction and plant nodes across reload", async ({
+  page,
+}) => {
+  await ensureAdminSession(page);
+  const suffix = Date.now();
+  const api = page.context().request;
+  const projectResponse = await postWithCsrf(api, "/api/projects", {
+    name: `Hydro Diagram ${suffix}`,
+    description: "Hydraulic diagram browser acceptance",
+  });
+  expect(projectResponse.status()).toBe(201);
+  const project = (await projectResponse.json()) as { id: number };
+  const scenarioResponse = await postWithCsrf(
+    api,
+    `/api/projects/${project.id}/scenarios`,
+    {
+      name: `Hydraulic topology ${suffix}`,
+      description: "Minimal persisted hydraulic graph",
+    },
+  );
+  expect(scenarioResponse.status()).toBe(201);
+  const scenario = (await scenarioResponse.json()) as { id: number };
+
+  await page.goto(`/react/scenarios/${scenario.id}`);
+  await page.getByRole("link", { name: "Abrir diagrama hidraulico" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Diagrama hidraulico" }),
+  ).toBeVisible();
+  await expect(page.getByText("Estado: saved")).toBeVisible();
+
+  await page.getByRole("button", { name: "Agregar embalse" }).click();
+  await page.getByRole("button", { name: "Agregar union" }).click();
+  await page.getByRole("button", { name: "Agregar central" }).click();
+  await page.getByLabel("Etiqueta plant_1").fill("Plant Laja");
+  await expect(page.getByText("Estado: dirty")).toBeVisible();
+  await page.getByRole("button", { name: "Guardar diagrama" }).click();
+  await expect(page.getByText("Estado: saved")).toBeVisible();
+
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Diagrama hidraulico" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Etiqueta reservoir_1")).toHaveValue(
+    "Reservoir 1",
+  );
+  await expect(page.getByLabel("Etiqueta junction_1")).toHaveValue(
+    "Junction 1",
+  );
+  await expect(page.getByLabel("Etiqueta plant_1")).toHaveValue("Plant Laja");
+});
+
 test("React admin users and project access cover assignment, removal, deactivation, and denials", async ({
   page,
 }) => {

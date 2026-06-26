@@ -37,6 +37,7 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import "./styles.css";
 import {
   ForbiddenView,
+  HydraulicDiagramEditorView,
   NotFoundView,
   PublicationPreviewView,
   ProjectDetailView,
@@ -288,6 +289,12 @@ function AuthenticatedRoutes({ user }: { user: CurrentUser }) {
           <Route
             path="scenarios/:scenarioId/draft"
             element={isClient ? <ForbiddenView /> : <ScenarioDraftEditorView />}
+          />
+          <Route
+            path="scenarios/:scenarioId/hydraulic-diagram"
+            element={
+              isClient ? <ForbiddenView /> : <HydraulicDiagramEditorView />
+            }
           />
           <Route
             path="scenario-versions/:versionId"
