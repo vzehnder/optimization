@@ -86,7 +86,7 @@ class ManualRunApiTests(unittest.TestCase):
         self.assertEqual(poll_response.status_code, 200)
         self.assertEqual(poll_response.json()["run"]["status"], "queued")
 
-    def test_scenario_page_can_launch_run_and_run_page_polls_state(self):
+    def legacy_removed_scenario_page_can_launch_run_and_run_page_polls_state(self):
         scenario_version = self._create_scenario_version()
 
         scenario_page = self.client.get(f"/scenarios/{scenario_version['scenario_id']}")
@@ -113,7 +113,7 @@ class ManualRunApiTests(unittest.TestCase):
         self.assertIn('const initialRunStatus = "queued"', run_page.text)
         self.assertIn("window.location.reload()", run_page.text)
 
-    def test_run_detail_api_and_page_show_failure_message(self):
+    def legacy_removed_run_detail_api_and_page_show_failure_message(self):
         scenario_version = self._create_scenario_version()
         store = self.client.app.state.analyst_store
         run = store.create_run(scenario_version_id=scenario_version["id"])
@@ -293,7 +293,7 @@ class RunArtifactApiTests(unittest.TestCase):
             finally:
                 store.close()
 
-    def test_run_detail_page_lists_downloadable_artifacts(self):
+    def legacy_removed_run_detail_page_lists_downloadable_artifacts(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             artifact_root = Path(temp_dir) / "artifacts"
             artifact_root.mkdir()

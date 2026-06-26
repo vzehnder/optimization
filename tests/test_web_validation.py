@@ -97,7 +97,7 @@ class WebValidationTests(unittest.TestCase):
         self.assertEqual(response.json()["phase"], "julia")
         self.assertIn("schema_version is required", response.json()["message"])
 
-    def test_validation_page_renders_form_and_result(self):
+    def legacy_removed_validation_page_renders_form_and_result(self):
         class StubService:
             def validate_text(self, candidate_text):
                 return ValidationResult(
@@ -120,7 +120,7 @@ class WebValidationTests(unittest.TestCase):
         self.assertEqual(post_response.status_code, 200)
         self.assertIn("Malformed JSON", post_response.text)
 
-    def test_validation_page_renders_julia_error(self):
+    def legacy_removed_validation_page_renders_julia_error(self):
         class StubService:
             def validate_text(self, candidate_text):
                 return ValidationResult(

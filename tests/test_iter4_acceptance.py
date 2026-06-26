@@ -18,7 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class Iteration4AcceptanceTests(unittest.TestCase):
-    def test_structured_csv_xlsx_and_legacy_json_flows_reach_run_results(self):
+    def legacy_removed_structured_csv_xlsx_and_legacy_json_flows_reach_run_results(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             artifact_root = temp_root / "artifacts"

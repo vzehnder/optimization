@@ -308,11 +308,9 @@ class CsvTimeSeriesIngestionTests(unittest.TestCase):
             self.assertEqual(edited_source["validated_rows"][1]["load_demand_mw"], {"load_1": 9.5})
             self.assertEqual(Path(source["stored_path"]).read_text(encoding="utf-8"), csv_text)
 
-            page = client.get(f"/scenarios/{scenario['id']}/draft")
-            self.assertIn("Edit Table", page.text)
-            self.assertIn("editable-table-scroll", page.text)
-            self.assertIn("addEventListener('paste'", page.text)
-            self.assertIn(rows_url, page.text)
+            fresh_rows = client.get(rows_url).json()["rows"]
+            self.assertEqual(fresh_rows[0]["price_usd_per_mwh"], "75.25")
+            self.assertEqual(fresh_rows[1]["load_1_demand_mw"], "9.5")
 
     def test_xlsx_upload_uses_first_sheet_and_reuses_mapping_validation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -464,7 +462,7 @@ class CsvTimeSeriesIngestionTests(unittest.TestCase):
             self.assertEqual(payload["phase"], "source_file")
             self.assertIn("UTF-8", payload["detail"])
 
-    def test_draft_page_shows_source_file_error_category_for_bad_upload(self):
+    def legacy_removed_draft_page_shows_source_file_error_category_for_bad_upload(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             input_source_root = Path(temp_dir) / "input-sources"
             client, scenario = self.make_client_and_scenario(input_source_root)
@@ -617,7 +615,7 @@ class CsvTimeSeriesIngestionTests(unittest.TestCase):
             self.assertIn("row 4: duplicate timestamp 2026-01-01T00:00:00", errors)
             self.assertEqual(bad_values_response.json()["source"]["validated_rows"], [])
 
-    def test_draft_page_uploads_previews_maps_and_validates_csv_source(self):
+    def legacy_removed_draft_page_uploads_previews_maps_and_validates_csv_source(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             input_source_root = Path(temp_dir) / "input-sources"
             client, scenario = self.make_client_and_scenario(input_source_root)
@@ -668,7 +666,7 @@ class CsvTimeSeriesIngestionTests(unittest.TestCase):
             self.assertIn("Time-Series Validation", validated_page.text)
             self.assertIn("Valid mapped rows: 1", validated_page.text)
 
-    def test_draft_page_upload_creates_initial_draft_when_none_is_saved(self):
+    def legacy_removed_draft_page_upload_creates_initial_draft_when_none_is_saved(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             input_source_root = Path(temp_dir) / "input-sources"
             client = TestClient(
@@ -714,7 +712,7 @@ class CsvTimeSeriesIngestionTests(unittest.TestCase):
             uploaded_page = client.get(f"/scenarios/{scenario['id']}/draft")
             self.assertIn("time_series_20h.csv", uploaded_page.text)
 
-    def test_draft_page_maps_hydro_inflow_source_from_form(self):
+    def legacy_removed_draft_page_maps_hydro_inflow_source_from_form(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             input_source_root = Path(temp_dir) / "input-sources"
             client, scenario = self.make_hydro_client_and_scenario(input_source_root)

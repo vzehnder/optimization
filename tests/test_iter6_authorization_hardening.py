@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from app.auth import hash_password
 from app.main import create_app
 from app.persistence import AnalystStore
+from tests.auth_test_helpers import login_json_with_csrf
 from tests.test_results_review import create_completed_run_with_result_artifacts
 
 
@@ -37,7 +38,7 @@ class Iteration6AuthorizationHardeningTests(unittest.TestCase):
             403,
         )
 
-    def test_client_is_blocked_from_analyst_pages_and_mutation_apis(self):
+    def test_client_is_redirected_from_legacy_bookmarks_and_blocked_from_mutation_apis(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             artifact_root = Path(temp_dir) / "artifacts"
             run = create_completed_run_with_result_artifacts(self.store, artifact_root)
@@ -61,16 +62,18 @@ class Iteration6AuthorizationHardeningTests(unittest.TestCase):
             client = TestClient(create_app(store=self.store, artifact_root=artifact_root, auth_enabled=True))
             self.login(client, "client@example.local", "client pass")
 
-            for path in [
-                f"/projects/{project_id}",
-                f"/scenarios/{scenario_id}",
-                f"/scenarios/{scenario_id}/draft",
-                f"/runs/{run['id']}",
-                "/system-cases/validate",
-                f"/publications/{publication['id']}/preview",
+            for path, react_path in [
+                (f"/projects/{project_id}", f"/react/projects/{project_id}"),
+                (f"/scenarios/{scenario_id}", f"/react/scenarios/{scenario_id}"),
+                (f"/scenarios/{scenario_id}/draft", f"/react/scenarios/{scenario_id}/draft"),
+                (f"/runs/{run['id']}", f"/react/runs/{run['id']}"),
+                ("/system-cases/validate", "/react/system"),
+                (f"/publications/{publication['id']}/preview", f"/react/publications/{publication['id']}/preview"),
             ]:
                 with self.subTest(path=path):
-                    self.assertEqual(client.get(path, follow_redirects=False).status_code, 403)
+                    response = client.get(path, follow_redirects=False)
+                    self.assertEqual(response.status_code, 303)
+                    self.assertEqual(response.headers["location"], react_path)
 
             mutation_routes = [
                 ("post", f"/api/scenarios/{scenario_id}/draft", {"json": {"document": {}}}),
@@ -138,7 +141,10 @@ class Iteration6AuthorizationHardeningTests(unittest.TestCase):
             self.store.set_user_active(self.client_user["id"], False, updated_by="analyst@example.local")
             deactivated_response = client.get(download_path, follow_redirects=False)
             self.assertEqual(deactivated_response.status_code, 303)
-            self.assertTrue(deactivated_response.headers["location"].startswith("/login?next="))
+            self.assertEqual(
+                deactivated_response.headers["location"],
+                f"/react/client/projects/{project_id}/publications/{publication['id']}/artifacts/summary_json/download",
+            )
 
     def create_user(self, email, *, role, password):
         return self.store.create_user(
@@ -150,12 +156,8 @@ class Iteration6AuthorizationHardeningTests(unittest.TestCase):
         )
 
     def login(self, client, email, password):
-        response = client.post(
-            "/login",
-            data={"email": email, "password": password},
-            follow_redirects=False,
-        )
-        self.assertEqual(response.status_code, 303)
+        response = login_json_with_csrf(client, email, password)
+        self.assertEqual(response.status_code, 200)
 
 
 if __name__ == "__main__":

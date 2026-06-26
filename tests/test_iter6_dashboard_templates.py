@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from app.auth import hash_password
 from app.main import create_app
 from app.persistence import AnalystStore
+from tests.auth_test_helpers import login_json_with_csrf, post_json_with_csrf, put_json_with_csrf
 from tests.test_results_review import (
     create_completed_run_with_hydro_result_artifacts,
     create_completed_run_with_result_artifacts,
@@ -24,9 +25,10 @@ class Iteration6DashboardTemplateTests(unittest.TestCase):
         self.store.close()
 
     def test_internal_user_can_create_list_and_update_project_dashboard_templates(self):
-        project = self.client.post(
+        project = post_json_with_csrf(
+            self.client,
             "/api/projects",
-            json={"name": "Template Project", "description": "Client dashboard curation"},
+            {"name": "Template Project", "description": "Client dashboard curation"},
         ).json()
         scenario = self.store.create_scenario(project_id=project["id"], name="Base")
         version = self.store.create_scenario_version(
@@ -43,9 +45,10 @@ class Iteration6DashboardTemplateTests(unittest.TestCase):
         before_version = self.store.get_scenario_version(version["id"], include_document=False)
         before_run = self.store.get_run(run["id"])
 
-        create_response = self.client.post(
+        create_response = post_json_with_csrf(
+            self.client,
             f"/api/projects/{project['id']}/dashboard-templates",
-            json={
+            {
                 "name": "Executive Client View",
                 "show_summary": True,
                 "show_price_chart": True,
@@ -76,9 +79,10 @@ class Iteration6DashboardTemplateTests(unittest.TestCase):
             [(created["id"], "Executive Client View")],
         )
 
-        update_response = self.client.put(
+        update_response = put_json_with_csrf(
+            self.client,
             f"/api/dashboard-templates/{created['id']}",
-            json={
+            {
                 "name": "External Reviewer View",
                 "show_summary": False,
                 "show_price_chart": False,
@@ -197,17 +201,20 @@ class Iteration6DashboardTemplateTests(unittest.TestCase):
             self.assertIsNone(results["asset_dispatch_table"])
 
     def test_dashboard_templates_remain_project_scoped_and_client_blocked(self):
-        first_project = self.client.post(
+        first_project = post_json_with_csrf(
+            self.client,
             "/api/projects",
-            json={"name": "Template Owner", "description": ""},
+            {"name": "Template Owner", "description": ""},
         ).json()
-        second_project = self.client.post(
+        second_project = post_json_with_csrf(
+            self.client,
             "/api/projects",
-            json={"name": "Other Project", "description": ""},
+            {"name": "Other Project", "description": ""},
         ).json()
-        template_response = self.client.post(
+        template_response = post_json_with_csrf(
+            self.client,
             f"/api/projects/{first_project['id']}/dashboard-templates",
-            json={"name": "Owner Only View"},
+            {"name": "Owner Only View"},
         )
         self.assertEqual(template_response.status_code, 201)
         template = template_response.json()["dashboard_template"]
@@ -249,12 +256,8 @@ class Iteration6DashboardTemplateTests(unittest.TestCase):
         )
 
     def login(self, client, email, password):
-        response = client.post(
-            "/login",
-            data={"email": email, "password": password},
-            follow_redirects=False,
-        )
-        self.assertEqual(response.status_code, 303)
+        response = login_json_with_csrf(client, email, password)
+        self.assertEqual(response.status_code, 200)
 
 
 if __name__ == "__main__":

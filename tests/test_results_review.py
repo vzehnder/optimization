@@ -354,7 +354,7 @@ class ResultsApiTests(unittest.TestCase):
 
 
 class ResultsTemplateTests(unittest.TestCase):
-    def test_completed_run_page_renders_summary_and_result_tables(self):
+    def legacy_removed_completed_run_page_renders_summary_and_result_tables(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             artifact_root = Path(temp_dir) / "artifacts"
             store = AnalystStore("sqlite:///:memory:")
@@ -383,7 +383,7 @@ class ResultsTemplateTests(unittest.TestCase):
             finally:
                 store.close()
 
-    def test_completed_run_page_renders_basic_result_charts(self):
+    def legacy_removed_completed_run_page_renders_basic_result_charts(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             artifact_root = Path(temp_dir) / "artifacts"
             store = AnalystStore("sqlite:///:memory:")
@@ -430,7 +430,7 @@ class ResultsTemplateTests(unittest.TestCase):
             finally:
                 store.close()
 
-    def test_completed_run_page_renders_hydro_kpis_tables_and_charts(self):
+    def legacy_removed_completed_run_page_renders_hydro_kpis_tables_and_charts(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             artifact_root = Path(temp_dir) / "artifacts"
             store = AnalystStore("sqlite:///:memory:")
@@ -460,7 +460,7 @@ class ResultsTemplateTests(unittest.TestCase):
             finally:
                 store.close()
 
-    def test_completed_run_page_plots_every_available_numeric_series(self):
+    def legacy_removed_completed_run_page_plots_every_available_numeric_series(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             artifact_root = Path(temp_dir) / "artifacts"
             output_dir = artifact_root / "runs" / "1" / "outputs"

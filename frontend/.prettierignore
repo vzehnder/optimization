@@ -1,0 +1,6 @@
+dist/
+node_modules/
+openapi.json
+openapi.check.json
+src/api/schema.ts
+src/api/schema.check.ts
