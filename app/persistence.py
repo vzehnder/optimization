@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import threading
@@ -43,6 +44,8 @@ HYDRAULIC_REACH_TYPES = {
     "tailrace",
     "other",
 }
+HYDRAULIC_TERMINAL_CONDITIONS = {"none", "equal_initial", "min_terminal"}
+STORAGE_ELEVATION_CURVE_KEY = "storage_elevation"
 
 
 def utc_now_iso() -> str:
@@ -228,6 +231,77 @@ class AnalystStore:
                 FOREIGN KEY (case_id) REFERENCES optimization_cases(id) ON DELETE CASCADE,
                 FOREIGN KEY (hydraulic_plant_id) REFERENCES hydraulic_plants(id) ON DELETE CASCADE,
                 UNIQUE (case_id, hydraulic_plant_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS case_hydraulic_reservoir_parameters (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id INTEGER NOT NULL,
+                case_hydraulic_node_id INTEGER NOT NULL,
+                storage_min_hm3 REAL NOT NULL,
+                storage_max_hm3 REAL NOT NULL,
+                initial_storage_hm3 REAL NOT NULL,
+                terminal_condition TEXT NOT NULL DEFAULT 'none',
+                terminal_storage_min_hm3 REAL,
+                terminal_water_value_usd_per_hm3 REAL NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (case_id) REFERENCES optimization_cases(id) ON DELETE CASCADE,
+                FOREIGN KEY (case_hydraulic_node_id) REFERENCES case_hydraulic_nodes(id) ON DELETE CASCADE,
+                UNIQUE (case_id, case_hydraulic_node_id),
+                CHECK (terminal_condition IN ('none', 'equal_initial', 'min_terminal'))
+            );
+
+            CREATE TABLE IF NOT EXISTS hydraulic_curve_sets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id INTEGER NOT NULL,
+                curve_key TEXT NOT NULL,
+                version_number INTEGER NOT NULL,
+                version_label TEXT NOT NULL,
+                curve_dimension INTEGER NOT NULL DEFAULT 1,
+                axis_x_name TEXT NOT NULL,
+                axis_x_unit TEXT NOT NULL,
+                axis_y_name TEXT NOT NULL,
+                axis_y_unit TEXT NOT NULL,
+                content_hash TEXT,
+                status TEXT NOT NULL DEFAULT 'draft',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                UNIQUE (project_id, entity_type, entity_id, curve_key, version_number),
+                CHECK (status IN ('draft', 'validated', 'archived'))
+            );
+
+            CREATE TABLE IF NOT EXISTS hydraulic_curve_points (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                hydraulic_curve_set_id INTEGER NOT NULL,
+                point_index INTEGER NOT NULL,
+                x_value REAL NOT NULL,
+                y_value REAL NOT NULL,
+                FOREIGN KEY (hydraulic_curve_set_id) REFERENCES hydraulic_curve_sets(id) ON DELETE CASCADE,
+                UNIQUE (hydraulic_curve_set_id, point_index)
+            );
+
+            CREATE TABLE IF NOT EXISTS case_hydraulic_curve_bindings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id INTEGER NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id INTEGER NOT NULL,
+                curve_role TEXT NOT NULL,
+                hydraulic_curve_set_id INTEGER NOT NULL,
+                required INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (case_id) REFERENCES optimization_cases(id) ON DELETE CASCADE,
+                FOREIGN KEY (hydraulic_curve_set_id) REFERENCES hydraulic_curve_sets(id) ON DELETE CASCADE,
+                UNIQUE (case_id, entity_type, entity_id, curve_role)
             );
 
             CREATE TABLE IF NOT EXISTS case_hydraulic_diagram_layouts (
@@ -1352,7 +1426,16 @@ class AnalystStore:
                 "DELETE FROM case_hydraulic_plants WHERE case_id = ?",
                 (case_id,),
             )
+            self.connection.execute(
+                "DELETE FROM case_hydraulic_curve_bindings WHERE case_id = ?",
+                (case_id,),
+            )
+            self.connection.execute(
+                "DELETE FROM case_hydraulic_reservoir_parameters WHERE case_id = ?",
+                (case_id,),
+            )
 
+            project_id = int(context["hydraulic_system"]["project_id"])
             active_nodes_by_key: dict[str, dict[str, Any]] = {}
             for index, node in enumerate(normalized_nodes):
                 if node["component_type"] == "plant":
@@ -1383,6 +1466,25 @@ class AnalystStore:
                         "y": node["y"],
                     }
                     entity_type = "case_hydraulic_node"
+                    if node["component_type"] == "reservoir":
+                        if node.get("reservoir") is not None:
+                            self._persist_reservoir_parameters(
+                                case_id=case_id,
+                                case_hydraulic_node_id=active_id,
+                                reservoir=node["reservoir"],
+                                updated_by=updated_by,
+                                now=now,
+                            )
+                        if node.get("storage_elevation_curve") is not None:
+                            self._persist_storage_elevation_curve(
+                                project_id=project_id,
+                                base_node_id=created_node["hydraulic_node_id"],
+                                case_id=case_id,
+                                case_hydraulic_node_id=active_id,
+                                curve=node["storage_elevation_curve"],
+                                updated_by=updated_by,
+                                now=now,
+                            )
                 self.connection.execute(
                     """
                     INSERT INTO case_hydraulic_diagram_items (
@@ -1556,6 +1658,9 @@ class AnalystStore:
                         "technical_key": reach_key,
                     }
                 )
+
+        errors.extend(self._validate_active_reservoirs(case_id))
+
         validation = {
             "ok": not errors,
             "errors": errors,
@@ -2443,6 +2548,10 @@ class AnalystStore:
         ).fetchall()
         nodes = [hydraulic_diagram_node_row_to_dict(row) for row in node_rows + plant_rows]
         nodes.sort(key=lambda node: (node["z_index"], node["layout_item_id"]))
+        case_id = int(context["optimization_case"]["id"])
+        project_id = int(context["hydraulic_system"]["project_id"])
+        for node in nodes:
+            self._attach_reservoir_detail(node, case_id=case_id, project_id=project_id)
         reach_rows = self.connection.execute(
             """
             SELECT
@@ -2482,6 +2591,217 @@ class AnalystStore:
             "nodes": nodes,
             "reaches": reaches,
         }
+
+    def _validate_active_reservoirs(self, case_id: int) -> list[dict[str, Any]]:
+        reservoir_rows = self.connection.execute(
+            """
+            SELECT case_hydraulic_nodes.id AS case_hydraulic_node_id,
+                   hydraulic_nodes.node_key
+            FROM case_hydraulic_nodes
+            JOIN hydraulic_nodes
+              ON hydraulic_nodes.id = case_hydraulic_nodes.hydraulic_node_id
+            WHERE case_hydraulic_nodes.case_id = ?
+              AND case_hydraulic_nodes.is_active = 1
+              AND hydraulic_nodes.node_type = 'reservoir'
+            ORDER BY case_hydraulic_nodes.id
+            """,
+            (case_id,),
+        ).fetchall()
+        errors: list[dict[str, Any]] = []
+        for row in reservoir_rows:
+            case_hydraulic_node_id = int(row["case_hydraulic_node_id"])
+            node_key = str(row["node_key"])
+
+            def add_error(code: str, message: str) -> None:
+                errors.append(
+                    {
+                        "severity": "error",
+                        "code": code,
+                        "message": message,
+                        "entity_type": "case_hydraulic_node",
+                        "entity_id": case_hydraulic_node_id,
+                        "technical_key": node_key,
+                    }
+                )
+
+            params_row = self.connection.execute(
+                """
+                SELECT storage_min_hm3, storage_max_hm3, initial_storage_hm3,
+                       terminal_condition, terminal_storage_min_hm3,
+                       terminal_water_value_usd_per_hm3
+                FROM case_hydraulic_reservoir_parameters
+                WHERE case_id = ? AND case_hydraulic_node_id = ?
+                """,
+                (case_id, case_hydraulic_node_id),
+            ).fetchone()
+            binding_row = self.connection.execute(
+                """
+                SELECT hydraulic_curve_set_id
+                FROM case_hydraulic_curve_bindings
+                WHERE case_id = ?
+                  AND entity_type = 'case_hydraulic_node'
+                  AND entity_id = ?
+                  AND curve_role = ?
+                """,
+                (case_id, case_hydraulic_node_id, STORAGE_ELEVATION_CURVE_KEY),
+            ).fetchone()
+
+            if params_row is None:
+                add_error(
+                    "missing_reservoir_parameters",
+                    f"Reservoir {node_key} requires storage parameters before validation.",
+                )
+            if binding_row is None:
+                add_error(
+                    "missing_storage_elevation_curve",
+                    f"Reservoir {node_key} requires a storage_elevation curve binding.",
+                )
+
+            points: list[dict[str, float]] = []
+            if binding_row is not None:
+                points = self._load_curve_set_points(
+                    int(binding_row["hydraulic_curve_set_id"])
+                )
+                storages = [point["x_value"] for point in points]
+                elevations = [point["y_value"] for point in points]
+                if any(
+                    storages[index] >= storages[index + 1]
+                    for index in range(len(storages) - 1)
+                ):
+                    add_error(
+                        "non_increasing_storage_points",
+                        f"Reservoir {node_key} storage points must strictly increase.",
+                    )
+                if any(
+                    elevations[index] > elevations[index + 1]
+                    for index in range(len(elevations) - 1)
+                ):
+                    add_error(
+                        "decreasing_elevation_points",
+                        f"Reservoir {node_key} elevation points must be non-decreasing.",
+                    )
+
+            if params_row is not None:
+                storage_min = float(params_row["storage_min_hm3"])
+                storage_max = float(params_row["storage_max_hm3"])
+                if points:
+                    domain_min = min(point["x_value"] for point in points)
+                    domain_max = max(point["x_value"] for point in points)
+                    if storage_min < domain_min or storage_max > domain_max:
+                        add_error(
+                            "storage_bounds_outside_curve_domain",
+                            f"Reservoir {node_key} storage bounds fall outside the curve domain.",
+                        )
+                terminal_condition = str(params_row["terminal_condition"])
+                terminal_storage_min = params_row["terminal_storage_min_hm3"]
+                terminal_water_value = float(
+                    params_row["terminal_water_value_usd_per_hm3"]
+                )
+                terminal_invalid = False
+                if terminal_condition == "min_terminal":
+                    if terminal_storage_min is None:
+                        terminal_invalid = True
+                    elif not (storage_min <= float(terminal_storage_min) <= storage_max):
+                        terminal_invalid = True
+                if terminal_water_value < 0:
+                    terminal_invalid = True
+                if terminal_invalid:
+                    add_error(
+                        "invalid_terminal_settings",
+                        f"Reservoir {node_key} has invalid terminal condition settings.",
+                    )
+        return errors
+
+    def _attach_reservoir_detail(
+        self,
+        node: dict[str, Any],
+        *,
+        case_id: int,
+        project_id: int,
+    ) -> None:
+        node["reservoir"] = None
+        node["storage_elevation_curve"] = None
+        node["available_curves"] = []
+        if node.get("component_type") != "reservoir":
+            return
+        case_hydraulic_node_id = int(node["entity_id"])
+        base_row = self.connection.execute(
+            "SELECT hydraulic_node_id FROM case_hydraulic_nodes WHERE id = ?",
+            (case_hydraulic_node_id,),
+        ).fetchone()
+        if base_row is None:
+            return
+        base_node_id = int(base_row["hydraulic_node_id"])
+
+        params_row = self.connection.execute(
+            """
+            SELECT storage_min_hm3, storage_max_hm3, initial_storage_hm3,
+                   terminal_condition, terminal_storage_min_hm3,
+                   terminal_water_value_usd_per_hm3
+            FROM case_hydraulic_reservoir_parameters
+            WHERE case_id = ? AND case_hydraulic_node_id = ?
+            """,
+            (case_id, case_hydraulic_node_id),
+        ).fetchone()
+        if params_row is not None:
+            node["reservoir"] = {
+                "storage_min_hm3": float(params_row["storage_min_hm3"]),
+                "storage_max_hm3": float(params_row["storage_max_hm3"]),
+                "initial_storage_hm3": float(params_row["initial_storage_hm3"]),
+                "terminal_condition": str(params_row["terminal_condition"]),
+                "terminal_storage_min_hm3": (
+                    None
+                    if params_row["terminal_storage_min_hm3"] is None
+                    else float(params_row["terminal_storage_min_hm3"])
+                ),
+                "terminal_water_value_usd_per_hm3": float(
+                    params_row["terminal_water_value_usd_per_hm3"]
+                ),
+            }
+
+        binding_row = self.connection.execute(
+            """
+            SELECT hydraulic_curve_set_id
+            FROM case_hydraulic_curve_bindings
+            WHERE case_id = ?
+              AND entity_type = 'case_hydraulic_node'
+              AND entity_id = ?
+              AND curve_role = ?
+            """,
+            (case_id, case_hydraulic_node_id, STORAGE_ELEVATION_CURVE_KEY),
+        ).fetchone()
+
+        curve_rows = self.connection.execute(
+            """
+            SELECT id, version_number, version_label
+            FROM hydraulic_curve_sets
+            WHERE project_id = ?
+              AND entity_type = 'hydraulic_node'
+              AND entity_id = ?
+              AND curve_key = ?
+            ORDER BY version_number
+            """,
+            (project_id, base_node_id, STORAGE_ELEVATION_CURVE_KEY),
+        ).fetchall()
+        node["available_curves"] = [
+            {
+                "curve_set_id": int(row["id"]),
+                "version_number": int(row["version_number"]),
+                "version_label": str(row["version_label"]),
+                "points": self._load_curve_set_points(int(row["id"])),
+            }
+            for row in curve_rows
+        ]
+        if binding_row is not None:
+            bound_id = int(binding_row["hydraulic_curve_set_id"])
+            node["storage_elevation_curve"] = next(
+                (
+                    curve
+                    for curve in node["available_curves"]
+                    if curve["curve_set_id"] == bound_id
+                ),
+                None,
+            )
 
     def _create_case_hydraulic_node(
         self,
@@ -2699,6 +3019,231 @@ class AnalystStore:
         )
         return int(cursor.lastrowid)
 
+    def _persist_reservoir_parameters(
+        self,
+        *,
+        case_id: int,
+        case_hydraulic_node_id: int,
+        reservoir: Mapping[str, Any],
+        updated_by: str,
+        now: str,
+    ) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO case_hydraulic_reservoir_parameters (
+                case_id,
+                case_hydraulic_node_id,
+                storage_min_hm3,
+                storage_max_hm3,
+                initial_storage_hm3,
+                terminal_condition,
+                terminal_storage_min_hm3,
+                terminal_water_value_usd_per_hm3,
+                created_at,
+                updated_at,
+                created_by,
+                updated_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                case_id,
+                case_hydraulic_node_id,
+                reservoir["storage_min_hm3"],
+                reservoir["storage_max_hm3"],
+                reservoir["initial_storage_hm3"],
+                reservoir["terminal_condition"],
+                reservoir["terminal_storage_min_hm3"],
+                reservoir["terminal_water_value_usd_per_hm3"],
+                now,
+                now,
+                updated_by,
+                updated_by,
+            ),
+        )
+
+    def _persist_storage_elevation_curve(
+        self,
+        *,
+        project_id: int,
+        base_node_id: int,
+        case_id: int,
+        case_hydraulic_node_id: int,
+        curve: Mapping[str, Any],
+        updated_by: str,
+        now: str,
+    ) -> None:
+        curve_set_id = self._resolve_storage_elevation_curve_set(
+            project_id=project_id,
+            base_node_id=base_node_id,
+            curve=curve,
+            updated_by=updated_by,
+            now=now,
+        )
+        if curve_set_id is None:
+            return
+        self.connection.execute(
+            """
+            INSERT INTO case_hydraulic_curve_bindings (
+                case_id,
+                entity_type,
+                entity_id,
+                curve_role,
+                hydraulic_curve_set_id,
+                required,
+                created_at,
+                updated_at,
+                created_by,
+                updated_by
+            )
+            VALUES (?, 'case_hydraulic_node', ?, ?, ?, 1, ?, ?, ?, ?)
+            """,
+            (
+                case_id,
+                case_hydraulic_node_id,
+                STORAGE_ELEVATION_CURVE_KEY,
+                curve_set_id,
+                now,
+                now,
+                updated_by,
+                updated_by,
+            ),
+        )
+
+    def _resolve_storage_elevation_curve_set(
+        self,
+        *,
+        project_id: int,
+        base_node_id: int,
+        curve: Mapping[str, Any],
+        updated_by: str,
+        now: str,
+    ) -> int | None:
+        if curve.get("curve_set_id") is not None:
+            row = self.connection.execute(
+                """
+                SELECT id
+                FROM hydraulic_curve_sets
+                WHERE id = ?
+                  AND project_id = ?
+                  AND entity_type = 'hydraulic_node'
+                  AND entity_id = ?
+                  AND curve_key = ?
+                """,
+                (
+                    int(curve["curve_set_id"]),
+                    project_id,
+                    base_node_id,
+                    STORAGE_ELEVATION_CURVE_KEY,
+                ),
+            ).fetchone()
+            if row is None:
+                raise ValueError("storage elevation curve set not found for reservoir")
+            return int(row["id"])
+
+        points = curve.get("points") or []
+        if not points:
+            return None
+
+        content_hash = hydraulic_curve_content_hash(points)
+        existing = self.connection.execute(
+            """
+            SELECT id
+            FROM hydraulic_curve_sets
+            WHERE project_id = ?
+              AND entity_type = 'hydraulic_node'
+              AND entity_id = ?
+              AND curve_key = ?
+              AND content_hash = ?
+            ORDER BY version_number
+            LIMIT 1
+            """,
+            (project_id, base_node_id, STORAGE_ELEVATION_CURVE_KEY, content_hash),
+        ).fetchone()
+        if existing is not None:
+            return int(existing["id"])
+
+        next_version_row = self.connection.execute(
+            """
+            SELECT COALESCE(MAX(version_number), 0) + 1 AS next_version
+            FROM hydraulic_curve_sets
+            WHERE project_id = ?
+              AND entity_type = 'hydraulic_node'
+              AND entity_id = ?
+              AND curve_key = ?
+            """,
+            (project_id, base_node_id, STORAGE_ELEVATION_CURVE_KEY),
+        ).fetchone()
+        version_number = int(next_version_row["next_version"])
+        version_label = curve.get("version_label") or f"v{version_number}"
+        cursor = self.connection.execute(
+            """
+            INSERT INTO hydraulic_curve_sets (
+                project_id,
+                entity_type,
+                entity_id,
+                curve_key,
+                version_number,
+                version_label,
+                curve_dimension,
+                axis_x_name,
+                axis_x_unit,
+                axis_y_name,
+                axis_y_unit,
+                content_hash,
+                status,
+                created_at,
+                updated_at,
+                created_by,
+                updated_by
+            )
+            VALUES (?, 'hydraulic_node', ?, ?, ?, ?, 1, 'storage_hm3', 'hm3',
+                    'elevation_masl', 'masl', ?, 'draft', ?, ?, ?, ?)
+            """,
+            (
+                project_id,
+                base_node_id,
+                STORAGE_ELEVATION_CURVE_KEY,
+                version_number,
+                version_label,
+                content_hash,
+                now,
+                now,
+                updated_by,
+                updated_by,
+            ),
+        )
+        curve_set_id = int(cursor.lastrowid)
+        for point_index, point in enumerate(points):
+            self.connection.execute(
+                """
+                INSERT INTO hydraulic_curve_points (
+                    hydraulic_curve_set_id,
+                    point_index,
+                    x_value,
+                    y_value
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (curve_set_id, point_index, point["x_value"], point["y_value"]),
+            )
+        return curve_set_id
+
+    def _load_curve_set_points(self, curve_set_id: int) -> list[dict[str, float]]:
+        rows = self.connection.execute(
+            """
+            SELECT x_value, y_value
+            FROM hydraulic_curve_points
+            WHERE hydraulic_curve_set_id = ?
+            ORDER BY point_index
+            """,
+            (curve_set_id,),
+        ).fetchall()
+        return [
+            {"x_value": float(row["x_value"]), "y_value": float(row["y_value"])}
+            for row in rows
+        ]
+
     def _next_version_number(self, scenario_id: int) -> int:
         row = self.connection.execute(
             """
@@ -2810,16 +3355,72 @@ def normalize_hydraulic_diagram_nodes(nodes: list[dict[str, Any]]) -> list[dict[
             raise ValueError(f"duplicate hydraulic component key: {technical_key}")
         seen_keys.add(identity)
         display_name = str(node.get("display_name") or "").strip() or technical_key
-        normalized.append(
-            {
-                "component_type": component_type,
-                "technical_key": technical_key,
-                "display_name": display_name,
-                "x": float(node.get("x", 0.0)),
-                "y": float(node.get("y", 0.0)),
-            }
-        )
+        normalized_node = {
+            "component_type": component_type,
+            "technical_key": technical_key,
+            "display_name": display_name,
+            "x": float(node.get("x", 0.0)),
+            "y": float(node.get("y", 0.0)),
+            "reservoir": None,
+            "storage_elevation_curve": None,
+        }
+        if component_type == "reservoir":
+            if node.get("reservoir") is not None:
+                normalized_node["reservoir"] = normalize_hydraulic_reservoir_parameters(
+                    node["reservoir"]
+                )
+            if node.get("storage_elevation_curve") is not None:
+                normalized_node["storage_elevation_curve"] = (
+                    normalize_hydraulic_storage_elevation_curve(
+                        node["storage_elevation_curve"]
+                    )
+                )
+        normalized.append(normalized_node)
     return normalized
+
+
+def normalize_hydraulic_reservoir_parameters(reservoir: Mapping[str, Any]) -> dict[str, Any]:
+    terminal_condition = str(reservoir.get("terminal_condition") or "none").strip()
+    if terminal_condition not in HYDRAULIC_TERMINAL_CONDITIONS:
+        raise ValueError(f"unsupported reservoir terminal condition: {terminal_condition}")
+    terminal_storage_min = reservoir.get("terminal_storage_min_hm3")
+    return {
+        "storage_min_hm3": float(reservoir.get("storage_min_hm3", 0.0)),
+        "storage_max_hm3": float(reservoir.get("storage_max_hm3", 0.0)),
+        "initial_storage_hm3": float(reservoir.get("initial_storage_hm3", 0.0)),
+        "terminal_condition": terminal_condition,
+        "terminal_storage_min_hm3": (
+            None if terminal_storage_min is None else float(terminal_storage_min)
+        ),
+        "terminal_water_value_usd_per_hm3": float(
+            reservoir.get("terminal_water_value_usd_per_hm3", 0.0)
+        ),
+    }
+
+
+def normalize_hydraulic_storage_elevation_curve(curve: Mapping[str, Any]) -> dict[str, Any]:
+    curve_set_id = curve.get("curve_set_id")
+    points = [
+        {"x_value": float(point.get("x_value", 0.0)), "y_value": float(point.get("y_value", 0.0))}
+        for point in curve.get("points", [])
+    ]
+    return {
+        "curve_set_id": None if curve_set_id is None else int(curve_set_id),
+        "version_label": (
+            str(curve["version_label"]).strip()
+            if curve.get("version_label") not in (None, "")
+            else None
+        ),
+        "points": points,
+    }
+
+
+def hydraulic_curve_content_hash(points: list[dict[str, Any]]) -> str:
+    serialized = json.dumps(
+        [[round(point["x_value"], 9), round(point["y_value"], 9)] for point in points],
+        sort_keys=True,
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def normalize_hydraulic_diagram_reaches(reaches: list[dict[str, Any]]) -> list[dict[str, Any]]:

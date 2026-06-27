@@ -138,12 +138,34 @@ class HydraulicDiagramViewportRequest(BaseModel):
     zoom: float = Field(default=1.0, gt=0)
 
 
+class HydraulicReservoirParametersRequest(BaseModel):
+    storage_min_hm3: float
+    storage_max_hm3: float
+    initial_storage_hm3: float
+    terminal_condition: Literal["none", "equal_initial", "min_terminal"] = "none"
+    terminal_storage_min_hm3: float | None = None
+    terminal_water_value_usd_per_hm3: float = 0.0
+
+
+class HydraulicCurvePointRequest(BaseModel):
+    x_value: float
+    y_value: float
+
+
+class HydraulicStorageElevationCurveRequest(BaseModel):
+    curve_set_id: int | None = None
+    version_label: str | None = None
+    points: list[HydraulicCurvePointRequest] = Field(default_factory=list)
+
+
 class HydraulicDiagramNodeRequest(BaseModel):
     component_type: Literal["reservoir", "junction", "plant"]
     technical_key: str = Field(min_length=1)
     display_name: str = Field(min_length=1)
     x: float
     y: float
+    reservoir: HydraulicReservoirParametersRequest | None = None
+    storage_elevation_curve: HydraulicStorageElevationCurveRequest | None = None
 
 
 class HydraulicDiagramReachRequest(BaseModel):

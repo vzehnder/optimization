@@ -924,6 +924,13 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** HydraulicCurvePointRequest */
+        HydraulicCurvePointRequest: {
+            /** X Value */
+            x_value: number;
+            /** Y Value */
+            y_value: number;
+        };
         /** HydraulicDiagramNodeRequest */
         HydraulicDiagramNodeRequest: {
             /**
@@ -933,6 +940,8 @@ export interface components {
             component_type: "reservoir" | "junction" | "plant";
             /** Display Name */
             display_name: string;
+            reservoir?: components["schemas"]["HydraulicReservoirParametersRequest"] | null;
+            storage_elevation_curve?: components["schemas"]["HydraulicStorageElevationCurveRequest"] | null;
             /** Technical Key */
             technical_key: string;
             /** X */
@@ -980,6 +989,37 @@ export interface components {
              * @default 1
              */
             zoom: number;
+        };
+        /** HydraulicReservoirParametersRequest */
+        HydraulicReservoirParametersRequest: {
+            /** Initial Storage Hm3 */
+            initial_storage_hm3: number;
+            /** Storage Max Hm3 */
+            storage_max_hm3: number;
+            /** Storage Min Hm3 */
+            storage_min_hm3: number;
+            /**
+             * Terminal Condition
+             * @default none
+             * @enum {string}
+             */
+            terminal_condition: "none" | "equal_initial" | "min_terminal";
+            /** Terminal Storage Min Hm3 */
+            terminal_storage_min_hm3?: number | null;
+            /**
+             * Terminal Water Value Usd Per Hm3
+             * @default 0
+             */
+            terminal_water_value_usd_per_hm3: number;
+        };
+        /** HydraulicStorageElevationCurveRequest */
+        HydraulicStorageElevationCurveRequest: {
+            /** Curve Set Id */
+            curve_set_id?: number | null;
+            /** Points */
+            points?: components["schemas"]["HydraulicCurvePointRequest"][];
+            /** Version Label */
+            version_label?: string | null;
         };
         /** LoginRequest */
         LoginRequest: {

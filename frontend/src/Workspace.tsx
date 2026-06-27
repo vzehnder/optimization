@@ -36,12 +36,17 @@ import {
   type DashboardTemplate,
   type DashboardTemplatePayload,
   type HydraulicComponentType,
+  type HydraulicCurvePoint,
+  type HydraulicCurveSummary,
   type HydraulicDiagram,
   type HydraulicDiagramNodeWrite,
   type HydraulicDiagramReachWrite,
   type HydraulicDiagramValidation,
   type HydraulicDiagramViewport,
   type HydraulicReachType,
+  type HydraulicReservoirParameters,
+  type HydraulicStorageElevationCurveWrite,
+  type HydraulicTerminalCondition,
   type Publication,
   type PublicationPayload,
   type Project,
@@ -980,16 +985,55 @@ const hydraulicReachTypes: HydraulicReachType[] = [
   "other",
 ];
 
+function defaultReservoirParameters(): HydraulicReservoirParameters {
+  return {
+    storage_min_hm3: 0,
+    storage_max_hm3: 0,
+    initial_storage_hm3: 0,
+    terminal_condition: "none",
+    terminal_storage_min_hm3: null,
+    terminal_water_value_usd_per_hm3: 0,
+  };
+}
+
 function editableHydraulicNodes(
   diagram: HydraulicDiagram,
 ): HydraulicDiagramNodeWrite[] {
-  return diagram.nodes.map((node) => ({
-    component_type: node.component_type,
-    technical_key: node.technical_key,
-    display_name: node.display_name,
-    x: node.x,
-    y: node.y,
-  }));
+  return diagram.nodes.map((node) => {
+    const base: HydraulicDiagramNodeWrite = {
+      component_type: node.component_type,
+      technical_key: node.technical_key,
+      display_name: node.display_name,
+      x: node.x,
+      y: node.y,
+    };
+    if (node.component_type !== "reservoir") return base;
+    return {
+      ...base,
+      reservoir: node.reservoir ?? defaultReservoirParameters(),
+      storage_elevation_curve: node.storage_elevation_curve
+        ? {
+            curve_set_id: node.storage_elevation_curve.curve_set_id,
+            version_label: node.storage_elevation_curve.version_label,
+            points: node.storage_elevation_curve.points.map((point) => ({
+              ...point,
+            })),
+          }
+        : { curve_set_id: null, version_label: null, points: [] },
+    };
+  });
+}
+
+function curvesByNodeKey(
+  diagram: HydraulicDiagram,
+): Record<string, HydraulicCurveSummary[]> {
+  const map: Record<string, HydraulicCurveSummary[]> = {};
+  for (const node of diagram.nodes) {
+    if (node.component_type === "reservoir") {
+      map[node.technical_key] = node.available_curves ?? [];
+    }
+  }
+  return map;
 }
 
 function editableHydraulicReaches(
@@ -1277,6 +1321,270 @@ function HydraulicReachList({
   );
 }
 
+const hydraulicTerminalConditions: HydraulicTerminalCondition[] = [
+  "none",
+  "equal_initial",
+  "min_terminal",
+];
+
+const hydraulicTerminalConditionLabels: Record<
+  HydraulicTerminalCondition,
+  string
+> = {
+  none: "Sin condicion",
+  equal_initial: "Igual al inicial",
+  min_terminal: "Minimo terminal",
+};
+
+function HydraulicReservoirPanel({
+  node,
+  availableCurves,
+  updateReservoir,
+  updateCurve,
+}: {
+  node: HydraulicDiagramNodeWrite;
+  availableCurves: HydraulicCurveSummary[];
+  updateReservoir: (
+    technicalKey: string,
+    patch: Partial<HydraulicReservoirParameters>,
+  ) => void;
+  updateCurve: (
+    technicalKey: string,
+    curve: HydraulicStorageElevationCurveWrite,
+  ) => void;
+}) {
+  const key = node.technical_key;
+  const reservoir = node.reservoir ?? defaultReservoirParameters();
+  const curve: HydraulicStorageElevationCurveWrite =
+    node.storage_elevation_curve ?? {
+      curve_set_id: null,
+      version_label: null,
+      points: [],
+    };
+  const points = curve.points;
+
+  function setPoints(nextPoints: HydraulicCurvePoint[]) {
+    updateCurve(key, {
+      curve_set_id: null,
+      version_label: curve.version_label ?? null,
+      points: nextPoints,
+    });
+  }
+
+  return (
+    <li
+      className="hydraulic-reservoir-panel"
+      data-testid={`hydraulic-reservoir-${key}`}
+    >
+      <strong>{node.display_name}</strong>
+      <div className="reservoir-grid">
+        <label htmlFor={`reservoir-storage-min-${key}`}>
+          <span>Almacenamiento minimo {key}</span>
+          <input
+            id={`reservoir-storage-min-${key}`}
+            type="number"
+            value={reservoir.storage_min_hm3}
+            onChange={(event) =>
+              updateReservoir(key, {
+                storage_min_hm3: Number(event.target.value),
+              })
+            }
+          />
+        </label>
+        <label htmlFor={`reservoir-storage-max-${key}`}>
+          <span>Almacenamiento maximo {key}</span>
+          <input
+            id={`reservoir-storage-max-${key}`}
+            type="number"
+            value={reservoir.storage_max_hm3}
+            onChange={(event) =>
+              updateReservoir(key, {
+                storage_max_hm3: Number(event.target.value),
+              })
+            }
+          />
+        </label>
+        <label htmlFor={`reservoir-initial-${key}`}>
+          <span>Almacenamiento inicial {key}</span>
+          <input
+            id={`reservoir-initial-${key}`}
+            type="number"
+            value={reservoir.initial_storage_hm3}
+            onChange={(event) =>
+              updateReservoir(key, {
+                initial_storage_hm3: Number(event.target.value),
+              })
+            }
+          />
+        </label>
+        <label htmlFor={`reservoir-terminal-condition-${key}`}>
+          <span>Condicion terminal {key}</span>
+          <select
+            id={`reservoir-terminal-condition-${key}`}
+            value={reservoir.terminal_condition}
+            onChange={(event) =>
+              updateReservoir(key, {
+                terminal_condition: event.target
+                  .value as HydraulicTerminalCondition,
+              })
+            }
+          >
+            {hydraulicTerminalConditions.map((condition) => (
+              <option key={condition} value={condition}>
+                {hydraulicTerminalConditionLabels[condition]}
+              </option>
+            ))}
+          </select>
+        </label>
+        {reservoir.terminal_condition === "min_terminal" ? (
+          <label htmlFor={`reservoir-terminal-storage-${key}`}>
+            <span>Almacenamiento terminal minimo {key}</span>
+            <input
+              id={`reservoir-terminal-storage-${key}`}
+              type="number"
+              value={reservoir.terminal_storage_min_hm3 ?? ""}
+              onChange={(event) =>
+                updateReservoir(key, {
+                  terminal_storage_min_hm3:
+                    event.target.value === ""
+                      ? null
+                      : Number(event.target.value),
+                })
+              }
+            />
+          </label>
+        ) : null}
+        <label htmlFor={`reservoir-terminal-value-${key}`}>
+          <span>Valor terminal del agua {key}</span>
+          <input
+            id={`reservoir-terminal-value-${key}`}
+            type="number"
+            value={reservoir.terminal_water_value_usd_per_hm3}
+            onChange={(event) =>
+              updateReservoir(key, {
+                terminal_water_value_usd_per_hm3: Number(event.target.value),
+              })
+            }
+          />
+        </label>
+      </div>
+      <div className="reservoir-curve">
+        <div className="draft-section-heading">
+          <h3>Curva cota-volumen {key}</h3>
+          <div className="draft-actions">
+            {availableCurves.length ? (
+              <label htmlFor={`reservoir-curve-version-${key}`}>
+                <span>Version de curva {key}</span>
+                <select
+                  id={`reservoir-curve-version-${key}`}
+                  value={curve.curve_set_id ?? ""}
+                  onChange={(event) => {
+                    const selectedId = Number(event.target.value);
+                    const selected = availableCurves.find(
+                      (option) => option.curve_set_id === selectedId,
+                    );
+                    if (!selected) return;
+                    updateCurve(key, {
+                      curve_set_id: selected.curve_set_id,
+                      version_label: selected.version_label,
+                      points: selected.points.map((point) => ({ ...point })),
+                    });
+                  }}
+                >
+                  <option value="">Curva editada</option>
+                  {availableCurves.map((option) => (
+                    <option
+                      key={option.curve_set_id}
+                      value={option.curve_set_id}
+                    >
+                      {option.version_label} (v{option.version_number})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setPoints([...points, { x_value: 0, y_value: 0 }])}
+            >
+              Agregar punto de curva {key}
+            </button>
+          </div>
+        </div>
+        {points.length ? (
+          <ul className="resource-list reservoir-curve-points">
+            {points.map((point, index) => (
+              <li key={index}>
+                <label htmlFor={`reservoir-curve-x-${key}-${index}`}>
+                  <span>
+                    Almacenamiento punto {index + 1} {key}
+                  </span>
+                  <input
+                    id={`reservoir-curve-x-${key}-${index}`}
+                    type="number"
+                    value={point.x_value}
+                    onChange={(event) =>
+                      setPoints(
+                        points.map((current, currentIndex) =>
+                          currentIndex === index
+                            ? {
+                                ...current,
+                                x_value: Number(event.target.value),
+                              }
+                            : current,
+                        ),
+                      )
+                    }
+                  />
+                </label>
+                <label htmlFor={`reservoir-curve-y-${key}-${index}`}>
+                  <span>
+                    Cota punto {index + 1} {key}
+                  </span>
+                  <input
+                    id={`reservoir-curve-y-${key}-${index}`}
+                    type="number"
+                    value={point.y_value}
+                    onChange={(event) =>
+                      setPoints(
+                        points.map((current, currentIndex) =>
+                          currentIndex === index
+                            ? {
+                                ...current,
+                                y_value: Number(event.target.value),
+                              }
+                            : current,
+                        ),
+                      )
+                    }
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="secondary-action"
+                  onClick={() =>
+                    setPoints(
+                      points.filter(
+                        (_, currentIndex) => currentIndex !== index,
+                      ),
+                    )
+                  }
+                >
+                  Quitar punto {index + 1} {key}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <EmptyState>
+            Agrega puntos de almacenamiento y cota para esta curva.
+          </EmptyState>
+        )}
+      </div>
+    </li>
+  );
+}
+
 function HydraulicDiagramEditor({
   scenario,
   project,
@@ -1304,6 +1612,9 @@ function HydraulicDiagramEditor({
   const [pendingReachSource, setPendingReachSource] = useState<string | null>(
     null,
   );
+  const [availableCurves, setAvailableCurves] = useState<
+    Record<string, HydraulicCurveSummary[]>
+  >(() => curvesByNodeKey(initialDiagram));
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -1324,6 +1635,7 @@ function HydraulicDiagramEditor({
       );
       setNodes(editableHydraulicNodes(savedDiagram));
       setReaches(editableHydraulicReaches(savedDiagram));
+      setAvailableCurves(curvesByNodeKey(savedDiagram));
       setRevision(savedDiagram.revision);
       setViewport(defaultHydraulicViewport(savedDiagram));
       setSaveStatus("saved");
@@ -1343,6 +1655,7 @@ function HydraulicDiagramEditor({
       );
       setNodes(editableHydraulicNodes(serverDiagram));
       setReaches(editableHydraulicReaches(serverDiagram));
+      setAvailableCurves(curvesByNodeKey(serverDiagram));
       setRevision(serverDiagram.revision);
       setViewport(defaultHydraulicViewport(serverDiagram));
       setSaveStatus("saved");
@@ -1380,8 +1693,50 @@ function HydraulicDiagramEditor({
         x: 120 + current.length * 180,
         y: componentType === "plant" ? 180 : 80 + current.length * 30,
       };
+      if (componentType === "reservoir") {
+        nextNode.reservoir = defaultReservoirParameters();
+        nextNode.storage_elevation_curve = {
+          curve_set_id: null,
+          version_label: null,
+          points: [],
+        };
+      }
       return [...current, nextNode];
     });
+    markDirty();
+  }
+
+  function updateReservoir(
+    technicalKey: string,
+    patch: Partial<HydraulicReservoirParameters>,
+  ) {
+    setNodes((current) =>
+      current.map((node) =>
+        node.technical_key === technicalKey
+          ? {
+              ...node,
+              reservoir: {
+                ...(node.reservoir ?? defaultReservoirParameters()),
+                ...patch,
+              },
+            }
+          : node,
+      ),
+    );
+    markDirty();
+  }
+
+  function updateCurve(
+    technicalKey: string,
+    curve: HydraulicStorageElevationCurveWrite,
+  ) {
+    setNodes((current) =>
+      current.map((node) =>
+        node.technical_key === technicalKey
+          ? { ...node, storage_elevation_curve: curve }
+          : node,
+      ),
+    );
     markDirty();
   }
 
@@ -1562,6 +1917,33 @@ function HydraulicDiagramEditor({
             reaches={reaches}
             updateReach={updateReach}
           />
+        </section>
+        <section
+          className="workspace-section"
+          aria-labelledby="reservoir-tools"
+        >
+          <div className="draft-section-heading">
+            <h2 id="reservoir-tools">Parametros de embalse</h2>
+          </div>
+          {nodes.some((node) => node.component_type === "reservoir") ? (
+            <ul className="resource-list hydraulic-reservoir-list">
+              {nodes
+                .filter((node) => node.component_type === "reservoir")
+                .map((node) => (
+                  <HydraulicReservoirPanel
+                    key={node.technical_key}
+                    node={node}
+                    availableCurves={availableCurves[node.technical_key] ?? []}
+                    updateReservoir={updateReservoir}
+                    updateCurve={updateCurve}
+                  />
+                ))}
+            </ul>
+          ) : (
+            <EmptyState>
+              Agrega un embalse para editar almacenamiento y curva cota-volumen.
+            </EmptyState>
+          )}
         </section>
       </form>
     </section>

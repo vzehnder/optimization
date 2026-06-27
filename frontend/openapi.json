@@ -235,6 +235,24 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HydraulicCurvePointRequest": {
+        "properties": {
+          "x_value": {
+            "title": "X Value",
+            "type": "number"
+          },
+          "y_value": {
+            "title": "Y Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x_value",
+          "y_value"
+        ],
+        "title": "HydraulicCurvePointRequest",
+        "type": "object"
+      },
       "HydraulicDiagramNodeRequest": {
         "properties": {
           "component_type": {
@@ -250,6 +268,26 @@
             "minLength": 1,
             "title": "Display Name",
             "type": "string"
+          },
+          "reservoir": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HydraulicReservoirParametersRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "storage_elevation_curve": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HydraulicStorageElevationCurveRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "technical_key": {
             "minLength": 1,
@@ -365,6 +403,90 @@
           }
         },
         "title": "HydraulicDiagramViewportRequest",
+        "type": "object"
+      },
+      "HydraulicReservoirParametersRequest": {
+        "properties": {
+          "initial_storage_hm3": {
+            "title": "Initial Storage Hm3",
+            "type": "number"
+          },
+          "storage_max_hm3": {
+            "title": "Storage Max Hm3",
+            "type": "number"
+          },
+          "storage_min_hm3": {
+            "title": "Storage Min Hm3",
+            "type": "number"
+          },
+          "terminal_condition": {
+            "default": "none",
+            "enum": [
+              "none",
+              "equal_initial",
+              "min_terminal"
+            ],
+            "title": "Terminal Condition",
+            "type": "string"
+          },
+          "terminal_storage_min_hm3": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal Storage Min Hm3"
+          },
+          "terminal_water_value_usd_per_hm3": {
+            "default": 0.0,
+            "title": "Terminal Water Value Usd Per Hm3",
+            "type": "number"
+          }
+        },
+        "required": [
+          "storage_min_hm3",
+          "storage_max_hm3",
+          "initial_storage_hm3"
+        ],
+        "title": "HydraulicReservoirParametersRequest",
+        "type": "object"
+      },
+      "HydraulicStorageElevationCurveRequest": {
+        "properties": {
+          "curve_set_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Curve Set Id"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/HydraulicCurvePointRequest"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "version_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Label"
+          }
+        },
+        "title": "HydraulicStorageElevationCurveRequest",
         "type": "object"
       },
       "LoginRequest": {

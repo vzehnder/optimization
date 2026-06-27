@@ -338,12 +338,46 @@ export type HydraulicReachType =
   | "tailrace"
   | "other";
 
+export type HydraulicTerminalCondition =
+  | "none"
+  | "equal_initial"
+  | "min_terminal";
+
+export interface HydraulicReservoirParameters {
+  storage_min_hm3: number;
+  storage_max_hm3: number;
+  initial_storage_hm3: number;
+  terminal_condition: HydraulicTerminalCondition;
+  terminal_storage_min_hm3: number | null;
+  terminal_water_value_usd_per_hm3: number;
+}
+
+export interface HydraulicCurvePoint {
+  x_value: number;
+  y_value: number;
+}
+
+export interface HydraulicCurveSummary {
+  curve_set_id: number;
+  version_number: number;
+  version_label: string;
+  points: HydraulicCurvePoint[];
+}
+
+export interface HydraulicStorageElevationCurveWrite {
+  curve_set_id?: number | null;
+  version_label?: string | null;
+  points: HydraulicCurvePoint[];
+}
+
 export interface HydraulicDiagramNodeWrite {
   component_type: HydraulicComponentType;
   technical_key: string;
   display_name: string;
   x: number;
   y: number;
+  reservoir?: HydraulicReservoirParameters | null;
+  storage_elevation_curve?: HydraulicStorageElevationCurveWrite | null;
 }
 
 export interface HydraulicDiagramNode extends HydraulicDiagramNodeWrite {
@@ -351,6 +385,9 @@ export interface HydraulicDiagramNode extends HydraulicDiagramNodeWrite {
   entity_type: string;
   entity_id: number;
   z_index: number;
+  reservoir: HydraulicReservoirParameters | null;
+  storage_elevation_curve: HydraulicCurveSummary | null;
+  available_curves: HydraulicCurveSummary[];
 }
 
 export interface HydraulicDiagramReachWrite {

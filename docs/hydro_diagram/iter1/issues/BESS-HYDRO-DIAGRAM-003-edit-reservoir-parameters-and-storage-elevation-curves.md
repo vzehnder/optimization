@@ -1,6 +1,6 @@
 # BESS-HYDRO-DIAGRAM-003: Edit Reservoir Parameters And Storage-Elevation Curves
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/hydro_diagram/iter1/prd_hydro_diagram_editor.md`
@@ -23,21 +23,21 @@ than embedding mutable points only in the diagram document.
 
 ## Acceptance criteria
 
-- [ ] Selecting a reservoir opens a panel with storage bounds, initial storage,
+- [x] Selecting a reservoir opens a panel with storage bounds, initial storage,
       terminal condition and terminal water value.
-- [ ] The panel can create or edit a `storage_elevation` curve as point rows.
-- [ ] The panel can select an existing compatible versioned curve.
-- [ ] Saving persists curve sets, curve points and the case curve binding.
-- [ ] Validation requires reservoir parameters for active reservoir nodes.
-- [ ] Validation requires a `storage_elevation` binding for active reservoir
+- [x] The panel can create or edit a `storage_elevation` curve as point rows.
+- [x] The panel can select an existing compatible versioned curve.
+- [x] Saving persists curve sets, curve points and the case curve binding.
+- [x] Validation requires reservoir parameters for active reservoir nodes.
+- [x] Validation requires a `storage_elevation` binding for active reservoir
       nodes.
-- [ ] Validation rejects non-increasing storage points, decreasing elevation,
+- [x] Validation rejects non-increasing storage points, decreasing elevation,
       storage bounds outside curve domain and invalid terminal settings.
-- [ ] Backend tests cover parameter persistence, curve versioning, binding and
+- [x] Backend tests cover parameter persistence, curve versioning, binding and
       invalid curve cases.
-- [ ] React tests cover reservoir panel editing, curve table editing and
+- [x] React tests cover reservoir panel editing, curve table editing and
       validation error display.
-- [ ] The DB checkpoint records implemented curve and reservoir parameter
+- [x] The DB checkpoint records implemented curve and reservoir parameter
       tables.
 
 ## Blocked by

@@ -207,7 +207,7 @@ test("React auth handles bootstrap, login, refresh, roles, logout, and deactivat
   );
 });
 
-test("React hydraulic diagram persists reservoir junction and plant nodes across reload", async ({
+test("React hydraulic diagram persists reservoir parameters curves junction and plant nodes across reload", async ({
   page,
 }) => {
   await ensureAdminSession(page);
@@ -278,6 +278,21 @@ test("React hydraulic diagram persists reservoir junction and plant nodes across
     .getByLabel("Tipo reach_reservoir_1_junction_1")
     .selectOption("canal");
   await page.getByLabel("Etiqueta plant_1").fill("Plant Laja");
+
+  await page.getByLabel("Almacenamiento minimo reservoir_1").fill("5");
+  await page.getByLabel("Almacenamiento maximo reservoir_1").fill("50");
+  await page.getByLabel("Almacenamiento inicial reservoir_1").fill("20");
+  await page
+    .getByRole("button", { name: "Agregar punto de curva reservoir_1" })
+    .click();
+  await page.getByLabel("Almacenamiento punto 1 reservoir_1").fill("5");
+  await page.getByLabel("Cota punto 1 reservoir_1").fill("700");
+  await page
+    .getByRole("button", { name: "Agregar punto de curva reservoir_1" })
+    .click();
+  await page.getByLabel("Almacenamiento punto 2 reservoir_1").fill("50");
+  await page.getByLabel("Cota punto 2 reservoir_1").fill("760");
+
   await expect(page.getByText("Estado: dirty")).toBeVisible();
   await page.getByRole("button", { name: "Guardar diagrama" }).click();
   await expect(page.getByText("Estado: saved")).toBeVisible();
@@ -301,6 +316,13 @@ test("React hydraulic diagram persists reservoir junction and plant nodes across
   await expect(
     page.getByLabel("Tipo reach_reservoir_1_junction_1"),
   ).toHaveValue("canal");
+  await expect(
+    page.getByLabel("Almacenamiento maximo reservoir_1"),
+  ).toHaveValue("50");
+  await expect(page.getByLabel("Cota punto 2 reservoir_1")).toHaveValue("760");
+  await expect(page.getByLabel("Version de curva reservoir_1")).not.toHaveValue(
+    "",
+  );
 });
 
 test("React admin users and project access cover assignment, removal, deactivation, and denials", async ({
