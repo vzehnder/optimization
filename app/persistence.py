@@ -1816,6 +1816,16 @@ class AnalystStore:
             "schema_version": "bess_system_dispatch.v3",
             "case_name": diagram["optimization_case"]["case_key"],
             "solver": {"name": "HiGHS", "options": {}},
+            "time_series": [
+                {
+                    "timestamp": "2026-01-01T00:00:00",
+                    "duration_hours": 1.0,
+                    "natural_inflow_m3s": {
+                        requirement["entity_id"]: 0.0
+                        for requirement in required_time_series
+                    },
+                }
+            ],
             "hydraulic_network": {
                 "nodes": network_nodes,
                 "reaches": reaches,

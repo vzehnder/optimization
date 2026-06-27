@@ -697,6 +697,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scenarios/{scenario_id}/hydraulic-diagram/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Promote Hydraulic Diagram */
+        post: operations["promote_hydraulic_diagram_api_scenarios__scenario_id__hydraulic_diagram_promote_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scenarios/{scenario_id}/hydraulic-diagram/v3-preview": {
         parameters: {
             query?: never;
@@ -2805,6 +2822,37 @@ export interface operations {
         };
     };
     create_hydraulic_diagram_api_scenarios__scenario_id__hydraulic_diagram_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    promote_hydraulic_diagram_api_scenarios__scenario_id__hydraulic_diagram_promote_post: {
         parameters: {
             query?: never;
             header?: never;

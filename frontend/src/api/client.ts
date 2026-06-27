@@ -1131,6 +1131,14 @@ export async function validateHydraulicV3Preview(
   return response.validation;
 }
 
+export async function promoteHydraulicDiagram(
+  scenarioId: number,
+): Promise<ScenarioVersion> {
+  return postJsonWithCsrf<ScenarioVersion>(
+    `/api/scenarios/${scenarioId}/hydraulic-diagram/promote`,
+  );
+}
+
 export async function getGeneratedSystemCasePreview(
   scenarioId: number,
 ): Promise<unknown> {

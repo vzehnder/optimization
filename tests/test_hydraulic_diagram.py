@@ -1,27 +1,136 @@
+import json
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.persistence import AnalystStore
+from app.runner import JuliaRunExecutor
 from app.validation import ValidationResult
 
 
 class StubValidationService:
     def __init__(self):
         self.validated_texts = []
+        self.file_validation_count = 0
 
     def validate_text(self, candidate_text):
         self.validated_texts.append(candidate_text)
+        document = json.loads(candidate_text)
         return ValidationResult(
             ok=True,
             phase="julia",
             message="Validation succeeded",
             payload={
                 "status": "ok",
-                "schema_version": "bess_system_dispatch.v3",
-                "case_name": "scenario_1_hydraulic_case",
-                "hydraulic_network": {"nodes": 3, "reaches": 2, "plants": 1, "units": 1},
+                "schema_version": document["schema_version"],
+                "case_name": document["case_name"],
+                "hydraulic_network": {"nodes": 3, "reaches": 1, "plants": 1, "units": 1},
             },
+            exit_code=0,
+            raw_stdout='{"status":"ok"}\n',
+            raw_stderr="",
+        )
+
+    def validate_file(self, candidate_path):
+        self.file_validation_count += 1
+        return ValidationResult(
+            ok=True,
+            phase="julia",
+            message="Validation succeeded",
+            payload={"status": "ok"},
+            exit_code=0,
+            raw_stdout='{"status":"ok"}\n',
+            raw_stderr="",
+        )
+
+
+class SynchronousRunQueue:
+    def __init__(self, executor):
+        self.executor = executor
+
+    def enqueue(self, run_id):
+        self.executor.execute(run_id)
+
+    def stop(self):
+        pass
+
+
+class HydraulicV3RunProcess:
+    def __init__(self):
+        self.completed_commands = []
+
+    def __call__(self, command, **kwargs):
+        self.completed_commands.append((command, kwargs))
+        input_path = next(Path(item) for item in command if str(item).endswith("system_case.json"))
+        system_case = json.loads(input_path.read_text(encoding="utf-8"))
+        output_root = Path(command[command.index("--output-root") + 1])
+        output_dir = output_root / "scenario_1_hydraulic_case" / "hydraulic-v3-run"
+        output_dir.mkdir(parents=True)
+        summary_path = output_dir / "summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "case_name": "scenario_1_hydraulic_case",
+                    "schema_version": "bess_system_dispatch.v3",
+                    "solver_name": "HiGHS",
+                    "solver_status": "OPTIMAL",
+                    "termination_status": "OPTIMAL",
+                    "objective_value_usd": 120.0,
+                    "hydraulic_v3_totals": {
+                        "total_generation_mwh": 30.0,
+                        "final_storage_hm3": 19.856,
+                    },
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (output_dir / "dispatch.csv").write_text(
+            "timestamp,duration_hours,total_hydro_power_mw,total_hydro_turbine_flow_m3s,"
+            "total_hydro_storage_hm3,total_hydro_reservoir_elevation_masl\n"
+            "2026-01-01T00:00:00,1.0,30.0,40.0,19.856,719.808\n",
+            encoding="utf-8",
+        )
+        (output_dir / "asset_dispatch.csv").write_text(
+            "timestamp,duration_hours,asset_id,asset_type,hydro_power_mw,"
+            "hydro_turbine_flow_m3s,hydro_storage_hm3,hydro_reservoir_elevation_masl\n"
+            "2026-01-01T00:00:00,1.0,unit_1,hydraulic_unit,30.0,40.0,19.856,719.808\n",
+            encoding="utf-8",
+        )
+        (output_dir / "system_case_resolved.json").write_text(
+            json.dumps(system_case, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (output_dir / "model_metadata.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "bess_system_dispatch.v3",
+                    "hydraulic_nodes": ["reservoir_alpha", "junction_in", "junction_out"],
+                    "hydraulic_units": ["unit_1"],
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps(
+                {
+                    "case_name": "scenario_1_hydraulic_case",
+                    "run_timestamp": "hydraulic-v3-run",
+                    "output_dir": str(output_dir),
+                    "summary_path": str(summary_path),
+                    "termination_status": "OPTIMAL",
+                }
+            ),
+            stderr="",
         )
 
 
@@ -785,6 +894,155 @@ class HydraulicDiagramApiTests(unittest.TestCase):
         self.assertEqual(validation["errors"], [])
 
     def test_v3_preview_generation_validates_with_julia_persists_snapshot_and_marks_stale_after_edit(self):
+        self._save_complete_v3_diagram()
+
+        preview_response = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/v3-preview"
+        )
+
+        self.assertEqual(preview_response.status_code, 200)
+        validation = preview_response.json()["validation"]
+        preview = validation["system_case"]
+        self.assertTrue(validation["ok"])
+        self.assertFalse(validation["stale"])
+        self.assertEqual(preview["schema_version"], "bess_system_dispatch.v3")
+        self.assertEqual(preview["hydraulic_network"]["nodes"][0]["id"], "reservoir_alpha")
+        self.assertEqual(
+            preview["hydraulic_network"]["nodes"][0]["curves"]["storage_elevation"],
+            [
+                {"storage_hm3": 5.0, "elevation_masl": 700.0},
+                {"storage_hm3": 50.0, "elevation_masl": 760.0},
+            ],
+        )
+        self.assertEqual(
+            preview["hydraulic_network"]["units"][0]["curves"]["flow_power"],
+            [
+                {"flow_m3s": 0.0, "power_mw": 0.0},
+                {"flow_m3s": 40.0, "power_mw": 30.0},
+            ],
+        )
+        self.assertEqual(
+            preview["hydraulic_network"]["required_time_series"],
+            [
+                {
+                    "entity_type": "hydraulic_node",
+                    "entity_id": "reservoir_alpha",
+                    "signal_key": "natural_inflow_m3s",
+                    "binding_status": "required",
+                }
+            ],
+        )
+        self.assertEqual(len(self.validation_service.validated_texts), 1)
+        self.assertIn('"schema_version": "bess_system_dispatch.v3"', self.validation_service.validated_texts[0])
+
+        reloaded = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram"
+        ).json()["diagram"]
+        self.assertTrue(reloaded["validation"]["ok"])
+        self.assertFalse(reloaded["validation"]["stale"])
+
+        edited_nodes = reloaded["nodes"]
+        edited_nodes[0]["display_name"] = "Reservoir Alpha Edited"
+        stale_response = self.client.put(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram",
+            json={
+                "revision": reloaded["revision"],
+                "nodes": edited_nodes,
+                "reaches": reloaded["reaches"],
+                "viewport": reloaded["layout"]["viewport"],
+            },
+        )
+        self.assertEqual(stale_response.status_code, 200)
+        self.assertTrue(stale_response.json()["diagram"]["validation"]["stale"])
+
+    def test_validated_v3_diagram_promotes_to_version_and_manual_run_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            validation_service = StubValidationService()
+            run_process = HydraulicV3RunProcess()
+            executor = JuliaRunExecutor(
+                store=store,
+                artifact_root=artifact_root,
+                runner=run_process,
+                validation_service=validation_service,
+            )
+            client = TestClient(
+                create_app(
+                    validation_service=validation_service,
+                    store=store,
+                    run_queue=SynchronousRunQueue(executor),
+                    artifact_root=artifact_root,
+                )
+            )
+            try:
+                project = client.post("/api/projects", json={"name": "Hydro Project"}).json()
+                scenario = client.post(
+                    f"/api/projects/{project['id']}/scenarios",
+                    json={"name": "Hydraulic v3 run"},
+                ).json()
+                self.client = client
+                self.scenario = scenario
+                self.validation_service = validation_service
+                self._save_complete_v3_diagram()
+
+                preview_response = client.post(
+                    f"/api/scenarios/{scenario['id']}/hydraulic-diagram/v3-preview"
+                )
+                self.assertEqual(preview_response.status_code, 200)
+                system_case = preview_response.json()["validation"]["system_case"]
+
+                promote_response = client.post(
+                    f"/api/scenarios/{scenario['id']}/hydraulic-diagram/promote"
+                )
+
+                self.assertEqual(promote_response.status_code, 201)
+                version = promote_response.json()
+                stored_version = client.get(f"/api/scenario-versions/{version['id']}").json()[
+                    "scenario_version"
+                ]
+                self.assertEqual(stored_version["schema_version"], "bess_system_dispatch.v3")
+                self.assertEqual(stored_version["system_case_json"], system_case)
+                self.assertEqual(stored_version["generation_metadata"]["kind"], "hydraulic_diagram_v3")
+
+                run_response = client.post(f"/api/scenario-versions/{version['id']}/runs")
+                self.assertEqual(run_response.status_code, 201)
+                run = client.get(f"/api/runs/{run_response.json()['id']}").json()["run"]
+                self.assertEqual(run["status"], "succeeded")
+                self.assertEqual(validation_service.file_validation_count, 1)
+                self.assertTrue(run_process.completed_commands)
+
+                artifacts = client.get(f"/api/runs/{run['id']}/artifacts").json()["artifacts"]
+                artifacts_by_type = {artifact["artifact_type"]: artifact for artifact in artifacts}
+                self.assertEqual(
+                    set(artifacts_by_type),
+                    {
+                        "input_snapshot",
+                        "stdout_log",
+                        "stderr_log",
+                        "summary_json",
+                        "dispatch_csv",
+                        "asset_dispatch_csv",
+                        "system_case_resolved_json",
+                        "model_metadata_json",
+                    },
+                )
+                resolved = json.loads(
+                    Path(artifacts_by_type["system_case_resolved_json"]["path"]).read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertEqual(resolved["schema_version"], "bess_system_dispatch.v3")
+                metadata = json.loads(
+                    Path(artifacts_by_type["model_metadata_json"]["path"]).read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertEqual(metadata["schema_version"], "bess_system_dispatch.v3")
+            finally:
+                store.close()
+
+    def _save_complete_v3_diagram(self):
         created = self._create_diagram()
         save_response = self.client.put(
             f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram",
@@ -864,76 +1122,11 @@ class HydraulicDiagramApiTests(unittest.TestCase):
                         "to_node_key": "junction_in",
                         "reach_type": "river",
                     },
-                    {
-                        "technical_key": "reach_tailrace_out",
-                        "display_name": "Tailrace out",
-                        "from_node_key": "junction_out",
-                        "to_node_key": "reservoir_alpha",
-                        "reach_type": "tailrace",
-                    },
                 ],
             },
         )
         self.assertEqual(save_response.status_code, 200)
-
-        preview_response = self.client.post(
-            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/v3-preview"
-        )
-
-        self.assertEqual(preview_response.status_code, 200)
-        validation = preview_response.json()["validation"]
-        preview = validation["system_case"]
-        self.assertTrue(validation["ok"])
-        self.assertFalse(validation["stale"])
-        self.assertEqual(preview["schema_version"], "bess_system_dispatch.v3")
-        self.assertEqual(preview["hydraulic_network"]["nodes"][0]["id"], "reservoir_alpha")
-        self.assertEqual(
-            preview["hydraulic_network"]["nodes"][0]["curves"]["storage_elevation"],
-            [
-                {"storage_hm3": 5.0, "elevation_masl": 700.0},
-                {"storage_hm3": 50.0, "elevation_masl": 760.0},
-            ],
-        )
-        self.assertEqual(
-            preview["hydraulic_network"]["units"][0]["curves"]["flow_power"],
-            [
-                {"flow_m3s": 0.0, "power_mw": 0.0},
-                {"flow_m3s": 40.0, "power_mw": 30.0},
-            ],
-        )
-        self.assertEqual(
-            preview["hydraulic_network"]["required_time_series"],
-            [
-                {
-                    "entity_type": "hydraulic_node",
-                    "entity_id": "reservoir_alpha",
-                    "signal_key": "natural_inflow_m3s",
-                    "binding_status": "required",
-                }
-            ],
-        )
-        self.assertEqual(len(self.validation_service.validated_texts), 1)
-        self.assertIn('"schema_version": "bess_system_dispatch.v3"', self.validation_service.validated_texts[0])
-
-        reloaded = self.client.get(
-            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram"
-        ).json()["diagram"]
-        self.assertTrue(reloaded["validation"]["ok"])
-        self.assertFalse(reloaded["validation"]["stale"])
-
-        edited_nodes = reloaded["nodes"]
-        edited_nodes[0]["display_name"] = "Reservoir Alpha Edited"
-        stale_response = self.client.put(
-            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram",
-            json={
-                "revision": reloaded["revision"],
-                "nodes": edited_nodes,
-                "reaches": reloaded["reaches"],
-                "viewport": reloaded["layout"]["viewport"],
-            },
-        )
-        self.assertEqual(stale_response.status_code, 200)
-        self.assertTrue(stale_response.json()["diagram"]["validation"]["stale"])
+        return save_response.json()["diagram"]
 
 
 if __name__ == "__main__":

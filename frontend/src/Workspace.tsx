@@ -26,6 +26,7 @@ import {
   listScenarioRuns,
   listScenarios,
   listScenarioVersions,
+  promoteHydraulicDiagram,
   publishPublication,
   saveHydraulicDiagram,
   unpublishPublication,
@@ -93,6 +94,7 @@ const terminalRunStatuses = new Set(["succeeded", "failed"]);
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
+  if (error instanceof Error && error.message) return error.message;
   return "No se pudo completar la accion.";
 }
 
@@ -2041,6 +2043,7 @@ function HydraulicDiagramEditor({
   );
   const [saveStatus, setSaveStatus] = useState<HydraulicSaveStatus>("saved");
   const [error, setError] = useState("");
+  const [promotionMessage, setPromotionMessage] = useState("");
   const [validation, setValidation] =
     useState<HydraulicDiagramValidation | null>(() =>
       visibleHydraulicValidation(initialDiagram.validation),
@@ -2066,6 +2069,7 @@ function HydraulicDiagramEditor({
     onMutate: () => {
       setSaveStatus("saving");
       setError("");
+      setPromotionMessage("");
     },
     onSuccess: (savedDiagram) => {
       queryClient.setQueryData(
@@ -2114,6 +2118,26 @@ function HydraulicDiagramEditor({
     onSuccess: (serverValidation) => {
       setValidation(serverValidation);
       setError("");
+      setPromotionMessage("");
+    },
+    onError: (mutationError) => {
+      setError(errorMessage(mutationError));
+    },
+  });
+  const promoteV3Mutation = useMutation({
+    mutationFn: () => promoteHydraulicDiagram(scenario.id),
+    onSuccess: (version) => {
+      const key = scenarioVersionsQueryKey(scenario.id);
+      const existingVersions = queryClient.getQueryData<ScenarioVersion[]>(key);
+      queryClient.setQueryData(
+        key,
+        appendUnique(
+          Array.isArray(existingVersions) ? existingVersions : [],
+          version,
+        ),
+      );
+      setPromotionMessage(`Version v3 promovida: ${version.version_number}`);
+      setError("");
     },
     onError: (mutationError) => {
       setError(errorMessage(mutationError));
@@ -2133,6 +2157,7 @@ function HydraulicDiagramEditor({
   function markDirty() {
     setSaveStatus("dirty");
     setError("");
+    setPromotionMessage("");
     setValidation(null);
   }
 
@@ -2400,8 +2425,26 @@ function HydraulicDiagramEditor({
           >
             Generar preview v3
           </button>
+          <button
+            type="button"
+            className="secondary-action"
+            disabled={
+              promoteV3Mutation.isPending ||
+              saveMutation.isPending ||
+              saveStatus !== "saved" ||
+              !validation?.ok ||
+              validation.stale ||
+              !validation.system_case
+            }
+            onClick={() => promoteV3Mutation.mutate()}
+          >
+            {promoteV3Mutation.isPending
+              ? "Promoviendo v3"
+              : "Promover version v3"}
+          </button>
         </div>
         {error ? <p role="alert">{error}</p> : null}
+        {promotionMessage ? <p role="status">{promotionMessage}</p> : null}
         {validation ? (
           <section
             className="workspace-section validation-summary"

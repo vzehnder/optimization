@@ -1323,6 +1323,7 @@ describe("application shell", () => {
       reaches: [] as Array<unknown>,
     };
     let lastPutBody: { nodes: DiagramNode[] } | null = null;
+    const versions: unknown[] = [];
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const path = String(input);
@@ -1358,7 +1359,7 @@ describe("application shell", () => {
           });
         }
         if (path === "/api/scenarios/10/versions") {
-          return new Response(JSON.stringify({ versions: [] }), {
+          return new Response(JSON.stringify({ versions }), {
             headers: { "Content-Type": "application/json" },
           });
         }
@@ -1636,6 +1637,17 @@ describe("application shell", () => {
       reaches: [] as Array<unknown>,
     };
     let lastPutBody: { nodes: DiagramNode[] } | null = null;
+    let promoteCalls = 0;
+    const versions: Array<{
+      id: number;
+      scenario_id: number;
+      version_number: number;
+      case_name: string;
+      schema_version: string;
+      period_count: number;
+      asset_counts: Record<string, number>;
+      created_at: string;
+    }> = [];
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const path = String(input);
@@ -1799,6 +1811,27 @@ describe("application shell", () => {
             { headers: { "Content-Type": "application/json" } },
           );
         }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram/promote" &&
+          method === "POST"
+        ) {
+          promoteCalls += 1;
+          const version = {
+            id: 81,
+            scenario_id: 10,
+            version_number: 1,
+            case_name: "scenario_10_hydraulic_case",
+            schema_version: "bess_system_dispatch.v3",
+            period_count: 1,
+            asset_counts: {},
+            created_at: "2026-06-26T12:30:00Z",
+          };
+          versions.push(version);
+          return new Response(JSON.stringify(version), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
         return new Response(
           JSON.stringify({ detail: `unhandled ${method} ${path}` }),
           {
@@ -1884,6 +1917,14 @@ describe("application shell", () => {
     expect(await screen.findByText("Hydraulic v3 payload validated")).toBeVisible();
     expect(screen.getByText(/bess_system_dispatch\.v3/)).toBeVisible();
     expect(screen.getByText(/"id": "unit_1"/)).toBeVisible();
+
+    const promoteButton = screen.getByRole("button", {
+      name: "Promover version v3",
+    });
+    expect(promoteButton).toBeEnabled();
+    await user.click(promoteButton);
+    expect(await screen.findByText("Version v3 promovida: 1")).toBeVisible();
+    expect(promoteCalls).toBe(1);
 
     await user.click(screen.getByRole("button", { name: "Validar topologia" }));
     expect(

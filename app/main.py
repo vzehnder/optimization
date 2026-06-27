@@ -1144,6 +1144,41 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(error)) from error
         return {"validation": validation}
 
+    @app.post("/api/scenarios/{scenario_id}/hydraulic-diagram/promote", status_code=201)
+    async def promote_hydraulic_diagram(scenario_id: int):
+        try:
+            diagram = analyst_store.get_hydraulic_diagram(scenario_id)
+            validation = diagram["validation"]
+            if (
+                validation.get("kind") != "hydraulic_v3_preview"
+                or not validation.get("ok")
+                or validation.get("stale")
+            ):
+                raise DraftPromotionError("hydraulic v3 validation must succeed before promotion")
+            system_case = validation.get("system_case")
+            if not isinstance(system_case, dict):
+                raise DraftPromotionError("hydraulic v3 validation snapshot is missing system_case")
+            current_system_case = analyst_store.generate_hydraulic_v3_preview(scenario_id)
+            if json.dumps(current_system_case, sort_keys=True) != json.dumps(system_case, sort_keys=True):
+                raise DraftPromotionError("hydraulic v3 validation is stale after diagram edits")
+            scenario_version, error = save_validated_scenario_version(
+                scenario_id,
+                json.dumps(system_case, sort_keys=True),
+                {
+                    "kind": "hydraulic_diagram_v3",
+                    "source_case_id": diagram["optimization_case"]["id"],
+                    "validation_hash": validation.get("validation_hash"),
+                    "generated_at": utc_now_iso(),
+                },
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except DraftPromotionError as error:
+            return JSONResponse(error_response_body("promotion", str(error), phase="python_validation"), status_code=400)
+        if error is not None:
+            return JSONResponse(validation_response_body(error), status_code=400)
+        return scenario_version
+
     @app.post("/api/scenarios/{scenario_id}/draft", status_code=201)
     async def create_scenario_draft(scenario_id: int, payload: ScenarioDraftWriteRequest):
         try:

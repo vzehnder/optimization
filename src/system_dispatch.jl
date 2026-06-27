@@ -261,6 +261,7 @@ function validate_hydraulic_v3_system_case_document(document)::Dict{String,Any}
 
     case_name = required_string(document, "case_name")
     load_solver_config(required_value(document, "solver"))
+    periods = required_vector(document, "time_series")
     network = required_dict(document, "hydraulic_network")
     nodes = required_vector(network, "nodes")
     reaches = required_vector(network, "reaches")
@@ -290,6 +291,7 @@ function validate_hydraulic_v3_system_case_document(document)::Dict{String,Any}
         throw(ArgumentError("hydraulic_network must contain at least one reservoir node"))
     end
 
+    hydraulic_edges = Tuple{String,String}[]
     for (index, raw_reach) in enumerate(reaches)
         reach = to_string_key_dict(raw_reach)
         reach_id = required_string(reach, "id")
@@ -313,6 +315,7 @@ function validate_hydraulic_v3_system_case_document(document)::Dict{String,Any}
         if routing_method != "none" || travel_time_hours === nothing || travel_time_hours != 0.0
             throw(ArgumentError("reach $(reach_id) uses unsupported routing; only routing_method none with zero travel_time_hours is supported"))
         end
+        push!(hydraulic_edges, (from_node, to_node))
     end
 
     plant_ids = Set{String}()
@@ -357,11 +360,22 @@ function validate_hydraulic_v3_system_case_document(document)::Dict{String,Any}
         if intake_node == discharge_node
             throw(ArgumentError("unit $(unit_id) intake_node and discharge_node must be distinct"))
         end
+        unit_mode = optional_string(unit, "operation_mode", "generation")
+        if unit_mode != "generation"
+            throw(ArgumentError("unit $(unit_id) operation_mode $(unit_mode) is unsupported; only generation is supported"))
+        end
+        if optional_bool(unit, "is_reversible", false) || optional_bool(unit, "can_pump", false)
+            throw(ArgumentError("unit $(unit_id) pumping or reversible operation is unsupported"))
+        end
         validate_optional_nonnegative_number(unit, "min_power_mw", "unit $(unit_id)")
         validate_optional_nonnegative_number(unit, "max_power_mw", "unit $(unit_id)")
         validate_optional_nonnegative_number(unit, "min_flow_m3s", "unit $(unit_id)")
         validate_optional_nonnegative_number(unit, "max_flow_m3s", "unit $(unit_id)")
-        flow_power = required_vector(required_dict(unit, "curves"), "flow_power")
+        unit_curves = required_dict(unit, "curves")
+        if haskey(unit_curves, "head_power") || haskey(unit_curves, "flow_head_efficiency")
+            throw(ArgumentError("unit $(unit_id) head-dependent generation is unsupported"))
+        end
+        flow_power = required_vector(unit_curves, "flow_power")
         validate_hydraulic_v3_curve(
             flow_power,
             "unit $(unit_id) flow_power",
@@ -369,10 +383,12 @@ function validate_hydraulic_v3_system_case_document(document)::Dict{String,Any}
             "power_mw";
             nondecreasing_y = true,
         )
+        push!(hydraulic_edges, (intake_node, discharge_node))
     end
     if isempty(unit_ids)
         throw(ArgumentError("hydraulic_network must contain at least one unit"))
     end
+    validate_hydraulic_v3_acyclic(hydraulic_edges)
 
     for raw_requirement in required_time_series
         requirement = to_string_key_dict(raw_requirement)
@@ -394,10 +410,32 @@ function validate_hydraulic_v3_system_case_document(document)::Dict{String,Any}
         end
     end
 
+    for (index, raw_period) in enumerate(periods)
+        period = to_string_key_dict(raw_period)
+        parse_required_datetime(required_value(period, "timestamp"), "time_series[$index].timestamp")
+        duration_hours = parse_required_float(required_value(period, "duration_hours"), "time_series[$index].duration_hours")
+        if !isfinite(duration_hours) || duration_hours <= 0
+            throw(ArgumentError("time_series[$index].duration_hours must be positive"))
+        end
+        inflows = to_string_key_dict(required_dict(period, "natural_inflow_m3s"))
+        for raw_requirement in required_time_series
+            requirement = to_string_key_dict(raw_requirement)
+            entity_id = required_string(requirement, "entity_id")
+            if !haskey(inflows, entity_id)
+                throw(ArgumentError("time_series[$index].natural_inflow_m3s[$entity_id] is required"))
+            end
+            inflow = parse_required_float(inflows[entity_id], "time_series[$index].natural_inflow_m3s[$entity_id]")
+            if !isfinite(inflow) || inflow < 0
+                throw(ArgumentError("time_series[$index].natural_inflow_m3s[$entity_id] must be nonnegative"))
+            end
+        end
+    end
+
     return Dict{String,Any}(
         "status" => "ok",
         "case_name" => case_name,
         "schema_version" => schema_version,
+        "period_count" => length(periods),
         "hydraulic_network" => Dict{String,Any}(
             "nodes" => length(nodes),
             "reaches" => length(reaches),
@@ -406,6 +444,35 @@ function validate_hydraulic_v3_system_case_document(document)::Dict{String,Any}
             "required_time_series" => length(required_time_series),
         ),
     )
+end
+
+function validate_hydraulic_v3_acyclic(edges::Vector{Tuple{String,String}})
+    adjacency = Dict{String,Vector{String}}()
+    for (from_node, to_node) in edges
+        push!(get!(adjacency, from_node, String[]), to_node)
+        get!(adjacency, to_node, String[])
+    end
+
+    visiting = Set{String}()
+    visited = Set{String}()
+    function visit(node::String)
+        if node in visiting
+            throw(ArgumentError("hydraulic_network contains unsupported cycle involving node $(node)"))
+        end
+        if node in visited
+            return
+        end
+        push!(visiting, node)
+        for next_node in get(adjacency, node, String[])
+            visit(next_node)
+        end
+        delete!(visiting, node)
+        push!(visited, node)
+    end
+
+    for node in keys(adjacency)
+        visit(node)
+    end
 end
 
 function validate_hydraulic_v3_reservoir_node(node_id::String, node::Dict{String,Any})
@@ -1299,6 +1366,16 @@ function run_system_case(
     run_timestamp = nothing,
 )::SystemRunOutput
     resolved_path = resolve_system_case_path(path)
+    document = read_system_case_document(resolved_path)
+    if string(get(document, "schema_version", "")) == SYSTEM_SCHEMA_VERSION_V3
+        return run_hydraulic_v3_system_case(
+            document,
+            resolved_path;
+            output_root,
+            run_timestamp,
+        )
+    end
+
     system_case = load_system_case(resolved_path)
     optimization_data = normalize_system_case(system_case)
     result = solve_system_dispatch(optimization_data)
@@ -1310,6 +1387,522 @@ function run_system_case(
         output_root,
         run_timestamp,
         source_identifiers = system_case_source_identifiers(resolved_path),
+    )
+end
+
+function read_system_case_document(path::AbstractString)::Dict{String,Any}
+    return try
+        JSON3.read(read(path, String), Dict{String,Any})
+    catch error
+        throw(ArgumentError("system_case JSON could not be parsed: $(sprint(showerror, error))"))
+    end
+end
+
+function run_hydraulic_v3_system_case(
+    document::Dict{String,Any},
+    source_path::AbstractString;
+    output_root::AbstractString = "outputs",
+    run_timestamp = nothing,
+)::SystemRunOutput
+    validate_hydraulic_v3_system_case_document(document)
+    case_name = required_string(document, "case_name")
+    solver = load_solver_config(required_value(document, "solver"))
+    if solver.name != "HiGHS"
+        throw(ArgumentError("only HiGHS solver is supported; got $(solver.name)"))
+    end
+
+    network = required_dict(document, "hydraulic_network")
+    periods = [to_string_key_dict(period) for period in required_vector(document, "time_series")]
+    nodes = [to_string_key_dict(node) for node in required_vector(network, "nodes")]
+    reaches = [to_string_key_dict(reach) for reach in required_vector(network, "reaches")]
+    units = [to_string_key_dict(unit) for unit in required_vector(network, "units")]
+    reservoirs = [node for node in nodes if required_string(node, "type") == "reservoir"]
+    if isempty(reservoirs)
+        throw(ArgumentError("hydraulic_network must contain at least one reservoir node"))
+    end
+
+    timestamps = [
+        parse_required_datetime(required_value(period, "timestamp"), "time_series[$index].timestamp")
+        for (index, period) in enumerate(periods)
+    ]
+    durations = [
+        parse_required_float(required_value(period, "duration_hours"), "time_series[$index].duration_hours")
+        for (index, period) in enumerate(periods)
+    ]
+    n_periods = length(periods)
+    n_reservoirs = length(reservoirs)
+    n_units = length(units)
+
+    reservoir_ids = [required_string(reservoir, "id") for reservoir in reservoirs]
+    reservoir_index_by_id = Dict(reservoir_id => index for (index, reservoir_id) in enumerate(reservoir_ids))
+    node_type_by_id = Dict(required_string(node, "id") => required_string(node, "type") for node in nodes)
+
+    storage_min = zeros(n_reservoirs)
+    storage_max = zeros(n_reservoirs)
+    initial_storage = zeros(n_reservoirs)
+    terminal_condition = fill("none", n_reservoirs)
+    terminal_storage_min = Union{Float64,Nothing}[nothing for _ in 1:n_reservoirs]
+    terminal_water_value = zeros(n_reservoirs)
+    reservoir_curves = Vector{Vector{Tuple{Float64,Float64}}}(undef, n_reservoirs)
+    for (reservoir_index, reservoir) in enumerate(reservoirs)
+        reservoir_id = reservoir_ids[reservoir_index]
+        params = required_dict(reservoir, "reservoir")
+        storage_min[reservoir_index] = parse_required_float(required_value(params, "storage_min_hm3"), "reservoir $(reservoir_id) storage_min_hm3")
+        storage_max[reservoir_index] = parse_required_float(required_value(params, "storage_max_hm3"), "reservoir $(reservoir_id) storage_max_hm3")
+        initial_storage[reservoir_index] = parse_required_float(required_value(params, "initial_storage_hm3"), "reservoir $(reservoir_id) initial_storage_hm3")
+        terminal_condition[reservoir_index] = optional_string(params, "terminal_condition", "none")
+        if terminal_condition[reservoir_index] == "min_terminal"
+            terminal_storage_min[reservoir_index] = parse_required_float(
+                required_value(params, "terminal_storage_min_hm3"),
+                "reservoir $(reservoir_id) terminal_storage_min_hm3",
+            )
+        end
+        terminal_water_value[reservoir_index] = parse_required_float(
+            get(params, "terminal_water_value_usd_per_hm3", 0.0),
+            "reservoir $(reservoir_id) terminal_water_value_usd_per_hm3",
+        )
+        reservoir_curves[reservoir_index] = hydraulic_v3_curve_tuples(
+            required_vector(required_dict(reservoir, "curves"), "storage_elevation"),
+            "storage_hm3",
+            "elevation_masl",
+        )
+    end
+
+    natural_inflow = zeros(n_reservoirs, n_periods)
+    for (period_index, period) in enumerate(periods)
+        period_inflows = to_string_key_dict(required_dict(period, "natural_inflow_m3s"))
+        for (reservoir_index, reservoir_id) in enumerate(reservoir_ids)
+            natural_inflow[reservoir_index, period_index] = parse_required_float(
+                required_value(period_inflows, reservoir_id),
+                "time_series[$period_index].natural_inflow_m3s[$reservoir_id]",
+            )
+        end
+    end
+
+    unit_ids = [required_string(unit, "id") for unit in units]
+    unit_reservoir_index = zeros(Int, n_units)
+    unit_flow_min = zeros(n_units)
+    unit_flow_max = zeros(n_units)
+    unit_power_max = Union{Float64,Nothing}[nothing for _ in 1:n_units]
+    unit_power_slope = zeros(n_units)
+    unit_power_intercept = zeros(n_units)
+    for (unit_index, unit) in enumerate(units)
+        unit_id = unit_ids[unit_index]
+        unit_reservoir = hydraulic_v3_unit_source_reservoir(unit, reaches, node_type_by_id)
+        unit_reservoir_index[unit_index] = reservoir_index_by_id[unit_reservoir]
+        flow_power = hydraulic_v3_curve_tuples(
+            required_vector(required_dict(unit, "curves"), "flow_power"),
+            "flow_m3s",
+            "power_mw",
+        )
+        if length(flow_power) != 2
+            throw(ArgumentError("unit $(unit_id) flow_power solver support is limited to two points"))
+        end
+        flow_a, power_a = flow_power[1]
+        flow_b, power_b = flow_power[2]
+        unit_power_slope[unit_index] = (power_b - power_a) / (flow_b - flow_a)
+        unit_power_intercept[unit_index] = power_a - unit_power_slope[unit_index] * flow_a
+        min_flow = optional_float(get(unit, "min_flow_m3s", nothing), "unit $(unit_id) min_flow_m3s")
+        max_flow = optional_float(get(unit, "max_flow_m3s", nothing), "unit $(unit_id) max_flow_m3s")
+        unit_flow_min[unit_index] = min_flow === nothing ? flow_a : min_flow
+        unit_flow_max[unit_index] = max_flow === nothing ? flow_b : max_flow
+        unit_power_max[unit_index] = optional_float(get(unit, "max_power_mw", nothing), "unit $(unit_id) max_power_mw")
+    end
+
+    model = Model(HiGHS.Optimizer)
+    set_silent(model)
+    for (name, value) in solver.options
+        set_optimizer_attribute(model, name, value)
+    end
+
+    @variable(model, turbine_flow[1:n_units, 1:n_periods] >= 0)
+    @variable(model, hydro_power[1:n_units, 1:n_periods] >= 0)
+    @variable(model, spill_flow[1:n_reservoirs, 1:n_periods] >= 0)
+    @variable(model, storage[1:n_reservoirs, 1:n_periods])
+
+    for unit_index in 1:n_units, period_index in 1:n_periods
+        @constraint(model, turbine_flow[unit_index, period_index] >= unit_flow_min[unit_index])
+        @constraint(model, turbine_flow[unit_index, period_index] <= unit_flow_max[unit_index])
+        @constraint(
+            model,
+            hydro_power[unit_index, period_index] ==
+                unit_power_intercept[unit_index] + unit_power_slope[unit_index] * turbine_flow[unit_index, period_index],
+        )
+        if unit_power_max[unit_index] !== nothing
+            @constraint(model, hydro_power[unit_index, period_index] <= unit_power_max[unit_index])
+        end
+    end
+
+    for reservoir_index in 1:n_reservoirs
+        reservoir_unit_indices = [unit_index for unit_index in 1:n_units if unit_reservoir_index[unit_index] == reservoir_index]
+        for period_index in 1:n_periods
+            previous_storage = period_index == 1 ? initial_storage[reservoir_index] : storage[reservoir_index, period_index - 1]
+            outgoing_turbine_flow = sum(turbine_flow[unit_index, period_index] for unit_index in reservoir_unit_indices)
+            @constraint(
+                model,
+                storage[reservoir_index, period_index] ==
+                    previous_storage +
+                    natural_inflow[reservoir_index, period_index] * durations[period_index] * HM3_PER_M3S_HOUR -
+                    outgoing_turbine_flow * durations[period_index] * HM3_PER_M3S_HOUR -
+                    spill_flow[reservoir_index, period_index] * durations[period_index] * HM3_PER_M3S_HOUR,
+            )
+            @constraint(model, storage[reservoir_index, period_index] >= storage_min[reservoir_index])
+            @constraint(model, storage[reservoir_index, period_index] <= storage_max[reservoir_index])
+        end
+        if terminal_condition[reservoir_index] == "equal_initial"
+            @constraint(model, storage[reservoir_index, n_periods] == initial_storage[reservoir_index])
+        elseif terminal_condition[reservoir_index] == "min_terminal"
+            @constraint(model, storage[reservoir_index, n_periods] >= terminal_storage_min[reservoir_index])
+        end
+    end
+
+    @objective(
+        model,
+        Max,
+        sum(hydro_power[unit_index, period_index] * durations[period_index] for unit_index in 1:n_units, period_index in 1:n_periods) +
+        sum(terminal_water_value[reservoir_index] * storage[reservoir_index, n_periods] for reservoir_index in 1:n_reservoirs),
+    )
+    optimize!(model)
+
+    termination = string(termination_status(model))
+    solver_status = raw_solver_status(model, termination)
+    if !has_values(model)
+        throw(ErrorException("optimization finished without primal values; termination_status=$termination"))
+    end
+
+    turbine_values = value.(turbine_flow)
+    power_values = value.(hydro_power)
+    spill_values = value.(spill_flow)
+    storage_values = value.(storage)
+    elevation_values = zeros(n_reservoirs, n_periods)
+    for reservoir_index in 1:n_reservoirs, period_index in 1:n_periods
+        elevation_values[reservoir_index, period_index] = hydraulic_v3_interpolate(
+            reservoir_curves[reservoir_index],
+            storage_values[reservoir_index, period_index],
+        )
+    end
+    inflow_volume = hydraulic_v3_volume_matrix(natural_inflow, durations)
+    turbine_volume = hydraulic_v3_volume_matrix(turbine_values, durations)
+    spill_volume = hydraulic_v3_volume_matrix(spill_values, durations)
+    terminal_value = [
+        terminal_water_value[reservoir_index] * storage_values[reservoir_index, n_periods]
+        for reservoir_index in 1:n_reservoirs
+    ]
+
+    result = SystemDispatchResult(
+        case_name,
+        solver.name,
+        solver_status,
+        termination,
+        objective_value(model),
+        zeros(0, n_periods),
+        zeros(0, n_periods),
+        zeros(0, n_periods),
+        zeros(0, n_periods),
+        zeros(0, n_periods),
+        zeros(0, n_periods),
+        zeros(0, n_periods),
+        zeros(0, n_periods),
+        zeros(n_periods),
+        zeros(n_periods),
+        zeros(n_periods),
+        zeros(0, n_periods),
+        zeros(0, n_periods),
+        turbine_values,
+        spill_values,
+        power_values,
+        storage_values,
+        elevation_values,
+        inflow_volume,
+        turbine_volume,
+        spill_volume,
+        zeros(size(spill_volume)),
+        terminal_value,
+    )
+
+    return write_hydraulic_v3_run_outputs(
+        document,
+        timestamps,
+        durations,
+        reservoir_ids,
+        unit_ids,
+        natural_inflow,
+        result;
+        output_root,
+        run_timestamp,
+        source_identifiers = system_case_source_identifiers(source_path),
+    )
+end
+
+function write_hydraulic_v3_run_outputs(
+    document::Dict{String,Any},
+    timestamps::Vector{DateTime},
+    durations::Vector{Float64},
+    reservoir_ids::Vector{String},
+    unit_ids::Vector{String},
+    natural_inflow::Matrix{Float64},
+    result::SystemDispatchResult;
+    output_root::AbstractString = "outputs",
+    run_timestamp = nothing,
+    source_identifiers = Dict{String,Any}(),
+)::SystemRunOutput
+    run_timestamp_id = format_run_timestamp(run_timestamp)
+    case_output_root = joinpath(output_root, result.case_name)
+    output_dir, resolved_run_timestamp = unique_run_output_dir(case_output_root, run_timestamp_id)
+    mkpath(output_dir)
+
+    dispatch_path = joinpath(output_dir, "dispatch.csv")
+    asset_dispatch_path = joinpath(output_dir, "asset_dispatch.csv")
+    summary_path = joinpath(output_dir, "summary.json")
+    system_case_resolved_path = joinpath(output_dir, "system_case_resolved.json")
+    model_metadata_path = joinpath(output_dir, "model_metadata.json")
+
+    CSV.write(dispatch_path, hydraulic_v3_dispatch_dataframe(timestamps, durations, natural_inflow, result))
+    CSV.write(asset_dispatch_path, hydraulic_v3_asset_dispatch_dataframe(timestamps, durations, reservoir_ids, unit_ids, natural_inflow, result))
+    write_json_file(summary_path, hydraulic_v3_summary_dict(result, durations, reservoir_ids, unit_ids, resolved_run_timestamp, source_identifiers))
+    write_json_file(system_case_resolved_path, document)
+    write_json_file(model_metadata_path, hydraulic_v3_metadata_dict(reservoir_ids, unit_ids, length(timestamps)))
+
+    return SystemRunOutput(
+        result.case_name,
+        resolved_run_timestamp,
+        output_dir,
+        dispatch_path,
+        asset_dispatch_path,
+        summary_path,
+        system_case_resolved_path,
+        model_metadata_path,
+        result,
+    )
+end
+
+function hydraulic_v3_curve_tuples(points, x_key::AbstractString, y_key::AbstractString)::Vector{Tuple{Float64,Float64}}
+    return [
+        (
+            parse_required_float(required_value(to_string_key_dict(point), x_key), "$(x_key)"),
+            parse_required_float(required_value(to_string_key_dict(point), y_key), "$(y_key)"),
+        )
+        for point in points
+    ]
+end
+
+function hydraulic_v3_unit_source_reservoir(
+    unit::Dict{String,Any},
+    reaches::Vector{Dict{String,Any}},
+    node_type_by_id::Dict{String,String},
+)::String
+    unit_id = required_string(unit, "id")
+    intake_node = required_string(unit, "intake_node")
+    if get(node_type_by_id, intake_node, "") == "reservoir"
+        return intake_node
+    end
+    for reach in reaches
+        from_node = required_string(reach, "from_node")
+        to_node = required_string(reach, "to_node")
+        if to_node == intake_node && get(node_type_by_id, from_node, "") == "reservoir"
+            return from_node
+        end
+    end
+    throw(ArgumentError("unit $(unit_id) intake_node $(intake_node) must be fed by one reservoir reach"))
+end
+
+function hydraulic_v3_interpolate(points::Vector{Tuple{Float64,Float64}}, x::Float64)::Float64
+    if x <= points[1][1]
+        return points[1][2]
+    end
+    for index in 1:(length(points) - 1)
+        x0, y0 = points[index]
+        x1, y1 = points[index + 1]
+        if x <= x1
+            return y0 + (x - x0) * (y1 - y0) / (x1 - x0)
+        end
+    end
+    return points[end][2]
+end
+
+function hydraulic_v3_volume_matrix(flow_m3s::Matrix{Float64}, duration_hours::Vector{Float64})::Matrix{Float64}
+    volume = zeros(size(flow_m3s))
+    for period in eachindex(duration_hours)
+        volume[:, period] .= flow_m3s[:, period] .* duration_hours[period] .* HM3_PER_M3S_HOUR
+    end
+    return volume
+end
+
+function hydraulic_v3_dispatch_dataframe(
+    timestamps::Vector{DateTime},
+    durations::Vector{Float64},
+    natural_inflow::Matrix{Float64},
+    result::SystemDispatchResult,
+)::DataFrame
+    n_periods = length(timestamps)
+    return DataFrame(
+        timestamp = [string(timestamp) for timestamp in timestamps],
+        duration_hours = durations,
+        total_hydro_power_mw = [sum(result.hydro_power_mw[:, period]) for period in 1:n_periods],
+        total_hydro_inflow_m3s = [sum(natural_inflow[:, period]) for period in 1:n_periods],
+        total_hydro_turbine_flow_m3s = [sum(result.hydro_turbine_flow_m3s[:, period]) for period in 1:n_periods],
+        total_hydro_spill_flow_m3s = [sum(result.hydro_spill_flow_m3s[:, period]) for period in 1:n_periods],
+        total_hydro_storage_hm3 = [sum(result.hydro_storage_hm3[:, period]) for period in 1:n_periods],
+        total_hydro_reservoir_elevation_masl = [sum(result.hydro_reservoir_elevation_masl[:, period]) for period in 1:n_periods],
+        total_hydro_terminal_water_value_usd = [
+            period == n_periods ? sum(result.hydro_terminal_water_value_usd) : 0.0
+            for period in 1:n_periods
+        ],
+    )
+end
+
+function hydraulic_v3_asset_dispatch_dataframe(
+    timestamps::Vector{DateTime},
+    durations::Vector{Float64},
+    reservoir_ids::Vector{String},
+    unit_ids::Vector{String},
+    natural_inflow::Matrix{Float64},
+    result::SystemDispatchResult,
+)::DataFrame
+    timestamp = String[]
+    duration_hours = Float64[]
+    asset_id = String[]
+    asset_type = String[]
+    hydro_power_mw = Float64[]
+    hydro_inflow_m3s = Float64[]
+    hydro_turbine_flow_m3s = Float64[]
+    hydro_spill_flow_m3s = Float64[]
+    hydro_inflow_volume_hm3 = Float64[]
+    hydro_turbine_volume_hm3 = Float64[]
+    hydro_spill_volume_hm3 = Float64[]
+    hydro_storage_hm3 = Float64[]
+    hydro_reservoir_elevation_masl = Float64[]
+    hydro_terminal_water_value_usd = Float64[]
+
+    for period in eachindex(timestamps)
+        for (unit_index, unit_id) in enumerate(unit_ids)
+            push!(timestamp, string(timestamps[period]))
+            push!(duration_hours, durations[period])
+            push!(asset_id, unit_id)
+            push!(asset_type, "hydraulic_unit")
+            push!(hydro_power_mw, result.hydro_power_mw[unit_index, period])
+            push!(hydro_inflow_m3s, 0.0)
+            push!(hydro_turbine_flow_m3s, result.hydro_turbine_flow_m3s[unit_index, period])
+            push!(hydro_spill_flow_m3s, 0.0)
+            push!(hydro_inflow_volume_hm3, 0.0)
+            push!(hydro_turbine_volume_hm3, result.hydro_turbine_volume_hm3[unit_index, period])
+            push!(hydro_spill_volume_hm3, 0.0)
+            push!(hydro_storage_hm3, 0.0)
+            push!(hydro_reservoir_elevation_masl, 0.0)
+            push!(hydro_terminal_water_value_usd, 0.0)
+        end
+        for (reservoir_index, reservoir_id) in enumerate(reservoir_ids)
+            push!(timestamp, string(timestamps[period]))
+            push!(duration_hours, durations[period])
+            push!(asset_id, reservoir_id)
+            push!(asset_type, "hydraulic_reservoir")
+            push!(hydro_power_mw, 0.0)
+            push!(hydro_inflow_m3s, natural_inflow[reservoir_index, period])
+            push!(hydro_turbine_flow_m3s, 0.0)
+            push!(hydro_spill_flow_m3s, result.hydro_spill_flow_m3s[reservoir_index, period])
+            push!(hydro_inflow_volume_hm3, result.hydro_inflow_volume_hm3[reservoir_index, period])
+            push!(hydro_turbine_volume_hm3, 0.0)
+            push!(hydro_spill_volume_hm3, result.hydro_spill_volume_hm3[reservoir_index, period])
+            push!(hydro_storage_hm3, result.hydro_storage_hm3[reservoir_index, period])
+            push!(hydro_reservoir_elevation_masl, result.hydro_reservoir_elevation_masl[reservoir_index, period])
+            push!(
+                hydro_terminal_water_value_usd,
+                period == length(timestamps) ? result.hydro_terminal_water_value_usd[reservoir_index] : 0.0,
+            )
+        end
+    end
+
+    return DataFrame(
+        timestamp = timestamp,
+        duration_hours = duration_hours,
+        asset_id = asset_id,
+        asset_type = asset_type,
+        hydro_power_mw = hydro_power_mw,
+        hydro_inflow_m3s = hydro_inflow_m3s,
+        hydro_turbine_flow_m3s = hydro_turbine_flow_m3s,
+        hydro_spill_flow_m3s = hydro_spill_flow_m3s,
+        hydro_inflow_volume_hm3 = hydro_inflow_volume_hm3,
+        hydro_turbine_volume_hm3 = hydro_turbine_volume_hm3,
+        hydro_spill_volume_hm3 = hydro_spill_volume_hm3,
+        hydro_storage_hm3 = hydro_storage_hm3,
+        hydro_reservoir_elevation_masl = hydro_reservoir_elevation_masl,
+        hydro_terminal_water_value_usd = hydro_terminal_water_value_usd,
+    )
+end
+
+function hydraulic_v3_summary_dict(
+    result::SystemDispatchResult,
+    durations::Vector{Float64},
+    reservoir_ids::Vector{String},
+    unit_ids::Vector{String},
+    run_timestamp::String,
+    source_identifiers::Dict{String,Any},
+)::Dict{String,Any}
+    n_periods = size(result.hydro_power_mw, 2)
+    total_generation_mwh = sum(
+        result.hydro_power_mw[unit_index, period_index] * durations[period_index]
+        for unit_index in axes(result.hydro_power_mw, 1), period_index in 1:n_periods
+    )
+    return Dict{String,Any}(
+        "case_name" => result.case_name,
+        "schema_version" => SYSTEM_SCHEMA_VERSION_V3,
+        "solver_name" => result.solver_name,
+        "solver_status" => result.solver_status,
+        "termination_status" => result.termination_status,
+        "objective_value_usd" => result.objective_value_usd,
+        "run_timestamp" => run_timestamp,
+        "source" => source_identifiers,
+        "hydraulic_v3_totals" => Dict{String,Any}(
+            "total_generation_mwh" => total_generation_mwh,
+            "total_turbine_volume_hm3" => sum(result.hydro_turbine_volume_hm3),
+            "total_spill_volume_hm3" => sum(result.hydro_spill_volume_hm3),
+            "terminal_water_value_usd" => sum(result.hydro_terminal_water_value_usd),
+            "final_storage_hm3" => sum(result.hydro_storage_hm3[:, n_periods]),
+        ),
+        "hydraulic_v3_by_unit" => Dict{String,Any}(
+            unit_id => Dict{String,Any}(
+                "total_generation_mwh" => sum(
+                    result.hydro_power_mw[unit_index, period_index] * durations[period_index]
+                    for period_index in 1:n_periods
+                ),
+                "total_turbine_volume_hm3" => sum(result.hydro_turbine_volume_hm3[unit_index, :]),
+            )
+            for (unit_index, unit_id) in enumerate(unit_ids)
+        ),
+        "hydraulic_v3_by_reservoir" => Dict{String,Any}(
+            reservoir_id => Dict{String,Any}(
+                "final_storage_hm3" => result.hydro_storage_hm3[reservoir_index, n_periods],
+                "final_reservoir_elevation_masl" => result.hydro_reservoir_elevation_masl[reservoir_index, n_periods],
+                "terminal_water_value_usd" => result.hydro_terminal_water_value_usd[reservoir_index],
+            )
+            for (reservoir_index, reservoir_id) in enumerate(reservoir_ids)
+        ),
+    )
+end
+
+function hydraulic_v3_metadata_dict(
+    reservoir_ids::Vector{String},
+    unit_ids::Vector{String},
+    period_count::Int,
+)::Dict{String,Any}
+    return Dict{String,Any}(
+        "model_name" => "hydraulic_network_dispatch",
+        "schema_version" => SYSTEM_SCHEMA_VERSION_V3,
+        "number_of_periods" => period_count,
+        "hydraulic_reservoir_ids" => reservoir_ids,
+        "hydraulic_unit_ids" => unit_ids,
+        "active_constraint_flags" => Dict{String,Any}(
+            "hydraulic_storage_balance" => true,
+            "hydraulic_unit_linear_flow_power" => true,
+            "hydraulic_reservoir_elevation_reporting" => true,
+        ),
+        "hydraulic_unit_conventions" => Dict{String,Any}(
+            "power" => "MW",
+            "flow" => "m3/s",
+            "storage" => "hm3",
+            "elevation" => "masl",
+            "duration" => "hours",
+        ),
     )
 end
 

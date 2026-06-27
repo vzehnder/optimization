@@ -2935,6 +2935,43 @@
         "summary": "Save Hydraulic Diagram"
       }
     },
+    "/api/scenarios/{scenario_id}/hydraulic-diagram/promote": {
+      "post": {
+        "operationId": "promote_hydraulic_diagram_api_scenarios__scenario_id__hydraulic_diagram_promote_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Promote Hydraulic Diagram"
+      }
+    },
     "/api/scenarios/{scenario_id}/hydraulic-diagram/v3-preview": {
       "post": {
         "operationId": "validate_hydraulic_v3_preview_api_scenarios__scenario_id__hydraulic_diagram_v3_preview_post",

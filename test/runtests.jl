@@ -365,6 +365,15 @@ function minimal_hydraulic_v3_system_case_document()
             "name" => "HiGHS",
             "options" => Dict{String,Any}(),
         ),
+        "time_series" => [
+            Dict{String,Any}(
+                "timestamp" => "2026-01-01T00:00:00",
+                "duration_hours" => 2.0,
+                "natural_inflow_m3s" => Dict{String,Any}(
+                    "reservoir_alpha" => 0.0,
+                ),
+            ),
+        ],
         "hydraulic_network" => Dict{String,Any}(
             "nodes" => [
                 Dict{String,Any}(
@@ -404,15 +413,6 @@ function minimal_hydraulic_v3_system_case_document()
                     "from_node" => "reservoir_alpha",
                     "to_node" => "junction_in",
                     "type" => "river",
-                    "routing_method" => "none",
-                    "travel_time_hours" => 0.0,
-                ),
-                Dict{String,Any}(
-                    "id" => "reach_tailrace_out",
-                    "display_name" => "Tailrace out",
-                    "from_node" => "junction_out",
-                    "to_node" => "reservoir_alpha",
-                    "type" => "tailrace",
                     "routing_method" => "none",
                     "travel_time_hours" => 0.0,
                 ),
@@ -1521,7 +1521,7 @@ end
             @test string(validation_payload.case_name) == "scenario_1_hydraulic_case"
             @test string(validation_payload.schema_version) == "bess_system_dispatch.v3"
             @test Int(validation_payload.hydraulic_network.nodes) == 3
-            @test Int(validation_payload.hydraulic_network.reaches) == 2
+            @test Int(validation_payload.hydraulic_network.reaches) == 1
             @test Int(validation_payload.hydraulic_network.plants) == 1
             @test Int(validation_payload.hydraulic_network.units) == 1
         end
@@ -1548,6 +1548,93 @@ end
             error_payload = JSON3.read(read(stderr_path, String))
             @test string(error_payload.status) == "error"
             @test occursin("unit unit_1 intake_node missing_node not found", string(error_payload.message))
+        end
+
+        mktempdir() do case_dir
+            document = minimal_hydraulic_v3_system_case_document()
+            push!(
+                document["hydraulic_network"]["reaches"],
+                Dict{String,Any}(
+                    "id" => "reach_tailrace_cycle",
+                    "display_name" => "Tailrace cycle",
+                    "from_node" => "junction_out",
+                    "to_node" => "reservoir_alpha",
+                    "type" => "tailrace",
+                    "routing_method" => "none",
+                    "travel_time_hours" => 0.0,
+                ),
+            )
+            case_path = write_minimal_system_case_json(case_dir; document = document)
+            stdout_path = joinpath(case_dir, "v3_cycle_stdout.txt")
+            stderr_path = joinpath(case_dir, "v3_cycle_stderr.txt")
+
+            process = open(stdout_path, "w") do stdout_io
+                open(stderr_path, "w") do stderr_io
+                    return run(pipeline(
+                        ignorestatus(system_validation_cli_command(script_path, case_path));
+                        stdout = stdout_io,
+                        stderr = stderr_io,
+                    ))
+                end
+            end
+
+            @test !success(process)
+            @test isempty(strip(read(stdout_path, String)))
+            error_payload = JSON3.read(read(stderr_path, String))
+            @test string(error_payload.status) == "error"
+            @test occursin("unsupported cycle", string(error_payload.message))
+        end
+
+        mktempdir() do case_dir
+            document = minimal_hydraulic_v3_system_case_document()
+            case_path = write_minimal_system_case_json(case_dir; document = document)
+            run_output = BESSDispatch.run_system_case(
+                case_path;
+                output_root = joinpath(case_dir, "outputs"),
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+
+            @test run_output.result.termination_status == "OPTIMAL"
+            @test isfile(run_output.dispatch_path)
+            @test isfile(run_output.asset_dispatch_path)
+            @test isfile(run_output.summary_path)
+            @test isfile(run_output.system_case_resolved_path)
+            @test isfile(run_output.model_metadata_path)
+
+            dispatch_rows = collect(CSV.File(run_output.dispatch_path))
+            @test length(dispatch_rows) == 1
+            @test dispatch_rows[1].total_hydro_power_mw >= 0.0
+            @test dispatch_rows[1].total_hydro_turbine_flow_m3s >= 0.0
+            @test dispatch_rows[1].total_hydro_storage_hm3 >= 5.0
+            @test dispatch_rows[1].total_hydro_reservoir_elevation_masl >= 700.0
+
+            asset_rows = collect(CSV.File(run_output.asset_dispatch_path))
+            @test any(
+                row -> string(row.asset_type) == "hydraulic_unit" &&
+                    row.hydro_power_mw >= 0.0 &&
+                    row.hydro_turbine_flow_m3s >= 0.0,
+                asset_rows,
+            )
+            @test any(
+                row -> string(row.asset_type) == "hydraulic_reservoir" &&
+                    row.hydro_storage_hm3 >= 5.0 &&
+                    row.hydro_reservoir_elevation_masl >= 700.0,
+                asset_rows,
+            )
+
+            summary = JSON3.read(read(run_output.summary_path, String))
+            @test string(summary.schema_version) == "bess_system_dispatch.v3"
+            @test haskey(summary, :hydraulic_v3_totals)
+            @test haskey(summary.hydraulic_v3_totals, :total_generation_mwh)
+            @test summary.hydraulic_v3_totals.total_generation_mwh ≈
+                dispatch_rows[1].total_hydro_power_mw * dispatch_rows[1].duration_hours
+
+            resolved_case = JSON3.read(read(run_output.system_case_resolved_path, String))
+            @test string(resolved_case.schema_version) == "bess_system_dispatch.v3"
+
+            metadata = JSON3.read(read(run_output.model_metadata_path, String))
+            @test string(metadata.schema_version) == "bess_system_dispatch.v3"
+            @test string(metadata.hydraulic_unit_conventions.flow) == "m3/s"
         end
 
         mktempdir() do case_dir
