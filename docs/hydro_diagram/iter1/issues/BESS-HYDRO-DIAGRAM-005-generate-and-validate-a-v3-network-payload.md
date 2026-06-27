@@ -1,6 +1,6 @@
 # BESS-HYDRO-DIAGRAM-005: Generate And Validate A v3 Network Payload
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/hydro_diagram/iter1/prd_hydro_diagram_editor.md`
@@ -22,24 +22,54 @@ the case stale when topology, parameters, curves or series change.
 
 ## Acceptance criteria
 
-- [ ] The backend can generate a deterministic `bess_system_dispatch.v3`
+- [x] The backend can generate a deterministic `bess_system_dispatch.v3`
       preview from the normalized case.
-- [ ] The preview includes active hydraulic nodes, reaches, plants, units,
+- [x] The preview includes active hydraulic nodes, reaches, plants, units,
       curves and required signal references.
-- [ ] The React editor displays the generated payload read-only.
-- [ ] Julia validation accepts a valid minimal `v3` payload.
-- [ ] Julia validation rejects unsupported schema versions and malformed v3
+- [x] The React editor displays the generated payload read-only.
+- [x] Julia validation accepts a valid minimal `v3` payload.
+- [x] Julia validation rejects unsupported schema versions and malformed v3
       network payloads with explicit errors.
-- [ ] Successful validation persists a validation snapshot for the normalized
+- [x] Successful validation persists a validation snapshot for the normalized
       case.
-- [ ] Editing topology, parameters, curves or series after validation marks the
+- [x] Editing topology, parameters, curves or series after validation marks the
       validation stale and blocks promotion.
-- [ ] Existing `v1` and `v2` validation tests remain green.
-- [ ] Backend and Julia tests cover valid and invalid v3 preview/validation.
-- [ ] The DB checkpoint is updated if validation payload fields or dependencies
+- [x] Existing `v1` and `v2` validation tests remain green.
+- [x] Backend and Julia tests cover valid and invalid v3 preview/validation.
+- [x] The DB checkpoint is updated if validation payload fields or dependencies
       are added.
+
+## Implementation notes
+
+- Added `/api/scenarios/{scenario_id}/hydraulic-diagram/v3-preview`.
+- Generated `bess_system_dispatch.v3` from normalized active hydraulic nodes,
+  reaches, plants, units, storage-elevation curves, flow-power curves and
+  placeholder `natural_inflow_m3s` requirements.
+- Stored successful v3 validation snapshots in
+  `optimization_cases.validation_payload_json` with `validation_hash`,
+  `system_case`, `julia_validation` and `stale` status.
+- Marked prior v3 validation stale when saved diagram edits change the
+  generated payload hash.
+- Added Julia validation-only support for `bess_system_dispatch.v3` without
+  routing it through the v1/v2 solver path.
+- Added React read-only preview rendering through `Generar preview v3`.
+
+## Verification
+
+- `.\\.venv\\Scripts\\python.exe -m unittest tests.test_hydraulic_diagram`
+- `.\\.venv\\Scripts\\python.exe -m unittest discover tests`
+- `npm.cmd test`
+- `npm.cmd run build`
+- `npm.cmd run api:check`
+- `julia --project=. test\\runtests.jl`
+- Chrome smoke against `http://127.0.0.1:8124/react/scenarios/1/hydraulic-diagram`
+  confirmed `Generar preview v3` renders a read-only payload containing
+  `bess_system_dispatch.v3`.
+
+Known verification note: `npm.cmd run check` passed TypeScript and ESLint, then
+failed at repository-wide `prettier --check` because existing checkout
+formatting/CRLF warnings still affect many frontend files.
 
 ## Blocked by
 
 BESS-HYDRO-DIAGRAM-004
-

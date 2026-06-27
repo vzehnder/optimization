@@ -468,6 +468,7 @@ export interface HydraulicDiagram {
     updated_by: string;
   };
   revision: string;
+  validation?: HydraulicDiagramValidation;
   nodes: HydraulicDiagramNode[];
   reaches: HydraulicDiagramReach[];
 }
@@ -489,10 +490,15 @@ export interface HydraulicDiagramValidationIssue {
 }
 
 export interface HydraulicDiagramValidation {
+  kind?: string;
   ok: boolean;
+  stale?: boolean;
+  status?: string;
   summary: string;
   errors: HydraulicDiagramValidationIssue[];
   warnings: HydraulicDiagramValidationIssue[];
+  system_case?: unknown;
+  julia_validation?: unknown;
 }
 
 interface StructuredErrorBody {
@@ -1113,6 +1119,15 @@ export async function validateHydraulicDiagram(
   const response = await postJsonWithCsrf<{
     validation: HydraulicDiagramValidation;
   }>(`/api/scenarios/${scenarioId}/hydraulic-diagram/validate`);
+  return response.validation;
+}
+
+export async function validateHydraulicV3Preview(
+  scenarioId: number,
+): Promise<HydraulicDiagramValidation> {
+  const response = await postJsonWithCsrf<{
+    validation: HydraulicDiagramValidation;
+  }>(`/api/scenarios/${scenarioId}/hydraulic-diagram/v3-preview`);
   return response.validation;
 }
 

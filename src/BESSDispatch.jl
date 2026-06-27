@@ -40,6 +40,7 @@ export BESSParameters,
     run_system_case,
     solve_system_dispatch,
     validate_system_case,
+    validate_hydraulic_v3_system_case_document,
     write_system_run_outputs
 
 end

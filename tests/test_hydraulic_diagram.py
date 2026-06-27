@@ -7,20 +7,30 @@ from app.validation import ValidationResult
 
 
 class StubValidationService:
+    def __init__(self):
+        self.validated_texts = []
+
     def validate_text(self, candidate_text):
+        self.validated_texts.append(candidate_text)
         return ValidationResult(
             ok=True,
             phase="julia",
             message="Validation succeeded",
-            payload={"status": "ok"},
+            payload={
+                "status": "ok",
+                "schema_version": "bess_system_dispatch.v3",
+                "case_name": "scenario_1_hydraulic_case",
+                "hydraulic_network": {"nodes": 3, "reaches": 2, "plants": 1, "units": 1},
+            },
         )
 
 
 class HydraulicDiagramApiTests(unittest.TestCase):
     def setUp(self):
+        self.validation_service = StubValidationService()
         self.client = TestClient(
             create_app(
-                validation_service=StubValidationService(),
+                validation_service=self.validation_service,
                 database_url="sqlite:///:memory:",
             )
         )
@@ -773,6 +783,157 @@ class HydraulicDiagramApiTests(unittest.TestCase):
         ).json()["validation"]
         self.assertTrue(validation["ok"])
         self.assertEqual(validation["errors"], [])
+
+    def test_v3_preview_generation_validates_with_julia_persists_snapshot_and_marks_stale_after_edit(self):
+        created = self._create_diagram()
+        save_response = self.client.put(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram",
+            json={
+                "revision": created["revision"],
+                "nodes": [
+                    {
+                        "component_type": "reservoir",
+                        "technical_key": "reservoir_alpha",
+                        "display_name": "Reservoir Alpha",
+                        "x": 120.0,
+                        "y": 80.0,
+                        "reservoir": {
+                            "storage_min_hm3": 5.0,
+                            "storage_max_hm3": 50.0,
+                            "initial_storage_hm3": 20.0,
+                            "terminal_condition": "min_terminal",
+                            "terminal_storage_min_hm3": 10.0,
+                            "terminal_water_value_usd_per_hm3": 8.0,
+                        },
+                        "storage_elevation_curve": {
+                            "version_label": "v1",
+                            "points": [
+                                {"x_value": 5.0, "y_value": 700.0},
+                                {"x_value": 50.0, "y_value": 760.0},
+                            ],
+                        },
+                    },
+                    {
+                        "component_type": "junction",
+                        "technical_key": "junction_in",
+                        "display_name": "Intake",
+                        "x": 300.0,
+                        "y": 80.0,
+                    },
+                    {
+                        "component_type": "junction",
+                        "technical_key": "junction_out",
+                        "display_name": "Tailrace",
+                        "x": 480.0,
+                        "y": 120.0,
+                    },
+                    {
+                        "component_type": "plant",
+                        "technical_key": "plant_laja",
+                        "display_name": "Plant Laja",
+                        "x": 390.0,
+                        "y": 200.0,
+                        "plant": {"non_modeled": False, "max_power_mw": 30.0},
+                        "units": [
+                            {
+                                "technical_key": "unit_1",
+                                "display_name": "Unit 1",
+                                "is_active": True,
+                                "intake_node_key": "junction_in",
+                                "discharge_node_key": "junction_out",
+                                "min_power_mw": 0.0,
+                                "max_power_mw": 30.0,
+                                "min_flow_m3s": 0.0,
+                                "max_flow_m3s": 40.0,
+                                "flow_power_curve": {
+                                    "version_label": "v1",
+                                    "points": [
+                                        {"x_value": 0.0, "y_value": 0.0},
+                                        {"x_value": 40.0, "y_value": 30.0},
+                                    ],
+                                },
+                            }
+                        ],
+                    },
+                ],
+                "reaches": [
+                    {
+                        "technical_key": "reach_reservoir_intake",
+                        "display_name": "Reservoir to intake",
+                        "from_node_key": "reservoir_alpha",
+                        "to_node_key": "junction_in",
+                        "reach_type": "river",
+                    },
+                    {
+                        "technical_key": "reach_tailrace_out",
+                        "display_name": "Tailrace out",
+                        "from_node_key": "junction_out",
+                        "to_node_key": "reservoir_alpha",
+                        "reach_type": "tailrace",
+                    },
+                ],
+            },
+        )
+        self.assertEqual(save_response.status_code, 200)
+
+        preview_response = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/v3-preview"
+        )
+
+        self.assertEqual(preview_response.status_code, 200)
+        validation = preview_response.json()["validation"]
+        preview = validation["system_case"]
+        self.assertTrue(validation["ok"])
+        self.assertFalse(validation["stale"])
+        self.assertEqual(preview["schema_version"], "bess_system_dispatch.v3")
+        self.assertEqual(preview["hydraulic_network"]["nodes"][0]["id"], "reservoir_alpha")
+        self.assertEqual(
+            preview["hydraulic_network"]["nodes"][0]["curves"]["storage_elevation"],
+            [
+                {"storage_hm3": 5.0, "elevation_masl": 700.0},
+                {"storage_hm3": 50.0, "elevation_masl": 760.0},
+            ],
+        )
+        self.assertEqual(
+            preview["hydraulic_network"]["units"][0]["curves"]["flow_power"],
+            [
+                {"flow_m3s": 0.0, "power_mw": 0.0},
+                {"flow_m3s": 40.0, "power_mw": 30.0},
+            ],
+        )
+        self.assertEqual(
+            preview["hydraulic_network"]["required_time_series"],
+            [
+                {
+                    "entity_type": "hydraulic_node",
+                    "entity_id": "reservoir_alpha",
+                    "signal_key": "natural_inflow_m3s",
+                    "binding_status": "required",
+                }
+            ],
+        )
+        self.assertEqual(len(self.validation_service.validated_texts), 1)
+        self.assertIn('"schema_version": "bess_system_dispatch.v3"', self.validation_service.validated_texts[0])
+
+        reloaded = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram"
+        ).json()["diagram"]
+        self.assertTrue(reloaded["validation"]["ok"])
+        self.assertFalse(reloaded["validation"]["stale"])
+
+        edited_nodes = reloaded["nodes"]
+        edited_nodes[0]["display_name"] = "Reservoir Alpha Edited"
+        stale_response = self.client.put(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram",
+            json={
+                "revision": reloaded["revision"],
+                "nodes": edited_nodes,
+                "reaches": reloaded["reaches"],
+                "viewport": reloaded["layout"]["viewport"],
+            },
+        )
+        self.assertEqual(stale_response.status_code, 200)
+        self.assertTrue(stale_response.json()["diagram"]["validation"]["stale"])
 
 
 if __name__ == "__main__":

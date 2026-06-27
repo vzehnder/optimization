@@ -33,6 +33,7 @@ import {
   updateDashboardTemplate,
   updatePublicationDraft,
   validateHydraulicDiagram,
+  validateHydraulicV3Preview,
   type DashboardTemplate,
   type DashboardTemplatePayload,
   type HydraulicComponentType,
@@ -97,6 +98,13 @@ function errorMessage(error: unknown): string {
 
 function prettyJson(value: unknown): string {
   return JSON.stringify(value ?? {}, null, 2);
+}
+
+function visibleHydraulicValidation(
+  validation?: HydraulicDiagramValidation | null,
+): HydraulicDiagramValidation | null {
+  if (!validation || validation.status === "not_validated") return null;
+  return validation;
 }
 
 function displayValue(value: unknown, fallback = "Pendiente"): string {
@@ -2034,7 +2042,9 @@ function HydraulicDiagramEditor({
   const [saveStatus, setSaveStatus] = useState<HydraulicSaveStatus>("saved");
   const [error, setError] = useState("");
   const [validation, setValidation] =
-    useState<HydraulicDiagramValidation | null>(null);
+    useState<HydraulicDiagramValidation | null>(() =>
+      visibleHydraulicValidation(initialDiagram.validation),
+    );
   const [pendingReachSource, setPendingReachSource] = useState<string | null>(
     null,
   );
@@ -2068,6 +2078,7 @@ function HydraulicDiagramEditor({
       setUnitCurves(unitCurvesByKey(savedDiagram));
       setRevision(savedDiagram.revision);
       setViewport(defaultHydraulicViewport(savedDiagram));
+      setValidation(visibleHydraulicValidation(savedDiagram.validation));
       setSaveStatus("saved");
       setError("");
     },
@@ -2089,11 +2100,22 @@ function HydraulicDiagramEditor({
       setUnitCurves(unitCurvesByKey(serverDiagram));
       setRevision(serverDiagram.revision);
       setViewport(defaultHydraulicViewport(serverDiagram));
+      setValidation(visibleHydraulicValidation(serverDiagram.validation));
       setSaveStatus("saved");
       setError("");
     },
     onError: (mutationError) => {
       setSaveStatus("failed");
+      setError(errorMessage(mutationError));
+    },
+  });
+  const v3PreviewMutation = useMutation({
+    mutationFn: () => validateHydraulicV3Preview(scenario.id),
+    onSuccess: (serverValidation) => {
+      setValidation(serverValidation);
+      setError("");
+    },
+    onError: (mutationError) => {
       setError(errorMessage(mutationError));
     },
   });
@@ -2366,6 +2388,18 @@ function HydraulicDiagramEditor({
           >
             Validar topologia
           </button>
+          <button
+            type="button"
+            className="secondary-action"
+            disabled={
+              v3PreviewMutation.isPending ||
+              saveMutation.isPending ||
+              saveStatus !== "saved"
+            }
+            onClick={() => v3PreviewMutation.mutate()}
+          >
+            Generar preview v3
+          </button>
         </div>
         {error ? <p role="alert">{error}</p> : null}
         {validation ? (
@@ -2393,6 +2427,20 @@ function HydraulicDiagramEditor({
                   </li>
                 ))}
               </ul>
+            ) : null}
+            {validation.stale ? (
+              <p role="status">Validacion hidraulica v3 stale</p>
+            ) : null}
+            {validation.system_case ? (
+              <section
+                className="workspace-section"
+                aria-labelledby="hydraulic-v3-preview"
+              >
+                <h2 id="hydraulic-v3-preview">Payload v3 generado</h2>
+                <pre className="json-preview">
+                  {prettyJson(validation.system_case)}
+                </pre>
+              </section>
             ) : null}
           </section>
         ) : null}

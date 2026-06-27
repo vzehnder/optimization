@@ -1096,6 +1096,54 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"validation": validation}
 
+    @app.post("/api/scenarios/{scenario_id}/hydraulic-diagram/v3-preview")
+    async def validate_hydraulic_v3_preview(scenario_id: int):
+        try:
+            topology_validation = analyst_store.validate_hydraulic_diagram(scenario_id)
+            if not topology_validation["ok"]:
+                validation = {
+                    **topology_validation,
+                    "kind": "hydraulic_topology",
+                    "stale": False,
+                    "status": "error",
+                    "system_case": None,
+                }
+                return {"validation": validation}
+            system_case = analyst_store.generate_hydraulic_v3_preview(scenario_id)
+            result = service.validate_text(json.dumps(system_case, sort_keys=True))
+            if not result.ok:
+                validation = {
+                    "kind": "hydraulic_v3_preview",
+                    "ok": False,
+                    "stale": False,
+                    "status": "error",
+                    "summary": "Hydraulic v3 payload failed Julia validation",
+                    "errors": [
+                        {
+                            "severity": "error",
+                            "code": "julia_v3_validation_failed",
+                            "message": result.message,
+                            "entity_type": "hydraulic_v3_payload",
+                            "entity_id": 0,
+                            "technical_key": "bess_system_dispatch.v3",
+                        }
+                    ],
+                    "warnings": [],
+                    "system_case": system_case,
+                    "julia_validation": result.payload,
+                }
+                return {"validation": validation}
+            validation = analyst_store.persist_hydraulic_v3_validation(
+                scenario_id=scenario_id,
+                system_case=system_case,
+                julia_payload=result.payload,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return {"validation": validation}
+
     @app.post("/api/scenarios/{scenario_id}/draft", status_code=201)
     async def create_scenario_draft(scenario_id: int, payload: ScenarioDraftWriteRequest):
         try:

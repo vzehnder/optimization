@@ -8,9 +8,12 @@ using PiecewiseLinearOpt
 
 const SYSTEM_SCHEMA_VERSION = "bess_system_dispatch.v1"
 const SYSTEM_SCHEMA_VERSION_V2 = "bess_system_dispatch.v2"
+const SYSTEM_SCHEMA_VERSION_V3 = "bess_system_dispatch.v3"
 const SYSTEM_SUPPORTED_SCHEMA_VERSIONS = Set([SYSTEM_SCHEMA_VERSION, SYSTEM_SCHEMA_VERSION_V2])
 const SYSTEM_BUS_NODE_TYPES = Set(["bus", "pcc"])
 const SYSTEM_KNOWN_NODE_TYPES = Set(["bus", "pcc", "battery", "renewable", "grid", "load", "hydro"])
+const HYDRAULIC_V3_NODE_TYPES = Set(["reservoir", "junction", "intake", "tailrace", "river_inflow", "other"])
+const HYDRAULIC_V3_REACH_TYPES = Set(["river", "canal", "tunnel", "gate", "spillway", "bypass", "tailrace", "other"])
 const HM3_PER_M3S_HOUR = 3600.0 / 1_000_000.0
 
 struct SystemNode
@@ -248,6 +251,252 @@ function validate_system_case(system_case::SystemGraphData)::SystemGraphData
     end
 
     return system_case
+end
+
+function validate_hydraulic_v3_system_case_document(document)::Dict{String,Any}
+    schema_version = required_string(document, "schema_version")
+    if schema_version != SYSTEM_SCHEMA_VERSION_V3
+        throw(ArgumentError("schema_version must be $(SYSTEM_SCHEMA_VERSION_V3); got $(schema_version)"))
+    end
+
+    case_name = required_string(document, "case_name")
+    load_solver_config(required_value(document, "solver"))
+    network = required_dict(document, "hydraulic_network")
+    nodes = required_vector(network, "nodes")
+    reaches = required_vector(network, "reaches")
+    plants = required_vector(network, "plants")
+    units = required_vector(network, "units")
+    required_time_series = required_vector(network, "required_time_series")
+
+    node_ids = Set{String}()
+    reservoir_count = 0
+    for (index, raw_node) in enumerate(nodes)
+        node = to_string_key_dict(raw_node)
+        node_id = required_string(node, "id")
+        node_type = required_string(node, "type")
+        if node_id in node_ids
+            throw(ArgumentError("hydraulic_network.nodes[$index] id $(node_id) is duplicated"))
+        end
+        if !(node_type in HYDRAULIC_V3_NODE_TYPES)
+            throw(ArgumentError("hydraulic node $(node_id) has unsupported type $(node_type)"))
+        end
+        push!(node_ids, node_id)
+        if node_type == "reservoir"
+            reservoir_count += 1
+            validate_hydraulic_v3_reservoir_node(node_id, node)
+        end
+    end
+    if reservoir_count == 0
+        throw(ArgumentError("hydraulic_network must contain at least one reservoir node"))
+    end
+
+    for (index, raw_reach) in enumerate(reaches)
+        reach = to_string_key_dict(raw_reach)
+        reach_id = required_string(reach, "id")
+        reach_type = required_string(reach, "type")
+        if !(reach_type in HYDRAULIC_V3_REACH_TYPES)
+            throw(ArgumentError("reach $(reach_id) has unsupported type $(reach_type)"))
+        end
+        from_node = required_string(reach, "from_node")
+        to_node = required_string(reach, "to_node")
+        if !(from_node in node_ids)
+            throw(ArgumentError("reach $(reach_id) from_node $(from_node) not found"))
+        end
+        if !(to_node in node_ids)
+            throw(ArgumentError("reach $(reach_id) to_node $(to_node) not found"))
+        end
+        if from_node == to_node
+            throw(ArgumentError("reach $(reach_id) must connect distinct nodes"))
+        end
+        routing_method = optional_string(reach, "routing_method", "none")
+        travel_time_hours = optional_float(get(reach, "travel_time_hours", 0.0), "reach $(reach_id) travel_time_hours")
+        if routing_method != "none" || travel_time_hours === nothing || travel_time_hours != 0.0
+            throw(ArgumentError("reach $(reach_id) uses unsupported routing; only routing_method none with zero travel_time_hours is supported"))
+        end
+    end
+
+    plant_ids = Set{String}()
+    plant_unit_ids = Dict{String,Set{String}}()
+    for (index, raw_plant) in enumerate(plants)
+        plant = to_string_key_dict(raw_plant)
+        plant_id = required_string(plant, "id")
+        if plant_id in plant_ids
+            throw(ArgumentError("hydraulic_network.plants[$index] id $(plant_id) is duplicated"))
+        end
+        push!(plant_ids, plant_id)
+        raw_unit_ids = required_vector(plant, "units")
+        plant_unit_ids[plant_id] = Set(string(unit_id) for unit_id in raw_unit_ids)
+    end
+    if isempty(plant_ids)
+        throw(ArgumentError("hydraulic_network must contain at least one plant"))
+    end
+
+    unit_ids = Set{String}()
+    for (index, raw_unit) in enumerate(units)
+        unit = to_string_key_dict(raw_unit)
+        unit_id = required_string(unit, "id")
+        if unit_id in unit_ids
+            throw(ArgumentError("hydraulic_network.units[$index] id $(unit_id) is duplicated"))
+        end
+        push!(unit_ids, unit_id)
+        plant_id = required_string(unit, "plant_id")
+        if !(plant_id in plant_ids)
+            throw(ArgumentError("unit $(unit_id) plant_id $(plant_id) not found"))
+        end
+        if !(unit_id in plant_unit_ids[plant_id])
+            throw(ArgumentError("unit $(unit_id) is not listed by plant $(plant_id)"))
+        end
+        intake_node = required_string(unit, "intake_node")
+        discharge_node = required_string(unit, "discharge_node")
+        if !(intake_node in node_ids)
+            throw(ArgumentError("unit $(unit_id) intake_node $(intake_node) not found"))
+        end
+        if !(discharge_node in node_ids)
+            throw(ArgumentError("unit $(unit_id) discharge_node $(discharge_node) not found"))
+        end
+        if intake_node == discharge_node
+            throw(ArgumentError("unit $(unit_id) intake_node and discharge_node must be distinct"))
+        end
+        validate_optional_nonnegative_number(unit, "min_power_mw", "unit $(unit_id)")
+        validate_optional_nonnegative_number(unit, "max_power_mw", "unit $(unit_id)")
+        validate_optional_nonnegative_number(unit, "min_flow_m3s", "unit $(unit_id)")
+        validate_optional_nonnegative_number(unit, "max_flow_m3s", "unit $(unit_id)")
+        flow_power = required_vector(required_dict(unit, "curves"), "flow_power")
+        validate_hydraulic_v3_curve(
+            flow_power,
+            "unit $(unit_id) flow_power",
+            "flow_m3s",
+            "power_mw";
+            nondecreasing_y = true,
+        )
+    end
+    if isempty(unit_ids)
+        throw(ArgumentError("hydraulic_network must contain at least one unit"))
+    end
+
+    for raw_requirement in required_time_series
+        requirement = to_string_key_dict(raw_requirement)
+        entity_type = required_string(requirement, "entity_type")
+        entity_id = required_string(requirement, "entity_id")
+        signal_key = required_string(requirement, "signal_key")
+        binding_status = required_string(requirement, "binding_status")
+        if entity_type != "hydraulic_node"
+            throw(ArgumentError("required_time_series entity_type $(entity_type) is not supported"))
+        end
+        if !(entity_id in node_ids)
+            throw(ArgumentError("required_time_series entity_id $(entity_id) not found"))
+        end
+        if signal_key != "natural_inflow_m3s"
+            throw(ArgumentError("required_time_series signal_key $(signal_key) is not supported"))
+        end
+        if !(binding_status in Set(["required", "bound"]))
+            throw(ArgumentError("required_time_series binding_status $(binding_status) is not supported"))
+        end
+    end
+
+    return Dict{String,Any}(
+        "status" => "ok",
+        "case_name" => case_name,
+        "schema_version" => schema_version,
+        "hydraulic_network" => Dict{String,Any}(
+            "nodes" => length(nodes),
+            "reaches" => length(reaches),
+            "plants" => length(plants),
+            "units" => length(units),
+            "required_time_series" => length(required_time_series),
+        ),
+    )
+end
+
+function validate_hydraulic_v3_reservoir_node(node_id::String, node::Dict{String,Any})
+    reservoir = required_dict(node, "reservoir")
+    storage_min = parse_required_float(required_value(reservoir, "storage_min_hm3"), "reservoir $(node_id) storage_min_hm3")
+    storage_max = parse_required_float(required_value(reservoir, "storage_max_hm3"), "reservoir $(node_id) storage_max_hm3")
+    initial_storage = parse_required_float(required_value(reservoir, "initial_storage_hm3"), "reservoir $(node_id) initial_storage_hm3")
+    if !(storage_min < storage_max)
+        throw(ArgumentError("reservoir $(node_id) storage_min_hm3 must be less than storage_max_hm3"))
+    end
+    if !(storage_min <= initial_storage <= storage_max)
+        throw(ArgumentError("reservoir $(node_id) initial_storage_hm3 must be within storage bounds"))
+    end
+    terminal_condition = optional_string(reservoir, "terminal_condition", "none")
+    if !(terminal_condition in Set(["none", "equal_initial", "min_terminal"]))
+        throw(ArgumentError("reservoir $(node_id) terminal_condition must be one of none, equal_initial, min_terminal"))
+    end
+    if terminal_condition == "min_terminal"
+        terminal_storage_min = parse_required_float(
+            required_value(reservoir, "terminal_storage_min_hm3"),
+            "reservoir $(node_id) terminal_storage_min_hm3",
+        )
+        if !(storage_min <= terminal_storage_min <= storage_max)
+            throw(ArgumentError("reservoir $(node_id) terminal_storage_min_hm3 must be within storage bounds"))
+        end
+    end
+    terminal_value = parse_required_float(
+        get(reservoir, "terminal_water_value_usd_per_hm3", 0.0),
+        "reservoir $(node_id) terminal_water_value_usd_per_hm3",
+    )
+    if !isfinite(terminal_value) || terminal_value < 0
+        throw(ArgumentError("reservoir $(node_id) terminal_water_value_usd_per_hm3 must be nonnegative"))
+    end
+
+    points = required_vector(required_dict(node, "curves"), "storage_elevation")
+    validate_hydraulic_v3_curve(
+        points,
+        "reservoir $(node_id) storage_elevation",
+        "storage_hm3",
+        "elevation_masl";
+        nondecreasing_y = true,
+    )
+    storages = [
+        parse_required_float(required_value(to_string_key_dict(point), "storage_hm3"), "reservoir $(node_id) storage_elevation storage_hm3")
+        for point in points
+    ]
+    if storage_min < minimum(storages) || storage_max > maximum(storages)
+        throw(ArgumentError("reservoir $(node_id) storage bounds must lie within storage_elevation domain"))
+    end
+end
+
+function validate_hydraulic_v3_curve(
+    points,
+    label::AbstractString,
+    x_key::AbstractString,
+    y_key::AbstractString;
+    nondecreasing_y::Bool,
+)
+    if length(points) < 2
+        throw(ArgumentError("$(label) curve must contain at least two points"))
+    end
+    xs = Float64[]
+    ys = Float64[]
+    for point in points
+        point_dict = to_string_key_dict(point)
+        push!(xs, parse_required_float(required_value(point_dict, x_key), "$(label) $(x_key)"))
+        push!(ys, parse_required_float(required_value(point_dict, y_key), "$(label) $(y_key)"))
+    end
+    for index in 1:(length(xs) - 1)
+        if !(xs[index] < xs[index + 1])
+            throw(ArgumentError("$(label) $(x_key) must be strictly increasing"))
+        end
+        if nondecreasing_y && !(ys[index] <= ys[index + 1])
+            throw(ArgumentError("$(label) $(y_key) must be nondecreasing"))
+        end
+    end
+    for (index, value) in enumerate(vcat(xs, ys))
+        if !isfinite(value)
+            throw(ArgumentError("$(label) point[$index] must be finite"))
+        end
+    end
+end
+
+function validate_optional_nonnegative_number(config::Dict{String,Any}, key::AbstractString, label::AbstractString)
+    if !haskey(config, key) || config[key] === nothing
+        return
+    end
+    value = parse_required_float(config[key], "$(label) $(key)")
+    if !isfinite(value) || value < 0
+        throw(ArgumentError("$(label) $(key) must be nonnegative"))
+    end
 end
 
 function normalize_system_case(system_case::SystemGraphData)::SystemOptimizationData
@@ -2091,6 +2340,15 @@ function required_vector(config, key::AbstractString)
     end
 
     return value
+end
+
+function required_dict(config, key::AbstractString)::Dict{String,Any}
+    value = required_value(config, key)
+    try
+        return to_string_key_dict(value)
+    catch
+        throw(ArgumentError("$key must be an object; got $(repr(value))"))
+    end
 end
 
 function optional_dict(config, key::AbstractString)::Dict{String,Any}

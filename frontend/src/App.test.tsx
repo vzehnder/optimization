@@ -1775,6 +1775,30 @@ describe("application shell", () => {
             { headers: { "Content-Type": "application/json" } },
           );
         }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram/v3-preview" &&
+          method === "POST"
+        ) {
+          return new Response(
+            JSON.stringify({
+              validation: {
+                ok: true,
+                stale: false,
+                summary: "Hydraulic v3 payload validated",
+                errors: [],
+                warnings: [],
+                system_case: {
+                  schema_version: "bess_system_dispatch.v3",
+                  hydraulic_network: {
+                    units: [{ id: "unit_1", plant_id: "plant_1" }],
+                  },
+                },
+                julia_validation: { status: "ok" },
+              },
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
         return new Response(
           JSON.stringify({ detail: `unhandled ${method} ${path}` }),
           {
@@ -1855,6 +1879,11 @@ describe("application shell", () => {
 
     // Saved curve is now selectable as an existing version.
     expect(screen.getByLabelText("Version de curva unit_1")).toHaveValue("910");
+
+    await user.click(screen.getByRole("button", { name: "Generar preview v3" }));
+    expect(await screen.findByText("Hydraulic v3 payload validated")).toBeVisible();
+    expect(screen.getByText(/bess_system_dispatch\.v3/)).toBeVisible();
+    expect(screen.getByText(/"id": "unit_1"/)).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Validar topologia" }));
     expect(

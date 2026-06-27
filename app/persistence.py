@@ -1458,6 +1458,9 @@ class AnalystStore:
             if str(revision) != current_revision:
                 raise ValueError("stale hydraulic diagram revision")
 
+            previous_validation = hydraulic_validation_public_dict(
+                context["optimization_case"].get("validation_payload_json")
+            )
             normalized_nodes = normalize_hydraulic_diagram_nodes(nodes)
             normalized_reaches = normalize_hydraulic_diagram_reaches(reaches or [])
             resolved_viewport = {
@@ -1686,11 +1689,213 @@ class AnalystStore:
                     layout_id,
                 ),
             )
+            stale_validation = self._stale_validation_after_hydraulic_edit(
+                previous_validation,
+                scenario_id=scenario_id,
+                updated_at=now,
+            )
+            if stale_validation is not None:
+                self.connection.execute(
+                    """
+                    UPDATE optimization_cases
+                    SET validation_payload_json = ?,
+                        updated_at = ?,
+                        updated_by = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        json.dumps(stale_validation, sort_keys=True),
+                        now,
+                        updated_by,
+                        case_id,
+                    ),
+                )
             self.connection.commit()
             updated_context = self._get_hydraulic_diagram_context(scenario_id)
             if updated_context is None:
                 raise KeyError(f"hydraulic diagram for scenario {scenario_id} not found")
             return self._hydraulic_diagram_response(updated_context)
+
+    def generate_hydraulic_v3_preview(self, scenario_id: int) -> dict[str, Any]:
+        diagram = self.get_hydraulic_diagram(scenario_id)
+        network_nodes: list[dict[str, Any]] = []
+        reaches: list[dict[str, Any]] = []
+        plants: list[dict[str, Any]] = []
+        units: list[dict[str, Any]] = []
+        curves: list[dict[str, Any]] = []
+        required_time_series: list[dict[str, Any]] = []
+
+        for node in diagram["nodes"]:
+            component_type = str(node["component_type"])
+            if component_type == "plant":
+                plant = node.get("plant") or {}
+                plant_units = [unit["technical_key"] for unit in node.get("units", []) if unit.get("is_active", True)]
+                plants.append(
+                    {
+                        "id": node["technical_key"],
+                        "display_name": node["display_name"],
+                        "non_modeled": bool(plant.get("non_modeled", False)),
+                        "min_power_mw": plant.get("min_power_mw"),
+                        "max_power_mw": plant.get("max_power_mw"),
+                        "units": plant_units,
+                    }
+                )
+                for unit in node.get("units", []):
+                    if not unit.get("is_active", True):
+                        continue
+                    flow_power = hydraulic_flow_power_curve_points(unit.get("flow_power_curve"))
+                    units.append(
+                        {
+                            "id": unit["technical_key"],
+                            "display_name": unit["display_name"],
+                            "plant_id": node["technical_key"],
+                            "intake_node": unit.get("intake_node_key"),
+                            "discharge_node": unit.get("discharge_node_key"),
+                            "min_power_mw": unit.get("min_power_mw"),
+                            "max_power_mw": unit.get("max_power_mw"),
+                            "min_flow_m3s": unit.get("min_flow_m3s"),
+                            "max_flow_m3s": unit.get("max_flow_m3s"),
+                            "curves": {FLOW_POWER_CURVE_KEY: flow_power},
+                        }
+                    )
+                    curves.append(
+                        {
+                            "entity_type": "hydraulic_unit",
+                            "entity_id": unit["technical_key"],
+                            "curve_role": FLOW_POWER_CURVE_KEY,
+                            "points": flow_power,
+                        }
+                    )
+                continue
+
+            network_node = {
+                "id": node["technical_key"],
+                "display_name": node["display_name"],
+                "type": component_type,
+            }
+            if component_type == "reservoir":
+                network_node["reservoir"] = node.get("reservoir")
+                storage_elevation = hydraulic_storage_elevation_curve_points(
+                    node.get("storage_elevation_curve")
+                )
+                network_node["curves"] = {STORAGE_ELEVATION_CURVE_KEY: storage_elevation}
+                curves.append(
+                    {
+                        "entity_type": "hydraulic_node",
+                        "entity_id": node["technical_key"],
+                        "curve_role": STORAGE_ELEVATION_CURVE_KEY,
+                        "points": storage_elevation,
+                    }
+                )
+                required_time_series.append(
+                    {
+                        "entity_type": "hydraulic_node",
+                        "entity_id": node["technical_key"],
+                        "signal_key": "natural_inflow_m3s",
+                        "binding_status": "required",
+                    }
+                )
+            network_nodes.append(network_node)
+
+        for reach in diagram["reaches"]:
+            reaches.append(
+                {
+                    "id": reach["technical_key"],
+                    "display_name": reach["display_name"],
+                    "from_node": reach["from_node_key"],
+                    "to_node": reach["to_node_key"],
+                    "type": reach["reach_type"],
+                    "routing_method": "none",
+                    "travel_time_hours": 0.0,
+                    "flow_min_m3s": None,
+                    "spill_penalty_usd_per_hm3": None,
+                }
+            )
+
+        return {
+            "schema_version": "bess_system_dispatch.v3",
+            "case_name": diagram["optimization_case"]["case_key"],
+            "solver": {"name": "HiGHS", "options": {}},
+            "hydraulic_network": {
+                "nodes": network_nodes,
+                "reaches": reaches,
+                "plants": plants,
+                "units": units,
+                "curves": curves,
+                "required_time_series": required_time_series,
+            },
+        }
+
+    def persist_hydraulic_v3_validation(
+        self,
+        *,
+        scenario_id: int,
+        system_case: dict[str, Any],
+        julia_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        with self._lock:
+            context = self._get_hydraulic_diagram_context(scenario_id)
+            if context is None:
+                raise KeyError(f"hydraulic diagram for scenario {scenario_id} not found")
+            payload_hash = hydraulic_payload_hash(system_case)
+            validation = {
+                "kind": "hydraulic_v3_preview",
+                "ok": True,
+                "stale": False,
+                "status": "ok",
+                "summary": "Hydraulic v3 payload validated",
+                "errors": [],
+                "warnings": [],
+                "validation_hash": payload_hash,
+                "system_case": system_case,
+                "julia_validation": julia_payload,
+            }
+            self.connection.execute(
+                """
+                UPDATE optimization_cases
+                SET validation_payload_json = ?,
+                    updated_at = ?,
+                    updated_by = 'hydraulic_v3_validator'
+                WHERE id = ?
+                """,
+                (
+                    json.dumps(validation, sort_keys=True),
+                    utc_now_iso(),
+                    int(context["optimization_case"]["id"]),
+                ),
+            )
+            self.connection.commit()
+            return validation
+
+    def _stale_validation_after_hydraulic_edit(
+        self,
+        previous_validation: Mapping[str, Any],
+        *,
+        scenario_id: int,
+        updated_at: str,
+    ) -> dict[str, Any] | None:
+        if (
+            previous_validation.get("kind") != "hydraulic_v3_preview"
+            or not previous_validation.get("ok")
+            or previous_validation.get("stale")
+        ):
+            return None
+
+        previous_hash = previous_validation.get("validation_hash")
+        try:
+            current_hash = hydraulic_payload_hash(self.generate_hydraulic_v3_preview(scenario_id))
+        except Exception:
+            current_hash = None
+        if current_hash == previous_hash:
+            return None
+
+        stale = dict(previous_validation)
+        stale["ok"] = False
+        stale["stale"] = True
+        stale["status"] = "stale"
+        stale["summary"] = "Hydraulic v3 validation is stale after diagram edits"
+        stale["stale_at"] = updated_at
+        return stale
 
     def validate_hydraulic_diagram(self, scenario_id: int) -> dict[str, Any]:
         self.get_scenario(scenario_id)
@@ -2684,6 +2889,9 @@ class AnalystStore:
             "hydraulic_system": hydraulic_system_public_dict(context["hydraulic_system"]),
             "layout": hydraulic_layout_public_dict(layout),
             "revision": str(layout["layout_version"]),
+            "validation": hydraulic_validation_public_dict(
+                context["optimization_case"].get("validation_payload_json")
+            ),
             "nodes": nodes,
             "reaches": reaches,
         }
@@ -3988,6 +4196,60 @@ def optimization_case_public_dict(row: Mapping[str, Any]) -> dict[str, Any]:
         "display_name": row["display_name"],
         "updated_at": row["updated_at"],
     }
+
+
+def hydraulic_validation_public_dict(raw_payload: Any) -> dict[str, Any]:
+    if isinstance(raw_payload, Mapping):
+        payload = dict(raw_payload)
+    else:
+        try:
+            payload = json.loads(str(raw_payload or "{}"))
+        except json.JSONDecodeError:
+            payload = {}
+    if not isinstance(payload, dict) or not payload:
+        return {
+            "kind": "hydraulic_validation",
+            "ok": False,
+            "stale": True,
+            "status": "not_validated",
+            "summary": "Hydraulic diagram has not been validated",
+            "errors": [],
+            "warnings": [],
+        }
+    payload.setdefault("stale", False)
+    payload.setdefault("errors", [])
+    payload.setdefault("warnings", [])
+    payload.setdefault("summary", "Hydraulic validation available")
+    return payload
+
+
+def hydraulic_payload_hash(payload: Mapping[str, Any]) -> str:
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def hydraulic_storage_elevation_curve_points(curve: Mapping[str, Any] | None) -> list[dict[str, float]]:
+    if not isinstance(curve, Mapping):
+        return []
+    return [
+        {
+            "storage_hm3": float(point["x_value"]),
+            "elevation_masl": float(point["y_value"]),
+        }
+        for point in curve.get("points", [])
+    ]
+
+
+def hydraulic_flow_power_curve_points(curve: Mapping[str, Any] | None) -> list[dict[str, float]]:
+    if not isinstance(curve, Mapping):
+        return []
+    return [
+        {
+            "flow_m3s": float(point["x_value"]),
+            "power_mw": float(point["y_value"]),
+        }
+        for point in curve.get("points", [])
+    ]
 
 
 def hydraulic_system_public_dict(row: Mapping[str, Any]) -> dict[str, Any]:
