@@ -46,6 +46,25 @@ HYDRAULIC_REACH_TYPES = {
 }
 HYDRAULIC_TERMINAL_CONDITIONS = {"none", "equal_initial", "min_terminal"}
 STORAGE_ELEVATION_CURVE_KEY = "storage_elevation"
+FLOW_POWER_CURVE_KEY = "flow_power"
+
+# Each curve role maps a versioned curve set to its base entity scope and axes.
+STORAGE_ELEVATION_CURVE_SPEC = {
+    "curve_key": STORAGE_ELEVATION_CURVE_KEY,
+    "base_entity_type": "hydraulic_node",
+    "axis_x_name": "storage_hm3",
+    "axis_x_unit": "hm3",
+    "axis_y_name": "elevation_masl",
+    "axis_y_unit": "masl",
+}
+FLOW_POWER_CURVE_SPEC = {
+    "curve_key": FLOW_POWER_CURVE_KEY,
+    "base_entity_type": "hydraulic_unit",
+    "axis_x_name": "flow_m3s",
+    "axis_x_unit": "m3s",
+    "axis_y_name": "power_mw",
+    "axis_y_unit": "mw",
+}
 
 
 def utc_now_iso() -> str:
@@ -218,12 +237,32 @@ class AnalystStore:
                 UNIQUE (case_id, hydraulic_reach_id)
             );
 
+            CREATE TABLE IF NOT EXISTS hydraulic_units (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                hydraulic_plant_id INTEGER NOT NULL,
+                unit_key TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                intake_node_id INTEGER,
+                discharge_node_id INTEGER,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (hydraulic_plant_id) REFERENCES hydraulic_plants(id) ON DELETE CASCADE,
+                FOREIGN KEY (intake_node_id) REFERENCES hydraulic_nodes(id) ON DELETE SET NULL,
+                FOREIGN KEY (discharge_node_id) REFERENCES hydraulic_nodes(id) ON DELETE SET NULL,
+                UNIQUE (hydraulic_plant_id, unit_key)
+            );
+
             CREATE TABLE IF NOT EXISTS case_hydraulic_plants (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 case_id INTEGER NOT NULL,
                 hydraulic_plant_id INTEGER NOT NULL,
                 case_label TEXT NOT NULL,
                 is_active INTEGER NOT NULL DEFAULT 1,
+                non_modeled INTEGER NOT NULL DEFAULT 0,
+                min_power_mw REAL,
+                max_power_mw REAL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 created_by TEXT NOT NULL,
@@ -231,6 +270,27 @@ class AnalystStore:
                 FOREIGN KEY (case_id) REFERENCES optimization_cases(id) ON DELETE CASCADE,
                 FOREIGN KEY (hydraulic_plant_id) REFERENCES hydraulic_plants(id) ON DELETE CASCADE,
                 UNIQUE (case_id, hydraulic_plant_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS case_hydraulic_units (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id INTEGER NOT NULL,
+                hydraulic_unit_id INTEGER NOT NULL,
+                case_hydraulic_plant_id INTEGER NOT NULL,
+                case_label TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                min_power_mw REAL,
+                max_power_mw REAL,
+                min_flow_m3s REAL,
+                max_flow_m3s REAL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (case_id) REFERENCES optimization_cases(id) ON DELETE CASCADE,
+                FOREIGN KEY (hydraulic_unit_id) REFERENCES hydraulic_units(id) ON DELETE CASCADE,
+                FOREIGN KEY (case_hydraulic_plant_id) REFERENCES case_hydraulic_plants(id) ON DELETE CASCADE,
+                UNIQUE (case_id, hydraulic_unit_id)
             );
 
             CREATE TABLE IF NOT EXISTS case_hydraulic_reservoir_parameters (
@@ -507,6 +567,9 @@ class AnalystStore:
         self._ensure_column("runs", "error_message", "TEXT NOT NULL DEFAULT ''")
         self._ensure_column("scenario_versions", "generation_metadata_json", "TEXT NOT NULL DEFAULT '{}'")
         self._ensure_hydraulic_diagram_items_support_reaches()
+        self._ensure_column("case_hydraulic_plants", "non_modeled", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("case_hydraulic_plants", "min_power_mw", "REAL")
+        self._ensure_column("case_hydraulic_plants", "max_power_mw", "REAL")
         self.connection.commit()
 
     def _ensure_column(self, table_name: str, column_name: str, definition: str) -> None:
@@ -1423,6 +1486,10 @@ class AnalystStore:
                 (case_id,),
             )
             self.connection.execute(
+                "DELETE FROM case_hydraulic_units WHERE case_id = ?",
+                (case_id,),
+            )
+            self.connection.execute(
                 "DELETE FROM case_hydraulic_plants WHERE case_id = ?",
                 (case_id,),
             )
@@ -1437,16 +1504,27 @@ class AnalystStore:
 
             project_id = int(context["hydraulic_system"]["project_id"])
             active_nodes_by_key: dict[str, dict[str, Any]] = {}
+            plant_unit_specs: list[dict[str, Any]] = []
             for index, node in enumerate(normalized_nodes):
                 if node["component_type"] == "plant":
-                    active_id = self._create_case_hydraulic_plant(
+                    created_plant = self._create_case_hydraulic_plant(
                         case_id=case_id,
                         system_id=system_id,
                         plant_key=node["technical_key"],
                         display_name=node["display_name"],
+                        plant=node.get("plant"),
                         updated_by=updated_by,
                         now=now,
                     )
+                    active_id = created_plant["case_hydraulic_plant_id"]
+                    if node.get("units"):
+                        plant_unit_specs.append(
+                            {
+                                "hydraulic_plant_id": created_plant["hydraulic_plant_id"],
+                                "case_hydraulic_plant_id": active_id,
+                                "units": node["units"],
+                            }
+                        )
                     entity_type = "case_hydraulic_plant"
                 else:
                     created_node = self._create_case_hydraulic_node(
@@ -1476,12 +1554,14 @@ class AnalystStore:
                                 now=now,
                             )
                         if node.get("storage_elevation_curve") is not None:
-                            self._persist_storage_elevation_curve(
+                            self._persist_hydraulic_curve(
                                 project_id=project_id,
-                                base_node_id=created_node["hydraulic_node_id"],
+                                base_entity_id=created_node["hydraulic_node_id"],
                                 case_id=case_id,
-                                case_hydraulic_node_id=active_id,
+                                binding_entity_type="case_hydraulic_node",
+                                binding_entity_id=active_id,
                                 curve=node["storage_elevation_curve"],
+                                spec=STORAGE_ELEVATION_CURVE_SPEC,
                                 updated_by=updated_by,
                                 now=now,
                             )
@@ -1511,6 +1591,20 @@ class AnalystStore:
                         now,
                     ),
                 )
+
+            for spec in plant_unit_specs:
+                for unit in spec["units"]:
+                    self._persist_case_hydraulic_unit(
+                        project_id=project_id,
+                        system_id=system_id,
+                        case_id=case_id,
+                        hydraulic_plant_id=spec["hydraulic_plant_id"],
+                        case_hydraulic_plant_id=spec["case_hydraulic_plant_id"],
+                        unit=unit,
+                        active_nodes_by_key=active_nodes_by_key,
+                        updated_by=updated_by,
+                        now=now,
+                    )
 
             for index, reach in enumerate(normalized_reaches):
                 from_node = self._resolve_hydraulic_node_for_reach(
@@ -1660,6 +1754,7 @@ class AnalystStore:
                 )
 
         errors.extend(self._validate_active_reservoirs(case_id))
+        errors.extend(self._validate_active_plants_and_units(case_id, active_node_ids))
 
         validation = {
             "ok": not errors,
@@ -2552,6 +2647,7 @@ class AnalystStore:
         project_id = int(context["hydraulic_system"]["project_id"])
         for node in nodes:
             self._attach_reservoir_detail(node, case_id=case_id, project_id=project_id)
+            self._attach_plant_detail(node, case_id=case_id, project_id=project_id)
         reach_rows = self.connection.execute(
             """
             SELECT
@@ -2712,6 +2808,125 @@ class AnalystStore:
                     )
         return errors
 
+    def _validate_active_plants_and_units(
+        self, case_id: int, active_node_ids: set[int]
+    ) -> list[dict[str, Any]]:
+        errors: list[dict[str, Any]] = []
+        plant_rows = self.connection.execute(
+            """
+            SELECT case_hydraulic_plants.id AS case_hydraulic_plant_id,
+                   case_hydraulic_plants.non_modeled,
+                   hydraulic_plants.plant_key
+            FROM case_hydraulic_plants
+            JOIN hydraulic_plants
+              ON hydraulic_plants.id = case_hydraulic_plants.hydraulic_plant_id
+            WHERE case_hydraulic_plants.case_id = ?
+              AND case_hydraulic_plants.is_active = 1
+            ORDER BY case_hydraulic_plants.id
+            """,
+            (case_id,),
+        ).fetchall()
+        for plant in plant_rows:
+            case_plant_id = int(plant["case_hydraulic_plant_id"])
+            plant_key = str(plant["plant_key"])
+            unit_rows = self.connection.execute(
+                """
+                SELECT case_hydraulic_units.id AS case_unit_id,
+                       case_hydraulic_units.hydraulic_unit_id AS base_unit_id,
+                       case_hydraulic_units.is_active,
+                       hydraulic_units.unit_key,
+                       hydraulic_units.intake_node_id,
+                       hydraulic_units.discharge_node_id
+                FROM case_hydraulic_units
+                JOIN hydraulic_units
+                  ON hydraulic_units.id = case_hydraulic_units.hydraulic_unit_id
+                WHERE case_hydraulic_units.case_id = ?
+                  AND case_hydraulic_units.case_hydraulic_plant_id = ?
+                ORDER BY case_hydraulic_units.id
+                """,
+                (case_id, case_plant_id),
+            ).fetchall()
+            active_units = [row for row in unit_rows if int(row["is_active"]) == 1]
+            if not bool(plant["non_modeled"]) and not active_units:
+                errors.append(
+                    {
+                        "severity": "error",
+                        "code": "plant_without_active_units",
+                        "message": f"Plant {plant_key} requires at least one active unit.",
+                        "entity_type": "case_hydraulic_plant",
+                        "entity_id": case_plant_id,
+                        "technical_key": plant_key,
+                    }
+                )
+            for unit in active_units:
+                case_unit_id = int(unit["case_unit_id"])
+                unit_key = str(unit["unit_key"])
+
+                def add_unit_error(code: str, message: str) -> None:
+                    errors.append(
+                        {
+                            "severity": "error",
+                            "code": code,
+                            "message": message,
+                            "entity_type": "case_hydraulic_unit",
+                            "entity_id": case_unit_id,
+                            "technical_key": unit_key,
+                        }
+                    )
+
+                intake_id = unit["intake_node_id"]
+                discharge_id = unit["discharge_node_id"]
+                if (
+                    intake_id is None
+                    or discharge_id is None
+                    or int(intake_id) not in active_node_ids
+                    or int(discharge_id) not in active_node_ids
+                    or int(intake_id) == int(discharge_id)
+                ):
+                    add_unit_error(
+                        "inactive_or_equal_unit_nodes",
+                        f"Unit {unit_key} requires distinct active intake and discharge nodes.",
+                    )
+
+                binding_row = self.connection.execute(
+                    """
+                    SELECT hydraulic_curve_set_id
+                    FROM case_hydraulic_curve_bindings
+                    WHERE case_id = ?
+                      AND entity_type = 'case_hydraulic_unit'
+                      AND entity_id = ?
+                      AND curve_role = ?
+                    """,
+                    (case_id, case_unit_id, FLOW_POWER_CURVE_KEY),
+                ).fetchone()
+                if binding_row is None:
+                    add_unit_error(
+                        "missing_flow_power_curve",
+                        f"Unit {unit_key} requires a flow_power curve binding.",
+                    )
+                    continue
+                points = self._load_curve_set_points(
+                    int(binding_row["hydraulic_curve_set_id"])
+                )
+                flows = [point["x_value"] for point in points]
+                powers = [point["y_value"] for point in points]
+                invalid_curve = len(points) < 2
+                if any(
+                    flows[index] >= flows[index + 1] for index in range(len(flows) - 1)
+                ):
+                    invalid_curve = True
+                if any(
+                    powers[index] > powers[index + 1]
+                    for index in range(len(powers) - 1)
+                ):
+                    invalid_curve = True
+                if invalid_curve:
+                    add_unit_error(
+                        "invalid_flow_power_curve",
+                        f"Unit {unit_key} flow_power curve must have increasing flow and non-decreasing power.",
+                    )
+        return errors
+
     def _attach_reservoir_detail(
         self,
         node: dict[str, Any],
@@ -2759,31 +2974,42 @@ class AnalystStore:
                 ),
             }
 
-        binding_row = self.connection.execute(
-            """
-            SELECT hydraulic_curve_set_id
-            FROM case_hydraulic_curve_bindings
-            WHERE case_id = ?
-              AND entity_type = 'case_hydraulic_node'
-              AND entity_id = ?
-              AND curve_role = ?
-            """,
-            (case_id, case_hydraulic_node_id, STORAGE_ELEVATION_CURVE_KEY),
-        ).fetchone()
+        bound, available = self._entity_curve_detail(
+            project_id=project_id,
+            base_entity_type="hydraulic_node",
+            base_entity_id=base_node_id,
+            case_id=case_id,
+            binding_entity_type="case_hydraulic_node",
+            binding_entity_id=case_hydraulic_node_id,
+            curve_key=STORAGE_ELEVATION_CURVE_KEY,
+        )
+        node["available_curves"] = available
+        node["storage_elevation_curve"] = bound
 
+    def _entity_curve_detail(
+        self,
+        *,
+        project_id: int,
+        base_entity_type: str,
+        base_entity_id: int,
+        case_id: int,
+        binding_entity_type: str,
+        binding_entity_id: int,
+        curve_key: str,
+    ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
         curve_rows = self.connection.execute(
             """
             SELECT id, version_number, version_label
             FROM hydraulic_curve_sets
             WHERE project_id = ?
-              AND entity_type = 'hydraulic_node'
+              AND entity_type = ?
               AND entity_id = ?
               AND curve_key = ?
             ORDER BY version_number
             """,
-            (project_id, base_node_id, STORAGE_ELEVATION_CURVE_KEY),
+            (project_id, base_entity_type, base_entity_id, curve_key),
         ).fetchall()
-        node["available_curves"] = [
+        available = [
             {
                 "curve_set_id": int(row["id"]),
                 "version_number": int(row["version_number"]),
@@ -2792,16 +3018,107 @@ class AnalystStore:
             }
             for row in curve_rows
         ]
+        binding_row = self.connection.execute(
+            """
+            SELECT hydraulic_curve_set_id
+            FROM case_hydraulic_curve_bindings
+            WHERE case_id = ?
+              AND entity_type = ?
+              AND entity_id = ?
+              AND curve_role = ?
+            """,
+            (case_id, binding_entity_type, binding_entity_id, curve_key),
+        ).fetchone()
+        bound = None
         if binding_row is not None:
             bound_id = int(binding_row["hydraulic_curve_set_id"])
-            node["storage_elevation_curve"] = next(
-                (
-                    curve
-                    for curve in node["available_curves"]
-                    if curve["curve_set_id"] == bound_id
-                ),
+            bound = next(
+                (curve for curve in available if curve["curve_set_id"] == bound_id),
                 None,
             )
+        return bound, available
+
+    def _attach_plant_detail(
+        self,
+        node: dict[str, Any],
+        *,
+        case_id: int,
+        project_id: int,
+    ) -> None:
+        node["plant"] = None
+        node["units"] = []
+        if node.get("component_type") != "plant":
+            return
+        case_hydraulic_plant_id = int(node["entity_id"])
+        plant_row = self.connection.execute(
+            """
+            SELECT non_modeled, min_power_mw, max_power_mw
+            FROM case_hydraulic_plants
+            WHERE id = ?
+            """,
+            (case_hydraulic_plant_id,),
+        ).fetchone()
+        if plant_row is None:
+            return
+        node["plant"] = {
+            "non_modeled": bool(plant_row["non_modeled"]),
+            "min_power_mw": _optional_float(plant_row["min_power_mw"]),
+            "max_power_mw": _optional_float(plant_row["max_power_mw"]),
+        }
+        unit_rows = self.connection.execute(
+            """
+            SELECT
+                case_hydraulic_units.id AS case_unit_id,
+                case_hydraulic_units.hydraulic_unit_id AS base_unit_id,
+                hydraulic_units.unit_key,
+                case_hydraulic_units.case_label,
+                case_hydraulic_units.is_active,
+                case_hydraulic_units.min_power_mw,
+                case_hydraulic_units.max_power_mw,
+                case_hydraulic_units.min_flow_m3s,
+                case_hydraulic_units.max_flow_m3s,
+                intake_nodes.node_key AS intake_node_key,
+                discharge_nodes.node_key AS discharge_node_key
+            FROM case_hydraulic_units
+            JOIN hydraulic_units
+              ON hydraulic_units.id = case_hydraulic_units.hydraulic_unit_id
+            LEFT JOIN hydraulic_nodes AS intake_nodes
+              ON intake_nodes.id = hydraulic_units.intake_node_id
+            LEFT JOIN hydraulic_nodes AS discharge_nodes
+              ON discharge_nodes.id = hydraulic_units.discharge_node_id
+            WHERE case_hydraulic_units.case_id = ?
+              AND case_hydraulic_units.case_hydraulic_plant_id = ?
+            ORDER BY case_hydraulic_units.id
+            """,
+            (case_id, case_hydraulic_plant_id),
+        ).fetchall()
+        units: list[dict[str, Any]] = []
+        for row in unit_rows:
+            bound, available = self._entity_curve_detail(
+                project_id=project_id,
+                base_entity_type="hydraulic_unit",
+                base_entity_id=int(row["base_unit_id"]),
+                case_id=case_id,
+                binding_entity_type="case_hydraulic_unit",
+                binding_entity_id=int(row["case_unit_id"]),
+                curve_key=FLOW_POWER_CURVE_KEY,
+            )
+            units.append(
+                {
+                    "technical_key": str(row["unit_key"]),
+                    "display_name": str(row["case_label"]),
+                    "is_active": bool(row["is_active"]),
+                    "intake_node_key": row["intake_node_key"],
+                    "discharge_node_key": row["discharge_node_key"],
+                    "min_power_mw": _optional_float(row["min_power_mw"]),
+                    "max_power_mw": _optional_float(row["max_power_mw"]),
+                    "min_flow_m3s": _optional_float(row["min_flow_m3s"]),
+                    "max_flow_m3s": _optional_float(row["max_flow_m3s"]),
+                    "flow_power_curve": bound,
+                    "available_curves": available,
+                }
+            )
+        node["units"] = units
 
     def _create_case_hydraulic_node(
         self,
@@ -2971,9 +3288,10 @@ class AnalystStore:
         system_id: int,
         plant_key: str,
         display_name: str,
+        plant: Mapping[str, Any] | None,
         updated_by: str,
         now: str,
-    ) -> int:
+    ) -> dict[str, int]:
         self.connection.execute(
             """
             INSERT INTO hydraulic_plants (
@@ -3001,6 +3319,9 @@ class AnalystStore:
             """,
             (system_id, plant_key),
         ).fetchone()
+        non_modeled = 1 if (plant or {}).get("non_modeled") else 0
+        min_power = (plant or {}).get("min_power_mw")
+        max_power = (plant or {}).get("max_power_mw")
         cursor = self.connection.execute(
             """
             INSERT INTO case_hydraulic_plants (
@@ -3008,16 +3329,157 @@ class AnalystStore:
                 hydraulic_plant_id,
                 case_label,
                 is_active,
+                non_modeled,
+                min_power_mw,
+                max_power_mw,
                 created_at,
                 updated_at,
                 created_by,
                 updated_by
             )
-            VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+            VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (case_id, int(plant_row["id"]), display_name, now, now, updated_by, updated_by),
+            (
+                case_id,
+                int(plant_row["id"]),
+                display_name,
+                non_modeled,
+                min_power,
+                max_power,
+                now,
+                now,
+                updated_by,
+                updated_by,
+            ),
         )
-        return int(cursor.lastrowid)
+        return {
+            "case_hydraulic_plant_id": int(cursor.lastrowid),
+            "hydraulic_plant_id": int(plant_row["id"]),
+        }
+
+    def _persist_case_hydraulic_unit(
+        self,
+        *,
+        project_id: int,
+        system_id: int,
+        case_id: int,
+        hydraulic_plant_id: int,
+        case_hydraulic_plant_id: int,
+        unit: Mapping[str, Any],
+        active_nodes_by_key: Mapping[str, dict[str, Any]],
+        updated_by: str,
+        now: str,
+    ) -> None:
+        intake_node_id = self._resolve_unit_node_id(
+            system_id, unit.get("intake_node_key"), active_nodes_by_key
+        )
+        discharge_node_id = self._resolve_unit_node_id(
+            system_id, unit.get("discharge_node_key"), active_nodes_by_key
+        )
+        unit_key = unit["technical_key"]
+        display_name = unit["display_name"]
+        self.connection.execute(
+            """
+            INSERT INTO hydraulic_units (
+                hydraulic_plant_id,
+                unit_key,
+                display_name,
+                intake_node_id,
+                discharge_node_id,
+                created_at,
+                updated_at,
+                created_by,
+                updated_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (hydraulic_plant_id, unit_key) DO UPDATE SET
+                display_name = excluded.display_name,
+                intake_node_id = excluded.intake_node_id,
+                discharge_node_id = excluded.discharge_node_id,
+                updated_at = excluded.updated_at,
+                updated_by = excluded.updated_by
+            """,
+            (
+                hydraulic_plant_id,
+                unit_key,
+                display_name,
+                intake_node_id,
+                discharge_node_id,
+                now,
+                now,
+                updated_by,
+                updated_by,
+            ),
+        )
+        unit_row = self.connection.execute(
+            """
+            SELECT id
+            FROM hydraulic_units
+            WHERE hydraulic_plant_id = ? AND unit_key = ?
+            """,
+            (hydraulic_plant_id, unit_key),
+        ).fetchone()
+        base_unit_id = int(unit_row["id"])
+        cursor = self.connection.execute(
+            """
+            INSERT INTO case_hydraulic_units (
+                case_id,
+                hydraulic_unit_id,
+                case_hydraulic_plant_id,
+                case_label,
+                is_active,
+                min_power_mw,
+                max_power_mw,
+                min_flow_m3s,
+                max_flow_m3s,
+                created_at,
+                updated_at,
+                created_by,
+                updated_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                case_id,
+                base_unit_id,
+                case_hydraulic_plant_id,
+                display_name,
+                1 if unit.get("is_active", True) else 0,
+                unit.get("min_power_mw"),
+                unit.get("max_power_mw"),
+                unit.get("min_flow_m3s"),
+                unit.get("max_flow_m3s"),
+                now,
+                now,
+                updated_by,
+                updated_by,
+            ),
+        )
+        case_unit_id = int(cursor.lastrowid)
+        if unit.get("flow_power_curve") is not None:
+            self._persist_hydraulic_curve(
+                project_id=project_id,
+                base_entity_id=base_unit_id,
+                case_id=case_id,
+                binding_entity_type="case_hydraulic_unit",
+                binding_entity_id=case_unit_id,
+                curve=unit["flow_power_curve"],
+                spec=FLOW_POWER_CURVE_SPEC,
+                updated_by=updated_by,
+                now=now,
+            )
+
+    def _resolve_unit_node_id(
+        self,
+        system_id: int,
+        node_key: str | None,
+        active_nodes_by_key: Mapping[str, dict[str, Any]],
+    ) -> int | None:
+        if not node_key:
+            return None
+        return self._resolve_hydraulic_node_for_reach(
+            system_id, node_key, active_nodes_by_key
+        )["hydraulic_node_id"]
 
     def _persist_reservoir_parameters(
         self,
@@ -3062,21 +3524,24 @@ class AnalystStore:
             ),
         )
 
-    def _persist_storage_elevation_curve(
+    def _persist_hydraulic_curve(
         self,
         *,
         project_id: int,
-        base_node_id: int,
+        base_entity_id: int,
         case_id: int,
-        case_hydraulic_node_id: int,
+        binding_entity_type: str,
+        binding_entity_id: int,
         curve: Mapping[str, Any],
+        spec: Mapping[str, str],
         updated_by: str,
         now: str,
     ) -> None:
-        curve_set_id = self._resolve_storage_elevation_curve_set(
+        curve_set_id = self._resolve_hydraulic_curve_set(
             project_id=project_id,
-            base_node_id=base_node_id,
+            base_entity_id=base_entity_id,
             curve=curve,
+            spec=spec,
             updated_by=updated_by,
             now=now,
         )
@@ -3096,12 +3561,13 @@ class AnalystStore:
                 created_by,
                 updated_by
             )
-            VALUES (?, 'case_hydraulic_node', ?, ?, ?, 1, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
             """,
             (
                 case_id,
-                case_hydraulic_node_id,
-                STORAGE_ELEVATION_CURVE_KEY,
+                binding_entity_type,
+                binding_entity_id,
+                spec["curve_key"],
                 curve_set_id,
                 now,
                 now,
@@ -3110,15 +3576,18 @@ class AnalystStore:
             ),
         )
 
-    def _resolve_storage_elevation_curve_set(
+    def _resolve_hydraulic_curve_set(
         self,
         *,
         project_id: int,
-        base_node_id: int,
+        base_entity_id: int,
         curve: Mapping[str, Any],
+        spec: Mapping[str, str],
         updated_by: str,
         now: str,
     ) -> int | None:
+        entity_type = spec["base_entity_type"]
+        curve_key = spec["curve_key"]
         if curve.get("curve_set_id") is not None:
             row = self.connection.execute(
                 """
@@ -3126,19 +3595,20 @@ class AnalystStore:
                 FROM hydraulic_curve_sets
                 WHERE id = ?
                   AND project_id = ?
-                  AND entity_type = 'hydraulic_node'
+                  AND entity_type = ?
                   AND entity_id = ?
                   AND curve_key = ?
                 """,
                 (
                     int(curve["curve_set_id"]),
                     project_id,
-                    base_node_id,
-                    STORAGE_ELEVATION_CURVE_KEY,
+                    entity_type,
+                    base_entity_id,
+                    curve_key,
                 ),
             ).fetchone()
             if row is None:
-                raise ValueError("storage elevation curve set not found for reservoir")
+                raise ValueError(f"{curve_key} curve set not found for entity")
             return int(row["id"])
 
         points = curve.get("points") or []
@@ -3151,14 +3621,14 @@ class AnalystStore:
             SELECT id
             FROM hydraulic_curve_sets
             WHERE project_id = ?
-              AND entity_type = 'hydraulic_node'
+              AND entity_type = ?
               AND entity_id = ?
               AND curve_key = ?
               AND content_hash = ?
             ORDER BY version_number
             LIMIT 1
             """,
-            (project_id, base_node_id, STORAGE_ELEVATION_CURVE_KEY, content_hash),
+            (project_id, entity_type, base_entity_id, curve_key, content_hash),
         ).fetchone()
         if existing is not None:
             return int(existing["id"])
@@ -3168,11 +3638,11 @@ class AnalystStore:
             SELECT COALESCE(MAX(version_number), 0) + 1 AS next_version
             FROM hydraulic_curve_sets
             WHERE project_id = ?
-              AND entity_type = 'hydraulic_node'
+              AND entity_type = ?
               AND entity_id = ?
               AND curve_key = ?
             """,
-            (project_id, base_node_id, STORAGE_ELEVATION_CURVE_KEY),
+            (project_id, entity_type, base_entity_id, curve_key),
         ).fetchone()
         version_number = int(next_version_row["next_version"])
         version_label = curve.get("version_label") or f"v{version_number}"
@@ -3197,15 +3667,19 @@ class AnalystStore:
                 created_by,
                 updated_by
             )
-            VALUES (?, 'hydraulic_node', ?, ?, ?, ?, 1, 'storage_hm3', 'hm3',
-                    'elevation_masl', 'masl', ?, 'draft', ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?)
             """,
             (
                 project_id,
-                base_node_id,
-                STORAGE_ELEVATION_CURVE_KEY,
+                entity_type,
+                base_entity_id,
+                curve_key,
                 version_number,
                 version_label,
+                spec["axis_x_name"],
+                spec["axis_x_unit"],
+                spec["axis_y_name"],
+                spec["axis_y_unit"],
                 content_hash,
                 now,
                 now,
@@ -3375,7 +3849,57 @@ def normalize_hydraulic_diagram_nodes(nodes: list[dict[str, Any]]) -> list[dict[
                         node["storage_elevation_curve"]
                     )
                 )
+        if component_type == "plant":
+            normalized_node["plant"] = normalize_hydraulic_plant_parameters(
+                node.get("plant") or {}
+            )
+            normalized_node["units"] = normalize_hydraulic_units(node.get("units") or [])
         normalized.append(normalized_node)
+    return normalized
+
+
+def _optional_float(value: Any) -> float | None:
+    return None if value is None else float(value)
+
+
+def normalize_hydraulic_plant_parameters(plant: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "non_modeled": bool(plant.get("non_modeled", False)),
+        "min_power_mw": _optional_float(plant.get("min_power_mw")),
+        "max_power_mw": _optional_float(plant.get("max_power_mw")),
+    }
+
+
+def normalize_hydraulic_units(units: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    for unit in units:
+        technical_key = str(unit.get("technical_key") or "").strip()
+        if not technical_key:
+            raise ValueError("hydraulic unit technical_key is required")
+        if technical_key in seen_keys:
+            raise ValueError(f"duplicate hydraulic unit key: {technical_key}")
+        seen_keys.add(technical_key)
+        intake_node_key = str(unit.get("intake_node_key") or "").strip() or None
+        discharge_node_key = str(unit.get("discharge_node_key") or "").strip() or None
+        curve = unit.get("flow_power_curve")
+        normalized.append(
+            {
+                "technical_key": technical_key,
+                "display_name": str(unit.get("display_name") or "").strip()
+                or technical_key,
+                "is_active": bool(unit.get("is_active", True)),
+                "intake_node_key": intake_node_key,
+                "discharge_node_key": discharge_node_key,
+                "min_power_mw": _optional_float(unit.get("min_power_mw")),
+                "max_power_mw": _optional_float(unit.get("max_power_mw")),
+                "min_flow_m3s": _optional_float(unit.get("min_flow_m3s")),
+                "max_flow_m3s": _optional_float(unit.get("max_flow_m3s")),
+                "flow_power_curve": (
+                    None if curve is None else normalize_hydraulic_curve_points(curve)
+                ),
+            }
+        )
     return normalized
 
 
@@ -3398,7 +3922,7 @@ def normalize_hydraulic_reservoir_parameters(reservoir: Mapping[str, Any]) -> di
     }
 
 
-def normalize_hydraulic_storage_elevation_curve(curve: Mapping[str, Any]) -> dict[str, Any]:
+def normalize_hydraulic_curve_points(curve: Mapping[str, Any]) -> dict[str, Any]:
     curve_set_id = curve.get("curve_set_id")
     points = [
         {"x_value": float(point.get("x_value", 0.0)), "y_value": float(point.get("y_value", 0.0))}
@@ -3413,6 +3937,10 @@ def normalize_hydraulic_storage_elevation_curve(curve: Mapping[str, Any]) -> dic
         ),
         "points": points,
     }
+
+
+def normalize_hydraulic_storage_elevation_curve(curve: Mapping[str, Any]) -> dict[str, Any]:
+    return normalize_hydraulic_curve_points(curve)
 
 
 def hydraulic_curve_content_hash(points: list[dict[str, Any]]) -> str:

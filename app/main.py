@@ -158,6 +158,31 @@ class HydraulicStorageElevationCurveRequest(BaseModel):
     points: list[HydraulicCurvePointRequest] = Field(default_factory=list)
 
 
+class HydraulicFlowPowerCurveRequest(BaseModel):
+    curve_set_id: int | None = None
+    version_label: str | None = None
+    points: list[HydraulicCurvePointRequest] = Field(default_factory=list)
+
+
+class HydraulicPlantParametersRequest(BaseModel):
+    non_modeled: bool = False
+    min_power_mw: float | None = None
+    max_power_mw: float | None = None
+
+
+class HydraulicUnitRequest(BaseModel):
+    technical_key: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    is_active: bool = True
+    intake_node_key: str | None = None
+    discharge_node_key: str | None = None
+    min_power_mw: float | None = None
+    max_power_mw: float | None = None
+    min_flow_m3s: float | None = None
+    max_flow_m3s: float | None = None
+    flow_power_curve: HydraulicFlowPowerCurveRequest | None = None
+
+
 class HydraulicDiagramNodeRequest(BaseModel):
     component_type: Literal["reservoir", "junction", "plant"]
     technical_key: str = Field(min_length=1)
@@ -166,6 +191,8 @@ class HydraulicDiagramNodeRequest(BaseModel):
     y: float
     reservoir: HydraulicReservoirParametersRequest | None = None
     storage_elevation_curve: HydraulicStorageElevationCurveRequest | None = None
+    plant: HydraulicPlantParametersRequest | None = None
+    units: list[HydraulicUnitRequest] = Field(default_factory=list)
 
 
 class HydraulicDiagramReachRequest(BaseModel):

@@ -966,7 +966,8 @@ describe("application shell", () => {
 
     await user.click(screen.getByRole("button", { name: "Guardar diagrama" }));
     expect(await screen.findByText("Estado: saved")).toBeVisible();
-    expect(screen.getByText("Plant Laja")).toBeVisible();
+    // The plant label now appears both in the node list and the plant panel.
+    expect(screen.getAllByText("Plant Laja").length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: "Recargar diagrama" }));
     await waitFor(() => expect(reloadCount).toBeGreaterThan(0));
@@ -1549,6 +1550,318 @@ describe("application shell", () => {
     ).toBeVisible();
     expect(
       screen.getByText(/storage bounds fall outside the curve domain/),
+    ).toBeVisible();
+  });
+
+  it("edits a plant panel with a generation unit and flow-power curve, then shows unit validation errors", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    type CurvePoint = { x_value: number; y_value: number };
+    type CurveSummary = {
+      curve_set_id: number;
+      version_number: number;
+      version_label: string;
+      points: CurvePoint[];
+    };
+    type Unit = {
+      technical_key: string;
+      display_name: string;
+      is_active: boolean;
+      intake_node_key: string | null;
+      discharge_node_key: string | null;
+      min_power_mw: number | null;
+      max_power_mw: number | null;
+      min_flow_m3s: number | null;
+      max_flow_m3s: number | null;
+      flow_power_curve?: (CurveSummary | { points: CurvePoint[] }) | null;
+      available_curves?: CurveSummary[];
+    };
+    type DiagramNode = {
+      layout_item_id: number;
+      entity_type: string;
+      entity_id: number;
+      component_type: "reservoir" | "junction" | "plant";
+      technical_key: string;
+      display_name: string;
+      x: number;
+      y: number;
+      z_index: number;
+      plant?: {
+        non_modeled: boolean;
+        min_power_mw: number | null;
+        max_power_mw: number | null;
+      } | null;
+      units?: Unit[];
+    };
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Plant case",
+      description: "Hydraulic plant branch",
+      created_at: "2026-06-26T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hydro PMGD",
+      description: "Hydraulic workspace",
+      created_at: "2026-06-26T12:00:00Z",
+    };
+    let diagram = {
+      scenario_id: 10,
+      optimization_case: {
+        id: 4,
+        scenario_id: 10,
+        case_key: "scenario_10_hydraulic_case",
+        display_name: "Plant case",
+        updated_at: "2026-06-26T12:10:00Z",
+      },
+      hydraulic_system: {
+        id: 5,
+        project_id: 1,
+        system_key: "default_hydraulic_system",
+        display_name: "Default hydraulic system",
+      },
+      layout: {
+        id: 6,
+        case_id: 4,
+        layout_key: "default",
+        layout_engine: "auto_dag",
+        layout_version: 1,
+        revision: "1",
+        viewport: { x: 0, y: 0, zoom: 1 },
+        updated_at: "2026-06-26T12:10:00Z",
+        updated_by: "internal_analyst",
+      },
+      revision: "1",
+      nodes: [] as DiagramNode[],
+      reaches: [] as Array<unknown>,
+    };
+    let lastPutBody: { nodes: DiagramNode[] } | null = null;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "POST"
+        ) {
+          return new Response(JSON.stringify({ diagram }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "PUT"
+        ) {
+          const body = JSON.parse(String(init?.body)) as {
+            nodes: DiagramNode[];
+          };
+          lastPutBody = body;
+          diagram = {
+            ...diagram,
+            revision: "2",
+            layout: {
+              ...diagram.layout,
+              layout_version: 2,
+              revision: "2",
+              layout_engine: "manual",
+            },
+            nodes: body.nodes.map((node, index) => {
+              const base: DiagramNode = {
+                ...node,
+                layout_item_id: index + 1,
+                entity_type:
+                  node.component_type === "plant"
+                    ? "case_hydraulic_plant"
+                    : "case_hydraulic_node",
+                entity_id: index + 1,
+                z_index: index,
+              };
+              if (node.component_type !== "plant") return base;
+              const units = (node.units ?? []).map((unit) => {
+                const points = unit.flow_power_curve?.points ?? [];
+                const summary: CurveSummary | null = points.length
+                  ? {
+                      curve_set_id: 910,
+                      version_number: 1,
+                      version_label: "v1",
+                      points,
+                    }
+                  : null;
+                return {
+                  ...unit,
+                  flow_power_curve: summary,
+                  available_curves: summary ? [summary] : [],
+                };
+              });
+              return {
+                ...base,
+                plant: node.plant ?? {
+                  non_modeled: false,
+                  min_power_mw: null,
+                  max_power_mw: null,
+                },
+                units,
+              };
+            }),
+            reaches: [],
+          };
+          return new Response(JSON.stringify({ diagram }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram/validate" &&
+          method === "POST"
+        ) {
+          return new Response(
+            JSON.stringify({
+              validation: {
+                ok: false,
+                summary: "Hydraulic topology has errors",
+                errors: [
+                  {
+                    code: "inactive_or_equal_unit_nodes",
+                    message:
+                      "Unit unit_1 requires distinct active intake and discharge nodes.",
+                    entity_type: "case_hydraulic_unit",
+                    entity_id: 1,
+                    technical_key: "unit_1",
+                  },
+                ],
+                warnings: [],
+              },
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Plant case" }),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("link", { name: "Abrir diagrama hidraulico" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Agregar union" }));
+    await user.click(screen.getByRole("button", { name: "Agregar union" }));
+    await user.click(screen.getByRole("button", { name: "Agregar central" }));
+
+    expect(screen.getByTestId("hydraulic-plant-plant_1")).toBeVisible();
+    await user.clear(screen.getByLabelText("Potencia maxima central plant_1"));
+    await user.type(
+      screen.getByLabelText("Potencia maxima central plant_1"),
+      "60",
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Agregar unidad plant_1" }),
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Nodo de toma unit_1"),
+      "junction_1",
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Nodo de descarga unit_1"),
+      "junction_2",
+    );
+    await user.clear(screen.getByLabelText("Potencia maxima unit_1"));
+    await user.type(screen.getByLabelText("Potencia maxima unit_1"), "30");
+    await user.clear(screen.getByLabelText("Caudal maximo unit_1"));
+    await user.type(screen.getByLabelText("Caudal maximo unit_1"), "40");
+
+    await user.click(
+      screen.getByRole("button", { name: "Agregar punto de curva unit_1" }),
+    );
+    await user.type(screen.getByLabelText("Caudal punto 1 unit_1"), "0");
+    await user.type(screen.getByLabelText("Potencia punto 1 unit_1"), "0");
+    await user.click(
+      screen.getByRole("button", { name: "Agregar punto de curva unit_1" }),
+    );
+    await user.type(screen.getByLabelText("Caudal punto 2 unit_1"), "40");
+    await user.type(screen.getByLabelText("Potencia punto 2 unit_1"), "30");
+
+    await user.click(screen.getByRole("button", { name: "Guardar diagrama" }));
+    expect(await screen.findByText("Estado: saved")).toBeVisible();
+
+    expect(lastPutBody).not.toBeNull();
+    const plantNode = lastPutBody!.nodes.find(
+      (node) => node.component_type === "plant",
+    )!;
+    expect(plantNode.plant?.max_power_mw).toBe(60);
+    expect(plantNode.units).toHaveLength(1);
+    const savedUnit = plantNode.units![0];
+    expect(savedUnit.technical_key).toBe("unit_1");
+    expect(savedUnit.intake_node_key).toBe("junction_1");
+    expect(savedUnit.discharge_node_key).toBe("junction_2");
+    expect(savedUnit.max_power_mw).toBe(30);
+    expect(savedUnit.max_flow_m3s).toBe(40);
+    expect(savedUnit.flow_power_curve?.points).toEqual([
+      { x_value: 0, y_value: 0 },
+      { x_value: 40, y_value: 30 },
+    ]);
+
+    // Saved curve is now selectable as an existing version.
+    expect(screen.getByLabelText("Version de curva unit_1")).toHaveValue("910");
+
+    await user.click(screen.getByRole("button", { name: "Validar topologia" }));
+    expect(
+      await screen.findByText("Hydraulic topology has errors"),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/distinct active intake and discharge nodes/),
     ).toBeVisible();
   });
 

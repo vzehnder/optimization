@@ -269,6 +269,16 @@
             "title": "Display Name",
             "type": "string"
           },
+          "plant": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HydraulicPlantParametersRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "reservoir": {
             "anyOf": [
               {
@@ -293,6 +303,13 @@
             "minLength": 1,
             "title": "Technical Key",
             "type": "string"
+          },
+          "units": {
+            "items": {
+              "$ref": "#/components/schemas/HydraulicUnitRequest"
+            },
+            "title": "Units",
+            "type": "array"
           },
           "x": {
             "title": "X",
@@ -405,6 +422,74 @@
         "title": "HydraulicDiagramViewportRequest",
         "type": "object"
       },
+      "HydraulicFlowPowerCurveRequest": {
+        "properties": {
+          "curve_set_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Curve Set Id"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/HydraulicCurvePointRequest"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "version_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Label"
+          }
+        },
+        "title": "HydraulicFlowPowerCurveRequest",
+        "type": "object"
+      },
+      "HydraulicPlantParametersRequest": {
+        "properties": {
+          "max_power_mw": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Power Mw"
+          },
+          "min_power_mw": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Power Mw"
+          },
+          "non_modeled": {
+            "default": false,
+            "title": "Non Modeled",
+            "type": "boolean"
+          }
+        },
+        "title": "HydraulicPlantParametersRequest",
+        "type": "object"
+      },
       "HydraulicReservoirParametersRequest": {
         "properties": {
           "initial_storage_hm3": {
@@ -487,6 +572,107 @@
           }
         },
         "title": "HydraulicStorageElevationCurveRequest",
+        "type": "object"
+      },
+      "HydraulicUnitRequest": {
+        "properties": {
+          "discharge_node_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discharge Node Key"
+          },
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "flow_power_curve": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HydraulicFlowPowerCurveRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "intake_node_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intake Node Key"
+          },
+          "is_active": {
+            "default": true,
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "max_flow_m3s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Flow M3S"
+          },
+          "max_power_mw": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Power Mw"
+          },
+          "min_flow_m3s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Flow M3S"
+          },
+          "min_power_mw": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Power Mw"
+          },
+          "technical_key": {
+            "minLength": 1,
+            "title": "Technical Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "technical_key",
+          "display_name"
+        ],
+        "title": "HydraulicUnitRequest",
         "type": "object"
       },
       "LoginRequest": {

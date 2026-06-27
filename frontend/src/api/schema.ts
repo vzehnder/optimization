@@ -940,10 +940,13 @@ export interface components {
             component_type: "reservoir" | "junction" | "plant";
             /** Display Name */
             display_name: string;
+            plant?: components["schemas"]["HydraulicPlantParametersRequest"] | null;
             reservoir?: components["schemas"]["HydraulicReservoirParametersRequest"] | null;
             storage_elevation_curve?: components["schemas"]["HydraulicStorageElevationCurveRequest"] | null;
             /** Technical Key */
             technical_key: string;
+            /** Units */
+            units?: components["schemas"]["HydraulicUnitRequest"][];
             /** X */
             x: number;
             /** Y */
@@ -990,6 +993,27 @@ export interface components {
              */
             zoom: number;
         };
+        /** HydraulicFlowPowerCurveRequest */
+        HydraulicFlowPowerCurveRequest: {
+            /** Curve Set Id */
+            curve_set_id?: number | null;
+            /** Points */
+            points?: components["schemas"]["HydraulicCurvePointRequest"][];
+            /** Version Label */
+            version_label?: string | null;
+        };
+        /** HydraulicPlantParametersRequest */
+        HydraulicPlantParametersRequest: {
+            /** Max Power Mw */
+            max_power_mw?: number | null;
+            /** Min Power Mw */
+            min_power_mw?: number | null;
+            /**
+             * Non Modeled
+             * @default false
+             */
+            non_modeled: boolean;
+        };
         /** HydraulicReservoirParametersRequest */
         HydraulicReservoirParametersRequest: {
             /** Initial Storage Hm3 */
@@ -1020,6 +1044,31 @@ export interface components {
             points?: components["schemas"]["HydraulicCurvePointRequest"][];
             /** Version Label */
             version_label?: string | null;
+        };
+        /** HydraulicUnitRequest */
+        HydraulicUnitRequest: {
+            /** Discharge Node Key */
+            discharge_node_key?: string | null;
+            /** Display Name */
+            display_name: string;
+            flow_power_curve?: components["schemas"]["HydraulicFlowPowerCurveRequest"] | null;
+            /** Intake Node Key */
+            intake_node_key?: string | null;
+            /**
+             * Is Active
+             * @default true
+             */
+            is_active: boolean;
+            /** Max Flow M3S */
+            max_flow_m3s?: number | null;
+            /** Max Power Mw */
+            max_power_mw?: number | null;
+            /** Min Flow M3S */
+            min_flow_m3s?: number | null;
+            /** Min Power Mw */
+            min_power_mw?: number | null;
+            /** Technical Key */
+            technical_key: string;
         };
         /** LoginRequest */
         LoginRequest: {

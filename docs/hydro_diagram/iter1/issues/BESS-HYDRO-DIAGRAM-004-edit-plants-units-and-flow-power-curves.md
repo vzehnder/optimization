@@ -1,6 +1,6 @@
 # BESS-HYDRO-DIAGRAM-004: Edit Plants, Units, And Flow-Power Curves
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/hydro_diagram/iter1/prd_hydro_diagram_editor.md`
@@ -22,22 +22,22 @@ for active plants that participate in the MVP solver path.
 
 ## Acceptance criteria
 
-- [ ] Selecting a plant opens a panel with plant label, optional aggregate
+- [x] Selecting a plant opens a panel with plant label, optional aggregate
       limits and a unit list.
-- [ ] The analyst can add, edit and disable generation-only units for the
+- [x] The analyst can add, edit and disable generation-only units for the
       plant.
-- [ ] Each unit can select active intake and discharge nodes.
-- [ ] Each unit can edit turbine-flow and power limits.
-- [ ] Each active unit can create or select one active `flow_power` curve.
-- [ ] Validation requires active plants to have active units unless explicitly
+- [x] Each unit can select active intake and discharge nodes.
+- [x] Each unit can edit turbine-flow and power limits.
+- [x] Each active unit can create or select one active `flow_power` curve.
+- [x] Validation requires active plants to have active units unless explicitly
       marked non-modeled.
-- [ ] Validation rejects unit intake/discharge nodes that are inactive or equal.
-- [ ] Validation rejects missing or invalid `flow_power` curve bindings for
+- [x] Validation rejects unit intake/discharge nodes that are inactive or equal.
+- [x] Validation rejects missing or invalid `flow_power` curve bindings for
       active units.
-- [ ] Backend tests cover plant/unit persistence, unit validation and curve
+- [x] Backend tests cover plant/unit persistence, unit validation and curve
       binding.
-- [ ] React tests cover the plant panel and unit subeditor.
-- [ ] The DB checkpoint records implemented plant, unit and flow-power curve
+- [x] React tests cover the plant panel and unit subeditor.
+- [x] The DB checkpoint records implemented plant, unit and flow-power curve
       state.
 
 ## Blocked by

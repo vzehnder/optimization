@@ -279,6 +279,23 @@ test("React hydraulic diagram persists reservoir parameters curves junction and 
     .selectOption("canal");
   await page.getByLabel("Etiqueta plant_1").fill("Plant Laja");
 
+  // Add a generation unit with intake/discharge nodes and a flow-power curve.
+  await page.getByRole("button", { name: "Agregar unidad plant_1" }).click();
+  await page.getByLabel("Nodo de toma unit_1").selectOption("reservoir_1");
+  await page.getByLabel("Nodo de descarga unit_1").selectOption("junction_1");
+  await page.getByLabel("Potencia maxima unit_1").fill("30");
+  await page.getByLabel("Caudal maximo unit_1").fill("40");
+  await page
+    .getByRole("button", { name: "Agregar punto de curva unit_1" })
+    .click();
+  await page.getByLabel("Caudal punto 1 unit_1").fill("0");
+  await page.getByLabel("Potencia punto 1 unit_1").fill("0");
+  await page
+    .getByRole("button", { name: "Agregar punto de curva unit_1" })
+    .click();
+  await page.getByLabel("Caudal punto 2 unit_1").fill("40");
+  await page.getByLabel("Potencia punto 2 unit_1").fill("30");
+
   await page.getByLabel("Almacenamiento minimo reservoir_1").fill("5");
   await page.getByLabel("Almacenamiento maximo reservoir_1").fill("50");
   await page.getByLabel("Almacenamiento inicial reservoir_1").fill("20");
@@ -323,6 +340,15 @@ test("React hydraulic diagram persists reservoir parameters curves junction and 
   await expect(page.getByLabel("Version de curva reservoir_1")).not.toHaveValue(
     "",
   );
+  await expect(page.getByLabel("Nodo de toma unit_1")).toHaveValue(
+    "reservoir_1",
+  );
+  await expect(page.getByLabel("Nodo de descarga unit_1")).toHaveValue(
+    "junction_1",
+  );
+  await expect(page.getByLabel("Caudal maximo unit_1")).toHaveValue("40");
+  await expect(page.getByLabel("Potencia punto 2 unit_1")).toHaveValue("30");
+  await expect(page.getByLabel("Version de curva unit_1")).not.toHaveValue("");
 });
 
 test("React admin users and project access cover assignment, removal, deactivation, and denials", async ({

@@ -370,6 +370,32 @@ export interface HydraulicStorageElevationCurveWrite {
   points: HydraulicCurvePoint[];
 }
 
+export type HydraulicCurveWrite = HydraulicStorageElevationCurveWrite;
+
+export interface HydraulicPlantParameters {
+  non_modeled: boolean;
+  min_power_mw: number | null;
+  max_power_mw: number | null;
+}
+
+export interface HydraulicUnitWrite {
+  technical_key: string;
+  display_name: string;
+  is_active: boolean;
+  intake_node_key: string | null;
+  discharge_node_key: string | null;
+  min_power_mw: number | null;
+  max_power_mw: number | null;
+  min_flow_m3s: number | null;
+  max_flow_m3s: number | null;
+  flow_power_curve?: HydraulicCurveWrite | null;
+}
+
+export interface HydraulicUnit extends HydraulicUnitWrite {
+  flow_power_curve: HydraulicCurveSummary | null;
+  available_curves: HydraulicCurveSummary[];
+}
+
 export interface HydraulicDiagramNodeWrite {
   component_type: HydraulicComponentType;
   technical_key: string;
@@ -378,6 +404,8 @@ export interface HydraulicDiagramNodeWrite {
   y: number;
   reservoir?: HydraulicReservoirParameters | null;
   storage_elevation_curve?: HydraulicStorageElevationCurveWrite | null;
+  plant?: HydraulicPlantParameters | null;
+  units?: HydraulicUnitWrite[];
 }
 
 export interface HydraulicDiagramNode extends HydraulicDiagramNodeWrite {
@@ -388,6 +416,8 @@ export interface HydraulicDiagramNode extends HydraulicDiagramNodeWrite {
   reservoir: HydraulicReservoirParameters | null;
   storage_elevation_curve: HydraulicCurveSummary | null;
   available_curves: HydraulicCurveSummary[];
+  plant: HydraulicPlantParameters | null;
+  units: HydraulicUnit[];
 }
 
 export interface HydraulicDiagramReachWrite {

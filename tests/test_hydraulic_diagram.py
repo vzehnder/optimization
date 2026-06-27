@@ -485,6 +485,268 @@ class HydraulicDiagramApiTests(unittest.TestCase):
         self.assertIn("storage_bounds_outside_curve_domain", codes)
         self.assertIn("invalid_terminal_settings", codes)
 
+    def _plant_node(self, diagram):
+        return next(
+            node for node in diagram["nodes"] if node["component_type"] == "plant"
+        )
+
+    def _save_plant(self, revision, *, plant=None, units=None, extra_nodes=None):
+        nodes = list(extra_nodes or [])
+        plant_node = {
+            "component_type": "plant",
+            "technical_key": "plant_laja",
+            "display_name": "Plant Laja",
+            "x": 480.0,
+            "y": 140.0,
+        }
+        if plant is not None:
+            plant_node["plant"] = plant
+        if units is not None:
+            plant_node["units"] = units
+        nodes.append(plant_node)
+        return self.client.put(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram",
+            json={"revision": revision, "nodes": nodes},
+        )
+
+    def _intake_discharge_nodes(self):
+        return [
+            {
+                "component_type": "junction",
+                "technical_key": "junction_in",
+                "display_name": "Intake",
+                "x": 120.0,
+                "y": 80.0,
+            },
+            {
+                "component_type": "junction",
+                "technical_key": "junction_out",
+                "display_name": "Tailrace",
+                "x": 300.0,
+                "y": 110.0,
+            },
+        ]
+
+    def test_plant_units_and_flow_power_curve_persist_and_reload(self):
+        created = self._create_diagram()
+        unit = {
+            "technical_key": "unit_1",
+            "display_name": "Unit 1",
+            "is_active": True,
+            "intake_node_key": "junction_in",
+            "discharge_node_key": "junction_out",
+            "min_power_mw": 0.0,
+            "max_power_mw": 30.0,
+            "min_flow_m3s": 0.0,
+            "max_flow_m3s": 40.0,
+            "flow_power_curve": {
+                "version_label": "v1",
+                "points": [
+                    {"x_value": 0.0, "y_value": 0.0},
+                    {"x_value": 40.0, "y_value": 30.0},
+                ],
+            },
+        }
+        response = self._save_plant(
+            created["revision"],
+            plant={"non_modeled": False, "min_power_mw": None, "max_power_mw": 60.0},
+            units=[unit],
+            extra_nodes=self._intake_discharge_nodes(),
+        )
+        self.assertEqual(response.status_code, 200)
+        node = self._plant_node(response.json()["diagram"])
+        self.assertEqual(node["plant"]["non_modeled"], False)
+        self.assertIsNone(node["plant"]["min_power_mw"])
+        self.assertEqual(node["plant"]["max_power_mw"], 60.0)
+        self.assertEqual(len(node["units"]), 1)
+        saved_unit = node["units"][0]
+        self.assertEqual(saved_unit["technical_key"], "unit_1")
+        self.assertEqual(saved_unit["is_active"], True)
+        self.assertEqual(saved_unit["intake_node_key"], "junction_in")
+        self.assertEqual(saved_unit["discharge_node_key"], "junction_out")
+        self.assertEqual(saved_unit["max_power_mw"], 30.0)
+        self.assertEqual(saved_unit["max_flow_m3s"], 40.0)
+        self.assertEqual(saved_unit["flow_power_curve"]["version_number"], 1)
+        self.assertEqual(saved_unit["flow_power_curve"]["version_label"], "v1")
+        self.assertEqual(
+            saved_unit["flow_power_curve"]["points"],
+            [
+                {"x_value": 0.0, "y_value": 0.0},
+                {"x_value": 40.0, "y_value": 30.0},
+            ],
+        )
+        self.assertEqual(len(saved_unit["available_curves"]), 1)
+        first_curve_set_id = saved_unit["flow_power_curve"]["curve_set_id"]
+
+        reloaded = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram"
+        ).json()["diagram"]
+        self.assertEqual(self._plant_node(reloaded), node)
+
+        # Editing curve points to a new shape creates a new version.
+        edited_unit = dict(unit)
+        edited_unit["flow_power_curve"] = {
+            "version_label": "v2",
+            "points": [
+                {"x_value": 0.0, "y_value": 0.0},
+                {"x_value": 40.0, "y_value": 28.0},
+            ],
+        }
+        edited = self._save_plant(
+            reloaded["revision"],
+            plant={"non_modeled": False, "min_power_mw": None, "max_power_mw": 60.0},
+            units=[edited_unit],
+            extra_nodes=self._intake_discharge_nodes(),
+        )
+        edited_unit_out = self._plant_node(edited.json()["diagram"])["units"][0]
+        self.assertEqual(edited_unit_out["flow_power_curve"]["version_number"], 2)
+        self.assertNotEqual(
+            edited_unit_out["flow_power_curve"]["curve_set_id"], first_curve_set_id
+        )
+        self.assertEqual(len(edited_unit_out["available_curves"]), 2)
+
+        # Selecting an existing version by id reuses it without a new version.
+        selected_unit = dict(unit)
+        selected_unit["flow_power_curve"] = {"curve_set_id": first_curve_set_id}
+        selected = self._save_plant(
+            edited.json()["diagram"]["revision"],
+            plant={"non_modeled": False, "min_power_mw": None, "max_power_mw": 60.0},
+            units=[selected_unit],
+            extra_nodes=self._intake_discharge_nodes(),
+        )
+        selected_unit_out = self._plant_node(selected.json()["diagram"])["units"][0]
+        self.assertEqual(
+            selected_unit_out["flow_power_curve"]["curve_set_id"], first_curve_set_id
+        )
+        self.assertEqual(selected_unit_out["flow_power_curve"]["version_number"], 1)
+        self.assertEqual(len(selected_unit_out["available_curves"]), 2)
+
+    def _valid_unit(self, **overrides):
+        unit = {
+            "technical_key": "unit_1",
+            "display_name": "Unit 1",
+            "is_active": True,
+            "intake_node_key": "junction_in",
+            "discharge_node_key": "junction_out",
+            "min_power_mw": 0.0,
+            "max_power_mw": 30.0,
+            "min_flow_m3s": 0.0,
+            "max_flow_m3s": 40.0,
+            "flow_power_curve": {
+                "version_label": "v1",
+                "points": [
+                    {"x_value": 0.0, "y_value": 0.0},
+                    {"x_value": 40.0, "y_value": 30.0},
+                ],
+            },
+        }
+        unit.update(overrides)
+        return unit
+
+    def test_validation_requires_active_plant_to_have_units(self):
+        created = self._create_diagram()
+        save = self._save_plant(
+            created["revision"],
+            plant={"non_modeled": False},
+            units=[],
+        )
+        self.assertEqual(save.status_code, 200)
+        validation = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/validate"
+        ).json()["validation"]
+        self.assertFalse(validation["ok"])
+        codes = {error["code"] for error in validation["errors"]}
+        self.assertIn("plant_without_active_units", codes)
+        plant_error = next(
+            error
+            for error in validation["errors"]
+            if error["code"] == "plant_without_active_units"
+        )
+        self.assertEqual(plant_error["entity_type"], "case_hydraulic_plant")
+        self.assertEqual(plant_error["technical_key"], "plant_laja")
+
+    def test_validation_skips_non_modeled_plant_without_units(self):
+        created = self._create_diagram()
+        save = self._save_plant(
+            created["revision"],
+            plant={"non_modeled": True},
+            units=[],
+        )
+        self.assertEqual(save.status_code, 200)
+        validation = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/validate"
+        ).json()["validation"]
+        codes = {error["code"] for error in validation["errors"]}
+        self.assertNotIn("plant_without_active_units", codes)
+
+    def test_validation_rejects_bad_unit_nodes_and_flow_power_curve(self):
+        created = self._create_diagram()
+        equal_no_curve = self._valid_unit(
+            intake_node_key="junction_in",
+            discharge_node_key="junction_in",
+            flow_power_curve=None,
+        )
+        save = self._save_plant(
+            created["revision"],
+            plant={"non_modeled": False},
+            units=[equal_no_curve],
+            extra_nodes=self._intake_discharge_nodes(),
+        )
+        self.assertEqual(save.status_code, 200)
+        validation = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/validate"
+        ).json()["validation"]
+        self.assertFalse(validation["ok"])
+        codes = {error["code"] for error in validation["errors"]}
+        self.assertIn("inactive_or_equal_unit_nodes", codes)
+        self.assertIn("missing_flow_power_curve", codes)
+        for error in validation["errors"]:
+            if error["code"] in {
+                "inactive_or_equal_unit_nodes",
+                "missing_flow_power_curve",
+            }:
+                self.assertEqual(error["entity_type"], "case_hydraulic_unit")
+                self.assertEqual(error["technical_key"], "unit_1")
+
+    def test_validation_rejects_invalid_flow_power_curve_shape(self):
+        created = self._create_diagram()
+        bad_curve_unit = self._valid_unit(
+            flow_power_curve={
+                "version_label": "bad",
+                "points": [
+                    {"x_value": 40.0, "y_value": 30.0},
+                    {"x_value": 10.0, "y_value": 20.0},
+                ],
+            }
+        )
+        save = self._save_plant(
+            created["revision"],
+            plant={"non_modeled": False},
+            units=[bad_curve_unit],
+            extra_nodes=self._intake_discharge_nodes(),
+        )
+        self.assertEqual(save.status_code, 200)
+        validation = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/validate"
+        ).json()["validation"]
+        codes = {error["code"] for error in validation["errors"]}
+        self.assertIn("invalid_flow_power_curve", codes)
+
+    def test_validation_passes_for_complete_plant_with_unit(self):
+        created = self._create_diagram()
+        save = self._save_plant(
+            created["revision"],
+            plant={"non_modeled": False},
+            units=[self._valid_unit()],
+            extra_nodes=self._intake_discharge_nodes(),
+        )
+        self.assertEqual(save.status_code, 200)
+        validation = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/validate"
+        ).json()["validation"]
+        self.assertTrue(validation["ok"])
+        self.assertEqual(validation["errors"], [])
+
     def test_validation_passes_for_complete_reservoir(self):
         created = self._create_diagram()
         reservoir = {

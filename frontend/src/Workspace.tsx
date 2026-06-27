@@ -43,10 +43,13 @@ import {
   type HydraulicDiagramReachWrite,
   type HydraulicDiagramValidation,
   type HydraulicDiagramViewport,
+  type HydraulicCurveWrite,
+  type HydraulicPlantParameters,
   type HydraulicReachType,
   type HydraulicReservoirParameters,
   type HydraulicStorageElevationCurveWrite,
   type HydraulicTerminalCondition,
+  type HydraulicUnitWrite,
   type Publication,
   type PublicationPayload,
   type Project,
@@ -996,6 +999,29 @@ function defaultReservoirParameters(): HydraulicReservoirParameters {
   };
 }
 
+function defaultPlantParameters(): HydraulicPlantParameters {
+  return { non_modeled: false, min_power_mw: null, max_power_mw: null };
+}
+
+function emptyCurve(): HydraulicCurveWrite {
+  return { curve_set_id: null, version_label: null, points: [] };
+}
+
+function defaultHydraulicUnit(technicalKey: string): HydraulicUnitWrite {
+  return {
+    technical_key: technicalKey,
+    display_name: technicalKey,
+    is_active: true,
+    intake_node_key: null,
+    discharge_node_key: null,
+    min_power_mw: null,
+    max_power_mw: null,
+    min_flow_m3s: null,
+    max_flow_m3s: null,
+    flow_power_curve: emptyCurve(),
+  };
+}
+
 function editableHydraulicNodes(
   diagram: HydraulicDiagram,
 ): HydraulicDiagramNodeWrite[] {
@@ -1007,20 +1033,48 @@ function editableHydraulicNodes(
       x: node.x,
       y: node.y,
     };
-    if (node.component_type !== "reservoir") return base;
-    return {
-      ...base,
-      reservoir: node.reservoir ?? defaultReservoirParameters(),
-      storage_elevation_curve: node.storage_elevation_curve
-        ? {
-            curve_set_id: node.storage_elevation_curve.curve_set_id,
-            version_label: node.storage_elevation_curve.version_label,
-            points: node.storage_elevation_curve.points.map((point) => ({
-              ...point,
-            })),
-          }
-        : { curve_set_id: null, version_label: null, points: [] },
-    };
+    if (node.component_type === "reservoir") {
+      return {
+        ...base,
+        reservoir: node.reservoir ?? defaultReservoirParameters(),
+        storage_elevation_curve: node.storage_elevation_curve
+          ? {
+              curve_set_id: node.storage_elevation_curve.curve_set_id,
+              version_label: node.storage_elevation_curve.version_label,
+              points: node.storage_elevation_curve.points.map((point) => ({
+                ...point,
+              })),
+            }
+          : { curve_set_id: null, version_label: null, points: [] },
+      };
+    }
+    if (node.component_type === "plant") {
+      return {
+        ...base,
+        plant: node.plant ?? defaultPlantParameters(),
+        units: (node.units ?? []).map((unit) => ({
+          technical_key: unit.technical_key,
+          display_name: unit.display_name,
+          is_active: unit.is_active,
+          intake_node_key: unit.intake_node_key,
+          discharge_node_key: unit.discharge_node_key,
+          min_power_mw: unit.min_power_mw,
+          max_power_mw: unit.max_power_mw,
+          min_flow_m3s: unit.min_flow_m3s,
+          max_flow_m3s: unit.max_flow_m3s,
+          flow_power_curve: unit.flow_power_curve
+            ? {
+                curve_set_id: unit.flow_power_curve.curve_set_id,
+                version_label: unit.flow_power_curve.version_label,
+                points: unit.flow_power_curve.points.map((point) => ({
+                  ...point,
+                })),
+              }
+            : emptyCurve(),
+        })),
+      };
+    }
+    return base;
   });
 }
 
@@ -1034,6 +1088,30 @@ function curvesByNodeKey(
     }
   }
   return map;
+}
+
+function unitCurvesByKey(
+  diagram: HydraulicDiagram,
+): Record<string, HydraulicCurveSummary[]> {
+  const map: Record<string, HydraulicCurveSummary[]> = {};
+  for (const node of diagram.nodes) {
+    if (node.component_type === "plant") {
+      for (const unit of node.units ?? []) {
+        map[unit.technical_key] = unit.available_curves ?? [];
+      }
+    }
+  }
+  return map;
+}
+
+function nextHydraulicUnitKey(nodes: HydraulicDiagramNodeWrite[]): string {
+  const existing = new Set<string>();
+  for (const node of nodes) {
+    for (const unit of node.units ?? []) existing.add(unit.technical_key);
+  }
+  let index = 1;
+  while (existing.has(`unit_${index}`)) index += 1;
+  return `unit_${index}`;
 }
 
 function editableHydraulicReaches(
@@ -1585,6 +1663,354 @@ function HydraulicReservoirPanel({
   );
 }
 
+function HydraulicUnitSubeditor({
+  plantKey,
+  unit,
+  nodeKeys,
+  availableCurves,
+  updateUnit,
+  removeUnit,
+  updateUnitCurve,
+}: {
+  plantKey: string;
+  unit: HydraulicUnitWrite;
+  nodeKeys: string[];
+  availableCurves: HydraulicCurveSummary[];
+  updateUnit: (
+    plantKey: string,
+    unitKey: string,
+    patch: Partial<HydraulicUnitWrite>,
+  ) => void;
+  removeUnit: (plantKey: string, unitKey: string) => void;
+  updateUnitCurve: (
+    plantKey: string,
+    unitKey: string,
+    curve: HydraulicCurveWrite,
+  ) => void;
+}) {
+  const key = unit.technical_key;
+  const curve = unit.flow_power_curve ?? emptyCurve();
+  const points = curve.points;
+
+  function setPoints(nextPoints: HydraulicCurvePoint[]) {
+    updateUnitCurve(plantKey, key, {
+      curve_set_id: null,
+      version_label: curve.version_label ?? null,
+      points: nextPoints,
+    });
+  }
+
+  function numberField(
+    label: string,
+    field: keyof HydraulicUnitWrite,
+    value: number | null,
+  ) {
+    return (
+      <label htmlFor={`unit-${field}-${key}`}>
+        <span>
+          {label} {key}
+        </span>
+        <input
+          id={`unit-${field}-${key}`}
+          type="number"
+          value={value ?? ""}
+          onChange={(event) =>
+            updateUnit(plantKey, key, {
+              [field]:
+                event.target.value === "" ? null : Number(event.target.value),
+            } as Partial<HydraulicUnitWrite>)
+          }
+        />
+      </label>
+    );
+  }
+
+  return (
+    <li className="hydraulic-unit" data-testid={`hydraulic-unit-${key}`}>
+      <div className="draft-field-grid">
+        <label htmlFor={`unit-label-${key}`}>
+          <span>Etiqueta unidad {key}</span>
+          <input
+            id={`unit-label-${key}`}
+            type="text"
+            value={unit.display_name}
+            onChange={(event) =>
+              updateUnit(plantKey, key, { display_name: event.target.value })
+            }
+          />
+        </label>
+        <label htmlFor={`unit-active-${key}`}>
+          <span>Activa {key}</span>
+          <input
+            id={`unit-active-${key}`}
+            type="checkbox"
+            checked={unit.is_active}
+            onChange={(event) =>
+              updateUnit(plantKey, key, { is_active: event.target.checked })
+            }
+          />
+        </label>
+        <label htmlFor={`unit-intake-${key}`}>
+          <span>Nodo de toma {key}</span>
+          <select
+            id={`unit-intake-${key}`}
+            value={unit.intake_node_key ?? ""}
+            onChange={(event) =>
+              updateUnit(plantKey, key, {
+                intake_node_key: event.target.value || null,
+              })
+            }
+          >
+            <option value="">Sin nodo</option>
+            {nodeKeys.map((nodeKey) => (
+              <option key={nodeKey} value={nodeKey}>
+                {nodeKey}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label htmlFor={`unit-discharge-${key}`}>
+          <span>Nodo de descarga {key}</span>
+          <select
+            id={`unit-discharge-${key}`}
+            value={unit.discharge_node_key ?? ""}
+            onChange={(event) =>
+              updateUnit(plantKey, key, {
+                discharge_node_key: event.target.value || null,
+              })
+            }
+          >
+            <option value="">Sin nodo</option>
+            {nodeKeys.map((nodeKey) => (
+              <option key={nodeKey} value={nodeKey}>
+                {nodeKey}
+              </option>
+            ))}
+          </select>
+        </label>
+        {numberField("Potencia minima", "min_power_mw", unit.min_power_mw)}
+        {numberField("Potencia maxima", "max_power_mw", unit.max_power_mw)}
+        {numberField("Caudal minimo", "min_flow_m3s", unit.min_flow_m3s)}
+        {numberField("Caudal maximo", "max_flow_m3s", unit.max_flow_m3s)}
+      </div>
+      <div className="unit-curve">
+        <div className="draft-section-heading">
+          <h4>Curva caudal-potencia {key}</h4>
+          <div className="draft-actions">
+            {availableCurves.length ? (
+              <label htmlFor={`unit-curve-version-${key}`}>
+                <span>Version de curva {key}</span>
+                <select
+                  id={`unit-curve-version-${key}`}
+                  value={curve.curve_set_id ?? ""}
+                  onChange={(event) => {
+                    const selectedId = Number(event.target.value);
+                    const selected = availableCurves.find(
+                      (option) => option.curve_set_id === selectedId,
+                    );
+                    if (!selected) return;
+                    updateUnitCurve(plantKey, key, {
+                      curve_set_id: selected.curve_set_id,
+                      version_label: selected.version_label,
+                      points: selected.points.map((point) => ({ ...point })),
+                    });
+                  }}
+                >
+                  <option value="">Curva editada</option>
+                  {availableCurves.map((option) => (
+                    <option key={option.curve_set_id} value={option.curve_set_id}>
+                      {option.version_label} (v{option.version_number})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setPoints([...points, { x_value: 0, y_value: 0 }])}
+            >
+              Agregar punto de curva {key}
+            </button>
+          </div>
+        </div>
+        {points.length ? (
+          <ul className="resource-list unit-curve-points">
+            {points.map((point, index) => (
+              <li key={index}>
+                <label htmlFor={`unit-curve-x-${key}-${index}`}>
+                  <span>
+                    Caudal punto {index + 1} {key}
+                  </span>
+                  <input
+                    id={`unit-curve-x-${key}-${index}`}
+                    type="number"
+                    value={point.x_value}
+                    onChange={(event) =>
+                      setPoints(
+                        points.map((current, currentIndex) =>
+                          currentIndex === index
+                            ? { ...current, x_value: Number(event.target.value) }
+                            : current,
+                        ),
+                      )
+                    }
+                  />
+                </label>
+                <label htmlFor={`unit-curve-y-${key}-${index}`}>
+                  <span>
+                    Potencia punto {index + 1} {key}
+                  </span>
+                  <input
+                    id={`unit-curve-y-${key}-${index}`}
+                    type="number"
+                    value={point.y_value}
+                    onChange={(event) =>
+                      setPoints(
+                        points.map((current, currentIndex) =>
+                          currentIndex === index
+                            ? { ...current, y_value: Number(event.target.value) }
+                            : current,
+                        ),
+                      )
+                    }
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="secondary-action"
+                  onClick={() =>
+                    setPoints(
+                      points.filter((_, currentIndex) => currentIndex !== index),
+                    )
+                  }
+                >
+                  Quitar punto {index + 1} {key}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <EmptyState>Agrega puntos de caudal y potencia.</EmptyState>
+        )}
+      </div>
+      <button
+        type="button"
+        className="secondary-action"
+        onClick={() => removeUnit(plantKey, key)}
+      >
+        Quitar unidad {key}
+      </button>
+    </li>
+  );
+}
+
+function HydraulicPlantPanel({
+  node,
+  nodeKeys,
+  unitCurves,
+  updatePlant,
+  addUnit,
+  updateUnit,
+  removeUnit,
+  updateUnitCurve,
+}: {
+  node: HydraulicDiagramNodeWrite;
+  nodeKeys: string[];
+  unitCurves: Record<string, HydraulicCurveSummary[]>;
+  updatePlant: (
+    plantKey: string,
+    patch: Partial<HydraulicPlantParameters>,
+  ) => void;
+  addUnit: (plantKey: string) => void;
+  updateUnit: (
+    plantKey: string,
+    unitKey: string,
+    patch: Partial<HydraulicUnitWrite>,
+  ) => void;
+  removeUnit: (plantKey: string, unitKey: string) => void;
+  updateUnitCurve: (
+    plantKey: string,
+    unitKey: string,
+    curve: HydraulicCurveWrite,
+  ) => void;
+}) {
+  const key = node.technical_key;
+  const plant = node.plant ?? defaultPlantParameters();
+  const units = node.units ?? [];
+  return (
+    <li className="hydraulic-plant-panel" data-testid={`hydraulic-plant-${key}`}>
+      <strong>{node.display_name}</strong>
+      <div className="plant-grid">
+        <label htmlFor={`plant-non-modeled-${key}`}>
+          <span>No modelada {key}</span>
+          <input
+            id={`plant-non-modeled-${key}`}
+            type="checkbox"
+            checked={plant.non_modeled}
+            onChange={(event) =>
+              updatePlant(key, { non_modeled: event.target.checked })
+            }
+          />
+        </label>
+        <label htmlFor={`plant-min-power-${key}`}>
+          <span>Potencia minima central {key}</span>
+          <input
+            id={`plant-min-power-${key}`}
+            type="number"
+            value={plant.min_power_mw ?? ""}
+            onChange={(event) =>
+              updatePlant(key, {
+                min_power_mw:
+                  event.target.value === "" ? null : Number(event.target.value),
+              })
+            }
+          />
+        </label>
+        <label htmlFor={`plant-max-power-${key}`}>
+          <span>Potencia maxima central {key}</span>
+          <input
+            id={`plant-max-power-${key}`}
+            type="number"
+            value={plant.max_power_mw ?? ""}
+            onChange={(event) =>
+              updatePlant(key, {
+                max_power_mw:
+                  event.target.value === "" ? null : Number(event.target.value),
+              })
+            }
+          />
+        </label>
+      </div>
+      <div className="plant-units">
+        <div className="draft-section-heading">
+          <h3>Unidades {key}</h3>
+          <button type="button" onClick={() => addUnit(key)}>
+            Agregar unidad {key}
+          </button>
+        </div>
+        {units.length ? (
+          <ul className="resource-list hydraulic-unit-list">
+            {units.map((unit) => (
+              <HydraulicUnitSubeditor
+                key={unit.technical_key}
+                plantKey={key}
+                unit={unit}
+                nodeKeys={nodeKeys}
+                availableCurves={unitCurves[unit.technical_key] ?? []}
+                updateUnit={updateUnit}
+                removeUnit={removeUnit}
+                updateUnitCurve={updateUnitCurve}
+              />
+            ))}
+          </ul>
+        ) : (
+          <EmptyState>Agrega una unidad generadora a esta central.</EmptyState>
+        )}
+      </div>
+    </li>
+  );
+}
+
 function HydraulicDiagramEditor({
   scenario,
   project,
@@ -1615,6 +2041,9 @@ function HydraulicDiagramEditor({
   const [availableCurves, setAvailableCurves] = useState<
     Record<string, HydraulicCurveSummary[]>
   >(() => curvesByNodeKey(initialDiagram));
+  const [unitCurves, setUnitCurves] = useState<
+    Record<string, HydraulicCurveSummary[]>
+  >(() => unitCurvesByKey(initialDiagram));
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -1636,6 +2065,7 @@ function HydraulicDiagramEditor({
       setNodes(editableHydraulicNodes(savedDiagram));
       setReaches(editableHydraulicReaches(savedDiagram));
       setAvailableCurves(curvesByNodeKey(savedDiagram));
+      setUnitCurves(unitCurvesByKey(savedDiagram));
       setRevision(savedDiagram.revision);
       setViewport(defaultHydraulicViewport(savedDiagram));
       setSaveStatus("saved");
@@ -1656,6 +2086,7 @@ function HydraulicDiagramEditor({
       setNodes(editableHydraulicNodes(serverDiagram));
       setReaches(editableHydraulicReaches(serverDiagram));
       setAvailableCurves(curvesByNodeKey(serverDiagram));
+      setUnitCurves(unitCurvesByKey(serverDiagram));
       setRevision(serverDiagram.revision);
       setViewport(defaultHydraulicViewport(serverDiagram));
       setSaveStatus("saved");
@@ -1701,6 +2132,10 @@ function HydraulicDiagramEditor({
           points: [],
         };
       }
+      if (componentType === "plant") {
+        nextNode.plant = defaultPlantParameters();
+        nextNode.units = [];
+      }
       return [...current, nextNode];
     });
     markDirty();
@@ -1738,6 +2173,84 @@ function HydraulicDiagramEditor({
       ),
     );
     markDirty();
+  }
+
+  function updatePlant(
+    plantKey: string,
+    patch: Partial<HydraulicPlantParameters>,
+  ) {
+    setNodes((current) =>
+      current.map((node) =>
+        node.technical_key === plantKey
+          ? {
+              ...node,
+              plant: { ...(node.plant ?? defaultPlantParameters()), ...patch },
+            }
+          : node,
+      ),
+    );
+    markDirty();
+  }
+
+  function mapUnits(
+    plantKey: string,
+    mapper: (units: HydraulicUnitWrite[]) => HydraulicUnitWrite[],
+  ) {
+    setNodes((current) =>
+      current.map((node) =>
+        node.technical_key === plantKey
+          ? { ...node, units: mapper(node.units ?? []) }
+          : node,
+      ),
+    );
+    markDirty();
+  }
+
+  function addUnit(plantKey: string) {
+    setNodes((current) => {
+      const unitKey = nextHydraulicUnitKey(current);
+      return current.map((node) =>
+        node.technical_key === plantKey
+          ? {
+              ...node,
+              units: [...(node.units ?? []), defaultHydraulicUnit(unitKey)],
+            }
+          : node,
+      );
+    });
+    markDirty();
+  }
+
+  function updateUnit(
+    plantKey: string,
+    unitKey: string,
+    patch: Partial<HydraulicUnitWrite>,
+  ) {
+    mapUnits(plantKey, (units) =>
+      units.map((unit) =>
+        unit.technical_key === unitKey ? { ...unit, ...patch } : unit,
+      ),
+    );
+  }
+
+  function removeUnit(plantKey: string, unitKey: string) {
+    mapUnits(plantKey, (units) =>
+      units.filter((unit) => unit.technical_key !== unitKey),
+    );
+  }
+
+  function updateUnitCurve(
+    plantKey: string,
+    unitKey: string,
+    curve: HydraulicCurveWrite,
+  ) {
+    mapUnits(plantKey, (units) =>
+      units.map((unit) =>
+        unit.technical_key === unitKey
+          ? { ...unit, flow_power_curve: curve }
+          : unit,
+      ),
+    );
   }
 
   function updateNode(
@@ -1942,6 +2455,36 @@ function HydraulicDiagramEditor({
           ) : (
             <EmptyState>
               Agrega un embalse para editar almacenamiento y curva cota-volumen.
+            </EmptyState>
+          )}
+        </section>
+        <section className="workspace-section" aria-labelledby="plant-tools">
+          <div className="draft-section-heading">
+            <h2 id="plant-tools">Centrales y unidades</h2>
+          </div>
+          {nodes.some((node) => node.component_type === "plant") ? (
+            <ul className="resource-list hydraulic-plant-list">
+              {nodes
+                .filter((node) => node.component_type === "plant")
+                .map((node) => (
+                  <HydraulicPlantPanel
+                    key={node.technical_key}
+                    node={node}
+                    nodeKeys={nodes
+                      .filter((other) => other.component_type !== "plant")
+                      .map((other) => other.technical_key)}
+                    unitCurves={unitCurves}
+                    updatePlant={updatePlant}
+                    addUnit={addUnit}
+                    updateUnit={updateUnit}
+                    removeUnit={removeUnit}
+                    updateUnitCurve={updateUnitCurve}
+                  />
+                ))}
+            </ul>
+          ) : (
+            <EmptyState>
+              Agrega una central para editar sus unidades generadoras.
             </EmptyState>
           )}
         </section>
