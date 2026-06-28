@@ -1233,10 +1233,31 @@ describe("application shell", () => {
       screen.getByLabelText("Etiqueta reach_reservoir_1_junction_1"),
       "Spillway A",
     );
+    await user.type(
+      screen.getByLabelText("Caudal minimo m3/s reach_reservoir_1_junction_1"),
+      "4",
+    );
+    await user.type(
+      screen.getByLabelText(
+        "Penalidad vertedero USD/hm3 reach_reservoir_1_junction_1",
+      ),
+      "120",
+    );
+    expect(
+      screen.getByTestId("reach-minimum-flow-reach_reservoir_1_junction_1"),
+    ).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Guardar diagrama" }));
     expect(await screen.findByText("Estado: saved")).toBeVisible();
     expect(screen.getByDisplayValue("Spillway A")).toBeVisible();
+    expect(
+      screen.getByLabelText("Caudal minimo m3/s reach_reservoir_1_junction_1"),
+    ).toHaveValue(4);
+    expect(
+      screen.getByLabelText(
+        "Penalidad vertedero USD/hm3 reach_reservoir_1_junction_1",
+      ),
+    ).toHaveValue(120);
 
     await user.click(screen.getByRole("button", { name: "Validar topologia" }));
     expect(

@@ -453,6 +453,160 @@ class HydraulicDiagramApiTests(unittest.TestCase):
             ],
         )
 
+    def _min_flow_series(self, *values, version_label="v1"):
+        return {
+            "version_label": version_label,
+            "points": [
+                {
+                    "timestamp": f"2026-01-01T{index:02d}:00:00",
+                    "duration_hours": 1.0,
+                    "value_m3s": float(value),
+                }
+                for index, value in enumerate(values)
+            ],
+        }
+
+    def _save_reach_with_controls(self, **reach_overrides):
+        created = self._create_diagram()
+        reach = {
+            "technical_key": "reach_alpha_junction",
+            "display_name": "Alpha to Junction",
+            "from_node_key": "junction_up",
+            "to_node_key": "junction_a",
+            "reach_type": "river",
+        }
+        reach.update(reach_overrides)
+        return self.client.put(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram",
+            json={
+                "revision": created["revision"],
+                "nodes": [
+                    {
+                        "component_type": "junction",
+                        "technical_key": "junction_up",
+                        "display_name": "Junction Up",
+                        "x": 120.0,
+                        "y": 80.0,
+                    },
+                    {
+                        "component_type": "junction",
+                        "technical_key": "junction_a",
+                        "display_name": "Junction A",
+                        "x": 300.0,
+                        "y": 110.0,
+                    },
+                ],
+                "reaches": [reach],
+            },
+        )
+
+    def test_reach_minimum_flow_and_spill_penalty_persist_and_reload(self):
+        response = self._save_reach_with_controls(
+            reach_type="spillway",
+            flow_min_m3s=3.5,
+            spill_penalty_usd_per_hm3=150.0,
+        )
+        self.assertEqual(response.status_code, 200)
+        reach = response.json()["diagram"]["reaches"][0]
+        self.assertEqual(reach["flow_min_m3s"], 3.5)
+        self.assertEqual(reach["spill_penalty_usd_per_hm3"], 150.0)
+        self.assertIsNone(reach["minimum_flow_series"])
+
+        reloaded = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram"
+        ).json()["diagram"]
+        self.assertEqual(reloaded["reaches"][0], reach)
+
+    def test_reach_minimum_flow_series_persists_and_reloads(self):
+        response = self._save_reach_with_controls(
+            minimum_flow_series=self._min_flow_series(2.0, 4.0)
+        )
+        self.assertEqual(response.status_code, 200)
+        reach = response.json()["diagram"]["reaches"][0]
+        series = reach["minimum_flow_series"]
+        self.assertEqual(series["version_number"], 1)
+        self.assertEqual(
+            series["points"],
+            [
+                {"timestamp": "2026-01-01T00:00:00", "duration_hours": 1.0, "value_m3s": 2.0},
+                {"timestamp": "2026-01-01T01:00:00", "duration_hours": 1.0, "value_m3s": 4.0},
+            ],
+        )
+        self.assertEqual(len(reach["available_minimum_flow_series"]), 1)
+
+        reloaded = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram"
+        ).json()["diagram"]
+        self.assertEqual(reloaded["reaches"][0], reach)
+
+    def test_reach_v3_preview_includes_scalar_minimum_flow_and_spill_penalty(self):
+        self._save_complete_v3_diagram(
+            reach_overrides={"flow_min_m3s": 6.0}
+        )
+        preview = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/v3-preview"
+        ).json()
+        reach = preview["validation"]["system_case"]["hydraulic_network"]["reaches"][0]
+        self.assertEqual(reach["flow_min_m3s"], 6.0)
+        self.assertIsNone(reach["spill_penalty_usd_per_hm3"])
+
+    def test_reach_v3_preview_resolves_minimum_flow_series_into_time_series(self):
+        self._save_complete_v3_diagram(
+            reach_overrides={
+                "minimum_flow_series": self._min_flow_series(7.0, 9.0)
+            }
+        )
+        preview = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/v3-preview"
+        ).json()
+        system_case = preview["validation"]["system_case"]
+        periods = system_case["time_series"]
+        self.assertEqual(
+            [period["minimum_flow_m3s"]["reach_reservoir_intake"] for period in periods],
+            [7.0, 9.0],
+        )
+
+    def test_validation_rejects_negative_minimum_flow_and_spill_penalty(self):
+        save = self._save_reach_with_controls(
+            reach_type="spillway",
+            flow_min_m3s=-1.0,
+            spill_penalty_usd_per_hm3=-2.0,
+        )
+        self.assertEqual(save.status_code, 200)
+        validation = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/validate"
+        ).json()["validation"]
+        self.assertFalse(validation["ok"])
+        codes = {error["code"] for error in validation["errors"]}
+        self.assertIn("negative_minimum_flow", codes)
+        self.assertIn("negative_spill_penalty", codes)
+
+    def test_validation_rejects_spill_penalty_on_non_spillway_reach(self):
+        save = self._save_reach_with_controls(
+            reach_type="river",
+            spill_penalty_usd_per_hm3=10.0,
+        )
+        self.assertEqual(save.status_code, 200)
+        validation = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/validate"
+        ).json()["validation"]
+        self.assertFalse(validation["ok"])
+        codes = {error["code"] for error in validation["errors"]}
+        self.assertIn("spill_penalty_requires_spillway", codes)
+
+    def test_validation_rejects_minimum_flow_series_horizon_mismatch(self):
+        diagram = self._save_complete_v3_diagram(
+            reach_overrides={
+                "minimum_flow_series": self._min_flow_series(7.0, 9.0, 11.0)
+            }
+        )
+        del diagram
+        validation = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/validate"
+        ).json()["validation"]
+        self.assertFalse(validation["ok"])
+        codes = {error["code"] for error in validation["errors"]}
+        self.assertIn("minimum_flow_horizon_mismatch", codes)
 
     def _create_diagram(self):
         return self.client.post(
@@ -1284,7 +1438,16 @@ class HydraulicDiagramApiTests(unittest.TestCase):
             finally:
                 store.close()
 
-    def _save_complete_v3_diagram(self):
+    def _save_complete_v3_diagram(self, *, reach_overrides=None):
+        reach = {
+            "technical_key": "reach_reservoir_intake",
+            "display_name": "Reservoir to intake",
+            "from_node_key": "reservoir_alpha",
+            "to_node_key": "junction_in",
+            "reach_type": "river",
+        }
+        if reach_overrides:
+            reach.update(reach_overrides)
         created = self._create_diagram()
         save_response = self.client.put(
             f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram",
@@ -1371,15 +1534,7 @@ class HydraulicDiagramApiTests(unittest.TestCase):
                         ],
                     },
                 ],
-                "reaches": [
-                    {
-                        "technical_key": "reach_reservoir_intake",
-                        "display_name": "Reservoir to intake",
-                        "from_node_key": "reservoir_alpha",
-                        "to_node_key": "junction_in",
-                        "reach_type": "river",
-                    },
-                ],
+                "reaches": [reach],
             },
         )
         self.assertEqual(save_response.status_code, 200)

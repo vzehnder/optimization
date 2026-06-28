@@ -315,8 +315,22 @@ function validate_hydraulic_v3_system_case_document(document)::Dict{String,Any}
         if routing_method != "none" || travel_time_hours === nothing || travel_time_hours != 0.0
             throw(ArgumentError("reach $(reach_id) uses unsupported routing; only routing_method none with zero travel_time_hours is supported"))
         end
+        flow_min = optional_float(get(reach, "flow_min_m3s", nothing), "reach $(reach_id) flow_min_m3s")
+        if flow_min !== nothing && (!isfinite(flow_min) || flow_min < 0)
+            throw(ArgumentError("reach $(reach_id) flow_min_m3s must be nonnegative"))
+        end
+        spill_penalty = optional_float(get(reach, "spill_penalty_usd_per_hm3", nothing), "reach $(reach_id) spill_penalty_usd_per_hm3")
+        if spill_penalty !== nothing
+            if !isfinite(spill_penalty) || spill_penalty < 0
+                throw(ArgumentError("reach $(reach_id) spill_penalty_usd_per_hm3 must be nonnegative"))
+            end
+            if reach_type != "spillway"
+                throw(ArgumentError("reach $(reach_id) spill_penalty_usd_per_hm3 is only supported on spillway reaches"))
+            end
+        end
         push!(hydraulic_edges, (from_node, to_node))
     end
+    reach_ids_for_minimum_flow = Set(required_string(to_string_key_dict(reach), "id") for reach in reaches)
 
     plant_ids = Set{String}()
     plant_unit_ids = Dict{String,Set{String}}()
@@ -427,6 +441,18 @@ function validate_hydraulic_v3_system_case_document(document)::Dict{String,Any}
             inflow = parse_required_float(inflows[entity_id], "time_series[$index].natural_inflow_m3s[$entity_id]")
             if !isfinite(inflow) || inflow < 0
                 throw(ArgumentError("time_series[$index].natural_inflow_m3s[$entity_id] must be nonnegative"))
+            end
+        end
+        if haskey(period, "minimum_flow_m3s")
+            minimum_flows = to_string_key_dict(required_dict(period, "minimum_flow_m3s"))
+            for (reach_id, raw_value) in minimum_flows
+                if !(reach_id in reach_ids_for_minimum_flow)
+                    throw(ArgumentError("time_series[$index].minimum_flow_m3s[$reach_id] does not match a reach"))
+                end
+                value = parse_required_float(raw_value, "time_series[$index].minimum_flow_m3s[$reach_id]")
+                if !isfinite(value) || value < 0
+                    throw(ArgumentError("time_series[$index].minimum_flow_m3s[$reach_id] must be nonnegative"))
+                end
             end
         end
     end
@@ -1509,6 +1535,41 @@ function run_hydraulic_v3_system_case(
         unit_power_max[unit_index] = optional_float(get(unit, "max_power_mw", nothing), "unit $(unit_id) max_power_mw")
     end
 
+    n_reaches = length(reaches)
+    reach_ids = [required_string(reach, "id") for reach in reaches]
+    reach_source_reservoir = zeros(Int, n_reaches)
+    reach_is_spillway = falses(n_reaches)
+    reach_min_flow = zeros(n_reaches, n_periods)
+    reservoir_spill_penalty = zeros(n_reservoirs)
+    period_minimum_flows = [
+        haskey(period, "minimum_flow_m3s") ? to_string_key_dict(required_dict(period, "minimum_flow_m3s")) : Dict{String,Any}()
+        for period in periods
+    ]
+    for (reach_index, reach) in enumerate(reaches)
+        reach_id = reach_ids[reach_index]
+        from_node = required_string(reach, "from_node")
+        reach_is_spillway[reach_index] = required_string(reach, "type") == "spillway"
+        if get(node_type_by_id, from_node, "") == "reservoir"
+            reach_source_reservoir[reach_index] = reservoir_index_by_id[from_node]
+        end
+        scalar_min = optional_float(get(reach, "flow_min_m3s", nothing), "reach $(reach_id) flow_min_m3s")
+        for period_index in 1:n_periods
+            series_value = get(period_minimum_flows[period_index], reach_id, nothing)
+            if series_value !== nothing
+                reach_min_flow[reach_index, period_index] = parse_required_float(
+                    series_value,
+                    "time_series[$period_index].minimum_flow_m3s[$reach_id]",
+                )
+            elseif scalar_min !== nothing
+                reach_min_flow[reach_index, period_index] = scalar_min
+            end
+        end
+        spill_penalty = optional_float(get(reach, "spill_penalty_usd_per_hm3", nothing), "reach $(reach_id) spill_penalty_usd_per_hm3")
+        if reach_is_spillway[reach_index] && spill_penalty !== nothing && reach_source_reservoir[reach_index] != 0
+            reservoir_spill_penalty[reach_source_reservoir[reach_index]] += spill_penalty
+        end
+    end
+
     model = Model(HiGHS.Optimizer)
     set_silent(model)
     for (name, value) in solver.options
@@ -1556,11 +1617,42 @@ function run_hydraulic_v3_system_case(
         end
     end
 
+    for reach_index in 1:n_reaches
+        if !any(reach_min_flow[reach_index, period_index] > 0 for period_index in 1:n_periods)
+            continue
+        end
+        source_reservoir = reach_source_reservoir[reach_index]
+        if source_reservoir == 0
+            throw(ArgumentError("reach $(reach_ids[reach_index]) minimum flow is only supported on reaches leaving a reservoir"))
+        end
+        reservoir_unit_indices = [unit_index for unit_index in 1:n_units if unit_reservoir_index[unit_index] == source_reservoir]
+        for period_index in 1:n_periods
+            if reach_is_spillway[reach_index]
+                @constraint(model, spill_flow[source_reservoir, period_index] >= reach_min_flow[reach_index, period_index])
+            else
+                if isempty(reservoir_unit_indices)
+                    throw(ArgumentError("reach $(reach_ids[reach_index]) minimum flow requires a downstream unit"))
+                end
+                @constraint(
+                    model,
+                    sum(turbine_flow[unit_index, period_index] for unit_index in reservoir_unit_indices) >=
+                        reach_min_flow[reach_index, period_index],
+                )
+            end
+        end
+    end
+
     @objective(
         model,
         Max,
         sum(hydro_power[unit_index, period_index] * durations[period_index] for unit_index in 1:n_units, period_index in 1:n_periods) +
-        sum(terminal_water_value[reservoir_index] * storage[reservoir_index, n_periods] for reservoir_index in 1:n_reservoirs),
+        sum(terminal_water_value[reservoir_index] * storage[reservoir_index, n_periods] for reservoir_index in 1:n_reservoirs) -
+        sum(
+            reservoir_spill_penalty[reservoir_index] *
+            spill_flow[reservoir_index, period_index] *
+            durations[period_index] * HM3_PER_M3S_HOUR
+            for reservoir_index in 1:n_reservoirs, period_index in 1:n_periods
+        ),
     )
     optimize!(model)
 
@@ -1584,6 +1676,11 @@ function run_hydraulic_v3_system_case(
     inflow_volume = hydraulic_v3_volume_matrix(natural_inflow, durations)
     turbine_volume = hydraulic_v3_volume_matrix(turbine_values, durations)
     spill_volume = hydraulic_v3_volume_matrix(spill_values, durations)
+    spill_penalty_volume = zeros(n_reservoirs, n_periods)
+    for reservoir_index in 1:n_reservoirs
+        spill_penalty_volume[reservoir_index, :] .=
+            reservoir_spill_penalty[reservoir_index] .* spill_volume[reservoir_index, :]
+    end
     terminal_value = [
         terminal_water_value[reservoir_index] * storage_values[reservoir_index, n_periods]
         for reservoir_index in 1:n_reservoirs
@@ -1616,7 +1713,7 @@ function run_hydraulic_v3_system_case(
         inflow_volume,
         turbine_volume,
         spill_volume,
-        zeros(size(spill_volume)),
+        spill_penalty_volume,
         terminal_value,
     )
 
@@ -1856,6 +1953,7 @@ function hydraulic_v3_summary_dict(
             "total_generation_mwh" => total_generation_mwh,
             "total_turbine_volume_hm3" => sum(result.hydro_turbine_volume_hm3),
             "total_spill_volume_hm3" => sum(result.hydro_spill_volume_hm3),
+            "total_spill_penalty_usd" => sum(result.hydro_spill_penalty_usd),
             "terminal_water_value_usd" => sum(result.hydro_terminal_water_value_usd),
             "final_storage_hm3" => sum(result.hydro_storage_hm3[:, n_periods]),
         ),

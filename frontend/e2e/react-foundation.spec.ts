@@ -277,6 +277,9 @@ test("React hydraulic diagram persists reservoir parameters curves junction and 
   await page
     .getByLabel("Tipo reach_reservoir_1_junction_1")
     .selectOption("canal");
+  await page
+    .getByLabel("Caudal minimo m3/s reach_reservoir_1_junction_1")
+    .fill("3");
   await page.getByLabel("Etiqueta plant_1").fill("Plant Laja");
 
   // Add a generation unit with intake/discharge nodes and a flow-power curve.
@@ -345,6 +348,9 @@ test("React hydraulic diagram persists reservoir parameters curves junction and 
   await expect(
     page.getByLabel("Tipo reach_reservoir_1_junction_1"),
   ).toHaveValue("canal");
+  await expect(
+    page.getByLabel("Caudal minimo m3/s reach_reservoir_1_junction_1"),
+  ).toHaveValue("3");
   await expect(
     page.getByLabel("Almacenamiento maximo reservoir_1"),
   ).toHaveValue("50");

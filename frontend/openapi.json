@@ -347,15 +347,47 @@
             "title": "Display Name",
             "type": "string"
           },
+          "flow_min_m3s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flow Min M3S"
+          },
           "from_node_key": {
             "minLength": 1,
             "title": "From Node Key",
             "type": "string"
           },
+          "minimum_flow_series": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HydraulicNaturalInflowSeriesRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "reach_type": {
             "minLength": 1,
             "title": "Reach Type",
             "type": "string"
+          },
+          "spill_penalty_usd_per_hm3": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spill Penalty Usd Per Hm3"
           },
           "technical_key": {
             "minLength": 1,

@@ -1701,6 +1701,127 @@ end
         end
     end
 
+    @testset "hydraulic v3 reach minimum flow and spillway controls" begin
+        function reach_control_validation_message(mutator)
+            document = minimal_hydraulic_v3_system_case_document()
+            mutator(document)
+            try
+                BESSDispatch.validate_hydraulic_v3_system_case_document(document)
+                return ""
+            catch error
+                return sprint(showerror, error)
+            end
+        end
+
+        @test occursin(
+            "reach reach_reservoir_intake flow_min_m3s must be nonnegative",
+            reach_control_validation_message(document -> begin
+                document["hydraulic_network"]["reaches"][1]["flow_min_m3s"] = -1.0
+            end),
+        )
+        @test occursin(
+            "reach reach_reservoir_intake spill_penalty_usd_per_hm3 must be nonnegative",
+            reach_control_validation_message(document -> begin
+                document["hydraulic_network"]["reaches"][1]["type"] = "spillway"
+                document["hydraulic_network"]["reaches"][1]["spill_penalty_usd_per_hm3"] = -5.0
+            end),
+        )
+        @test occursin(
+            "spill_penalty_usd_per_hm3 is only supported on spillway reaches",
+            reach_control_validation_message(document -> begin
+                document["hydraulic_network"]["reaches"][1]["spill_penalty_usd_per_hm3"] = 10.0
+            end),
+        )
+
+        # Scalar minimum flow forces the unit to turbine at least the required flow
+        # even when keeping water has higher terminal value.
+        mktempdir() do case_dir
+            document = minimal_hydraulic_v3_system_case_document()
+            document["hydraulic_network"]["nodes"][1]["reservoir"]["terminal_water_value_usd_per_hm3"] = 1000.0
+            document["hydraulic_network"]["reaches"][1]["flow_min_m3s"] = 10.0
+            case_path = write_minimal_system_case_json(case_dir; document = document)
+            run_output = BESSDispatch.run_system_case(
+                case_path;
+                output_root = joinpath(case_dir, "outputs"),
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+            @test run_output.result.termination_status == "OPTIMAL"
+            dispatch_rows = collect(CSV.File(run_output.dispatch_path))
+            @test dispatch_rows[1].total_hydro_turbine_flow_m3s ≈ 10.0
+        end
+
+        # A spillway reach with a spill penalty reports spill volume and the
+        # corresponding penalty in the run summary.
+        mktempdir() do case_dir
+            document = minimal_hydraulic_v3_system_case_document()
+            reservoir = document["hydraulic_network"]["nodes"][1]["reservoir"]
+            reservoir["initial_storage_hm3"] = 50.0
+            reservoir["terminal_condition"] = "none"
+            delete!(reservoir, "terminal_storage_min_hm3")
+            reservoir["terminal_water_value_usd_per_hm3"] = 0.0
+            document["time_series"][1]["natural_inflow_m3s"]["reservoir_alpha"] = 60.0
+            push!(
+                document["hydraulic_network"]["reaches"],
+                Dict{String,Any}(
+                    "id" => "reach_spillway",
+                    "display_name" => "Spillway",
+                    "from_node" => "reservoir_alpha",
+                    "to_node" => "junction_out",
+                    "type" => "spillway",
+                    "routing_method" => "none",
+                    "travel_time_hours" => 0.0,
+                    "spill_penalty_usd_per_hm3" => 100.0,
+                ),
+            )
+            case_path = write_minimal_system_case_json(case_dir; document = document)
+            run_output = BESSDispatch.run_system_case(
+                case_path;
+                output_root = joinpath(case_dir, "outputs"),
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+            @test run_output.result.termination_status == "OPTIMAL"
+            dispatch_rows = collect(CSV.File(run_output.dispatch_path))
+            @test dispatch_rows[1].total_hydro_turbine_flow_m3s ≈ 40.0
+            @test dispatch_rows[1].total_hydro_spill_flow_m3s ≈ 20.0
+            summary = JSON3.read(read(run_output.summary_path, String))
+            hm3_per_m3s_hour = 3600.0 / 1_000_000.0
+            expected_spill_volume = 20.0 * 2.0 * hm3_per_m3s_hour
+            @test summary.hydraulic_v3_totals.total_spill_volume_hm3 ≈ expected_spill_volume
+            @test summary.hydraulic_v3_totals.total_spill_penalty_usd ≈ 100.0 * expected_spill_volume
+        end
+
+        # Series-backed minimum flow enforces the per-period requirement.
+        mktempdir() do case_dir
+            document = minimal_hydraulic_v3_system_case_document()
+            document["hydraulic_network"]["nodes"][1]["reservoir"]["terminal_water_value_usd_per_hm3"] = 1000.0
+            document["time_series"] = [
+                Dict{String,Any}(
+                    "timestamp" => "2026-01-01T00:00:00",
+                    "duration_hours" => 2.0,
+                    "natural_inflow_m3s" => Dict{String,Any}("reservoir_alpha" => 0.0),
+                    "minimum_flow_m3s" => Dict{String,Any}("reach_reservoir_intake" => 10.0),
+                ),
+                Dict{String,Any}(
+                    "timestamp" => "2026-01-01T02:00:00",
+                    "duration_hours" => 2.0,
+                    "natural_inflow_m3s" => Dict{String,Any}("reservoir_alpha" => 0.0),
+                    "minimum_flow_m3s" => Dict{String,Any}("reach_reservoir_intake" => 5.0),
+                ),
+            ]
+            document["hydraulic_network"]["reaches"][1]["flow_min_source"] = "series"
+            case_path = write_minimal_system_case_json(case_dir; document = document)
+            run_output = BESSDispatch.run_system_case(
+                case_path;
+                output_root = joinpath(case_dir, "outputs"),
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+            @test run_output.result.termination_status == "OPTIMAL"
+            dispatch_rows = collect(CSV.File(run_output.dispatch_path))
+            @test dispatch_rows[1].total_hydro_turbine_flow_m3s ≈ 10.0
+            @test dispatch_rows[2].total_hydro_turbine_flow_m3s ≈ 5.0
+        end
+    end
+
     @testset "rejects invalid system battery bounds before model construction" begin
         document = minimal_system_case_document()
         battery = system_case_node(document, "battery_1")

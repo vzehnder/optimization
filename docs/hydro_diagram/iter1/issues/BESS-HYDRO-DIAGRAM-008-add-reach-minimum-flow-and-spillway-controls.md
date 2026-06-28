@@ -1,6 +1,6 @@
 # BESS-HYDRO-DIAGRAM-008: Add Reach Minimum Flow And Spillway Controls
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/hydro_diagram/iter1/prd_hydro_diagram_editor.md`
@@ -21,18 +21,34 @@ flow and spill behavior can be inspected after a run.
 
 ## Acceptance criteria
 
-- [ ] The reach panel supports scalar minimum flow.
-- [ ] The reach panel supports a series binding for `minimum_flow_m3s` where
+- [x] The reach panel supports scalar minimum flow.
+- [x] The reach panel supports a series binding for `minimum_flow_m3s` where
       the time-series path exists.
-- [ ] The reach panel supports `spillway` type and spill penalty.
-- [ ] Validation rejects negative minimum flow and negative spill penalty.
-- [ ] Validation rejects series-backed minimum flow with incompatible horizon.
-- [ ] The v3 solver enforces supported minimum-flow behavior.
-- [ ] The v3 objective applies supported spillway penalty behavior.
-- [ ] Results expose reach flow and spill metrics needed to inspect behavior.
-- [ ] Tests cover scalar minimum flow, series minimum flow, spill penalty and
+- [x] The reach panel supports `spillway` type and spill penalty.
+- [x] Validation rejects negative minimum flow and negative spill penalty.
+- [x] Validation rejects series-backed minimum flow with incompatible horizon.
+- [x] The v3 solver enforces supported minimum-flow behavior.
+- [x] The v3 objective applies supported spillway penalty behavior.
+- [x] Results expose reach flow and spill metrics needed to inspect behavior.
+- [x] Tests cover scalar minimum flow, series minimum flow, spill penalty and
       invalid inputs.
-- [ ] The DB checkpoint records reach parameter and binding changes.
+- [x] The DB checkpoint records reach parameter and binding changes.
+
+## Implementation notes
+
+- Scalar `case_hydraulic_reaches.flow_min_m3s` and
+  `spill_penalty_usd_per_hm3` are persisted from the save payload; series-backed
+  minimum flow reuses the versioned hydraulic time-series tables with
+  `entity_type = 'case_hydraulic_reach'`, `signal_key = 'minimum_flow_m3s'`.
+- The v3 preview emits `flow_min_m3s`/`flow_min_source`/`spill_penalty_usd_per_hm3`
+  per reach and resolves bound series into per-period
+  `time_series[*].minimum_flow_m3s` blocks keyed by reach id.
+- The Julia v3 solver enforces minimum flow on the reservoir-source reach
+  (turbine flow lower bound, or spill lower bound for spillway reaches),
+  subtracts the spillway penalty from the objective, and reports
+  `total_spill_penalty_usd` in the run summary.
+- Supported MVP scope: minimum flow is enforced only on reaches leaving a
+  reservoir; spill penalties are only accepted on `spillway` reaches.
 
 ## Blocked by
 

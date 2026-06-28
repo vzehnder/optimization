@@ -1164,7 +1164,30 @@ function editableHydraulicReaches(
     from_node_key: reach.from_node_key,
     to_node_key: reach.to_node_key,
     reach_type: reach.reach_type,
+    flow_min_m3s: reach.flow_min_m3s ?? null,
+    spill_penalty_usd_per_hm3: reach.spill_penalty_usd_per_hm3 ?? null,
+    minimum_flow_series: reach.minimum_flow_series
+      ? {
+          time_series_set_id: reach.minimum_flow_series.time_series_set_id,
+          version_label: reach.minimum_flow_series.version_label,
+          points: reach.minimum_flow_series.points.map((point) => ({
+            timestamp: point.timestamp,
+            duration_hours: point.duration_hours,
+            value_m3s: point.value_m3s,
+          })),
+        }
+      : null,
   }));
+}
+
+function minimumFlowSeriesByReachKey(
+  diagram: HydraulicDiagram,
+): Record<string, HydraulicNaturalInflowSeriesSummary[]> {
+  const map: Record<string, HydraulicNaturalInflowSeriesSummary[]> = {};
+  for (const reach of diagram.reaches || []) {
+    map[reach.technical_key] = reach.available_minimum_flow_series ?? [];
+  }
+  return map;
 }
 
 function defaultHydraulicViewport(
@@ -1327,6 +1350,7 @@ function HydraulicReachList({
   nodes,
   reaches,
   updateReach,
+  minimumFlowSeriesByReach,
 }: {
   nodes: HydraulicDiagramNodeWrite[];
   reaches: HydraulicDiagramReachWrite[];
@@ -1334,6 +1358,7 @@ function HydraulicReachList({
     technicalKey: string,
     patch: Partial<HydraulicDiagramReachWrite>,
   ) => void;
+  minimumFlowSeriesByReach: Record<string, HydraulicNaturalInflowSeriesSummary[]>;
 }) {
   const nodeKeys = nodes
     .filter((node) => node.component_type !== "plant")
@@ -1433,10 +1458,239 @@ function HydraulicReachList({
                 ))}
               </select>
             </label>
+            <label
+              className="field-row"
+              htmlFor={`hydraulic-reach-flow-min-${reach.technical_key}`}
+            >
+              <span>Caudal minimo m3/s {reach.technical_key}</span>
+              <input
+                id={`hydraulic-reach-flow-min-${reach.technical_key}`}
+                type="number"
+                value={reach.flow_min_m3s ?? ""}
+                onChange={(event) =>
+                  updateReach(reach.technical_key, {
+                    flow_min_m3s:
+                      event.target.value === ""
+                        ? null
+                        : Number(event.target.value),
+                  })
+                }
+              />
+            </label>
+            {reach.reach_type === "spillway" ? (
+              <label
+                className="field-row"
+                htmlFor={`hydraulic-reach-spill-penalty-${reach.technical_key}`}
+              >
+                <span>Penalidad vertedero USD/hm3 {reach.technical_key}</span>
+                <input
+                  id={`hydraulic-reach-spill-penalty-${reach.technical_key}`}
+                  type="number"
+                  value={reach.spill_penalty_usd_per_hm3 ?? ""}
+                  onChange={(event) =>
+                    updateReach(reach.technical_key, {
+                      spill_penalty_usd_per_hm3:
+                        event.target.value === ""
+                          ? null
+                          : Number(event.target.value),
+                    })
+                  }
+                />
+              </label>
+            ) : null}
           </div>
+          <HydraulicReachMinimumFlowSeries
+            reach={reach}
+            availableSeries={minimumFlowSeriesByReach[reach.technical_key] ?? []}
+            updateReach={updateReach}
+          />
         </li>
       ))}
     </ul>
+  );
+}
+
+function HydraulicReachMinimumFlowSeries({
+  reach,
+  availableSeries,
+  updateReach,
+}: {
+  reach: HydraulicDiagramReachWrite;
+  availableSeries: HydraulicNaturalInflowSeriesSummary[];
+  updateReach: (
+    technicalKey: string,
+    patch: Partial<HydraulicDiagramReachWrite>,
+  ) => void;
+}) {
+  const key = reach.technical_key;
+  const series = reach.minimum_flow_series ?? emptyInflowSeries();
+  const points = series.points;
+
+  function setPoints(nextPoints: HydraulicNaturalInflowSeriesPoint[]) {
+    updateReach(key, {
+      minimum_flow_series: {
+        time_series_set_id: null,
+        version_label: series.version_label ?? null,
+        points: nextPoints,
+      },
+    });
+  }
+
+  return (
+    <div
+      className="hydraulic-reach-minimum-flow"
+      data-testid={`reach-minimum-flow-${key}`}
+    >
+      <div className="draft-section-heading">
+        <h4>Caudal minimo por serie {key}</h4>
+        <div className="draft-actions">
+          {availableSeries.length ? (
+            <label htmlFor={`reach-min-flow-version-${key}`}>
+              <span>Version de serie {key}</span>
+              <select
+                id={`reach-min-flow-version-${key}`}
+                value={series.time_series_set_id ?? ""}
+                onChange={(event) => {
+                  const selectedId = Number(event.target.value);
+                  const selected = availableSeries.find(
+                    (option) => option.time_series_set_id === selectedId,
+                  );
+                  if (!selected) return;
+                  updateReach(key, {
+                    minimum_flow_series: {
+                      time_series_set_id: selected.time_series_set_id,
+                      version_label: selected.version_label,
+                      points: selected.points.map((point) => ({ ...point })),
+                    },
+                  });
+                }}
+              >
+                <option value="">Serie editada</option>
+                {availableSeries.map((option) => (
+                  <option
+                    key={option.time_series_set_id}
+                    value={option.time_series_set_id}
+                  >
+                    {option.version_label} (v{option.version_number})
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          <button
+            type="button"
+            data-testid={`reach-min-flow-add-point-${key}`}
+            onClick={() =>
+              setPoints([
+                ...points,
+                {
+                  timestamp: "2026-01-01T00:00:00",
+                  duration_hours: 1,
+                  value_m3s: 0,
+                },
+              ])
+            }
+          >
+            Agregar punto de caudal minimo {key}
+          </button>
+          {points.length ? (
+            <button
+              type="button"
+              className="secondary-action"
+              onClick={() =>
+                updateReach(key, { minimum_flow_series: null })
+              }
+            >
+              Quitar serie de caudal minimo {key}
+            </button>
+          ) : null}
+        </div>
+      </div>
+      {points.length ? (
+        <ul className="resource-list hydraulic-reach-minimum-flow-points">
+          {points.map((point, index) => (
+            <li key={index}>
+              <label htmlFor={`reach-min-flow-timestamp-${key}-${index}`}>
+                <span>
+                  Marca temporal {index + 1} {key}
+                </span>
+                <input
+                  id={`reach-min-flow-timestamp-${key}-${index}`}
+                  type="text"
+                  value={point.timestamp}
+                  onChange={(event) =>
+                    setPoints(
+                      points.map((current, currentIndex) =>
+                        currentIndex === index
+                          ? { ...current, timestamp: event.target.value }
+                          : current,
+                      ),
+                    )
+                  }
+                />
+              </label>
+              <label htmlFor={`reach-min-flow-duration-${key}-${index}`}>
+                <span>
+                  Duracion horas {index + 1} {key}
+                </span>
+                <input
+                  id={`reach-min-flow-duration-${key}-${index}`}
+                  type="number"
+                  value={point.duration_hours}
+                  onChange={(event) =>
+                    setPoints(
+                      points.map((current, currentIndex) =>
+                        currentIndex === index
+                          ? {
+                              ...current,
+                              duration_hours: Number(event.target.value),
+                            }
+                          : current,
+                      ),
+                    )
+                  }
+                />
+              </label>
+              <label htmlFor={`reach-min-flow-value-${key}-${index}`}>
+                <span>
+                  Caudal minimo m3/s {index + 1} {key}
+                </span>
+                <input
+                  id={`reach-min-flow-value-${key}-${index}`}
+                  type="number"
+                  value={point.value_m3s}
+                  onChange={(event) =>
+                    setPoints(
+                      points.map((current, currentIndex) =>
+                        currentIndex === index
+                          ? {
+                              ...current,
+                              value_m3s: Number(event.target.value),
+                            }
+                          : current,
+                      ),
+                    )
+                  }
+                />
+              </label>
+              <button
+                type="button"
+                className="secondary-action"
+                onClick={() =>
+                  setPoints(
+                    points.filter(
+                      (_, currentIndex) => currentIndex !== index,
+                    ),
+                  )
+                }
+              >
+                Quitar punto {index + 1} {key}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 
@@ -2261,6 +2515,9 @@ function HydraulicDiagramEditor({
   const [availableInflowSeries, setAvailableInflowSeries] = useState<
     Record<string, HydraulicNaturalInflowSeriesSummary[]>
   >(() => inflowSeriesByNodeKey(initialDiagram));
+  const [availableMinimumFlowSeries, setAvailableMinimumFlowSeries] = useState<
+    Record<string, HydraulicNaturalInflowSeriesSummary[]>
+  >(() => minimumFlowSeriesByReachKey(initialDiagram));
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -2285,6 +2542,7 @@ function HydraulicDiagramEditor({
       setAvailableCurves(curvesByNodeKey(savedDiagram));
       setUnitCurves(unitCurvesByKey(savedDiagram));
       setAvailableInflowSeries(inflowSeriesByNodeKey(savedDiagram));
+      setAvailableMinimumFlowSeries(minimumFlowSeriesByReachKey(savedDiagram));
       setRevision(savedDiagram.revision);
       setViewport(defaultHydraulicViewport(savedDiagram));
       setValidation(visibleHydraulicValidation(savedDiagram.validation));
@@ -2308,6 +2566,7 @@ function HydraulicDiagramEditor({
       setAvailableCurves(curvesByNodeKey(serverDiagram));
       setUnitCurves(unitCurvesByKey(serverDiagram));
       setAvailableInflowSeries(inflowSeriesByNodeKey(serverDiagram));
+      setAvailableMinimumFlowSeries(minimumFlowSeriesByReachKey(serverDiagram));
       setRevision(serverDiagram.revision);
       setViewport(defaultHydraulicViewport(serverDiagram));
       setValidation(visibleHydraulicValidation(serverDiagram.validation));
@@ -2740,6 +2999,7 @@ function HydraulicDiagramEditor({
             nodes={nodes}
             reaches={reaches}
             updateReach={updateReach}
+            minimumFlowSeriesByReach={availableMinimumFlowSeries}
           />
         </section>
         <section

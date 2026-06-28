@@ -448,6 +448,9 @@ export interface HydraulicDiagramReachWrite {
   from_node_key: string;
   to_node_key: string;
   reach_type: HydraulicReachType;
+  flow_min_m3s?: number | null;
+  spill_penalty_usd_per_hm3?: number | null;
+  minimum_flow_series?: HydraulicNaturalInflowSeriesWrite | null;
 }
 
 export interface HydraulicDiagramReach extends HydraulicDiagramReachWrite {
@@ -455,6 +458,10 @@ export interface HydraulicDiagramReach extends HydraulicDiagramReachWrite {
   entity_type: string;
   entity_id: number;
   z_index: number;
+  flow_min_m3s: number | null;
+  spill_penalty_usd_per_hm3: number | null;
+  minimum_flow_series: HydraulicNaturalInflowSeriesSummary | null;
+  available_minimum_flow_series: HydraulicNaturalInflowSeriesSummary[];
 }
 
 export interface HydraulicDiagramViewport {

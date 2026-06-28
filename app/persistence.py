@@ -68,6 +68,7 @@ FLOW_POWER_CURVE_SPEC = {
 }
 
 NATURAL_INFLOW_SIGNAL_KEY = "natural_inflow_m3s"
+MINIMUM_FLOW_SIGNAL_KEY = "minimum_flow_m3s"
 
 
 def utc_now_iso() -> str:
@@ -1697,7 +1698,22 @@ class AnalystStore:
                     reach_type=reach["reach_type"],
                     updated_by=updated_by,
                     now=now,
+                    flow_min_m3s=reach.get("flow_min_m3s"),
+                    spill_penalty_usd_per_hm3=reach.get("spill_penalty_usd_per_hm3"),
                 )
+                if reach.get("minimum_flow_series") is not None:
+                    self._persist_hydraulic_inflow_series(
+                        project_id=project_id,
+                        base_entity_id=created_reach["hydraulic_reach_id"],
+                        case_id=case_id,
+                        binding_entity_type="case_hydraulic_reach",
+                        binding_entity_id=created_reach["case_hydraulic_reach_id"],
+                        series=reach["minimum_flow_series"],
+                        updated_by=updated_by,
+                        now=now,
+                        signal_key=MINIMUM_FLOW_SIGNAL_KEY,
+                        base_entity_type="hydraulic_reach",
+                    )
                 active_endpoints = [
                     node
                     for node in (from_node, to_node)
@@ -1879,7 +1895,14 @@ class AnalystStore:
                 )
             network_nodes.append(network_node)
 
+        minimum_flow_series_by_key: dict[str, list[dict[str, float]]] = {}
         for reach in diagram["reaches"]:
+            series_points = hydraulic_natural_inflow_series_points(
+                reach.get("minimum_flow_series")
+            )
+            has_series = bool(series_points)
+            if has_series:
+                minimum_flow_series_by_key[reach["technical_key"]] = series_points
             reaches.append(
                 {
                     "id": reach["technical_key"],
@@ -1889,14 +1912,16 @@ class AnalystStore:
                     "type": reach["reach_type"],
                     "routing_method": "none",
                     "travel_time_hours": 0.0,
-                    "flow_min_m3s": None,
-                    "spill_penalty_usd_per_hm3": None,
+                    "flow_min_m3s": None if has_series else reach.get("flow_min_m3s"),
+                    "flow_min_source": "series" if has_series else "scalar",
+                    "spill_penalty_usd_per_hm3": reach.get("spill_penalty_usd_per_hm3"),
                 }
             )
 
         time_series = hydraulic_v3_time_series_from_inflows(
             required_time_series, inflow_series_by_key
         )
+        hydraulic_v3_apply_minimum_flow_series(time_series, minimum_flow_series_by_key)
 
         return {
             "schema_version": "bess_system_dispatch.v3",
@@ -2048,6 +2073,7 @@ class AnalystStore:
         errors.extend(self._validate_active_reservoirs(case_id))
         errors.extend(self._validate_active_plants_and_units(case_id, active_node_ids))
         errors.extend(self._validate_node_inflow_series(case_id))
+        errors.extend(self._validate_reach_controls(case_id))
 
         validation = {
             "ok": not errors,
@@ -2948,6 +2974,9 @@ class AnalystStore:
                 case_hydraulic_diagram_items.id AS layout_item_id,
                 case_hydraulic_diagram_items.z_index,
                 case_hydraulic_reaches.id AS entity_id,
+                case_hydraulic_reaches.hydraulic_reach_id AS base_reach_id,
+                case_hydraulic_reaches.flow_min_m3s,
+                case_hydraulic_reaches.spill_penalty_usd_per_hm3,
                 hydraulic_reaches.reach_key AS technical_key,
                 case_hydraulic_reaches.case_label AS display_name,
                 hydraulic_reaches.reach_type,
@@ -2972,6 +3001,13 @@ class AnalystStore:
             (layout_id, int(context["optimization_case"]["id"])),
         ).fetchall()
         reaches = [hydraulic_diagram_reach_row_to_dict(row) for row in reach_rows]
+        for reach, row in zip(reaches, reach_rows):
+            self._attach_reach_minimum_flow_detail(
+                reach,
+                case_id=case_id,
+                project_id=project_id,
+                base_reach_id=int(row["base_reach_id"]),
+            )
         return {
             "scenario_id": context["scenario_id"],
             "optimization_case": optimization_case_public_dict(context["optimization_case"]),
@@ -3103,6 +3139,130 @@ class AnalystStore:
                         "invalid_terminal_settings",
                         f"Reservoir {node_key} has invalid terminal condition settings.",
                     )
+        return errors
+
+    def _reference_inflow_horizon(
+        self, case_id: int
+    ) -> tuple[tuple[Any, ...], ...] | None:
+        binding_row = self.connection.execute(
+            """
+            SELECT hydraulic_time_series_set_id
+            FROM case_hydraulic_time_series_bindings
+            WHERE case_id = ?
+              AND entity_type = 'case_hydraulic_node'
+              AND signal_key = ?
+            ORDER BY entity_id
+            LIMIT 1
+            """,
+            (case_id, NATURAL_INFLOW_SIGNAL_KEY),
+        ).fetchone()
+        if binding_row is None:
+            return None
+        points = self._load_inflow_series_points(
+            int(binding_row["hydraulic_time_series_set_id"])
+        )
+        return tuple((point["timestamp"], point["duration_hours"]) for point in points)
+
+    def _validate_reach_controls(self, case_id: int) -> list[dict[str, Any]]:
+        reach_rows = self.connection.execute(
+            """
+            SELECT
+                case_hydraulic_reaches.id AS case_hydraulic_reach_id,
+                hydraulic_reaches.reach_key,
+                hydraulic_reaches.reach_type,
+                case_hydraulic_reaches.flow_min_m3s,
+                case_hydraulic_reaches.spill_penalty_usd_per_hm3
+            FROM case_hydraulic_reaches
+            JOIN hydraulic_reaches
+              ON hydraulic_reaches.id = case_hydraulic_reaches.hydraulic_reach_id
+            WHERE case_hydraulic_reaches.case_id = ?
+              AND case_hydraulic_reaches.is_active = 1
+            ORDER BY case_hydraulic_reaches.id
+            """,
+            (case_id,),
+        ).fetchall()
+        errors: list[dict[str, Any]] = []
+        reference_horizon = self._reference_inflow_horizon(case_id)
+        for row in reach_rows:
+            reach_key = str(row["reach_key"])
+            case_reach_id = int(row["case_hydraulic_reach_id"])
+
+            def make_error(code: str, message: str) -> dict[str, Any]:
+                return {
+                    "severity": "error",
+                    "code": code,
+                    "message": message,
+                    "entity_type": "case_hydraulic_reach",
+                    "entity_id": case_reach_id,
+                    "technical_key": reach_key,
+                }
+
+            flow_min = row["flow_min_m3s"]
+            if flow_min is not None and float(flow_min) < 0:
+                errors.append(
+                    make_error(
+                        "negative_minimum_flow",
+                        f"Reach {reach_key} minimum_flow_m3s must be nonnegative.",
+                    )
+                )
+            spill_penalty = row["spill_penalty_usd_per_hm3"]
+            if spill_penalty is not None:
+                if float(spill_penalty) < 0:
+                    errors.append(
+                        make_error(
+                            "negative_spill_penalty",
+                            f"Reach {reach_key} spill_penalty_usd_per_hm3 must be "
+                            "nonnegative.",
+                        )
+                    )
+                if str(row["reach_type"]) != "spillway":
+                    errors.append(
+                        make_error(
+                            "spill_penalty_requires_spillway",
+                            f"Reach {reach_key} spill penalty requires a spillway "
+                            "reach type.",
+                        )
+                    )
+
+            binding_row = self.connection.execute(
+                """
+                SELECT hydraulic_time_series_set_id
+                FROM case_hydraulic_time_series_bindings
+                WHERE case_id = ?
+                  AND entity_type = 'case_hydraulic_reach'
+                  AND entity_id = ?
+                  AND signal_key = ?
+                """,
+                (case_id, case_reach_id, MINIMUM_FLOW_SIGNAL_KEY),
+            ).fetchone()
+            if binding_row is None:
+                continue
+            points = self._load_inflow_series_points(
+                int(binding_row["hydraulic_time_series_set_id"])
+            )
+            has_negative = any(
+                math.isfinite(point["value_m3s"]) and point["value_m3s"] < 0
+                for point in points
+            )
+            if has_negative:
+                errors.append(
+                    make_error(
+                        "negative_minimum_flow",
+                        f"Reach {reach_key} minimum_flow_m3s values must be "
+                        "nonnegative.",
+                    )
+                )
+            horizon = tuple(
+                (point["timestamp"], point["duration_hours"]) for point in points
+            )
+            if reference_horizon is not None and horizon != reference_horizon:
+                errors.append(
+                    make_error(
+                        "minimum_flow_horizon_mismatch",
+                        f"Reach {reach_key} minimum_flow_m3s horizon must match the "
+                        "natural inflow horizon.",
+                    )
+                )
         return errors
 
     def _validate_node_inflow_series(self, case_id: int) -> list[dict[str, Any]]:
@@ -3421,6 +3581,26 @@ class AnalystStore:
         node["natural_inflow_series"] = bound
         node["available_inflow_series"] = available
 
+    def _attach_reach_minimum_flow_detail(
+        self,
+        reach: dict[str, Any],
+        *,
+        case_id: int,
+        project_id: int,
+        base_reach_id: int,
+    ) -> None:
+        bound, available = self._entity_inflow_series_detail(
+            project_id=project_id,
+            base_entity_id=base_reach_id,
+            case_id=case_id,
+            binding_entity_id=int(reach["entity_id"]),
+            signal_key=MINIMUM_FLOW_SIGNAL_KEY,
+            base_entity_type="hydraulic_reach",
+            binding_entity_type="case_hydraulic_reach",
+        )
+        reach["minimum_flow_series"] = bound
+        reach["available_minimum_flow_series"] = available
+
     def _entity_curve_detail(
         self,
         *,
@@ -3648,6 +3828,8 @@ class AnalystStore:
         reach_type: str,
         updated_by: str,
         now: str,
+        flow_min_m3s: float | None = None,
+        spill_penalty_usd_per_hm3: float | None = None,
     ) -> dict[str, int]:
         self.connection.execute(
             """
@@ -3702,14 +3884,26 @@ class AnalystStore:
                 hydraulic_reach_id,
                 case_label,
                 is_active,
+                flow_min_m3s,
+                spill_penalty_usd_per_hm3,
                 created_at,
                 updated_at,
                 created_by,
                 updated_by
             )
-            VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+            VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
             """,
-            (case_id, int(reach_row["id"]), display_name, now, now, updated_by, updated_by),
+            (
+                case_id,
+                int(reach_row["id"]),
+                display_name,
+                flow_min_m3s,
+                spill_penalty_usd_per_hm3,
+                now,
+                now,
+                updated_by,
+                updated_by,
+            ),
         )
         return {
             "case_hydraulic_reach_id": int(cursor.lastrowid),
@@ -4164,6 +4358,8 @@ class AnalystStore:
         series: Mapping[str, Any],
         updated_by: str,
         now: str,
+        signal_key: str = NATURAL_INFLOW_SIGNAL_KEY,
+        base_entity_type: str = "hydraulic_node",
     ) -> None:
         set_id = self._resolve_hydraulic_inflow_series_set(
             project_id=project_id,
@@ -4171,6 +4367,8 @@ class AnalystStore:
             series=series,
             updated_by=updated_by,
             now=now,
+            signal_key=signal_key,
+            base_entity_type=base_entity_type,
         )
         if set_id is None:
             return
@@ -4194,7 +4392,7 @@ class AnalystStore:
                 case_id,
                 binding_entity_type,
                 binding_entity_id,
-                NATURAL_INFLOW_SIGNAL_KEY,
+                signal_key,
                 set_id,
                 now,
                 now,
@@ -4211,9 +4409,10 @@ class AnalystStore:
         series: Mapping[str, Any],
         updated_by: str,
         now: str,
+        signal_key: str = NATURAL_INFLOW_SIGNAL_KEY,
+        base_entity_type: str = "hydraulic_node",
     ) -> int | None:
-        entity_type = "hydraulic_node"
-        signal_key = NATURAL_INFLOW_SIGNAL_KEY
+        entity_type = base_entity_type
         if series.get("time_series_set_id") is not None:
             row = self.connection.execute(
                 """
@@ -4353,18 +4552,21 @@ class AnalystStore:
         base_entity_id: int,
         case_id: int,
         binding_entity_id: int,
+        signal_key: str = NATURAL_INFLOW_SIGNAL_KEY,
+        base_entity_type: str = "hydraulic_node",
+        binding_entity_type: str = "case_hydraulic_node",
     ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
         set_rows = self.connection.execute(
             """
             SELECT id, version_number, version_label
             FROM hydraulic_time_series_sets
             WHERE project_id = ?
-              AND entity_type = 'hydraulic_node'
+              AND entity_type = ?
               AND entity_id = ?
               AND signal_key = ?
             ORDER BY version_number
             """,
-            (project_id, base_entity_id, NATURAL_INFLOW_SIGNAL_KEY),
+            (project_id, base_entity_type, base_entity_id, signal_key),
         ).fetchall()
         available = [
             {
@@ -4380,11 +4582,11 @@ class AnalystStore:
             SELECT hydraulic_time_series_set_id
             FROM case_hydraulic_time_series_bindings
             WHERE case_id = ?
-              AND entity_type = 'case_hydraulic_node'
+              AND entity_type = ?
               AND entity_id = ?
               AND signal_key = ?
             """,
-            (case_id, binding_entity_id, NATURAL_INFLOW_SIGNAL_KEY),
+            (case_id, binding_entity_type, binding_entity_id, signal_key),
         ).fetchone()
         bound = None
         if binding_row is not None:
@@ -4713,6 +4915,28 @@ def hydraulic_v3_time_series_from_inflows(
     return periods
 
 
+def hydraulic_v3_apply_minimum_flow_series(
+    time_series: list[dict[str, Any]],
+    minimum_flow_series_by_key: Mapping[str, list[dict[str, float]]],
+) -> None:
+    """Inject series-backed reach minimum flow into the v3 ``time_series`` block.
+
+    Each period gains a ``minimum_flow_m3s`` map keyed by reach id. Reaches with a
+    scalar (or no) minimum flow are absent from the map and are handled by the
+    per-reach ``flow_min_m3s`` attribute instead.
+    """
+
+    if not minimum_flow_series_by_key:
+        return
+    for index, period in enumerate(time_series):
+        period["minimum_flow_m3s"] = {
+            reach_id: (
+                float(points[index]["value_m3s"]) if index < len(points) else 0.0
+            )
+            for reach_id, points in minimum_flow_series_by_key.items()
+        }
+
+
 def hydraulic_natural_inflow_series_points(
     series: Mapping[str, Any] | None,
 ) -> list[dict[str, float]]:
@@ -4745,6 +4969,11 @@ def normalize_hydraulic_diagram_reaches(reaches: list[dict[str, Any]]) -> list[d
         reach_type = str(reach.get("reach_type") or "").strip()
         if reach_type not in HYDRAULIC_REACH_TYPES:
             raise ValueError(f"unsupported hydraulic reach type: {reach_type}")
+        minimum_flow_series = None
+        if reach.get("minimum_flow_series") is not None:
+            minimum_flow_series = normalize_hydraulic_natural_inflow_series(
+                reach["minimum_flow_series"]
+            )
         normalized.append(
             {
                 "technical_key": technical_key,
@@ -4752,6 +4981,11 @@ def normalize_hydraulic_diagram_reaches(reaches: list[dict[str, Any]]) -> list[d
                 "from_node_key": from_node_key,
                 "to_node_key": to_node_key,
                 "reach_type": reach_type,
+                "flow_min_m3s": _optional_float(reach.get("flow_min_m3s")),
+                "spill_penalty_usd_per_hm3": _optional_float(
+                    reach.get("spill_penalty_usd_per_hm3")
+                ),
+                "minimum_flow_series": minimum_flow_series,
             }
         )
     return normalized
@@ -4874,6 +5108,12 @@ def hydraulic_diagram_reach_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) ->
         "from_node_key": value["from_node_key"],
         "to_node_key": value["to_node_key"],
         "reach_type": value["reach_type"],
+        "flow_min_m3s": _optional_float(value.get("flow_min_m3s")),
+        "spill_penalty_usd_per_hm3": _optional_float(
+            value.get("spill_penalty_usd_per_hm3")
+        ),
+        "minimum_flow_series": None,
+        "available_minimum_flow_series": [],
         "z_index": int(value["z_index"] or 0),
     }
 

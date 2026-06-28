@@ -991,10 +991,15 @@ export interface components {
         HydraulicDiagramReachRequest: {
             /** Display Name */
             display_name: string;
+            /** Flow Min M3S */
+            flow_min_m3s?: number | null;
             /** From Node Key */
             from_node_key: string;
+            minimum_flow_series?: components["schemas"]["HydraulicNaturalInflowSeriesRequest"] | null;
             /** Reach Type */
             reach_type: string;
+            /** Spill Penalty Usd Per Hm3 */
+            spill_penalty_usd_per_hm3?: number | null;
             /** Technical Key */
             technical_key: string;
             /** To Node Key */

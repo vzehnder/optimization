@@ -214,6 +214,9 @@ class HydraulicDiagramReachRequest(BaseModel):
     from_node_key: str = Field(min_length=1)
     to_node_key: str = Field(min_length=1)
     reach_type: str = Field(min_length=1)
+    flow_min_m3s: float | None = None
+    spill_penalty_usd_per_hm3: float | None = None
+    minimum_flow_series: HydraulicNaturalInflowSeriesRequest | None = None
 
 
 class HydraulicDiagramSaveRequest(BaseModel):
