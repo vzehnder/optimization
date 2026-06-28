@@ -1638,6 +1638,45 @@ end
         end
 
         mktempdir() do case_dir
+            # A diagram-promoted run must use the bound natural inflow series in
+            # the reservoir water balance across the whole horizon.
+            document = minimal_hydraulic_v3_system_case_document()
+            document["time_series"] = [
+                Dict{String,Any}(
+                    "timestamp" => "2026-01-01T00:00:00",
+                    "duration_hours" => 2.0,
+                    "natural_inflow_m3s" => Dict{String,Any}("reservoir_alpha" => 10.0),
+                ),
+                Dict{String,Any}(
+                    "timestamp" => "2026-01-01T02:00:00",
+                    "duration_hours" => 2.0,
+                    "natural_inflow_m3s" => Dict{String,Any}("reservoir_alpha" => 4.0),
+                ),
+            ]
+            case_path = write_minimal_system_case_json(case_dir; document = document)
+            run_output = BESSDispatch.run_system_case(
+                case_path;
+                output_root = joinpath(case_dir, "outputs"),
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+
+            @test run_output.result.termination_status == "OPTIMAL"
+            dispatch_rows = collect(CSV.File(run_output.dispatch_path))
+            @test length(dispatch_rows) == 2
+            @test dispatch_rows[1].total_hydro_inflow_m3s ≈ 10.0
+            @test dispatch_rows[2].total_hydro_inflow_m3s ≈ 4.0
+
+            hm3_per_m3s_hour = 3600.0 / 1_000_000.0
+            initial_storage = 20.0
+            @test dispatch_rows[1].total_hydro_storage_hm3 ≈ initial_storage +
+                (10.0 - dispatch_rows[1].total_hydro_turbine_flow_m3s -
+                 dispatch_rows[1].total_hydro_spill_flow_m3s) * 2.0 * hm3_per_m3s_hour
+            @test dispatch_rows[2].total_hydro_storage_hm3 ≈ dispatch_rows[1].total_hydro_storage_hm3 +
+                (4.0 - dispatch_rows[2].total_hydro_turbine_flow_m3s -
+                 dispatch_rows[2].total_hydro_spill_flow_m3s) * 2.0 * hm3_per_m3s_hour
+        end
+
+        mktempdir() do case_dir
             document = minimal_system_case_document()
             delete!(document, "schema_version")
             case_path = write_minimal_system_case_json(case_dir; document = document)

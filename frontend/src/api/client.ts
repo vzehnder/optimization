@@ -372,6 +372,25 @@ export interface HydraulicStorageElevationCurveWrite {
 
 export type HydraulicCurveWrite = HydraulicStorageElevationCurveWrite;
 
+export interface HydraulicNaturalInflowSeriesPoint {
+  timestamp: string;
+  duration_hours: number;
+  value_m3s: number;
+}
+
+export interface HydraulicNaturalInflowSeriesSummary {
+  time_series_set_id: number;
+  version_number: number;
+  version_label: string;
+  points: HydraulicNaturalInflowSeriesPoint[];
+}
+
+export interface HydraulicNaturalInflowSeriesWrite {
+  time_series_set_id?: number | null;
+  version_label?: string | null;
+  points: HydraulicNaturalInflowSeriesPoint[];
+}
+
 export interface HydraulicPlantParameters {
   non_modeled: boolean;
   min_power_mw: number | null;
@@ -404,6 +423,7 @@ export interface HydraulicDiagramNodeWrite {
   y: number;
   reservoir?: HydraulicReservoirParameters | null;
   storage_elevation_curve?: HydraulicStorageElevationCurveWrite | null;
+  natural_inflow_series?: HydraulicNaturalInflowSeriesWrite | null;
   plant?: HydraulicPlantParameters | null;
   units?: HydraulicUnitWrite[];
 }
@@ -416,6 +436,8 @@ export interface HydraulicDiagramNode extends HydraulicDiagramNodeWrite {
   reservoir: HydraulicReservoirParameters | null;
   storage_elevation_curve: HydraulicCurveSummary | null;
   available_curves: HydraulicCurveSummary[];
+  natural_inflow_series: HydraulicNaturalInflowSeriesSummary | null;
+  available_inflow_series: HydraulicNaturalInflowSeriesSummary[];
   plant: HydraulicPlantParameters | null;
   units: HydraulicUnit[];
 }

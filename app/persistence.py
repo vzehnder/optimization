@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -65,6 +66,8 @@ FLOW_POWER_CURVE_SPEC = {
     "axis_y_name": "power_mw",
     "axis_y_unit": "mw",
 }
+
+NATURAL_INFLOW_SIGNAL_KEY = "natural_inflow_m3s"
 
 
 def utc_now_iso() -> str:
@@ -362,6 +365,55 @@ class AnalystStore:
                 FOREIGN KEY (case_id) REFERENCES optimization_cases(id) ON DELETE CASCADE,
                 FOREIGN KEY (hydraulic_curve_set_id) REFERENCES hydraulic_curve_sets(id) ON DELETE CASCADE,
                 UNIQUE (case_id, entity_type, entity_id, curve_role)
+            );
+
+            CREATE TABLE IF NOT EXISTS hydraulic_time_series_sets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id INTEGER NOT NULL,
+                signal_key TEXT NOT NULL,
+                version_number INTEGER NOT NULL,
+                version_label TEXT NOT NULL,
+                content_hash TEXT,
+                status TEXT NOT NULL DEFAULT 'draft',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                UNIQUE (project_id, entity_type, entity_id, signal_key, version_number),
+                CHECK (status IN ('draft', 'validated', 'archived'))
+            );
+
+            CREATE TABLE IF NOT EXISTS hydraulic_time_series_points (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                hydraulic_time_series_set_id INTEGER NOT NULL,
+                point_index INTEGER NOT NULL,
+                timestamp TEXT NOT NULL,
+                duration_hours REAL NOT NULL,
+                value REAL NOT NULL,
+                FOREIGN KEY (hydraulic_time_series_set_id)
+                    REFERENCES hydraulic_time_series_sets(id) ON DELETE CASCADE,
+                UNIQUE (hydraulic_time_series_set_id, point_index)
+            );
+
+            CREATE TABLE IF NOT EXISTS case_hydraulic_time_series_bindings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id INTEGER NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id INTEGER NOT NULL,
+                signal_key TEXT NOT NULL,
+                hydraulic_time_series_set_id INTEGER NOT NULL,
+                required INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (case_id) REFERENCES optimization_cases(id) ON DELETE CASCADE,
+                FOREIGN KEY (hydraulic_time_series_set_id)
+                    REFERENCES hydraulic_time_series_sets(id) ON DELETE CASCADE,
+                UNIQUE (case_id, entity_type, entity_id, signal_key)
             );
 
             CREATE TABLE IF NOT EXISTS case_hydraulic_diagram_layouts (
@@ -1501,6 +1553,10 @@ class AnalystStore:
                 (case_id,),
             )
             self.connection.execute(
+                "DELETE FROM case_hydraulic_time_series_bindings WHERE case_id = ?",
+                (case_id,),
+            )
+            self.connection.execute(
                 "DELETE FROM case_hydraulic_reservoir_parameters WHERE case_id = ?",
                 (case_id,),
             )
@@ -1547,6 +1603,17 @@ class AnalystStore:
                         "y": node["y"],
                     }
                     entity_type = "case_hydraulic_node"
+                    if node.get("natural_inflow_series") is not None:
+                        self._persist_hydraulic_inflow_series(
+                            project_id=project_id,
+                            base_entity_id=created_node["hydraulic_node_id"],
+                            case_id=case_id,
+                            binding_entity_type="case_hydraulic_node",
+                            binding_entity_id=active_id,
+                            series=node["natural_inflow_series"],
+                            updated_by=updated_by,
+                            now=now,
+                        )
                     if node["component_type"] == "reservoir":
                         if node.get("reservoir") is not None:
                             self._persist_reservoir_parameters(
@@ -1724,6 +1791,7 @@ class AnalystStore:
         units: list[dict[str, Any]] = []
         curves: list[dict[str, Any]] = []
         required_time_series: list[dict[str, Any]] = []
+        inflow_series_by_key: dict[str, list[dict[str, float]]] = {}
 
         for node in diagram["nodes"]:
             component_type = str(node["component_type"])
@@ -1773,6 +1841,11 @@ class AnalystStore:
                 "display_name": node["display_name"],
                 "type": component_type,
             }
+            node_series = hydraulic_natural_inflow_series_points(
+                node.get("natural_inflow_series")
+            )
+            if node_series:
+                inflow_series_by_key[node["technical_key"]] = node_series
             if component_type == "reservoir":
                 network_node["reservoir"] = node.get("reservoir")
                 storage_elevation = hydraulic_storage_elevation_curve_points(
@@ -1791,8 +1864,17 @@ class AnalystStore:
                     {
                         "entity_type": "hydraulic_node",
                         "entity_id": node["technical_key"],
-                        "signal_key": "natural_inflow_m3s",
+                        "signal_key": NATURAL_INFLOW_SIGNAL_KEY,
                         "binding_status": "required",
+                    }
+                )
+            elif node_series:
+                required_time_series.append(
+                    {
+                        "entity_type": "hydraulic_node",
+                        "entity_id": node["technical_key"],
+                        "signal_key": NATURAL_INFLOW_SIGNAL_KEY,
+                        "binding_status": "bound",
                     }
                 )
             network_nodes.append(network_node)
@@ -1812,20 +1894,15 @@ class AnalystStore:
                 }
             )
 
+        time_series = hydraulic_v3_time_series_from_inflows(
+            required_time_series, inflow_series_by_key
+        )
+
         return {
             "schema_version": "bess_system_dispatch.v3",
             "case_name": diagram["optimization_case"]["case_key"],
             "solver": {"name": "HiGHS", "options": {}},
-            "time_series": [
-                {
-                    "timestamp": "2026-01-01T00:00:00",
-                    "duration_hours": 1.0,
-                    "natural_inflow_m3s": {
-                        requirement["entity_id"]: 0.0
-                        for requirement in required_time_series
-                    },
-                }
-            ],
+            "time_series": time_series,
             "hydraulic_network": {
                 "nodes": network_nodes,
                 "reaches": reaches,
@@ -1970,6 +2047,7 @@ class AnalystStore:
 
         errors.extend(self._validate_active_reservoirs(case_id))
         errors.extend(self._validate_active_plants_and_units(case_id, active_node_ids))
+        errors.extend(self._validate_node_inflow_series(case_id))
 
         validation = {
             "ok": not errors,
@@ -2862,6 +2940,7 @@ class AnalystStore:
         project_id = int(context["hydraulic_system"]["project_id"])
         for node in nodes:
             self._attach_reservoir_detail(node, case_id=case_id, project_id=project_id)
+            self._attach_inflow_detail(node, case_id=case_id, project_id=project_id)
             self._attach_plant_detail(node, case_id=case_id, project_id=project_id)
         reach_rows = self.connection.execute(
             """
@@ -3023,6 +3102,117 @@ class AnalystStore:
                     add_error(
                         "invalid_terminal_settings",
                         f"Reservoir {node_key} has invalid terminal condition settings.",
+                    )
+        return errors
+
+    def _validate_node_inflow_series(self, case_id: int) -> list[dict[str, Any]]:
+        node_rows = self.connection.execute(
+            """
+            SELECT case_hydraulic_nodes.id AS case_hydraulic_node_id,
+                   hydraulic_nodes.node_key,
+                   hydraulic_nodes.node_type
+            FROM case_hydraulic_nodes
+            JOIN hydraulic_nodes
+              ON hydraulic_nodes.id = case_hydraulic_nodes.hydraulic_node_id
+            WHERE case_hydraulic_nodes.case_id = ?
+              AND case_hydraulic_nodes.is_active = 1
+            ORDER BY case_hydraulic_nodes.id
+            """,
+            (case_id,),
+        ).fetchall()
+        errors: list[dict[str, Any]] = []
+        bound_horizons: list[tuple[int, str, tuple[tuple[str, float], ...]]] = []
+        for row in node_rows:
+            case_node_id = int(row["case_hydraulic_node_id"])
+            node_key = str(row["node_key"])
+            binding_row = self.connection.execute(
+                """
+                SELECT hydraulic_time_series_set_id
+                FROM case_hydraulic_time_series_bindings
+                WHERE case_id = ?
+                  AND entity_type = 'case_hydraulic_node'
+                  AND entity_id = ?
+                  AND signal_key = ?
+                """,
+                (case_id, case_node_id, NATURAL_INFLOW_SIGNAL_KEY),
+            ).fetchone()
+            if binding_row is None:
+                if str(row["node_type"]) == "reservoir":
+                    errors.append(
+                        {
+                            "severity": "error",
+                            "code": "missing_natural_inflow_series",
+                            "message": (
+                                f"Reservoir {node_key} requires a natural_inflow_m3s "
+                                "series binding."
+                            ),
+                            "entity_type": "case_hydraulic_node",
+                            "entity_id": case_node_id,
+                            "technical_key": node_key,
+                        }
+                    )
+                continue
+
+            points = self._load_inflow_series_points(
+                int(binding_row["hydraulic_time_series_set_id"])
+            )
+            horizon = tuple(
+                (point["timestamp"], point["duration_hours"]) for point in points
+            )
+            bound_horizons.append((case_node_id, node_key, horizon))
+            has_negative = False
+            has_nonnumeric = False
+            for point in points:
+                value = point["value_m3s"]
+                if not math.isfinite(value):
+                    has_nonnumeric = True
+                elif value < 0:
+                    has_negative = True
+            if has_negative:
+                errors.append(
+                    {
+                        "severity": "error",
+                        "code": "negative_inflow_value",
+                        "message": (
+                            f"Node {node_key} natural_inflow_m3s values must be "
+                            "nonnegative."
+                        ),
+                        "entity_type": "case_hydraulic_node",
+                        "entity_id": case_node_id,
+                        "technical_key": node_key,
+                    }
+                )
+            if has_nonnumeric:
+                errors.append(
+                    {
+                        "severity": "error",
+                        "code": "nonnumeric_inflow_value",
+                        "message": (
+                            f"Node {node_key} natural_inflow_m3s values must be "
+                            "finite numbers."
+                        ),
+                        "entity_type": "case_hydraulic_node",
+                        "entity_id": case_node_id,
+                        "technical_key": node_key,
+                    }
+                )
+
+        if bound_horizons:
+            reference_horizon = bound_horizons[0][2]
+            for case_node_id, node_key, horizon in bound_horizons[1:]:
+                if horizon != reference_horizon:
+                    errors.append(
+                        {
+                            "severity": "error",
+                            "code": "inflow_horizon_mismatch",
+                            "message": (
+                                f"Node {node_key} natural_inflow_m3s horizon must match "
+                                "the other bound inflow series."
+                            ),
+                            "entity_type": "case_hydraulic_node",
+                            "entity_id": case_node_id,
+                            "technical_key": node_key,
+                        }
                     )
         return errors
 
@@ -3203,6 +3393,33 @@ class AnalystStore:
         )
         node["available_curves"] = available
         node["storage_elevation_curve"] = bound
+
+    def _attach_inflow_detail(
+        self,
+        node: dict[str, Any],
+        *,
+        case_id: int,
+        project_id: int,
+    ) -> None:
+        node["natural_inflow_series"] = None
+        node["available_inflow_series"] = []
+        if node.get("entity_type") != "case_hydraulic_node":
+            return
+        case_hydraulic_node_id = int(node["entity_id"])
+        base_row = self.connection.execute(
+            "SELECT hydraulic_node_id FROM case_hydraulic_nodes WHERE id = ?",
+            (case_hydraulic_node_id,),
+        ).fetchone()
+        if base_row is None:
+            return
+        bound, available = self._entity_inflow_series_detail(
+            project_id=project_id,
+            base_entity_id=int(base_row["hydraulic_node_id"]),
+            case_id=case_id,
+            binding_entity_id=case_hydraulic_node_id,
+        )
+        node["natural_inflow_series"] = bound
+        node["available_inflow_series"] = available
 
     def _entity_curve_detail(
         self,
@@ -3936,6 +4153,248 @@ class AnalystStore:
             for row in rows
         ]
 
+    def _persist_hydraulic_inflow_series(
+        self,
+        *,
+        project_id: int,
+        base_entity_id: int,
+        case_id: int,
+        binding_entity_type: str,
+        binding_entity_id: int,
+        series: Mapping[str, Any],
+        updated_by: str,
+        now: str,
+    ) -> None:
+        set_id = self._resolve_hydraulic_inflow_series_set(
+            project_id=project_id,
+            base_entity_id=base_entity_id,
+            series=series,
+            updated_by=updated_by,
+            now=now,
+        )
+        if set_id is None:
+            return
+        self.connection.execute(
+            """
+            INSERT INTO case_hydraulic_time_series_bindings (
+                case_id,
+                entity_type,
+                entity_id,
+                signal_key,
+                hydraulic_time_series_set_id,
+                required,
+                created_at,
+                updated_at,
+                created_by,
+                updated_by
+            )
+            VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+            """,
+            (
+                case_id,
+                binding_entity_type,
+                binding_entity_id,
+                NATURAL_INFLOW_SIGNAL_KEY,
+                set_id,
+                now,
+                now,
+                updated_by,
+                updated_by,
+            ),
+        )
+
+    def _resolve_hydraulic_inflow_series_set(
+        self,
+        *,
+        project_id: int,
+        base_entity_id: int,
+        series: Mapping[str, Any],
+        updated_by: str,
+        now: str,
+    ) -> int | None:
+        entity_type = "hydraulic_node"
+        signal_key = NATURAL_INFLOW_SIGNAL_KEY
+        if series.get("time_series_set_id") is not None:
+            row = self.connection.execute(
+                """
+                SELECT id
+                FROM hydraulic_time_series_sets
+                WHERE id = ?
+                  AND project_id = ?
+                  AND entity_type = ?
+                  AND entity_id = ?
+                  AND signal_key = ?
+                """,
+                (
+                    int(series["time_series_set_id"]),
+                    project_id,
+                    entity_type,
+                    base_entity_id,
+                    signal_key,
+                ),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"{signal_key} series set not found for entity")
+            return int(row["id"])
+
+        points = series.get("points") or []
+        if not points:
+            return None
+
+        content_hash = hydraulic_inflow_series_content_hash(points)
+        existing = self.connection.execute(
+            """
+            SELECT id
+            FROM hydraulic_time_series_sets
+            WHERE project_id = ?
+              AND entity_type = ?
+              AND entity_id = ?
+              AND signal_key = ?
+              AND content_hash = ?
+            ORDER BY version_number
+            LIMIT 1
+            """,
+            (project_id, entity_type, base_entity_id, signal_key, content_hash),
+        ).fetchone()
+        if existing is not None:
+            return int(existing["id"])
+
+        next_version_row = self.connection.execute(
+            """
+            SELECT COALESCE(MAX(version_number), 0) + 1 AS next_version
+            FROM hydraulic_time_series_sets
+            WHERE project_id = ?
+              AND entity_type = ?
+              AND entity_id = ?
+              AND signal_key = ?
+            """,
+            (project_id, entity_type, base_entity_id, signal_key),
+        ).fetchone()
+        version_number = int(next_version_row["next_version"])
+        version_label = series.get("version_label") or f"v{version_number}"
+        cursor = self.connection.execute(
+            """
+            INSERT INTO hydraulic_time_series_sets (
+                project_id,
+                entity_type,
+                entity_id,
+                signal_key,
+                version_number,
+                version_label,
+                content_hash,
+                status,
+                created_at,
+                updated_at,
+                created_by,
+                updated_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?)
+            """,
+            (
+                project_id,
+                entity_type,
+                base_entity_id,
+                signal_key,
+                version_number,
+                version_label,
+                content_hash,
+                now,
+                now,
+                updated_by,
+                updated_by,
+            ),
+        )
+        set_id = int(cursor.lastrowid)
+        for point_index, point in enumerate(points):
+            self.connection.execute(
+                """
+                INSERT INTO hydraulic_time_series_points (
+                    hydraulic_time_series_set_id,
+                    point_index,
+                    timestamp,
+                    duration_hours,
+                    value
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    set_id,
+                    point_index,
+                    point["timestamp"],
+                    point["duration_hours"],
+                    point["value_m3s"],
+                ),
+            )
+        return set_id
+
+    def _load_inflow_series_points(self, set_id: int) -> list[dict[str, float]]:
+        rows = self.connection.execute(
+            """
+            SELECT timestamp, duration_hours, value
+            FROM hydraulic_time_series_points
+            WHERE hydraulic_time_series_set_id = ?
+            ORDER BY point_index
+            """,
+            (set_id,),
+        ).fetchall()
+        return [
+            {
+                "timestamp": str(row["timestamp"]),
+                "duration_hours": float(row["duration_hours"]),
+                "value_m3s": float(row["value"]),
+            }
+            for row in rows
+        ]
+
+    def _entity_inflow_series_detail(
+        self,
+        *,
+        project_id: int,
+        base_entity_id: int,
+        case_id: int,
+        binding_entity_id: int,
+    ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+        set_rows = self.connection.execute(
+            """
+            SELECT id, version_number, version_label
+            FROM hydraulic_time_series_sets
+            WHERE project_id = ?
+              AND entity_type = 'hydraulic_node'
+              AND entity_id = ?
+              AND signal_key = ?
+            ORDER BY version_number
+            """,
+            (project_id, base_entity_id, NATURAL_INFLOW_SIGNAL_KEY),
+        ).fetchall()
+        available = [
+            {
+                "time_series_set_id": int(row["id"]),
+                "version_number": int(row["version_number"]),
+                "version_label": str(row["version_label"]),
+                "points": self._load_inflow_series_points(int(row["id"])),
+            }
+            for row in set_rows
+        ]
+        binding_row = self.connection.execute(
+            """
+            SELECT hydraulic_time_series_set_id
+            FROM case_hydraulic_time_series_bindings
+            WHERE case_id = ?
+              AND entity_type = 'case_hydraulic_node'
+              AND entity_id = ?
+              AND signal_key = ?
+            """,
+            (case_id, binding_entity_id, NATURAL_INFLOW_SIGNAL_KEY),
+        ).fetchone()
+        bound = None
+        if binding_row is not None:
+            bound_id = int(binding_row["hydraulic_time_series_set_id"])
+            bound = next(
+                (item for item in available if item["time_series_set_id"] == bound_id),
+                None,
+            )
+        return bound, available
+
     def _next_version_number(self, scenario_id: int) -> int:
         row = self.connection.execute(
             """
@@ -4055,7 +4514,12 @@ def normalize_hydraulic_diagram_nodes(nodes: list[dict[str, Any]]) -> list[dict[
             "y": float(node.get("y", 0.0)),
             "reservoir": None,
             "storage_elevation_curve": None,
+            "natural_inflow_series": None,
         }
+        if component_type != "plant" and node.get("natural_inflow_series") is not None:
+            normalized_node["natural_inflow_series"] = (
+                normalize_hydraulic_natural_inflow_series(node["natural_inflow_series"])
+            )
         if component_type == "reservoir":
             if node.get("reservoir") is not None:
                 normalized_node["reservoir"] = normalize_hydraulic_reservoir_parameters(
@@ -4167,6 +4631,101 @@ def hydraulic_curve_content_hash(points: list[dict[str, Any]]) -> str:
         sort_keys=True,
     )
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def normalize_hydraulic_natural_inflow_series(series: Mapping[str, Any]) -> dict[str, Any]:
+    set_id = series.get("time_series_set_id")
+    points = [
+        {
+            "timestamp": str(point.get("timestamp") or "").strip(),
+            "duration_hours": float(point.get("duration_hours", 1.0)),
+            "value_m3s": float(point.get("value_m3s", 0.0)),
+        }
+        for point in series.get("points", [])
+    ]
+    return {
+        "time_series_set_id": None if set_id is None else int(set_id),
+        "version_label": (
+            str(series["version_label"]).strip()
+            if series.get("version_label") not in (None, "")
+            else None
+        ),
+        "points": points,
+    }
+
+
+def hydraulic_inflow_series_content_hash(points: list[dict[str, Any]]) -> str:
+    serialized = json.dumps(
+        [
+            [
+                point["timestamp"],
+                round(point["duration_hours"], 9),
+                round(point["value_m3s"], 9),
+            ]
+            for point in points
+        ],
+        sort_keys=True,
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def hydraulic_v3_time_series_from_inflows(
+    required_time_series: list[dict[str, Any]],
+    inflow_series_by_key: Mapping[str, list[dict[str, float]]],
+) -> list[dict[str, Any]]:
+    """Resolve bound inflow series into the v3 ``time_series`` period blocks.
+
+    The horizon is taken from the first required entity that has a bound series.
+    When no entity is bound, a single zero period keeps the payload generatable
+    for incomplete diagrams; validation is responsible for blocking promotion.
+    """
+
+    required_ids = [requirement["entity_id"] for requirement in required_time_series]
+    reference_points: list[dict[str, float]] | None = None
+    for entity_id in required_ids:
+        points = inflow_series_by_key.get(entity_id)
+        if points:
+            reference_points = points
+            break
+    if reference_points is None:
+        return [
+            {
+                "timestamp": "2026-01-01T00:00:00",
+                "duration_hours": 1.0,
+                "natural_inflow_m3s": {entity_id: 0.0 for entity_id in required_ids},
+            }
+        ]
+    periods: list[dict[str, Any]] = []
+    for index, reference in enumerate(reference_points):
+        inflows: dict[str, float] = {}
+        for entity_id in required_ids:
+            points = inflow_series_by_key.get(entity_id, [])
+            inflows[entity_id] = (
+                float(points[index]["value_m3s"]) if index < len(points) else 0.0
+            )
+        periods.append(
+            {
+                "timestamp": reference["timestamp"],
+                "duration_hours": float(reference["duration_hours"]),
+                "natural_inflow_m3s": inflows,
+            }
+        )
+    return periods
+
+
+def hydraulic_natural_inflow_series_points(
+    series: Mapping[str, Any] | None,
+) -> list[dict[str, float]]:
+    if not isinstance(series, Mapping):
+        return []
+    return [
+        {
+            "timestamp": str(point["timestamp"]),
+            "duration_hours": float(point["duration_hours"]),
+            "value_m3s": float(point["value_m3s"]),
+        }
+        for point in series.get("points", [])
+    ]
 
 
 def normalize_hydraulic_diagram_reaches(reaches: list[dict[str, Any]]) -> list[dict[str, Any]]:

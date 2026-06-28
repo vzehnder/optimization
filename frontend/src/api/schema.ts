@@ -974,6 +974,7 @@ export interface components {
             component_type: "reservoir" | "junction" | "plant";
             /** Display Name */
             display_name: string;
+            natural_inflow_series?: components["schemas"]["HydraulicNaturalInflowSeriesRequest"] | null;
             plant?: components["schemas"]["HydraulicPlantParametersRequest"] | null;
             reservoir?: components["schemas"]["HydraulicReservoirParametersRequest"] | null;
             storage_elevation_curve?: components["schemas"]["HydraulicStorageElevationCurveRequest"] | null;
@@ -1033,6 +1034,27 @@ export interface components {
             curve_set_id?: number | null;
             /** Points */
             points?: components["schemas"]["HydraulicCurvePointRequest"][];
+            /** Version Label */
+            version_label?: string | null;
+        };
+        /** HydraulicNaturalInflowSeriesPointRequest */
+        HydraulicNaturalInflowSeriesPointRequest: {
+            /**
+             * Duration Hours
+             * @default 1
+             */
+            duration_hours: number;
+            /** Timestamp */
+            timestamp: string;
+            /** Value M3S */
+            value_m3s: number;
+        };
+        /** HydraulicNaturalInflowSeriesRequest */
+        HydraulicNaturalInflowSeriesRequest: {
+            /** Points */
+            points?: components["schemas"]["HydraulicNaturalInflowSeriesPointRequest"][];
+            /** Time Series Set Id */
+            time_series_set_id?: number | null;
             /** Version Label */
             version_label?: string | null;
         };

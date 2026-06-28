@@ -269,6 +269,16 @@
             "title": "Display Name",
             "type": "string"
           },
+          "natural_inflow_series": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HydraulicNaturalInflowSeriesRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "plant": {
             "anyOf": [
               {
@@ -455,6 +465,65 @@
           }
         },
         "title": "HydraulicFlowPowerCurveRequest",
+        "type": "object"
+      },
+      "HydraulicNaturalInflowSeriesPointRequest": {
+        "properties": {
+          "duration_hours": {
+            "default": 1.0,
+            "title": "Duration Hours",
+            "type": "number"
+          },
+          "timestamp": {
+            "minLength": 1,
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "value_m3s": {
+            "title": "Value M3S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "timestamp",
+          "value_m3s"
+        ],
+        "title": "HydraulicNaturalInflowSeriesPointRequest",
+        "type": "object"
+      },
+      "HydraulicNaturalInflowSeriesRequest": {
+        "properties": {
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/HydraulicNaturalInflowSeriesPointRequest"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "time_series_set_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Series Set Id"
+          },
+          "version_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Label"
+          }
+        },
+        "title": "HydraulicNaturalInflowSeriesRequest",
         "type": "object"
       },
       "HydraulicPlantParametersRequest": {

@@ -310,6 +310,18 @@ test("React hydraulic diagram persists reservoir parameters curves junction and 
   await page.getByLabel("Almacenamiento punto 2 reservoir_1").fill("50");
   await page.getByLabel("Cota punto 2 reservoir_1").fill("760");
 
+  // Bind a natural inflow series to the reservoir node.
+  await page
+    .getByRole("button", { name: "Agregar punto de afluente reservoir_1" })
+    .click();
+  await page.getByLabel("Marca temporal 1 reservoir_1").fill("2026-01-01T00:00:00");
+  await page.getByLabel("Caudal m3/s 1 reservoir_1").fill("5");
+  await page
+    .getByRole("button", { name: "Agregar punto de afluente reservoir_1" })
+    .click();
+  await page.getByLabel("Marca temporal 2 reservoir_1").fill("2026-01-01T01:00:00");
+  await page.getByLabel("Caudal m3/s 2 reservoir_1").fill("6");
+
   await expect(page.getByText("Estado: dirty")).toBeVisible();
   await page.getByRole("button", { name: "Guardar diagrama" }).click();
   await expect(page.getByText("Estado: saved")).toBeVisible();
@@ -349,6 +361,11 @@ test("React hydraulic diagram persists reservoir parameters curves junction and 
   await expect(page.getByLabel("Caudal maximo unit_1")).toHaveValue("40");
   await expect(page.getByLabel("Potencia punto 2 unit_1")).toHaveValue("30");
   await expect(page.getByLabel("Version de curva unit_1")).not.toHaveValue("");
+  await expect(page.getByLabel("Caudal m3/s 1 reservoir_1")).toHaveValue("5");
+  await expect(page.getByLabel("Caudal m3/s 2 reservoir_1")).toHaveValue("6");
+  await expect(
+    page.getByLabel("Version de serie reservoir_1"),
+  ).not.toHaveValue("");
 });
 
 test("React admin users and project access cover assignment, removal, deactivation, and denials", async ({

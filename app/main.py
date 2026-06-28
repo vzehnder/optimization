@@ -164,6 +164,18 @@ class HydraulicFlowPowerCurveRequest(BaseModel):
     points: list[HydraulicCurvePointRequest] = Field(default_factory=list)
 
 
+class HydraulicNaturalInflowSeriesPointRequest(BaseModel):
+    timestamp: str = Field(min_length=1)
+    duration_hours: float = 1.0
+    value_m3s: float
+
+
+class HydraulicNaturalInflowSeriesRequest(BaseModel):
+    time_series_set_id: int | None = None
+    version_label: str | None = None
+    points: list[HydraulicNaturalInflowSeriesPointRequest] = Field(default_factory=list)
+
+
 class HydraulicPlantParametersRequest(BaseModel):
     non_modeled: bool = False
     min_power_mw: float | None = None
@@ -191,6 +203,7 @@ class HydraulicDiagramNodeRequest(BaseModel):
     y: float
     reservoir: HydraulicReservoirParametersRequest | None = None
     storage_elevation_curve: HydraulicStorageElevationCurveRequest | None = None
+    natural_inflow_series: HydraulicNaturalInflowSeriesRequest | None = None
     plant: HydraulicPlantParametersRequest | None = None
     units: list[HydraulicUnitRequest] = Field(default_factory=list)
 

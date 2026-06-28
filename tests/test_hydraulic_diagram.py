@@ -459,7 +459,7 @@ class HydraulicDiagramApiTests(unittest.TestCase):
             f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram"
         ).json()["diagram"]
 
-    def _save(self, revision, *, reservoir=None, curve=None):
+    def _save(self, revision, *, reservoir=None, curve=None, inflow=None):
         node = {
             "component_type": "reservoir",
             "technical_key": "reservoir_alpha",
@@ -471,6 +471,8 @@ class HydraulicDiagramApiTests(unittest.TestCase):
             node["reservoir"] = reservoir
         if curve is not None:
             node["storage_elevation_curve"] = curve
+        if inflow is not None:
+            node["natural_inflow_series"] = inflow
         return self.client.put(
             f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram",
             json={"revision": revision, "nodes": [node]},
@@ -553,6 +555,71 @@ class HydraulicDiagramApiTests(unittest.TestCase):
         )
         self.assertEqual(selected_node["storage_elevation_curve"]["version_number"], 1)
         self.assertEqual(len(selected_node["available_curves"]), 2)
+
+    def _inflow_series(self, *values, version_label="v1"):
+        return {
+            "version_label": version_label,
+            "points": [
+                {
+                    "timestamp": f"2026-01-01T{index:02d}:00:00",
+                    "duration_hours": 1.0,
+                    "value_m3s": float(value),
+                }
+                for index, value in enumerate(values)
+            ],
+        }
+
+    def _save_reservoir_with_inflow(self, revision, series):
+        node = {
+            "component_type": "reservoir",
+            "technical_key": "reservoir_alpha",
+            "display_name": "Reservoir Alpha",
+            "x": 120.0,
+            "y": 80.0,
+            "reservoir": {
+                "storage_min_hm3": 5.0,
+                "storage_max_hm3": 50.0,
+                "initial_storage_hm3": 20.0,
+                "terminal_condition": "none",
+                "terminal_water_value_usd_per_hm3": 0.0,
+            },
+            "storage_elevation_curve": {
+                "version_label": "v1",
+                "points": [
+                    {"x_value": 5.0, "y_value": 700.0},
+                    {"x_value": 50.0, "y_value": 760.0},
+                ],
+            },
+            "natural_inflow_series": series,
+        }
+        return self.client.put(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram",
+            json={"revision": revision, "nodes": [node]},
+        )
+
+    def test_natural_inflow_series_binds_to_node_persists_and_reloads(self):
+        created = self._create_diagram()
+        response = self._save_reservoir_with_inflow(
+            created["revision"], self._inflow_series(5.0, 6.0)
+        )
+        self.assertEqual(response.status_code, 200)
+        node = self._reservoir_node(response.json()["diagram"])
+        series = node["natural_inflow_series"]
+        self.assertEqual(series["version_number"], 1)
+        self.assertEqual(series["version_label"], "v1")
+        self.assertEqual(
+            series["points"],
+            [
+                {"timestamp": "2026-01-01T00:00:00", "duration_hours": 1.0, "value_m3s": 5.0},
+                {"timestamp": "2026-01-01T01:00:00", "duration_hours": 1.0, "value_m3s": 6.0},
+            ],
+        )
+        self.assertEqual(len(node["available_inflow_series"]), 1)
+
+        reloaded = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram"
+        ).json()["diagram"]
+        self.assertEqual(self._reservoir_node(reloaded), node)
 
     def test_validation_requires_reservoir_parameters_and_curve(self):
         created = self._create_diagram()
@@ -884,7 +951,12 @@ class HydraulicDiagramApiTests(unittest.TestCase):
                 {"x_value": 50.0, "y_value": 760.0},
             ],
         }
-        save_response = self._save(created["revision"], reservoir=reservoir, curve=curve)
+        save_response = self._save(
+            created["revision"],
+            reservoir=reservoir,
+            curve=curve,
+            inflow=self._inflow_series(5.0, 6.0),
+        )
         self.assertEqual(save_response.status_code, 200)
 
         validation = self.client.post(
@@ -892,6 +964,155 @@ class HydraulicDiagramApiTests(unittest.TestCase):
         ).json()["validation"]
         self.assertTrue(validation["ok"])
         self.assertEqual(validation["errors"], [])
+
+    def test_natural_inflow_series_binds_to_non_reservoir_node(self):
+        created = self._create_diagram()
+        save_response = self.client.put(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram",
+            json={
+                "revision": created["revision"],
+                "nodes": [
+                    {
+                        "component_type": "junction",
+                        "technical_key": "junction_lat",
+                        "display_name": "Lateral inflow",
+                        "x": 200.0,
+                        "y": 90.0,
+                        "natural_inflow_series": self._inflow_series(2.0, 3.0),
+                    }
+                ],
+            },
+        )
+        self.assertEqual(save_response.status_code, 200)
+        node = next(
+            n
+            for n in save_response.json()["diagram"]["nodes"]
+            if n["technical_key"] == "junction_lat"
+        )
+        self.assertEqual(node["component_type"], "junction")
+        self.assertEqual(
+            [point["value_m3s"] for point in node["natural_inflow_series"]["points"]],
+            [2.0, 3.0],
+        )
+
+    def test_validation_requires_inflow_binding_on_reservoir(self):
+        created = self._create_diagram()
+        reservoir = {
+            "storage_min_hm3": 5.0,
+            "storage_max_hm3": 50.0,
+            "initial_storage_hm3": 20.0,
+            "terminal_condition": "none",
+            "terminal_water_value_usd_per_hm3": 0.0,
+        }
+        curve = {
+            "version_label": "v1",
+            "points": [
+                {"x_value": 5.0, "y_value": 700.0},
+                {"x_value": 50.0, "y_value": 760.0},
+            ],
+        }
+        save_response = self._save(created["revision"], reservoir=reservoir, curve=curve)
+        self.assertEqual(save_response.status_code, 200)
+
+        validation = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/validate"
+        ).json()["validation"]
+        self.assertFalse(validation["ok"])
+        missing = [
+            error
+            for error in validation["errors"]
+            if error["code"] == "missing_natural_inflow_series"
+        ]
+        self.assertEqual(len(missing), 1)
+        self.assertEqual(missing[0]["entity_type"], "case_hydraulic_node")
+        self.assertEqual(missing[0]["technical_key"], "reservoir_alpha")
+
+    def test_validation_rejects_negative_inflow_values(self):
+        created = self._create_diagram()
+        reservoir = {
+            "storage_min_hm3": 5.0,
+            "storage_max_hm3": 50.0,
+            "initial_storage_hm3": 20.0,
+            "terminal_condition": "none",
+            "terminal_water_value_usd_per_hm3": 0.0,
+        }
+        curve = {
+            "version_label": "v1",
+            "points": [
+                {"x_value": 5.0, "y_value": 700.0},
+                {"x_value": 50.0, "y_value": 760.0},
+            ],
+        }
+        save_response = self._save(
+            created["revision"],
+            reservoir=reservoir,
+            curve=curve,
+            inflow=self._inflow_series(5.0, -3.0),
+        )
+        self.assertEqual(save_response.status_code, 200)
+
+        validation = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/validate"
+        ).json()["validation"]
+        self.assertFalse(validation["ok"])
+        codes = {error["code"] for error in validation["errors"]}
+        self.assertIn("negative_inflow_value", codes)
+        negative = next(
+            error
+            for error in validation["errors"]
+            if error["code"] == "negative_inflow_value"
+        )
+        self.assertEqual(negative["entity_type"], "case_hydraulic_node")
+        self.assertEqual(negative["technical_key"], "reservoir_alpha")
+
+    def test_validation_rejects_inflow_horizon_mismatch(self):
+        created = self._create_diagram()
+        save_response = self.client.put(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram",
+            json={
+                "revision": created["revision"],
+                "nodes": [
+                    {
+                        "component_type": "reservoir",
+                        "technical_key": "reservoir_alpha",
+                        "display_name": "Reservoir Alpha",
+                        "x": 120.0,
+                        "y": 80.0,
+                        "reservoir": {
+                            "storage_min_hm3": 5.0,
+                            "storage_max_hm3": 50.0,
+                            "initial_storage_hm3": 20.0,
+                            "terminal_condition": "none",
+                            "terminal_water_value_usd_per_hm3": 0.0,
+                        },
+                        "storage_elevation_curve": {
+                            "version_label": "v1",
+                            "points": [
+                                {"x_value": 5.0, "y_value": 700.0},
+                                {"x_value": 50.0, "y_value": 760.0},
+                            ],
+                        },
+                        "natural_inflow_series": self._inflow_series(5.0, 6.0),
+                    },
+                    {
+                        "component_type": "junction",
+                        "technical_key": "junction_lat",
+                        "display_name": "Lateral",
+                        "x": 300.0,
+                        "y": 80.0,
+                        "natural_inflow_series": self._inflow_series(1.0),
+                    },
+                ],
+            },
+        )
+        self.assertEqual(save_response.status_code, 200)
+
+        validation = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/validate"
+        ).json()["validation"]
+        self.assertFalse(validation["ok"])
+        codes = {error["code"] for error in validation["errors"]}
+        self.assertIn("inflow_horizon_mismatch", codes)
 
     def test_v3_preview_generation_validates_with_julia_persists_snapshot_and_marks_stale_after_edit(self):
         self._save_complete_v3_diagram()
@@ -954,6 +1175,27 @@ class HydraulicDiagramApiTests(unittest.TestCase):
         )
         self.assertEqual(stale_response.status_code, 200)
         self.assertTrue(stale_response.json()["diagram"]["validation"]["stale"])
+
+    def test_v3_preview_resolves_bound_inflow_series_into_time_series(self):
+        self._save_complete_v3_diagram()
+        preview = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/v3-preview"
+        ).json()["validation"]["system_case"]
+        self.assertEqual(
+            preview["time_series"],
+            [
+                {
+                    "timestamp": "2026-01-01T00:00:00",
+                    "duration_hours": 1.0,
+                    "natural_inflow_m3s": {"reservoir_alpha": 5.0},
+                },
+                {
+                    "timestamp": "2026-01-01T01:00:00",
+                    "duration_hours": 1.0,
+                    "natural_inflow_m3s": {"reservoir_alpha": 6.0},
+                },
+            ],
+        )
 
     def test_validated_v3_diagram_promotes_to_version_and_manual_run_artifacts(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1068,6 +1310,21 @@ class HydraulicDiagramApiTests(unittest.TestCase):
                             "points": [
                                 {"x_value": 5.0, "y_value": 700.0},
                                 {"x_value": 50.0, "y_value": 760.0},
+                            ],
+                        },
+                        "natural_inflow_series": {
+                            "version_label": "v1",
+                            "points": [
+                                {
+                                    "timestamp": "2026-01-01T00:00:00",
+                                    "duration_hours": 1.0,
+                                    "value_m3s": 5.0,
+                                },
+                                {
+                                    "timestamp": "2026-01-01T01:00:00",
+                                    "duration_hours": 1.0,
+                                    "value_m3s": 6.0,
+                                },
                             ],
                         },
                     },

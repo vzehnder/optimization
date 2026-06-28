@@ -46,6 +46,9 @@ import {
   type HydraulicDiagramValidation,
   type HydraulicDiagramViewport,
   type HydraulicCurveWrite,
+  type HydraulicNaturalInflowSeriesPoint,
+  type HydraulicNaturalInflowSeriesSummary,
+  type HydraulicNaturalInflowSeriesWrite,
   type HydraulicPlantParameters,
   type HydraulicReachType,
   type HydraulicReservoirParameters,
@@ -1042,6 +1045,18 @@ function editableHydraulicNodes(
       display_name: node.display_name,
       x: node.x,
       y: node.y,
+      natural_inflow_series:
+        node.component_type === "plant"
+          ? null
+          : node.natural_inflow_series
+            ? {
+                time_series_set_id: node.natural_inflow_series.time_series_set_id,
+                version_label: node.natural_inflow_series.version_label,
+                points: node.natural_inflow_series.points.map((point) => ({
+                  ...point,
+                })),
+              }
+            : null,
     };
     if (node.component_type === "reservoir") {
       return {
@@ -1098,6 +1113,22 @@ function curvesByNodeKey(
     }
   }
   return map;
+}
+
+function inflowSeriesByNodeKey(
+  diagram: HydraulicDiagram,
+): Record<string, HydraulicNaturalInflowSeriesSummary[]> {
+  const map: Record<string, HydraulicNaturalInflowSeriesSummary[]> = {};
+  for (const node of diagram.nodes) {
+    if (node.component_type !== "plant") {
+      map[node.technical_key] = node.available_inflow_series ?? [];
+    }
+  }
+  return map;
+}
+
+function emptyInflowSeries(): HydraulicNaturalInflowSeriesWrite {
+  return { time_series_set_id: null, version_label: null, points: [] };
 }
 
 function unitCurvesByKey(
@@ -1423,6 +1454,176 @@ const hydraulicTerminalConditionLabels: Record<
   equal_initial: "Igual al inicial",
   min_terminal: "Minimo terminal",
 };
+
+function HydraulicInflowPanel({
+  node,
+  availableSeries,
+  updateInflowSeries,
+}: {
+  node: HydraulicDiagramNodeWrite;
+  availableSeries: HydraulicNaturalInflowSeriesSummary[];
+  updateInflowSeries: (
+    technicalKey: string,
+    series: HydraulicNaturalInflowSeriesWrite,
+  ) => void;
+}) {
+  const key = node.technical_key;
+  const series = node.natural_inflow_series ?? emptyInflowSeries();
+  const points = series.points;
+
+  function setPoints(nextPoints: HydraulicNaturalInflowSeriesPoint[]) {
+    updateInflowSeries(key, {
+      time_series_set_id: null,
+      version_label: series.version_label ?? null,
+      points: nextPoints,
+    });
+  }
+
+  return (
+    <li className="hydraulic-inflow-panel" data-testid={`hydraulic-inflow-${key}`}>
+      <div className="draft-section-heading">
+        <h3>Afluente natural {node.display_name}</h3>
+        <div className="draft-actions">
+          {availableSeries.length ? (
+            <label htmlFor={`inflow-version-${key}`}>
+              <span>Version de serie {key}</span>
+              <select
+                id={`inflow-version-${key}`}
+                value={series.time_series_set_id ?? ""}
+                onChange={(event) => {
+                  const selectedId = Number(event.target.value);
+                  const selected = availableSeries.find(
+                    (option) => option.time_series_set_id === selectedId,
+                  );
+                  if (!selected) return;
+                  updateInflowSeries(key, {
+                    time_series_set_id: selected.time_series_set_id,
+                    version_label: selected.version_label,
+                    points: selected.points.map((point) => ({ ...point })),
+                  });
+                }}
+              >
+                <option value="">Serie editada</option>
+                {availableSeries.map((option) => (
+                  <option
+                    key={option.time_series_set_id}
+                    value={option.time_series_set_id}
+                  >
+                    {option.version_label} (v{option.version_number})
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          <button
+            type="button"
+            data-testid={`inflow-add-point-${key}`}
+            onClick={() =>
+              setPoints([
+                ...points,
+                {
+                  timestamp: "2026-01-01T00:00:00",
+                  duration_hours: 1,
+                  value_m3s: 0,
+                },
+              ])
+            }
+          >
+            Agregar punto de afluente {key}
+          </button>
+        </div>
+      </div>
+      {points.length ? (
+        <ul className="resource-list hydraulic-inflow-points">
+          {points.map((point, index) => (
+            <li key={index}>
+              <label htmlFor={`inflow-timestamp-${key}-${index}`}>
+                <span>
+                  Marca temporal {index + 1} {key}
+                </span>
+                <input
+                  id={`inflow-timestamp-${key}-${index}`}
+                  type="text"
+                  value={point.timestamp}
+                  onChange={(event) =>
+                    setPoints(
+                      points.map((current, currentIndex) =>
+                        currentIndex === index
+                          ? { ...current, timestamp: event.target.value }
+                          : current,
+                      ),
+                    )
+                  }
+                />
+              </label>
+              <label htmlFor={`inflow-duration-${key}-${index}`}>
+                <span>
+                  Duracion horas {index + 1} {key}
+                </span>
+                <input
+                  id={`inflow-duration-${key}-${index}`}
+                  type="number"
+                  value={point.duration_hours}
+                  onChange={(event) =>
+                    setPoints(
+                      points.map((current, currentIndex) =>
+                        currentIndex === index
+                          ? {
+                              ...current,
+                              duration_hours: Number(event.target.value),
+                            }
+                          : current,
+                      ),
+                    )
+                  }
+                />
+              </label>
+              <label htmlFor={`inflow-value-${key}-${index}`}>
+                <span>
+                  Caudal m3/s {index + 1} {key}
+                </span>
+                <input
+                  id={`inflow-value-${key}-${index}`}
+                  type="number"
+                  value={point.value_m3s}
+                  onChange={(event) =>
+                    setPoints(
+                      points.map((current, currentIndex) =>
+                        currentIndex === index
+                          ? {
+                              ...current,
+                              value_m3s: Number(event.target.value),
+                            }
+                          : current,
+                      ),
+                    )
+                  }
+                />
+              </label>
+              <button
+                type="button"
+                className="secondary-action"
+                onClick={() =>
+                  setPoints(
+                    points.filter(
+                      (_, currentIndex) => currentIndex !== index,
+                    ),
+                  )
+                }
+              >
+                Quitar punto {index + 1} {key}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <EmptyState>
+          Sin afluente natural vinculado a este nodo.
+        </EmptyState>
+      )}
+    </li>
+  );
+}
 
 function HydraulicReservoirPanel({
   node,
@@ -2057,6 +2258,9 @@ function HydraulicDiagramEditor({
   const [unitCurves, setUnitCurves] = useState<
     Record<string, HydraulicCurveSummary[]>
   >(() => unitCurvesByKey(initialDiagram));
+  const [availableInflowSeries, setAvailableInflowSeries] = useState<
+    Record<string, HydraulicNaturalInflowSeriesSummary[]>
+  >(() => inflowSeriesByNodeKey(initialDiagram));
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -2080,6 +2284,7 @@ function HydraulicDiagramEditor({
       setReaches(editableHydraulicReaches(savedDiagram));
       setAvailableCurves(curvesByNodeKey(savedDiagram));
       setUnitCurves(unitCurvesByKey(savedDiagram));
+      setAvailableInflowSeries(inflowSeriesByNodeKey(savedDiagram));
       setRevision(savedDiagram.revision);
       setViewport(defaultHydraulicViewport(savedDiagram));
       setValidation(visibleHydraulicValidation(savedDiagram.validation));
@@ -2102,6 +2307,7 @@ function HydraulicDiagramEditor({
       setReaches(editableHydraulicReaches(serverDiagram));
       setAvailableCurves(curvesByNodeKey(serverDiagram));
       setUnitCurves(unitCurvesByKey(serverDiagram));
+      setAvailableInflowSeries(inflowSeriesByNodeKey(serverDiagram));
       setRevision(serverDiagram.revision);
       setViewport(defaultHydraulicViewport(serverDiagram));
       setValidation(visibleHydraulicValidation(serverDiagram.validation));
@@ -2216,6 +2422,20 @@ function HydraulicDiagramEditor({
       current.map((node) =>
         node.technical_key === technicalKey
           ? { ...node, storage_elevation_curve: curve }
+          : node,
+      ),
+    );
+    markDirty();
+  }
+
+  function updateInflowSeries(
+    technicalKey: string,
+    series: HydraulicNaturalInflowSeriesWrite,
+  ) {
+    setNodes((current) =>
+      current.map((node) =>
+        node.technical_key === technicalKey
+          ? { ...node, natural_inflow_series: series }
           : node,
       ),
     );
@@ -2546,6 +2766,31 @@ function HydraulicDiagramEditor({
           ) : (
             <EmptyState>
               Agrega un embalse para editar almacenamiento y curva cota-volumen.
+            </EmptyState>
+          )}
+        </section>
+        <section className="workspace-section" aria-labelledby="inflow-tools">
+          <div className="draft-section-heading">
+            <h2 id="inflow-tools">Afluentes naturales</h2>
+          </div>
+          {nodes.some((node) => node.component_type !== "plant") ? (
+            <ul className="resource-list hydraulic-inflow-list">
+              {nodes
+                .filter((node) => node.component_type !== "plant")
+                .map((node) => (
+                  <HydraulicInflowPanel
+                    key={node.technical_key}
+                    node={node}
+                    availableSeries={
+                      availableInflowSeries[node.technical_key] ?? []
+                    }
+                    updateInflowSeries={updateInflowSeries}
+                  />
+                ))}
+            </ul>
+          ) : (
+            <EmptyState>
+              Agrega un nodo hidraulico para vincular afluentes naturales.
             </EmptyState>
           )}
         </section>
