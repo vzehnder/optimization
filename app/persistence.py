@@ -46,6 +46,18 @@ HYDRAULIC_REACH_TYPES = {
     "other",
 }
 HYDRAULIC_TERMINAL_CONDITIONS = {"none", "equal_initial", "min_terminal"}
+# Routing methods the schema can store; the MVP v3 solver only runs `none`
+# (no travel-time delay). Other values are persisted but rejected before
+# promotion by topology validation.
+HYDRAULIC_ROUTING_METHODS = {"none", "fixed_delay", "linear_reservoir", "custom_curve"}
+HYDRAULIC_SUPPORTED_ROUTING_METHODS = {"none"}
+# Unit capability/generation modes the schema can store. The MVP v3 solver only
+# runs generation-only units with a flow-power curve; pumping, reversibility and
+# head-dependent generation are rejected before promotion.
+HYDRAULIC_UNIT_OPERATION_MODES = {"generation", "pump_only", "reversible"}
+HYDRAULIC_SUPPORTED_UNIT_OPERATION_MODES = {"generation"}
+HYDRAULIC_UNIT_GENERATION_MODES = {"flow_power_curve", "head_dependent"}
+HYDRAULIC_SUPPORTED_UNIT_GENERATION_MODES = {"flow_power_curve"}
 STORAGE_ELEVATION_CURVE_KEY = "storage_elevation"
 FLOW_POWER_CURVE_KEY = "flow_power"
 
@@ -638,6 +650,14 @@ class AnalystStore:
         self._ensure_column("case_hydraulic_plants", "non_modeled", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("case_hydraulic_plants", "min_power_mw", "REAL")
         self._ensure_column("case_hydraulic_plants", "max_power_mw", "REAL")
+        self._ensure_column(
+            "hydraulic_units", "operation_mode", "TEXT NOT NULL DEFAULT 'generation'"
+        )
+        self._ensure_column(
+            "hydraulic_units",
+            "generation_mode",
+            "TEXT NOT NULL DEFAULT 'flow_power_curve'",
+        )
         self.connection.commit()
 
     def _ensure_column(self, table_name: str, column_name: str, definition: str) -> None:
@@ -1736,6 +1756,8 @@ class AnalystStore:
                     now=now,
                     flow_min_m3s=reach.get("flow_min_m3s"),
                     spill_penalty_usd_per_hm3=reach.get("spill_penalty_usd_per_hm3"),
+                    routing_method=reach.get("routing_method", "none"),
+                    travel_time_hours=reach.get("travel_time_hours", 0.0),
                 )
                 if reach.get("minimum_flow_series") is not None:
                     self._persist_hydraulic_inflow_series(
@@ -2110,6 +2132,7 @@ class AnalystStore:
         errors.extend(self._validate_active_plants_and_units(case_id, active_node_ids))
         errors.extend(self._validate_node_inflow_series(case_id))
         errors.extend(self._validate_reach_controls(case_id))
+        errors.extend(self._validate_unsupported_topology(case_id, active_node_ids))
 
         validation = {
             "ok": not errors,
@@ -3079,6 +3102,8 @@ class AnalystStore:
                 hydraulic_reaches.reach_key AS technical_key,
                 case_hydraulic_reaches.case_label AS display_name,
                 hydraulic_reaches.reach_type,
+                hydraulic_reaches.routing_method,
+                hydraulic_reaches.travel_time_hours,
                 from_nodes.node_key AS from_node_key,
                 to_nodes.node_key AS to_node_key
             FROM case_hydraulic_reaches
@@ -3475,6 +3500,245 @@ class AnalystStore:
                     )
         return errors
 
+    def _validate_unsupported_topology(
+        self, case_id: int, active_node_ids: set[int]
+    ) -> list[dict[str, Any]]:
+        """Reject graph shapes outside the MVP v3 solver capability.
+
+        Detects unsupported routing/travel-time, cycles, disconnected islands
+        without boundary conditions, and head-dependent/pump-only/reversible
+        unit modes. Each error carries an entity reference so the UI can focus
+        the affected component.
+        """
+
+        errors: list[dict[str, Any]] = []
+        node_rows = self.connection.execute(
+            """
+            SELECT case_hydraulic_nodes.id AS case_node_id,
+                   case_hydraulic_nodes.hydraulic_node_id AS base_node_id,
+                   hydraulic_nodes.node_key,
+                   hydraulic_nodes.node_type
+            FROM case_hydraulic_nodes
+            JOIN hydraulic_nodes
+              ON hydraulic_nodes.id = case_hydraulic_nodes.hydraulic_node_id
+            WHERE case_hydraulic_nodes.case_id = ?
+              AND case_hydraulic_nodes.is_active = 1
+            ORDER BY case_hydraulic_nodes.id
+            """,
+            (case_id,),
+        ).fetchall()
+        node_key_by_base_id: dict[int, str] = {}
+        case_node_id_by_key: dict[str, int] = {}
+        node_keys: list[str] = []
+        boundary_keys: set[str] = set()
+        for row in node_rows:
+            key = str(row["node_key"])
+            node_key_by_base_id[int(row["base_node_id"])] = key
+            case_node_id_by_key[key] = int(row["case_node_id"])
+            node_keys.append(key)
+            if str(row["node_type"]) == "reservoir":
+                boundary_keys.add(key)
+
+        inflow_rows = self.connection.execute(
+            """
+            SELECT hydraulic_nodes.node_key
+            FROM case_hydraulic_time_series_bindings
+            JOIN case_hydraulic_nodes
+              ON case_hydraulic_nodes.id = case_hydraulic_time_series_bindings.entity_id
+            JOIN hydraulic_nodes
+              ON hydraulic_nodes.id = case_hydraulic_nodes.hydraulic_node_id
+            WHERE case_hydraulic_time_series_bindings.case_id = ?
+              AND case_hydraulic_time_series_bindings.entity_type = 'case_hydraulic_node'
+              AND case_hydraulic_time_series_bindings.signal_key = ?
+              AND case_hydraulic_nodes.is_active = 1
+            """,
+            (case_id, NATURAL_INFLOW_SIGNAL_KEY),
+        ).fetchall()
+        for row in inflow_rows:
+            boundary_keys.add(str(row["node_key"]))
+
+        edges: list[tuple[str, str]] = []
+        reach_by_edge: dict[tuple[str, str], dict[str, Any]] = {}
+        reach_rows = self.connection.execute(
+            """
+            SELECT case_hydraulic_reaches.id AS case_reach_id,
+                   hydraulic_reaches.reach_key,
+                   hydraulic_reaches.from_node_id,
+                   hydraulic_reaches.to_node_id,
+                   hydraulic_reaches.routing_method,
+                   hydraulic_reaches.travel_time_hours
+            FROM case_hydraulic_reaches
+            JOIN hydraulic_reaches
+              ON hydraulic_reaches.id = case_hydraulic_reaches.hydraulic_reach_id
+            WHERE case_hydraulic_reaches.case_id = ?
+              AND case_hydraulic_reaches.is_active = 1
+            ORDER BY case_hydraulic_reaches.id
+            """,
+            (case_id,),
+        ).fetchall()
+        for row in reach_rows:
+            reach_key = str(row["reach_key"])
+            case_reach_id = int(row["case_reach_id"])
+            entity = {
+                "entity_type": "case_hydraulic_reach",
+                "entity_id": case_reach_id,
+                "technical_key": reach_key,
+            }
+            routing_method = str(row["routing_method"] or "none")
+            if routing_method not in HYDRAULIC_SUPPORTED_ROUTING_METHODS:
+                errors.append(
+                    {
+                        "severity": "error",
+                        "code": "unsupported_reach_routing",
+                        "message": (
+                            f"Reach {reach_key} uses unsupported routing method "
+                            f"{routing_method}; only 'none' runs in the MVP solver."
+                        ),
+                        **entity,
+                    }
+                )
+            travel_time = float(row["travel_time_hours"] or 0.0)
+            if travel_time != 0.0:
+                errors.append(
+                    {
+                        "severity": "error",
+                        "code": "unsupported_reach_travel_time",
+                        "message": (
+                            f"Reach {reach_key} has travel_time_hours {travel_time}; "
+                            "the MVP solver only supports non-delayed reaches."
+                        ),
+                        **entity,
+                    }
+                )
+            from_key = node_key_by_base_id.get(int(row["from_node_id"]))
+            to_key = node_key_by_base_id.get(int(row["to_node_id"]))
+            if from_key is not None and to_key is not None:
+                edges.append((from_key, to_key))
+                reach_by_edge[(from_key, to_key)] = entity
+
+        unit_rows = self.connection.execute(
+            """
+            SELECT case_hydraulic_units.id AS case_unit_id,
+                   hydraulic_units.unit_key,
+                   hydraulic_units.intake_node_id,
+                   hydraulic_units.discharge_node_id,
+                   hydraulic_units.operation_mode,
+                   hydraulic_units.generation_mode
+            FROM case_hydraulic_units
+            JOIN hydraulic_units
+              ON hydraulic_units.id = case_hydraulic_units.hydraulic_unit_id
+            WHERE case_hydraulic_units.case_id = ?
+              AND case_hydraulic_units.is_active = 1
+            ORDER BY case_hydraulic_units.id
+            """,
+            (case_id,),
+        ).fetchall()
+        for row in unit_rows:
+            unit_key = str(row["unit_key"])
+            entity = {
+                "entity_type": "case_hydraulic_unit",
+                "entity_id": int(row["case_unit_id"]),
+                "technical_key": unit_key,
+            }
+            operation_mode = str(row["operation_mode"] or "generation")
+            if operation_mode not in HYDRAULIC_SUPPORTED_UNIT_OPERATION_MODES:
+                errors.append(
+                    {
+                        "severity": "error",
+                        "code": "unsupported_unit_operation_mode",
+                        "message": (
+                            f"Unit {unit_key} operation mode {operation_mode} is "
+                            "unsupported; only generation runs in the MVP solver."
+                        ),
+                        **entity,
+                    }
+                )
+            generation_mode = str(row["generation_mode"] or "flow_power_curve")
+            if generation_mode not in HYDRAULIC_SUPPORTED_UNIT_GENERATION_MODES:
+                errors.append(
+                    {
+                        "severity": "error",
+                        "code": "unsupported_unit_generation_mode",
+                        "message": (
+                            f"Unit {unit_key} generation mode {generation_mode} is "
+                            "unsupported; head-dependent generation is not in the MVP "
+                            "solver."
+                        ),
+                        **entity,
+                    }
+                )
+            intake_id = row["intake_node_id"]
+            discharge_id = row["discharge_node_id"]
+            if intake_id is None or discharge_id is None:
+                continue
+            from_key = node_key_by_base_id.get(int(intake_id))
+            to_key = node_key_by_base_id.get(int(discharge_id))
+            if from_key is not None and to_key is not None:
+                edges.append((from_key, to_key))
+
+        cycle = hydraulic_first_cycle(node_keys, edges)
+        if cycle:
+            cycle_set = set(cycle)
+            cycle_path = " -> ".join(cycle + [cycle[0]])
+            flagged_reaches = [
+                entity
+                for (from_key, to_key), entity in reach_by_edge.items()
+                if from_key in cycle_set and to_key in cycle_set
+            ]
+            if flagged_reaches:
+                for entity in flagged_reaches:
+                    errors.append(
+                        {
+                            "severity": "error",
+                            "code": "unsupported_cycle",
+                            "message": (
+                                "Reach "
+                                f"{entity['technical_key']} closes an unsupported "
+                                f"hydraulic cycle ({cycle_path}); the MVP solver only "
+                                "runs acyclic networks."
+                            ),
+                            **entity,
+                        }
+                    )
+            else:
+                representative = sorted(cycle_set)[0]
+                errors.append(
+                    {
+                        "severity": "error",
+                        "code": "unsupported_cycle",
+                        "message": (
+                            f"Hydraulic cycle ({cycle_path}) is unsupported; the MVP "
+                            "solver only runs acyclic networks."
+                        ),
+                        "entity_type": "case_hydraulic_node",
+                        "entity_id": case_node_id_by_key.get(representative, 0),
+                        "technical_key": representative,
+                    }
+                )
+
+        components = hydraulic_weakly_connected_components(node_keys, edges)
+        if len(components) > 1:
+            for component in components:
+                if any(key in boundary_keys for key in component):
+                    continue
+                representative = sorted(component)[0]
+                member_list = ", ".join(sorted(component))
+                errors.append(
+                    {
+                        "severity": "error",
+                        "code": "island_without_boundary",
+                        "message": (
+                            f"Disconnected hydraulic island ({member_list}) has no "
+                            "boundary condition (reservoir or natural inflow); add one "
+                            "or remove the island before promotion."
+                        ),
+                        "entity_type": "case_hydraulic_node",
+                        "entity_id": case_node_id_by_key.get(representative, 0),
+                        "technical_key": representative,
+                    }
+                )
+        return errors
+
     def _validate_active_plants_and_units(
         self, case_id: int, active_node_ids: set[int]
     ) -> list[dict[str, Any]]:
@@ -3785,6 +4049,8 @@ class AnalystStore:
                 case_hydraulic_units.id AS case_unit_id,
                 case_hydraulic_units.hydraulic_unit_id AS base_unit_id,
                 hydraulic_units.unit_key,
+                hydraulic_units.operation_mode,
+                hydraulic_units.generation_mode,
                 case_hydraulic_units.case_label,
                 case_hydraulic_units.is_active,
                 case_hydraulic_units.min_power_mw,
@@ -3822,6 +4088,8 @@ class AnalystStore:
                     "technical_key": str(row["unit_key"]),
                     "display_name": str(row["case_label"]),
                     "is_active": bool(row["is_active"]),
+                    "operation_mode": str(row["operation_mode"] or "generation"),
+                    "generation_mode": str(row["generation_mode"] or "flow_power_curve"),
                     "intake_node_key": row["intake_node_key"],
                     "discharge_node_key": row["discharge_node_key"],
                     "min_power_mw": _optional_float(row["min_power_mw"]),
@@ -3929,6 +4197,8 @@ class AnalystStore:
         now: str,
         flow_min_m3s: float | None = None,
         spill_penalty_usd_per_hm3: float | None = None,
+        routing_method: str = "none",
+        travel_time_hours: float = 0.0,
     ) -> dict[str, int]:
         self.connection.execute(
             """
@@ -3946,12 +4216,14 @@ class AnalystStore:
                 created_by,
                 updated_by
             )
-            VALUES (?, ?, ?, ?, ?, ?, 0, 'none', ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (hydraulic_system_id, reach_key) DO UPDATE SET
                 display_name = excluded.display_name,
                 from_node_id = excluded.from_node_id,
                 to_node_id = excluded.to_node_id,
                 reach_type = excluded.reach_type,
+                travel_time_hours = excluded.travel_time_hours,
+                routing_method = excluded.routing_method,
                 updated_at = excluded.updated_at,
                 updated_by = excluded.updated_by
             """,
@@ -3962,6 +4234,8 @@ class AnalystStore:
                 from_node_id,
                 to_node_id,
                 reach_type,
+                travel_time_hours,
+                routing_method,
                 now,
                 now,
                 updated_by,
@@ -4114,16 +4388,20 @@ class AnalystStore:
                 display_name,
                 intake_node_id,
                 discharge_node_id,
+                operation_mode,
+                generation_mode,
                 created_at,
                 updated_at,
                 created_by,
                 updated_by
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (hydraulic_plant_id, unit_key) DO UPDATE SET
                 display_name = excluded.display_name,
                 intake_node_id = excluded.intake_node_id,
                 discharge_node_id = excluded.discharge_node_id,
+                operation_mode = excluded.operation_mode,
+                generation_mode = excluded.generation_mode,
                 updated_at = excluded.updated_at,
                 updated_by = excluded.updated_by
             """,
@@ -4133,6 +4411,8 @@ class AnalystStore:
                 display_name,
                 intake_node_id,
                 discharge_node_id,
+                str(unit.get("operation_mode") or "generation"),
+                str(unit.get("generation_mode") or "flow_power_curve"),
                 now,
                 now,
                 updated_by,
@@ -4809,6 +5089,85 @@ def hydraulic_autolayout_position(index: int) -> tuple[float, float]:
     )
 
 
+def hydraulic_weakly_connected_components(
+    node_keys: list[str], edges: list[tuple[str, str]]
+) -> list[set[str]]:
+    """Group node keys into weakly-connected components (edge direction ignored).
+
+    Components are returned in the first-seen order of ``node_keys`` so the
+    result is deterministic for stable validation output.
+    """
+
+    parent: dict[str, str] = {key: key for key in node_keys}
+
+    def find(key: str) -> str:
+        root = key
+        while parent[root] != root:
+            root = parent[root]
+        while parent[key] != root:
+            parent[key], key = root, parent[key]
+        return root
+
+    for from_key, to_key in edges:
+        if from_key in parent and to_key in parent:
+            root_a, root_b = find(from_key), find(to_key)
+            if root_a != root_b:
+                parent[root_b] = root_a
+
+    members: dict[str, set[str]] = {}
+    for key in node_keys:
+        members.setdefault(find(key), set()).add(key)
+
+    ordered: list[set[str]] = []
+    seen_roots: set[str] = set()
+    for key in node_keys:
+        root = find(key)
+        if root not in seen_roots:
+            seen_roots.add(root)
+            ordered.append(members[root])
+    return ordered
+
+
+def hydraulic_first_cycle(
+    node_keys: list[str], edges: list[tuple[str, str]]
+) -> list[str]:
+    """Return the node keys forming the first directed cycle, or ``[]`` if none.
+
+    The MVP hydraulic solver only supports acyclic directed networks, so this
+    powers the topology validation that rejects unsupported cycles.
+    """
+
+    adjacency: dict[str, list[str]] = {key: [] for key in node_keys}
+    for from_key, to_key in edges:
+        if from_key in adjacency and to_key in adjacency:
+            adjacency[from_key].append(to_key)
+
+    white, gray, black = 0, 1, 2
+    color = {key: white for key in node_keys}
+    stack: list[str] = []
+
+    def visit(node: str) -> list[str]:
+        color[node] = gray
+        stack.append(node)
+        for neighbor in adjacency[node]:
+            if color[neighbor] == gray:
+                return stack[stack.index(neighbor):]
+            if color[neighbor] == white:
+                found = visit(neighbor)
+                if found:
+                    return found
+        stack.pop()
+        color[node] = black
+        return []
+
+    for key in node_keys:
+        if color[key] == white:
+            found = visit(key)
+            if found:
+                return found
+    return []
+
+
 def normalize_hydraulic_diagram_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     seen_keys: set[tuple[str, str]] = set()
@@ -4892,12 +5251,25 @@ def normalize_hydraulic_units(units: list[Mapping[str, Any]]) -> list[dict[str, 
         intake_node_key = str(unit.get("intake_node_key") or "").strip() or None
         discharge_node_key = str(unit.get("discharge_node_key") or "").strip() or None
         curve = unit.get("flow_power_curve")
+        operation_mode = str(unit.get("operation_mode") or "generation").strip() or "generation"
+        if operation_mode not in HYDRAULIC_UNIT_OPERATION_MODES:
+            raise ValueError(f"unsupported hydraulic unit operation mode: {operation_mode}")
+        generation_mode = (
+            str(unit.get("generation_mode") or "flow_power_curve").strip()
+            or "flow_power_curve"
+        )
+        if generation_mode not in HYDRAULIC_UNIT_GENERATION_MODES:
+            raise ValueError(
+                f"unsupported hydraulic unit generation mode: {generation_mode}"
+            )
         normalized.append(
             {
                 "technical_key": technical_key,
                 "display_name": str(unit.get("display_name") or "").strip()
                 or technical_key,
                 "is_active": bool(unit.get("is_active", True)),
+                "operation_mode": operation_mode,
+                "generation_mode": generation_mode,
                 "intake_node_key": intake_node_key,
                 "discharge_node_key": discharge_node_key,
                 "min_power_mw": _optional_float(unit.get("min_power_mw")),
@@ -5094,6 +5466,12 @@ def normalize_hydraulic_diagram_reaches(reaches: list[dict[str, Any]]) -> list[d
         reach_type = str(reach.get("reach_type") or "").strip()
         if reach_type not in HYDRAULIC_REACH_TYPES:
             raise ValueError(f"unsupported hydraulic reach type: {reach_type}")
+        routing_method = str(reach.get("routing_method") or "none").strip() or "none"
+        if routing_method not in HYDRAULIC_ROUTING_METHODS:
+            raise ValueError(f"unsupported hydraulic routing method: {routing_method}")
+        travel_time_hours = float(reach.get("travel_time_hours") or 0.0)
+        if travel_time_hours < 0:
+            raise ValueError("hydraulic reach travel_time_hours must be nonnegative")
         minimum_flow_series = None
         if reach.get("minimum_flow_series") is not None:
             minimum_flow_series = normalize_hydraulic_natural_inflow_series(
@@ -5106,6 +5484,8 @@ def normalize_hydraulic_diagram_reaches(reaches: list[dict[str, Any]]) -> list[d
                 "from_node_key": from_node_key,
                 "to_node_key": to_node_key,
                 "reach_type": reach_type,
+                "routing_method": routing_method,
+                "travel_time_hours": travel_time_hours,
                 "flow_min_m3s": _optional_float(reach.get("flow_min_m3s")),
                 "spill_penalty_usd_per_hm3": _optional_float(
                     reach.get("spill_penalty_usd_per_hm3")
@@ -5233,6 +5613,8 @@ def hydraulic_diagram_reach_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) ->
         "from_node_key": value["from_node_key"],
         "to_node_key": value["to_node_key"],
         "reach_type": value["reach_type"],
+        "routing_method": str(value.get("routing_method") or "none"),
+        "travel_time_hours": float(value.get("travel_time_hours") or 0.0),
         "flow_min_m3s": _optional_float(value.get("flow_min_m3s")),
         "spill_penalty_usd_per_hm3": _optional_float(
             value.get("spill_penalty_usd_per_hm3")

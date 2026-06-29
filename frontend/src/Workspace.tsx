@@ -1240,6 +1240,7 @@ function HydraulicNodeList({
   createReach,
   beginReachDrag,
   completeReachDrag,
+  focusedEntityKey,
 }: {
   nodes: HydraulicDiagramNodeWrite[];
   updateNode: (
@@ -1249,6 +1250,7 @@ function HydraulicNodeList({
   createReach: (fromNodeKey: string, toNodeKey: string) => void;
   beginReachDrag: (fromNodeKey: string) => void;
   completeReachDrag: (toNodeKey: string) => void;
+  focusedEntityKey: string | null;
 }) {
   if (!nodes.length) {
     return (
@@ -1263,6 +1265,12 @@ function HydraulicNodeList({
         <li
           key={node.technical_key}
           data-testid={`hydraulic-node-${node.technical_key}`}
+          data-focused={
+            focusedEntityKey === node.technical_key ? "true" : undefined
+          }
+          aria-current={
+            focusedEntityKey === node.technical_key ? "true" : undefined
+          }
           draggable={node.component_type !== "plant"}
           onDragStart={(event: DragEvent<HTMLLIElement>) => {
             event.dataTransfer.setData("text/plain", node.technical_key);
@@ -1351,6 +1359,7 @@ function HydraulicReachList({
   reaches,
   updateReach,
   minimumFlowSeriesByReach,
+  focusedEntityKey,
 }: {
   nodes: HydraulicDiagramNodeWrite[];
   reaches: HydraulicDiagramReachWrite[];
@@ -1359,6 +1368,7 @@ function HydraulicReachList({
     patch: Partial<HydraulicDiagramReachWrite>,
   ) => void;
   minimumFlowSeriesByReach: Record<string, HydraulicNaturalInflowSeriesSummary[]>;
+  focusedEntityKey: string | null;
 }) {
   const nodeKeys = nodes
     .filter((node) => node.component_type !== "plant")
@@ -1372,7 +1382,16 @@ function HydraulicReachList({
   return (
     <ul className="resource-list hydraulic-reach-list">
       {reaches.map((reach) => (
-        <li key={reach.technical_key}>
+        <li
+          key={reach.technical_key}
+          data-testid={`hydraulic-reach-${reach.technical_key}`}
+          data-focused={
+            focusedEntityKey === reach.technical_key ? "true" : undefined
+          }
+          aria-current={
+            focusedEntityKey === reach.technical_key ? "true" : undefined
+          }
+        >
           <strong>{reach.display_name}</strong>
           <p>
             {reach.technical_key} | {reach.from_node_key} -&gt;{" "}
@@ -2506,6 +2525,7 @@ function HydraulicDiagramEditor({
   const [pendingReachSource, setPendingReachSource] = useState<string | null>(
     null,
   );
+  const [focusedEntityKey, setFocusedEntityKey] = useState<string | null>(null);
   const [availableCurves, setAvailableCurves] = useState<
     Record<string, HydraulicCurveSummary[]>
   >(() => curvesByNodeKey(initialDiagram));
@@ -2934,8 +2954,15 @@ function HydraulicDiagramEditor({
               <ul className="resource-list">
                 {validation.errors.map((issue) => (
                   <li key={`${issue.code}-${issue.entity_id}`}>
-                    <strong>{issue.technical_key}</strong>
-                    <p>{issue.message}</p>
+                    <button
+                      type="button"
+                      className="hydraulic-validation-focus"
+                      onClick={() => setFocusedEntityKey(issue.technical_key)}
+                      aria-label={`Enfocar ${issue.technical_key}`}
+                    >
+                      <strong>{issue.technical_key}</strong>
+                      <p>{issue.message}</p>
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -2989,6 +3016,7 @@ function HydraulicDiagramEditor({
             createReach={createReach}
             beginReachDrag={beginReachDrag}
             completeReachDrag={completeReachDrag}
+            focusedEntityKey={focusedEntityKey}
           />
         </section>
         <section className="workspace-section" aria-labelledby="reach-tools">
@@ -3000,6 +3028,7 @@ function HydraulicDiagramEditor({
             reaches={reaches}
             updateReach={updateReach}
             minimumFlowSeriesByReach={availableMinimumFlowSeries}
+            focusedEntityKey={focusedEntityKey}
           />
         </section>
         <section

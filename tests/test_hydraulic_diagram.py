@@ -1589,7 +1589,295 @@ class HydraulicDiagramApiTests(unittest.TestCase):
             [(node["x"], node["y"]) for node in repeat["nodes"]], positions
         )
 
-    def _save_complete_v3_diagram(self, *, reach_overrides=None, node_positions=None, viewport=None):
+    def _validation_for(self):
+        return self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/validate"
+        ).json()["validation"]
+
+    def test_validation_rejects_unsupported_reach_routing_method(self):
+        self._save_complete_v3_diagram(
+            reach_overrides={"routing_method": "fixed_delay"}
+        )
+        validation = self._validation_for()
+        self.assertFalse(validation["ok"])
+        routing = [
+            error
+            for error in validation["errors"]
+            if error["code"] == "unsupported_reach_routing"
+        ]
+        self.assertEqual(len(routing), 1)
+        self.assertEqual(routing[0]["entity_type"], "case_hydraulic_reach")
+        self.assertEqual(routing[0]["technical_key"], "reach_reservoir_intake")
+
+    def test_validation_rejects_reach_travel_time_delay(self):
+        self._save_complete_v3_diagram(
+            reach_overrides={"travel_time_hours": 2.0}
+        )
+        validation = self._validation_for()
+        self.assertFalse(validation["ok"])
+        delays = [
+            error
+            for error in validation["errors"]
+            if error["code"] == "unsupported_reach_travel_time"
+        ]
+        self.assertEqual(len(delays), 1)
+        self.assertEqual(delays[0]["technical_key"], "reach_reservoir_intake")
+
+    def test_routing_and_travel_time_round_trip_on_reach(self):
+        diagram = self._save_complete_v3_diagram(
+            reach_overrides={
+                "routing_method": "fixed_delay",
+                "travel_time_hours": 3.5,
+            }
+        )
+        reach = next(
+            reach
+            for reach in diagram["reaches"]
+            if reach["technical_key"] == "reach_reservoir_intake"
+        )
+        self.assertEqual(reach["routing_method"], "fixed_delay")
+        self.assertEqual(reach["travel_time_hours"], 3.5)
+
+    def test_validation_rejects_unsupported_cycle(self):
+        self._save_complete_v3_diagram(
+            extra_reaches=[
+                {
+                    "technical_key": "reach_tailrace_return",
+                    "display_name": "Tailrace back to reservoir",
+                    "from_node_key": "junction_out",
+                    "to_node_key": "reservoir_alpha",
+                    "reach_type": "river",
+                }
+            ]
+        )
+        validation = self._validation_for()
+        self.assertFalse(validation["ok"])
+        cycles = [
+            error
+            for error in validation["errors"]
+            if error["code"] == "unsupported_cycle"
+        ]
+        self.assertTrue(cycles)
+        self.assertTrue(
+            all(error["entity_type"] == "case_hydraulic_reach" for error in cycles)
+        )
+        self.assertIn(
+            "reach_tailrace_return",
+            {error["technical_key"] for error in cycles},
+        )
+
+    def test_validation_rejects_island_without_boundary(self):
+        self._save_complete_v3_diagram(
+            extra_nodes=[
+                {
+                    "component_type": "junction",
+                    "technical_key": "junction_orphan_a",
+                    "display_name": "Orphan A",
+                    "x": 700.0,
+                    "y": 400.0,
+                },
+                {
+                    "component_type": "junction",
+                    "technical_key": "junction_orphan_b",
+                    "display_name": "Orphan B",
+                    "x": 760.0,
+                    "y": 460.0,
+                },
+            ],
+            extra_reaches=[
+                {
+                    "technical_key": "reach_orphan",
+                    "display_name": "Orphan reach",
+                    "from_node_key": "junction_orphan_a",
+                    "to_node_key": "junction_orphan_b",
+                    "reach_type": "river",
+                }
+            ],
+        )
+        validation = self._validation_for()
+        self.assertFalse(validation["ok"])
+        islands = [
+            error
+            for error in validation["errors"]
+            if error["code"] == "island_without_boundary"
+        ]
+        self.assertEqual(len(islands), 1)
+        self.assertEqual(islands[0]["entity_type"], "case_hydraulic_node")
+        self.assertIn("junction_orphan", islands[0]["technical_key"])
+
+    def test_validation_allows_disconnected_island_with_inflow_boundary(self):
+        self._save_complete_v3_diagram(
+            extra_nodes=[
+                {
+                    "component_type": "junction",
+                    "technical_key": "junction_lateral",
+                    "display_name": "Lateral inflow island",
+                    "x": 700.0,
+                    "y": 400.0,
+                    "natural_inflow_series": {
+                        "version_label": "v1",
+                        "points": [
+                            {
+                                "timestamp": "2026-01-01T00:00:00",
+                                "duration_hours": 1.0,
+                                "value_m3s": 2.0,
+                            },
+                            {
+                                "timestamp": "2026-01-01T01:00:00",
+                                "duration_hours": 1.0,
+                                "value_m3s": 3.0,
+                            },
+                        ],
+                    },
+                }
+            ]
+        )
+        validation = self._validation_for()
+        islands = [
+            error
+            for error in validation["errors"]
+            if error["code"] == "island_without_boundary"
+        ]
+        self.assertEqual(islands, [])
+
+    def test_validation_rejects_pump_only_unit_mode(self):
+        self._save_complete_v3_diagram(unit_overrides={"operation_mode": "pump_only"})
+        validation = self._validation_for()
+        self.assertFalse(validation["ok"])
+        modes = [
+            error
+            for error in validation["errors"]
+            if error["code"] == "unsupported_unit_operation_mode"
+        ]
+        self.assertEqual(len(modes), 1)
+        self.assertEqual(modes[0]["entity_type"], "case_hydraulic_unit")
+        self.assertEqual(modes[0]["technical_key"], "unit_1")
+
+    def test_validation_rejects_reversible_unit_mode(self):
+        self._save_complete_v3_diagram(unit_overrides={"operation_mode": "reversible"})
+        validation = self._validation_for()
+        modes = [
+            error
+            for error in validation["errors"]
+            if error["code"] == "unsupported_unit_operation_mode"
+        ]
+        self.assertEqual(len(modes), 1)
+
+    def test_validation_rejects_head_dependent_unit_generation_mode(self):
+        self._save_complete_v3_diagram(
+            unit_overrides={"generation_mode": "head_dependent"}
+        )
+        validation = self._validation_for()
+        modes = [
+            error
+            for error in validation["errors"]
+            if error["code"] == "unsupported_unit_generation_mode"
+        ]
+        self.assertEqual(len(modes), 1)
+        self.assertEqual(modes[0]["technical_key"], "unit_1")
+
+    def test_unit_modes_round_trip(self):
+        diagram = self._save_complete_v3_diagram(
+            unit_overrides={
+                "operation_mode": "reversible",
+                "generation_mode": "head_dependent",
+            }
+        )
+        plant = next(
+            node for node in diagram["nodes"] if node["component_type"] == "plant"
+        )
+        unit = plant["units"][0]
+        self.assertEqual(unit["operation_mode"], "reversible")
+        self.assertEqual(unit["generation_mode"], "head_dependent")
+
+    def test_complete_v3_diagram_has_no_unsupported_topology_errors(self):
+        self._save_complete_v3_diagram()
+        validation = self._validation_for()
+        unsupported_codes = {
+            "unsupported_reach_routing",
+            "unsupported_reach_travel_time",
+            "unsupported_cycle",
+            "island_without_boundary",
+            "unsupported_unit_operation_mode",
+            "unsupported_unit_generation_mode",
+        }
+        self.assertEqual(
+            [
+                error
+                for error in validation["errors"]
+                if error["code"] in unsupported_codes
+            ],
+            [],
+        )
+        self.assertTrue(validation["ok"])
+
+    def test_cyclic_diagram_cannot_be_promoted(self):
+        self._save_complete_v3_diagram(
+            extra_reaches=[
+                {
+                    "technical_key": "reach_tailrace_return",
+                    "display_name": "Tailrace back to reservoir",
+                    "from_node_key": "junction_out",
+                    "to_node_key": "reservoir_alpha",
+                    "reach_type": "river",
+                }
+            ]
+        )
+        # v3 preview must reflect the topology error and never produce a payload.
+        preview = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/v3-preview"
+        ).json()["validation"]
+        self.assertFalse(preview["ok"])
+        self.assertIsNone(preview.get("system_case"))
+        # Promotion is blocked because no valid v3 validation exists.
+        promote = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/promote"
+        )
+        self.assertEqual(promote.status_code, 400)
+
+    def test_parameter_edit_marks_validation_stale_and_blocks_promotion(self):
+        self._save_complete_v3_diagram()
+        preview = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/v3-preview"
+        ).json()["validation"]
+        self.assertTrue(preview["ok"])
+        self.assertFalse(preview["stale"])
+
+        reloaded = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram"
+        ).json()["diagram"]
+        nodes = reloaded["nodes"]
+        reservoir = next(
+            node for node in nodes if node["component_type"] == "reservoir"
+        )
+        reservoir["reservoir"]["storage_max_hm3"] = 60.0
+        stale_save = self.client.put(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram",
+            json={
+                "revision": reloaded["revision"],
+                "nodes": nodes,
+                "reaches": reloaded["reaches"],
+                "viewport": reloaded["layout"]["viewport"],
+            },
+        )
+        self.assertEqual(stale_save.status_code, 200)
+        self.assertTrue(stale_save.json()["diagram"]["validation"]["stale"])
+
+        promote = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/promote"
+        )
+        self.assertEqual(promote.status_code, 400)
+
+    def _save_complete_v3_diagram(
+        self,
+        *,
+        reach_overrides=None,
+        node_positions=None,
+        viewport=None,
+        extra_reaches=None,
+        extra_nodes=None,
+        unit_overrides=None,
+    ):
         reach = {
             "technical_key": "reach_reservoir_intake",
             "display_name": "Reservoir to intake",
@@ -1681,15 +1969,25 @@ class HydraulicDiagramApiTests(unittest.TestCase):
                         ],
                     },
                 ]
+        if unit_overrides:
+            plant_node = next(
+                node for node in nodes if node["component_type"] == "plant"
+            )
+            plant_node["units"][0].update(unit_overrides)
+        if extra_nodes:
+            nodes.extend(extra_nodes)
         if node_positions:
             for node in nodes:
                 override = node_positions.get(node["technical_key"])
                 if override is not None:
                     node["x"], node["y"] = float(override[0]), float(override[1])
+        reaches = [reach]
+        if extra_reaches:
+            reaches.extend(extra_reaches)
         payload = {
             "revision": created["revision"],
             "nodes": nodes,
-            "reaches": [reach],
+            "reaches": reaches,
         }
         if viewport is not None:
             payload["viewport"] = viewport

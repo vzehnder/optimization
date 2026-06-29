@@ -1472,6 +1472,18 @@ describe("application shell", () => {
       screen.getByText(/must connect active hydraulic nodes/),
     ).toBeVisible();
     expect(screen.getByDisplayValue("Spillway A")).toBeVisible();
+
+    // The validation message can focus the affected diagram component.
+    const reachItem = screen.getByTestId(
+      "hydraulic-reach-reach_reservoir_1_junction_1",
+    );
+    expect(reachItem).not.toHaveAttribute("data-focused");
+    await user.click(
+      screen.getByRole("button", {
+        name: "Enfocar reach_reservoir_1_junction_1",
+      }),
+    );
+    expect(reachItem).toHaveAttribute("data-focused", "true");
   });
 
   it("edits reservoir parameters and a storage-elevation curve, then shows reservoir validation errors", async () => {

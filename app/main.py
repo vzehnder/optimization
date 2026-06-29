@@ -191,6 +191,8 @@ class HydraulicUnitRequest(BaseModel):
     technical_key: str = Field(min_length=1)
     display_name: str = Field(min_length=1)
     is_active: bool = True
+    operation_mode: str = "generation"
+    generation_mode: str = "flow_power_curve"
     intake_node_key: str | None = None
     discharge_node_key: str | None = None
     min_power_mw: float | None = None
@@ -219,6 +221,8 @@ class HydraulicDiagramReachRequest(BaseModel):
     from_node_key: str = Field(min_length=1)
     to_node_key: str = Field(min_length=1)
     reach_type: str = Field(min_length=1)
+    routing_method: str = "none"
+    travel_time_hours: float = 0.0
     flow_min_m3s: float | None = None
     spill_penalty_usd_per_hm3: float | None = None
     minimum_flow_series: HydraulicNaturalInflowSeriesRequest | None = None

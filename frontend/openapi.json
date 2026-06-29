@@ -390,6 +390,11 @@
             "title": "Reach Type",
             "type": "string"
           },
+          "routing_method": {
+            "default": "none",
+            "title": "Routing Method",
+            "type": "string"
+          },
           "spill_penalty_usd_per_hm3": {
             "anyOf": [
               {
@@ -410,6 +415,11 @@
             "minLength": 1,
             "title": "To Node Key",
             "type": "string"
+          },
+          "travel_time_hours": {
+            "default": 0.0,
+            "title": "Travel Time Hours",
+            "type": "number"
           }
         },
         "required": [
@@ -715,6 +725,11 @@
               }
             ]
           },
+          "generation_mode": {
+            "default": "flow_power_curve",
+            "title": "Generation Mode",
+            "type": "string"
+          },
           "intake_node_key": {
             "anyOf": [
               {
@@ -774,6 +789,11 @@
               }
             ],
             "title": "Min Power Mw"
+          },
+          "operation_mode": {
+            "default": "generation",
+            "title": "Operation Mode",
+            "type": "string"
           },
           "technical_key": {
             "minLength": 1,

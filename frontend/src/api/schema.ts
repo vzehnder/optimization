@@ -1015,12 +1015,22 @@ export interface components {
             minimum_flow_series?: components["schemas"]["HydraulicNaturalInflowSeriesRequest"] | null;
             /** Reach Type */
             reach_type: string;
+            /**
+             * Routing Method
+             * @default none
+             */
+            routing_method: string;
             /** Spill Penalty Usd Per Hm3 */
             spill_penalty_usd_per_hm3?: number | null;
             /** Technical Key */
             technical_key: string;
             /** To Node Key */
             to_node_key: string;
+            /**
+             * Travel Time Hours
+             * @default 0
+             */
+            travel_time_hours: number;
         };
         /** HydraulicDiagramSaveRequest */
         HydraulicDiagramSaveRequest: {
@@ -1130,6 +1140,11 @@ export interface components {
             /** Display Name */
             display_name: string;
             flow_power_curve?: components["schemas"]["HydraulicFlowPowerCurveRequest"] | null;
+            /**
+             * Generation Mode
+             * @default flow_power_curve
+             */
+            generation_mode: string;
             /** Intake Node Key */
             intake_node_key?: string | null;
             /**
@@ -1145,6 +1160,11 @@ export interface components {
             min_flow_m3s?: number | null;
             /** Min Power Mw */
             min_power_mw?: number | null;
+            /**
+             * Operation Mode
+             * @default generation
+             */
+            operation_mode: string;
             /** Technical Key */
             technical_key: string;
         };
