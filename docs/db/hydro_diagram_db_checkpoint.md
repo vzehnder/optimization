@@ -47,6 +47,7 @@ Cuando una issue toque BBDD:
 | 2026-06-29 | BESS-HYDRO-DIAGRAM-009 | Se creo `scenario_version_hydraulic_diagram_snapshots`; la promocion congela un snapshot visual no ejecutable (via `build_hydraulic_diagram_layout_snapshot`) leido en `GET /api/scenario-versions/{id}/hydraulic-diagram-snapshot`. `normalize_hydraulic_diagram_nodes` aplica autolayout determinista cuando faltan `x`/`y`. Se corrigieron dos defectos preexistentes de PostgreSQL: nueve tablas hidraulicas con `id` ausentes de `ID_TABLES` (sus inserts no devolvian id) y el check `case_hydraulic_diagram_items_entity_type_check` obsoleto en bases creadas antes del soporte de reach/plant (nueva migracion `_ensure_hydraulic_diagram_items_entity_types_postgres`). | `python -m unittest discover tests` (136 ok, 1 skipped); `julia --project=. Pkg.test()` (532 ok); `npm test` (26 ok); `npm run build`; `eslint .`; `npm run api:generate`+`api:check`; `npm run test:browser -- -g "hydraulic diagram persists"` (1 passed); Chrome DevTools MCP smoke end-to-end contra PostgreSQL + Julia (guardar/validar/promover/snapshot/inmutabilidad/autolayout). |
 | 2026-06-29 | BESS-HYDRO-DIAGRAM-010 | Se agregaron las columnas `operation_mode`/`generation_mode` a `hydraulic_units` via `_ensure_column` (default `generation`/`flow_power_curve`); el guardado persiste `routing_method`/`travel_time_hours` por reach (columnas existentes desde BESS-HYDRO-DIAGRAM-002, ahora usadas). `validate_hydraulic_diagram` agrega `_validate_unsupported_topology` (ciclos, islas sin boundary, routing/travel-time y modos de unidad no soportados), con referencias de entidad. | `.\\.venv\\Scripts\\python.exe -m unittest discover tests` (155 ok, 1 skipped); `julia --project=. -e "import Pkg; Pkg.test()"` (532 ok); `npm test` (26 ok); `npm run build`; `eslint .`; `npm run api:generate`+`api:check`; `npx playwright test -g "hydraulic diagram persists"` (1 passed); smoke API contra PostgreSQL (cycle/routing/pump/island) y Chrome DevTools MCP UI contra PostgreSQL (error de ciclo + enfoque de componente). |
 | 2026-06-28 | BESS-HYDRO-DIAGRAM-008 | El guardado persiste `flow_min_m3s` y `spill_penalty_usd_per_hm3` escalares en `case_hydraulic_reaches`, y vincula `minimum_flow_m3s` por reach activo via `case_hydraulic_time_series_bindings` (sets versionados con `entity_type = 'hydraulic_reach'`). El preview v3 emite controles por reach y bloques `time_series[*].minimum_flow_m3s`; la validacion agrega `negative_minimum_flow`, `negative_spill_penalty`, `spill_penalty_requires_spillway` y `minimum_flow_horizon_mismatch`. El solver v3 fuerza caudal minimo en el reach origen-embalse, penaliza el vertedero en el objetivo y reporta `total_spill_penalty_usd`. | `.\\.venv\\Scripts\\python.exe -m unittest tests.test_hydraulic_diagram` (28 ok); `.\\.venv\\Scripts\\python.exe -m unittest discover tests` (131 ok, 1 skipped); `julia --project=. test\\runtests.jl` (532 ok); `npm.cmd test` (25 ok); `npm.cmd run build` (tsc ok); `npx eslint` (ok); `npm.cmd run api:generate` + `npm.cmd run api:check`. |
+| 2026-06-29 | BESS-HYDRO-DIAGRAM-011 | Cierre documental de BBDD de Hydro Diagram Iteracion 1. No crea tablas, columnas ni migraciones nuevas; confirma que el checkpoint refleja el estado final implementado: caso normalizado, red base/activa, parametros de embalse, curvas, series hidraulicas, layout editable, snapshot visual promovido y validacion topologica MVP. | `tests.test_hydro_diagram_acceptance` (2 ok); `tests.test_hydraulic_diagram` (45 ok); Python completa (157 ok, 1 skipped); Julia `Pkg.test()` (532 ok); React unit (26 ok); TypeScript/ESLint; OpenAPI generate/check; Playwright hydraulic browser (1 passed); Chrome/@chrome read-only smoke. `npm.cmd run check` falla solo en Prettier por formato/CRLF preexistente de frontend. |
 
 ## Migraciones Aplicadas
 
@@ -134,6 +135,20 @@ Cuando una issue toque BBDD:
   `unsupported_reach_routing`, `unsupported_reach_travel_time`,
   `unsupported_cycle`, `island_without_boundary`,
   `unsupported_unit_operation_mode` y `unsupported_unit_generation_mode`.
+
+## Cierre BESS-HYDRO-DIAGRAM-011
+
+La Iteracion 1 del editor de diagrama hidraulico queda cerrada sin cambios de
+esquema adicionales en BESS-HYDRO-DIAGRAM-011. El estado implementado real de
+BBDD es el documentado en `Estado General` y `Migraciones Aplicadas`.
+
+Quedan como trabajo futuro, no como deuda de esquema de esta iteracion:
+
+- topology import desde CSV/XLSX.
+- routing hidraulico avanzado y tiempo de viaje ejecutable.
+- head-dependent generation.
+- pumped storage, bombeo puro y unidades reversibles ejecutables.
+- collaborative editing y resolucion de conflictos multiusuario.
 
 ## Riesgos Activos
 

@@ -31,7 +31,7 @@ stored as a Markdown file in this folder. All issues carry the
 | BESS-HYDRO-DIAGRAM-008 | Add Reach Minimum Flow And Spillway Controls | AFK | ready-for-agent | Done | BESS-HYDRO-DIAGRAM-007 | [BESS-HYDRO-DIAGRAM-008-add-reach-minimum-flow-and-spillway-controls.md](BESS-HYDRO-DIAGRAM-008-add-reach-minimum-flow-and-spillway-controls.md) |
 | BESS-HYDRO-DIAGRAM-009 | Persist Layout And Snapshot Promoted Diagrams | AFK | ready-for-agent | Done | BESS-HYDRO-DIAGRAM-006 | [BESS-HYDRO-DIAGRAM-009-persist-layout-and-snapshot-promoted-diagrams.md](BESS-HYDRO-DIAGRAM-009-persist-layout-and-snapshot-promoted-diagrams.md) |
 | BESS-HYDRO-DIAGRAM-010 | Reject Unsupported Topologies And Stale Promotions | AFK | ready-for-agent | Done | BESS-HYDRO-DIAGRAM-008, BESS-HYDRO-DIAGRAM-009 | [BESS-HYDRO-DIAGRAM-010-reject-unsupported-topologies-and-stale-promotions.md](BESS-HYDRO-DIAGRAM-010-reject-unsupported-topologies-and-stale-promotions.md) |
-| BESS-HYDRO-DIAGRAM-011 | Finalize Acceptance Suite Docs And DB Checkpoint | AFK | ready-for-agent | Todo | BESS-HYDRO-DIAGRAM-001 through BESS-HYDRO-DIAGRAM-010 | [BESS-HYDRO-DIAGRAM-011-finalize-acceptance-suite-docs-and-db-checkpoint.md](BESS-HYDRO-DIAGRAM-011-finalize-acceptance-suite-docs-and-db-checkpoint.md) |
+| BESS-HYDRO-DIAGRAM-011 | Finalize Acceptance Suite Docs And DB Checkpoint | AFK | ready-for-agent | Done | BESS-HYDRO-DIAGRAM-001 through BESS-HYDRO-DIAGRAM-010 | [BESS-HYDRO-DIAGRAM-011-finalize-acceptance-suite-docs-and-db-checkpoint.md](BESS-HYDRO-DIAGRAM-011-finalize-acceptance-suite-docs-and-db-checkpoint.md) |
 
 ## Recommended Execution Order
 
@@ -65,6 +65,7 @@ stored as a Markdown file in this folder. All issues carry the
 | 2026-06-29 | BESS-HYDRO-DIAGRAM-009 | Todo -> Done | Completed layout persistence and promotion snapshots: new `scenario_version_hydraulic_diagram_snapshots` table, pure `build_hydraulic_diagram_layout_snapshot` deep module, snapshot frozen on promotion and read via `GET /api/scenario-versions/{id}/hydraulic-diagram-snapshot`, deterministic autolayout for nodes saved without positions (optional `x`/`y`), and proof that layout-only edits change neither the historical snapshot nor `system_case_json`. Also fixed two pre-existing PostgreSQL defects that blocked the diagram end-to-end (nine hydraulic `id` tables missing from `ID_TABLES`; stale `case_hydraulic_diagram_items` entity-type check constraint) plus an `ID_TABLES` regression guard test. Verified Python (136 ok), Julia (532 ok), React (26 ok), hydraulic Playwright (1 passed), OpenAPI regen + api:check, and a full Chrome DevTools MCP smoke against live PostgreSQL + Julia (save/validate/promote/snapshot/immutability/autolayout). |
 | 2026-06-29 | BESS-HYDRO-DIAGRAM-010 | Todo -> Done | Hardened topology validation against MVP-unsupported shapes via the new deep module `_validate_unsupported_topology` plus pure graph helpers `hydraulic_first_cycle`/`hydraulic_weakly_connected_components`: detects unsupported reach routing/travel-time, directed cycles, disconnected islands without a boundary condition (reservoir or natural inflow) and head-dependent/pump-only/reversible unit modes, each with `entity_type`/`entity_id`/`technical_key`. Reaches now persist `routing_method`/`travel_time_hours`; `hydraulic_units` gains `operation_mode`/`generation_mode` (defaults `generation`/`flow_power_curve`) via `_ensure_column`. Stale-after-edit and missing/stale promotion blocks are covered by tests. React renders each validation error as a focus button that selects the affected node/reach (`data-focused`/`aria-current`). Verified Python (155 ok, 1 skipped), Julia (532 ok), React (26 ok), tsc/eslint, OpenAPI regen + api:check, hydraulic Playwright (1 passed) and a Chrome DevTools MCP smoke against live PostgreSQL (cycle/routing/pump/island validation + error-to-component focus). |
 | 2026-06-28 | BESS-HYDRO-DIAGRAM-008 | Todo -> Done | Added reach operational controls: persisted scalar `case_hydraulic_reaches.flow_min_m3s`/`spill_penalty_usd_per_hm3`, series-backed reach minimum flow over the versioned hydraulic time-series tables (`entity_type = 'case_hydraulic_reach'`, `signal_key = 'minimum_flow_m3s'`), v3 preview emitting per-reach controls plus per-period `minimum_flow_m3s` blocks, validation (`negative_minimum_flow`, `negative_spill_penalty`, `spill_penalty_requires_spillway`, `minimum_flow_horizon_mismatch`), Julia v3 enforcement of minimum flow on the reservoir-source reach plus spillway penalty in the objective and `total_spill_penalty_usd` in the run summary, a React reach panel with scalar min flow, spill penalty and a minimum-flow series sub-editor, OpenAPI regeneration and DB checkpoint update. Verified focused/full Python (28/131 ok), full Julia (Pkg test), React unit (25 ok), tsc/eslint, OpenAPI regen + api:check and a Chrome smoke. |
+| 2026-06-29 | BESS-HYDRO-DIAGRAM-011 | Todo -> Done | Closed the final acceptance slice with `tests.test_hydro_diagram_acceptance`, a manual checklist under `docs/hydro_diagram/iter1/pruebas_manuales_iteracion1.md`, final DB checkpoint closeout and future-work documentation. Verified Python acceptance (2 ok), focused hydraulic API (45 ok), full Python (157 ok, 1 skipped), Julia `Pkg.test()` (532 ok), React unit (26 ok), TypeScript, ESLint, OpenAPI generate/check, Playwright hydraulic browser (1 passed) and Chrome/@chrome read-only smoke. `npm.cmd run check` still fails only at Prettier on pre-existing frontend formatting/CRLF warnings. |
 
 ## Regression Guard
 
@@ -98,6 +99,31 @@ Every slice that creates or changes database tables must update:
 ```text
 docs/db/hydro_diagram_db_checkpoint.md
 ```
+
+## Final Hydro Diagram Iteration 1 Verification
+
+The closing acceptance slice must run:
+
+```powershell
+.\\.venv\\Scripts\\python.exe -m unittest tests.test_hydro_diagram_acceptance -v
+.\\.venv\\Scripts\\python.exe -m unittest tests.test_hydraulic_diagram -v
+.\\.venv\\Scripts\\python.exe -m unittest discover tests -v
+julia --project=. -e "import Pkg; Pkg.test()"
+cd frontend
+npm.cmd test
+npm.cmd run check
+npm.cmd run api:generate
+npm.cmd run api:check
+npm.cmd run test:browser -- -g "hydraulic diagram persists"
+```
+
+The final browser smoke must verify create/edit/save/reload, topology
+validation, v3 preview, promotion, run launch and result visibility for the
+primary hydraulic diagram path.
+
+Known future work remains out of scope for this iteration: topology import,
+advanced routing, head-dependent generation, pumped storage, reversible units
+and collaborative editing.
 
 ## Dependency Notes
 
