@@ -478,6 +478,20 @@ class AnalystStore:
                 SELECT RAISE(ABORT, 'scenario versions are immutable');
             END;
 
+            CREATE TABLE IF NOT EXISTS scenario_version_hydraulic_diagram_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scenario_version_id INTEGER NOT NULL,
+                source_case_id INTEGER,
+                layout_key TEXT NOT NULL,
+                layout_snapshot_json TEXT NOT NULL,
+                layout_content_hash TEXT,
+                created_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                FOREIGN KEY (scenario_version_id) REFERENCES scenario_versions(id) ON DELETE CASCADE,
+                FOREIGN KEY (source_case_id) REFERENCES optimization_cases(id) ON DELETE SET NULL,
+                UNIQUE (scenario_version_id, layout_key)
+            );
+
             CREATE TABLE IF NOT EXISTS scenario_drafts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 scenario_id INTEGER NOT NULL UNIQUE,
@@ -620,6 +634,7 @@ class AnalystStore:
         self._ensure_column("runs", "error_message", "TEXT NOT NULL DEFAULT ''")
         self._ensure_column("scenario_versions", "generation_metadata_json", "TEXT NOT NULL DEFAULT '{}'")
         self._ensure_hydraulic_diagram_items_support_reaches()
+        self._ensure_hydraulic_diagram_items_entity_types_postgres()
         self._ensure_column("case_hydraulic_plants", "non_modeled", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("case_hydraulic_plants", "min_power_mw", "REAL")
         self._ensure_column("case_hydraulic_plants", "max_power_mw", "REAL")
@@ -722,6 +737,27 @@ class AnalystStore:
             """
         )
         self.connection.execute("PRAGMA foreign_keys = ON")
+
+    def _ensure_hydraulic_diagram_items_entity_types_postgres(self) -> None:
+        """Refresh the diagram-item entity-type check on PostgreSQL.
+
+        The constraint may predate reach and plant layout support on databases
+        created before those iterations, because the SQLite rebuild path does
+        not apply to PostgreSQL. Dropping and re-adding it is idempotent and
+        only widens the allowed set, so existing rows always remain valid.
+        """
+        if self.database_backend != "postgresql":
+            return
+        self.connection.execute(
+            "ALTER TABLE case_hydraulic_diagram_items "
+            "DROP CONSTRAINT IF EXISTS case_hydraulic_diagram_items_entity_type_check"
+        )
+        self.connection.execute(
+            "ALTER TABLE case_hydraulic_diagram_items "
+            "ADD CONSTRAINT case_hydraulic_diagram_items_entity_type_check "
+            "CHECK (entity_type IN "
+            "('case_hydraulic_node', 'case_hydraulic_reach', 'case_hydraulic_plant'))"
+        )
 
     def count_users(self) -> int:
         row = self.connection.execute("SELECT COUNT(*) AS user_count FROM users").fetchone()
@@ -2188,6 +2224,69 @@ class AnalystStore:
         if row is None:
             raise KeyError(f"scenario version {scenario_version_id} not found")
         return scenario_version_row_to_dict(row, include_document=include_document)
+
+    def persist_scenario_version_hydraulic_diagram_snapshot(
+        self,
+        *,
+        scenario_version_id: int,
+        layout_snapshot: dict[str, Any],
+        source_case_id: int | None = None,
+        layout_key: str = "default",
+        created_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        self.get_scenario_version(scenario_version_id, include_document=False)
+        snapshot_text = json.dumps(layout_snapshot, sort_keys=True)
+        content_hash = hashlib.sha256(snapshot_text.encode("utf-8")).hexdigest()
+        created_at = utc_now_iso()
+        self.connection.execute(
+            """
+            INSERT INTO scenario_version_hydraulic_diagram_snapshots (
+                scenario_version_id,
+                source_case_id,
+                layout_key,
+                layout_snapshot_json,
+                layout_content_hash,
+                created_at,
+                created_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                scenario_version_id,
+                source_case_id,
+                layout_key,
+                snapshot_text,
+                content_hash,
+                created_at,
+                created_by,
+            ),
+        )
+        self.connection.commit()
+        return self.get_scenario_version_hydraulic_diagram_snapshot(
+            scenario_version_id, layout_key=layout_key
+        )
+
+    def get_scenario_version_hydraulic_diagram_snapshot(
+        self,
+        scenario_version_id: int,
+        *,
+        layout_key: str = "default",
+    ) -> dict[str, Any]:
+        self.get_scenario_version(scenario_version_id, include_document=False)
+        row = self.connection.execute(
+            """
+            SELECT id, scenario_version_id, source_case_id, layout_key,
+                   layout_snapshot_json, layout_content_hash, created_at, created_by
+            FROM scenario_version_hydraulic_diagram_snapshots
+            WHERE scenario_version_id = ? AND layout_key = ?
+            """,
+            (scenario_version_id, layout_key),
+        ).fetchone()
+        if row is None:
+            raise KeyError(
+                f"hydraulic diagram snapshot for scenario version {scenario_version_id} not found"
+            )
+        return scenario_version_hydraulic_diagram_snapshot_row_to_dict(row)
 
     def delete_scenario_version(self, scenario_version_id: int) -> dict[str, Any]:
         with self._lock:
@@ -4693,10 +4792,27 @@ def normalize_hydraulic_viewport(viewport: Mapping[str, Any]) -> dict[str, float
     }
 
 
+HYDRAULIC_AUTOLAYOUT_ORIGIN_X = 120.0
+HYDRAULIC_AUTOLAYOUT_ORIGIN_Y = 80.0
+HYDRAULIC_AUTOLAYOUT_COLUMN_SPACING = 180.0
+HYDRAULIC_AUTOLAYOUT_ROW_SPACING = 140.0
+HYDRAULIC_AUTOLAYOUT_COLUMNS = 4
+
+
+def hydraulic_autolayout_position(index: int) -> tuple[float, float]:
+    """Deterministic grid position for an entity that has no saved position."""
+    column = index % HYDRAULIC_AUTOLAYOUT_COLUMNS
+    row = index // HYDRAULIC_AUTOLAYOUT_COLUMNS
+    return (
+        HYDRAULIC_AUTOLAYOUT_ORIGIN_X + column * HYDRAULIC_AUTOLAYOUT_COLUMN_SPACING,
+        HYDRAULIC_AUTOLAYOUT_ORIGIN_Y + row * HYDRAULIC_AUTOLAYOUT_ROW_SPACING,
+    )
+
+
 def normalize_hydraulic_diagram_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     seen_keys: set[tuple[str, str]] = set()
-    for node in nodes:
+    for index, node in enumerate(nodes):
         component_type = str(node.get("component_type") or "").strip()
         if component_type not in HYDRAULIC_VISIBLE_COMPONENT_TYPES:
             raise ValueError(f"unsupported hydraulic component type: {component_type}")
@@ -4708,12 +4824,21 @@ def normalize_hydraulic_diagram_nodes(nodes: list[dict[str, Any]]) -> list[dict[
             raise ValueError(f"duplicate hydraulic component key: {technical_key}")
         seen_keys.add(identity)
         display_name = str(node.get("display_name") or "").strip() or technical_key
+        raw_x = node.get("x")
+        raw_y = node.get("y")
+        if raw_x is None or raw_y is None:
+            auto_x, auto_y = hydraulic_autolayout_position(index)
+            x = float(raw_x) if raw_x is not None else auto_x
+            y = float(raw_y) if raw_y is not None else auto_y
+        else:
+            x = float(raw_x)
+            y = float(raw_y)
         normalized_node = {
             "component_type": component_type,
             "technical_key": technical_key,
             "display_name": display_name,
-            "x": float(node.get("x", 0.0)),
-            "y": float(node.get("y", 0.0)),
+            "x": x,
+            "y": y,
             "reservoir": None,
             "storage_elevation_curve": None,
             "natural_inflow_series": None,
@@ -5131,6 +5256,60 @@ def extract_system_case_metadata(document: dict[str, Any]) -> dict[str, Any]:
         "period_count": len(document.get("time_series", [])),
         "asset_counts": asset_counts,
     }
+
+
+def build_hydraulic_diagram_layout_snapshot(
+    diagram: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build a lightweight, non-executable visual snapshot of a diagram.
+
+    The snapshot captures only the visual arrangement (positions, viewport,
+    visible labels and connectivity) and deliberately omits hydraulic physics
+    such as reservoir parameters, curves and time series. The executable
+    contract remains ``scenario_versions.system_case_json``.
+    """
+    layout = diagram.get("layout") or {}
+    nodes = [
+        {
+            "entity_type": node["entity_type"],
+            "entity_id": node["entity_id"],
+            "component_type": node["component_type"],
+            "technical_key": node["technical_key"],
+            "display_name": node["display_name"],
+            "x": float(node["x"]),
+            "y": float(node["y"]),
+            "z_index": int(node.get("z_index", 0)),
+        }
+        for node in diagram.get("nodes", [])
+    ]
+    reaches = [
+        {
+            "entity_type": "case_hydraulic_reach",
+            "entity_id": reach["entity_id"],
+            "technical_key": reach["technical_key"],
+            "display_name": reach["display_name"],
+            "from_node_key": reach["from_node_key"],
+            "to_node_key": reach["to_node_key"],
+            "reach_type": reach["reach_type"],
+            "z_index": int(reach.get("z_index", 0)),
+        }
+        for reach in diagram.get("reaches", [])
+    ]
+    return {
+        "layout_key": layout.get("layout_key", "default"),
+        "layout_engine": layout.get("layout_engine"),
+        "viewport": layout.get("viewport") or {"x": 0.0, "y": 0.0, "zoom": 1.0},
+        "nodes": nodes,
+        "reaches": reaches,
+    }
+
+
+def scenario_version_hydraulic_diagram_snapshot_row_to_dict(
+    row: Mapping[str, Any] | sqlite3.Row,
+) -> dict[str, Any]:
+    value = row_to_dict(row)
+    value["layout_snapshot"] = json.loads(value.pop("layout_snapshot_json"))
+    return value
 
 
 def scenario_version_row_to_dict(

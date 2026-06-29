@@ -509,6 +509,45 @@ export interface HydraulicDiagramSavePayload {
   reaches: HydraulicDiagramReachWrite[];
 }
 
+export interface HydraulicDiagramLayoutSnapshotNode {
+  entity_type: string;
+  entity_id: number;
+  component_type: HydraulicComponentType;
+  technical_key: string;
+  display_name: string;
+  x: number;
+  y: number;
+  z_index: number;
+}
+
+export interface HydraulicDiagramLayoutSnapshotReach {
+  entity_type: string;
+  entity_id: number;
+  technical_key: string;
+  display_name: string;
+  from_node_key: string;
+  to_node_key: string;
+  reach_type: HydraulicReachType;
+  z_index: number;
+}
+
+export interface HydraulicDiagramLayoutSnapshot {
+  id: number;
+  scenario_version_id: number;
+  source_case_id: number | null;
+  layout_key: string;
+  layout_content_hash: string | null;
+  created_at: string;
+  created_by: string;
+  layout_snapshot: {
+    layout_key: string;
+    layout_engine?: string | null;
+    viewport: HydraulicDiagramViewport;
+    nodes: HydraulicDiagramLayoutSnapshotNode[];
+    reaches: HydraulicDiagramLayoutSnapshotReach[];
+  };
+}
+
 export interface HydraulicDiagramValidationIssue {
   severity?: "error" | "warning";
   code: string;
@@ -835,6 +874,18 @@ export async function getScenarioVersion(
     scenario_version: ScenarioVersionDetail;
   }>(`/api/scenario-versions/${scenarioVersionId}`, { signal });
   return response.scenario_version;
+}
+
+export async function getScenarioVersionHydraulicDiagramSnapshot(
+  scenarioVersionId: number,
+  signal?: AbortSignal,
+): Promise<HydraulicDiagramLayoutSnapshot> {
+  const response = await requestJson<{
+    snapshot: HydraulicDiagramLayoutSnapshot;
+  }>(`/api/scenario-versions/${scenarioVersionId}/hydraulic-diagram-snapshot`, {
+    signal,
+  });
+  return response.snapshot;
 }
 
 export async function deleteScenarioVersion(

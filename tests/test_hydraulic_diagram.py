@@ -1438,7 +1438,158 @@ class HydraulicDiagramApiTests(unittest.TestCase):
             finally:
                 store.close()
 
-    def _save_complete_v3_diagram(self, *, reach_overrides=None):
+    def test_promotion_freezes_readonly_layout_snapshot(self):
+        self._save_complete_v3_diagram()
+        preview_response = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/v3-preview"
+        )
+        self.assertEqual(preview_response.status_code, 200)
+
+        promote_response = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/promote"
+        )
+        self.assertEqual(promote_response.status_code, 201)
+        version = promote_response.json()
+
+        snapshot_response = self.client.get(
+            f"/api/scenario-versions/{version['id']}/hydraulic-diagram-snapshot"
+        )
+        self.assertEqual(snapshot_response.status_code, 200)
+        snapshot = snapshot_response.json()["snapshot"]
+        self.assertEqual(snapshot["scenario_version_id"], version["id"])
+        self.assertEqual(snapshot["layout_key"], "default")
+
+        layout = snapshot["layout_snapshot"]
+        node_keys = {
+            (node["component_type"], node["technical_key"]) for node in layout["nodes"]
+        }
+        self.assertIn(("reservoir", "reservoir_alpha"), node_keys)
+        self.assertIn(("plant", "plant_laja"), node_keys)
+        reservoir = next(
+            node for node in layout["nodes"] if node["technical_key"] == "reservoir_alpha"
+        )
+        self.assertEqual((reservoir["x"], reservoir["y"]), (120.0, 80.0))
+        # The snapshot is a lightweight visual record, not executable physics.
+        self.assertNotIn("reservoir", reservoir)
+        self.assertNotIn("storage_elevation_curve", reservoir)
+        reach_keys = {reach["technical_key"] for reach in layout["reaches"]}
+        self.assertIn("reach_reservoir_intake", reach_keys)
+
+    def test_editing_case_after_promotion_does_not_change_snapshot(self):
+        self._save_complete_v3_diagram()
+        self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/v3-preview"
+        )
+        version = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/promote"
+        ).json()
+        snapshot_before = self.client.get(
+            f"/api/scenario-versions/{version['id']}/hydraulic-diagram-snapshot"
+        ).json()["snapshot"]
+
+        # Move every node after promotion; the active case changes but history must not.
+        self._save_complete_v3_diagram(
+            node_positions={
+                "reservoir_alpha": (999.0, 999.0),
+                "junction_in": (888.0, 888.0),
+                "junction_out": (777.0, 777.0),
+                "plant_laja": (666.0, 666.0),
+            },
+            viewport={"x": 50.0, "y": 60.0, "zoom": 2.0},
+        )
+
+        snapshot_after = self.client.get(
+            f"/api/scenario-versions/{version['id']}/hydraulic-diagram-snapshot"
+        ).json()["snapshot"]
+        self.assertEqual(snapshot_before, snapshot_after)
+
+    def test_layout_only_change_does_not_change_generated_system_case(self):
+        self._save_complete_v3_diagram()
+        first = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/v3-preview"
+        ).json()["validation"]["system_case"]
+
+        self._save_complete_v3_diagram(
+            node_positions={
+                "reservoir_alpha": (10.0, 10.0),
+                "junction_in": (20.0, 20.0),
+                "junction_out": (30.0, 30.0),
+                "plant_laja": (40.0, 40.0),
+            },
+            viewport={"x": 5.0, "y": 6.0, "zoom": 1.5},
+        )
+        second = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/v3-preview"
+        ).json()["validation"]["system_case"]
+
+        self.assertEqual(first, second)
+
+    def test_new_nodes_without_positions_receive_deterministic_autolayout(self):
+        created = self._create_diagram()
+        save_response = self.client.put(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram",
+            json={
+                "revision": created["revision"],
+                "nodes": [
+                    {
+                        "component_type": "junction",
+                        "technical_key": "junction_a",
+                        "display_name": "Junction A",
+                    },
+                    {
+                        "component_type": "junction",
+                        "technical_key": "junction_b",
+                        "display_name": "Junction B",
+                    },
+                    {
+                        "component_type": "junction",
+                        "technical_key": "junction_c",
+                        "display_name": "Junction C",
+                    },
+                ],
+                "reaches": [],
+            },
+        )
+        self.assertEqual(save_response.status_code, 200)
+        nodes = save_response.json()["diagram"]["nodes"]
+        positions = [(node["x"], node["y"]) for node in nodes]
+        # Autolayout assigns distinct, non-origin positions instead of stacking at 0,0.
+        self.assertEqual(len(set(positions)), len(positions))
+        self.assertNotIn((0.0, 0.0), positions)
+
+        # Determinism: an identical save reproduces identical positions.
+        reloaded = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram"
+        ).json()["diagram"]
+        repeat = self.client.put(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram",
+            json={
+                "revision": reloaded["revision"],
+                "nodes": [
+                    {
+                        "component_type": "junction",
+                        "technical_key": "junction_a",
+                        "display_name": "Junction A",
+                    },
+                    {
+                        "component_type": "junction",
+                        "technical_key": "junction_b",
+                        "display_name": "Junction B",
+                    },
+                    {
+                        "component_type": "junction",
+                        "technical_key": "junction_c",
+                        "display_name": "Junction C",
+                    },
+                ],
+                "reaches": [],
+            },
+        ).json()["diagram"]
+        self.assertEqual(
+            [(node["x"], node["y"]) for node in repeat["nodes"]], positions
+        )
+
+    def _save_complete_v3_diagram(self, *, reach_overrides=None, node_positions=None, viewport=None):
         reach = {
             "technical_key": "reach_reservoir_intake",
             "display_name": "Reservoir to intake",
@@ -1449,11 +1600,7 @@ class HydraulicDiagramApiTests(unittest.TestCase):
         if reach_overrides:
             reach.update(reach_overrides)
         created = self._create_diagram()
-        save_response = self.client.put(
-            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram",
-            json={
-                "revision": created["revision"],
-                "nodes": [
+        nodes = [
                     {
                         "component_type": "reservoir",
                         "technical_key": "reservoir_alpha",
@@ -1533,9 +1680,22 @@ class HydraulicDiagramApiTests(unittest.TestCase):
                             }
                         ],
                     },
-                ],
-                "reaches": [reach],
-            },
+                ]
+        if node_positions:
+            for node in nodes:
+                override = node_positions.get(node["technical_key"])
+                if override is not None:
+                    node["x"], node["y"] = float(override[0]), float(override[1])
+        payload = {
+            "revision": created["revision"],
+            "nodes": nodes,
+            "reaches": [reach],
+        }
+        if viewport is not None:
+            payload["viewport"] = viewport
+        save_response = self.client.put(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram",
+            json=payload,
         )
         self.assertEqual(save_response.status_code, 200)
         return save_response.json()["diagram"]

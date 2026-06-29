@@ -322,20 +322,32 @@
             "type": "array"
           },
           "x": {
-            "title": "X",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "X"
           },
           "y": {
-            "title": "Y",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Y"
           }
         },
         "required": [
           "component_type",
           "technical_key",
-          "display_name",
-          "x",
-          "y"
+          "display_name"
         ],
         "title": "HydraulicDiagramNodeRequest",
         "type": "object"
@@ -2402,6 +2414,43 @@
           }
         },
         "summary": "Get Scenario Version"
+      }
+    },
+    "/api/scenario-versions/{scenario_version_id}/hydraulic-diagram-snapshot": {
+      "get": {
+        "operationId": "get_scenario_version_hydraulic_diagram_snapshot_api_scenario_versions__scenario_version_id__hydraulic_diagram_snapshot_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_version_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Version Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Scenario Version Hydraulic Diagram Snapshot"
       }
     },
     "/api/scenario-versions/{scenario_version_id}/runs": {

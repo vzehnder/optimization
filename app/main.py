@@ -29,7 +29,12 @@ from app.draft_editor import (
     generate_system_case_from_draft,
     structured_draft_document_from_system_case,
 )
-from app.persistence import AnalystStore, DEFAULT_PUBLICATION_ARTIFACT_TYPES, utc_now_iso
+from app.persistence import (
+    AnalystStore,
+    DEFAULT_PUBLICATION_ARTIFACT_TYPES,
+    build_hydraulic_diagram_layout_snapshot,
+    utc_now_iso,
+)
 from app.results import ResultReadError, apply_dashboard_template, read_run_results
 from app.runner import JuliaRunExecutor, LocalRunQueue
 from app.time_series_ingestion import (
@@ -199,8 +204,8 @@ class HydraulicDiagramNodeRequest(BaseModel):
     component_type: Literal["reservoir", "junction", "plant"]
     technical_key: str = Field(min_length=1)
     display_name: str = Field(min_length=1)
-    x: float
-    y: float
+    x: float | None = None
+    y: float | None = None
     reservoir: HydraulicReservoirParametersRequest | None = None
     storage_elevation_curve: HydraulicStorageElevationCurveRequest | None = None
     natural_inflow_series: HydraulicNaturalInflowSeriesRequest | None = None
@@ -1193,6 +1198,12 @@ def create_app(
             return JSONResponse(error_response_body("promotion", str(error), phase="python_validation"), status_code=400)
         if error is not None:
             return JSONResponse(validation_response_body(error), status_code=400)
+        analyst_store.persist_scenario_version_hydraulic_diagram_snapshot(
+            scenario_version_id=scenario_version["id"],
+            layout_snapshot=build_hydraulic_diagram_layout_snapshot(diagram),
+            source_case_id=diagram["optimization_case"]["id"],
+            layout_key=diagram["layout"]["layout_key"],
+        )
         return scenario_version
 
     @app.post("/api/scenarios/{scenario_id}/draft", status_code=201)
@@ -1467,6 +1478,16 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"scenario_version": scenario_version}
+
+    @app.get("/api/scenario-versions/{scenario_version_id}/hydraulic-diagram-snapshot")
+    async def get_scenario_version_hydraulic_diagram_snapshot(scenario_version_id: int):
+        try:
+            snapshot = analyst_store.get_scenario_version_hydraulic_diagram_snapshot(
+                scenario_version_id
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"snapshot": snapshot}
 
     @app.delete("/api/scenario-versions/{scenario_version_id}")
     async def delete_scenario_version(scenario_version_id: int):

@@ -974,6 +974,211 @@ describe("application shell", () => {
     expect(screen.getByLabelText("Etiqueta plant_1")).toHaveValue("Plant Laja");
   });
 
+  it("moves a node, saves the layout, and reloads the persisted position", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Layout case",
+      description: "Hydraulic layout branch",
+      created_at: "2026-06-26T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hydro PMGD",
+      description: "Hydraulic workspace",
+      created_at: "2026-06-26T12:00:00Z",
+    };
+    let diagram = {
+      scenario_id: 10,
+      optimization_case: {
+        id: 4,
+        scenario_id: 10,
+        case_key: "scenario_10_hydraulic_case",
+        display_name: "Layout case",
+        updated_at: "2026-06-26T12:10:00Z",
+      },
+      hydraulic_system: {
+        id: 5,
+        project_id: 1,
+        system_key: "default_hydraulic_system",
+        display_name: "Default hydraulic system",
+      },
+      layout: {
+        id: 6,
+        case_id: 4,
+        layout_key: "default",
+        layout_engine: "auto_dag",
+        layout_version: 1,
+        revision: "1",
+        viewport: { x: 0, y: 0, zoom: 1 },
+        updated_at: "2026-06-26T12:10:00Z",
+        updated_by: "internal_analyst",
+      },
+      revision: "1",
+      nodes: [] as Array<{
+        layout_item_id: number;
+        entity_type: string;
+        entity_id: number;
+        component_type: "reservoir" | "junction" | "plant";
+        technical_key: string;
+        display_name: string;
+        x: number;
+        y: number;
+        z_index: number;
+      }>,
+    };
+    let savedRevision = 1;
+    let reloadCount = 0;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "POST"
+        ) {
+          return new Response(JSON.stringify({ diagram }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "GET"
+        ) {
+          reloadCount += 1;
+          return new Response(JSON.stringify({ diagram }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "PUT"
+        ) {
+          const body = JSON.parse(String(init?.body));
+          savedRevision += 1;
+          diagram = {
+            ...diagram,
+            revision: String(savedRevision),
+            layout: {
+              ...diagram.layout,
+              layout_version: savedRevision,
+              revision: String(savedRevision),
+              layout_engine: "manual",
+              viewport: body.viewport,
+              updated_at: "2026-06-26T12:12:00Z",
+            },
+            nodes: body.nodes.map(
+              (
+                node: {
+                  component_type: "reservoir" | "junction" | "plant";
+                  technical_key: string;
+                  display_name: string;
+                  x: number;
+                  y: number;
+                },
+                index: number,
+              ) => ({
+                ...node,
+                layout_item_id: index + 1,
+                entity_type:
+                  node.component_type === "plant"
+                    ? "case_hydraulic_plant"
+                    : "case_hydraulic_node",
+                entity_id: index + 1,
+                z_index: index,
+              }),
+            ),
+          };
+          return new Response(JSON.stringify({ diagram }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Layout case" }),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("link", { name: "Abrir diagrama hidraulico" }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Diagrama hidraulico" }),
+    ).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Agregar union" }));
+    // Move the new node to a deliberate position.
+    await user.clear(screen.getByLabelText("X junction_1"));
+    await user.type(screen.getByLabelText("X junction_1"), "640");
+    await user.clear(screen.getByLabelText("Y junction_1"));
+    await user.type(screen.getByLabelText("Y junction_1"), "360");
+    expect(screen.getByText("Estado: dirty")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Guardar diagrama" }));
+    expect(await screen.findByText("Estado: saved")).toBeVisible();
+    expect(screen.getByLabelText("X junction_1")).toHaveValue(640);
+    expect(screen.getByLabelText("Y junction_1")).toHaveValue(360);
+
+    await user.click(screen.getByRole("button", { name: "Recargar diagrama" }));
+    await waitFor(() => expect(reloadCount).toBeGreaterThan(0));
+    // The persisted position survives a reload from the server.
+    expect(screen.getByLabelText("X junction_1")).toHaveValue(640);
+    expect(screen.getByLabelText("Y junction_1")).toHaveValue(360);
+  });
+
   it("creates directed hydraulic reaches by drag, edits them through the fallback form, and displays validation errors", async () => {
     window.history.replaceState({}, "", "/react/scenarios/10");
     const scenario = {
@@ -1934,8 +2139,12 @@ describe("application shell", () => {
     // Saved curve is now selectable as an existing version.
     expect(screen.getByLabelText("Version de curva unit_1")).toHaveValue("910");
 
-    await user.click(screen.getByRole("button", { name: "Generar preview v3" }));
-    expect(await screen.findByText("Hydraulic v3 payload validated")).toBeVisible();
+    await user.click(
+      screen.getByRole("button", { name: "Generar preview v3" }),
+    );
+    expect(
+      await screen.findByText("Hydraulic v3 payload validated"),
+    ).toBeVisible();
     expect(screen.getByText(/bess_system_dispatch\.v3/)).toBeVisible();
     expect(screen.getByText(/"id": "unit_1"/)).toBeVisible();
 

@@ -1,4 +1,5 @@
 import os
+import re
 import tempfile
 import unittest
 import uuid
@@ -6,11 +7,32 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app.auth import session_expires_at
-from app.database import database_url_from_env
+from app.database import ID_TABLES, database_url_from_env
 from app.persistence import AnalystStore
 
 
 POSTGRES_TEST_DATABASE_URL = os.environ.get("POSTGRES_TEST_DATABASE_URL")
+
+
+class IdTableRegistrationTests(unittest.TestCase):
+    def test_all_autoincrement_id_tables_are_registered_for_postgres_returning(self):
+        # On PostgreSQL the compatibility layer only appends ``RETURNING id`` for
+        # tables listed in ID_TABLES. A table with an autoincrement id that is
+        # missing from the set silently returns lastrowid 0, which breaks any
+        # foreign key that references the freshly inserted row.
+        source = (
+            Path(__file__).resolve().parents[1] / "app" / "persistence.py"
+        ).read_text(encoding="utf-8")
+        autoincrement_tables = set(
+            re.findall(
+                r"CREATE TABLE IF NOT EXISTS ([a-z_]+)\s*\(\s*"
+                r"id INTEGER PRIMARY KEY AUTOINCREMENT",
+                source,
+            )
+        )
+        self.assertTrue(autoincrement_tables, "no autoincrement id tables found")
+        missing = sorted(autoincrement_tables - ID_TABLES)
+        self.assertEqual(missing, [], f"tables missing from ID_TABLES: {missing}")
 
 
 class DatabaseEnvironmentTests(unittest.TestCase):

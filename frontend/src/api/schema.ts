@@ -522,6 +522,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scenario-versions/{scenario_version_id}/hydraulic-diagram-snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Scenario Version Hydraulic Diagram Snapshot */
+        get: operations["get_scenario_version_hydraulic_diagram_snapshot_api_scenario_versions__scenario_version_id__hydraulic_diagram_snapshot_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scenario-versions/{scenario_version_id}/runs": {
         parameters: {
             query?: never;
@@ -983,9 +1000,9 @@ export interface components {
             /** Units */
             units?: components["schemas"]["HydraulicUnitRequest"][];
             /** X */
-            x: number;
+            x?: number | null;
             /** Y */
-            y: number;
+            y?: number | null;
         };
         /** HydraulicDiagramReachRequest */
         HydraulicDiagramReachRequest: {
@@ -2357,6 +2374,37 @@ export interface operations {
         };
     };
     delete_scenario_version_api_scenario_versions__scenario_version_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_version_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_scenario_version_hydraulic_diagram_snapshot_api_scenario_versions__scenario_version_id__hydraulic_diagram_snapshot_get: {
         parameters: {
             query?: never;
             header?: never;
