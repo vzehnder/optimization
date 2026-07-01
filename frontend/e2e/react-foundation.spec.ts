@@ -242,12 +242,12 @@ test("React hydraulic diagram persists reservoir parameters curves junction and 
   await page.getByRole("button", { name: "Agregar central" }).click();
   await page.evaluate(() => {
     const source = document.querySelector(
-      '[data-testid="hydraulic-node-reservoir_1"]',
+      '[data-testid="hydraulic-node-out-reservoir_1"]',
     );
     const target = document.querySelector(
-      '[data-testid="hydraulic-node-junction_1"]',
+      '[data-testid="hydraulic-node-in-junction_1"]',
     );
-    if (!source || !target) throw new Error("hydraulic drag nodes not found");
+    if (!source || !target) throw new Error("hydraulic drag ports not found");
     const dataTransfer = new DataTransfer();
     source.dispatchEvent(
       new DragEvent("dragstart", {
@@ -280,6 +280,9 @@ test("React hydraulic diagram persists reservoir parameters curves junction and 
   await page
     .getByLabel("Caudal minimo m3/s reach_reservoir_1_junction_1")
     .fill("3");
+
+  // Select the plant on the canvas to edit its properties in the panel.
+  await page.locator('[data-testid="hydraulic-canvas-node-plant_1"]').click();
   await page.getByLabel("Etiqueta plant_1").fill("Plant Laja");
 
   // Add a generation unit with intake/discharge nodes and a flow-power curve.
@@ -299,6 +302,10 @@ test("React hydraulic diagram persists reservoir parameters curves junction and 
   await page.getByLabel("Caudal punto 2 unit_1").fill("40");
   await page.getByLabel("Potencia punto 2 unit_1").fill("30");
 
+  // Select the reservoir to edit storage, curve, and natural inflow.
+  await page
+    .locator('[data-testid="hydraulic-canvas-node-reservoir_1"]')
+    .click();
   await page.getByLabel("Almacenamiento minimo reservoir_1").fill("5");
   await page.getByLabel("Almacenamiento maximo reservoir_1").fill("50");
   await page.getByLabel("Almacenamiento inicial reservoir_1").fill("20");
@@ -317,12 +324,16 @@ test("React hydraulic diagram persists reservoir parameters curves junction and 
   await page
     .getByRole("button", { name: "Agregar punto de afluente reservoir_1" })
     .click();
-  await page.getByLabel("Marca temporal 1 reservoir_1").fill("2026-01-01T00:00:00");
+  await page
+    .getByLabel("Marca temporal 1 reservoir_1")
+    .fill("2026-01-01T00:00:00");
   await page.getByLabel("Caudal m3/s 1 reservoir_1").fill("5");
   await page
     .getByRole("button", { name: "Agregar punto de afluente reservoir_1" })
     .click();
-  await page.getByLabel("Marca temporal 2 reservoir_1").fill("2026-01-01T01:00:00");
+  await page
+    .getByLabel("Marca temporal 2 reservoir_1")
+    .fill("2026-01-01T01:00:00");
   await page.getByLabel("Caudal m3/s 2 reservoir_1").fill("6");
 
   await expect(page.getByText("Estado: dirty")).toBeVisible();
@@ -335,22 +346,13 @@ test("React hydraulic diagram persists reservoir parameters curves junction and 
   await expect(
     page.getByRole("heading", { name: "Diagrama hidraulico" }),
   ).toBeVisible();
+  // Selection resets on reload, so re-select each entity before reading values.
+  await page
+    .locator('[data-testid="hydraulic-canvas-node-reservoir_1"]')
+    .click();
   await expect(page.getByLabel("Etiqueta reservoir_1")).toHaveValue(
     "Reservoir 1",
   );
-  await expect(page.getByLabel("Etiqueta junction_1")).toHaveValue(
-    "Junction 1",
-  );
-  await expect(page.getByLabel("Etiqueta plant_1")).toHaveValue("Plant Laja");
-  await expect(
-    page.getByText("reach_reservoir_1_junction_1", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByLabel("Tipo reach_reservoir_1_junction_1"),
-  ).toHaveValue("canal");
-  await expect(
-    page.getByLabel("Caudal minimo m3/s reach_reservoir_1_junction_1"),
-  ).toHaveValue("3");
   await expect(
     page.getByLabel("Almacenamiento maximo reservoir_1"),
   ).toHaveValue("50");
@@ -358,6 +360,21 @@ test("React hydraulic diagram persists reservoir parameters curves junction and 
   await expect(page.getByLabel("Version de curva reservoir_1")).not.toHaveValue(
     "",
   );
+  await expect(page.getByLabel("Caudal m3/s 1 reservoir_1")).toHaveValue("5");
+  await expect(page.getByLabel("Caudal m3/s 2 reservoir_1")).toHaveValue("6");
+  await expect(page.getByLabel("Version de serie reservoir_1")).not.toHaveValue(
+    "",
+  );
+
+  await page
+    .locator('[data-testid="hydraulic-canvas-node-junction_1"]')
+    .click();
+  await expect(page.getByLabel("Etiqueta junction_1")).toHaveValue(
+    "Junction 1",
+  );
+
+  await page.locator('[data-testid="hydraulic-canvas-node-plant_1"]').click();
+  await expect(page.getByLabel("Etiqueta plant_1")).toHaveValue("Plant Laja");
   await expect(page.getByLabel("Nodo de toma unit_1")).toHaveValue(
     "reservoir_1",
   );
@@ -367,11 +384,20 @@ test("React hydraulic diagram persists reservoir parameters curves junction and 
   await expect(page.getByLabel("Caudal maximo unit_1")).toHaveValue("40");
   await expect(page.getByLabel("Potencia punto 2 unit_1")).toHaveValue("30");
   await expect(page.getByLabel("Version de curva unit_1")).not.toHaveValue("");
-  await expect(page.getByLabel("Caudal m3/s 1 reservoir_1")).toHaveValue("5");
-  await expect(page.getByLabel("Caudal m3/s 2 reservoir_1")).toHaveValue("6");
+
+  // Selecting the reach link opens its properties in the panel.
+  await page
+    .locator('[data-testid="hydraulic-link-reach_reservoir_1_junction_1"]')
+    .click();
   await expect(
-    page.getByLabel("Version de serie reservoir_1"),
-  ).not.toHaveValue("");
+    page.getByText("reach_reservoir_1_junction_1", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByLabel("Tipo reach_reservoir_1_junction_1"),
+  ).toHaveValue("canal");
+  await expect(
+    page.getByLabel("Caudal minimo m3/s reach_reservoir_1_junction_1"),
+  ).toHaveValue("3");
 });
 
 test("React admin users and project access cover assignment, removal, deactivation, and denials", async ({

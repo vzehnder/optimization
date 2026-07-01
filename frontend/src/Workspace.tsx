@@ -1253,7 +1253,7 @@ function HydraulicDiagramCanvas({
   reaches,
   viewport,
   updateNode,
-  createReach,
+  connectPorts,
   focusEntity,
   focusedEntityKey,
 }: {
@@ -1264,7 +1264,7 @@ function HydraulicDiagramCanvas({
     technicalKey: string,
     patch: Partial<HydraulicDiagramNodeWrite>,
   ) => void;
-  createReach: (fromNodeKey: string, toNodeKey: string) => void;
+  connectPorts: (fromNodeKey: string, toNodeKey: string) => void;
   focusEntity: (technicalKey: string | null) => void;
   focusedEntityKey: string | null;
 }) {
@@ -1354,45 +1354,67 @@ function HydraulicDiagramCanvas({
     });
   }
 
-  function createFocusedReach(fromNodeKey: string, toNodeKey: string) {
-    if (fromNodeKey === toNodeKey) return;
-    const nextKey = nextHydraulicReachKey(reaches, fromNodeKey, toNodeKey);
-    createReach(fromNodeKey, toNodeKey);
-    focusEntity(nextKey);
+  function beginConnection(nodeKey: string) {
+    setPendingConnector(nodeKey);
+    focusEntity(nodeKey);
   }
 
-  function clickConnector(nodeKey: string) {
-    if (!pendingConnector) {
-      setPendingConnector(nodeKey);
-      focusEntity(nodeKey);
-      return;
-    }
-    if (pendingConnector === nodeKey) {
-      setPendingConnector(null);
-      return;
-    }
-    createFocusedReach(pendingConnector, nodeKey);
+  function finishConnection(toNodeKey: string, fromNodeKey?: string) {
+    const source = fromNodeKey || pendingConnector;
     setPendingConnector(null);
+    if (!source || source === toNodeKey) return;
+    connectPorts(source, toNodeKey);
   }
 
   function edgePath(
     fromNode: HydraulicDiagramNodeWrite,
     toNode: HydraulicDiagramNodeWrite,
   ) {
+    // Connections leave the source's output port (bottom-center) and arrive at
+    // the target's input port (top-center) so they meet the visible circles.
     const start = {
       x: fromNode.x + hydraulicCanvasNodeWidth / 2,
-      y: fromNode.y + hydraulicCanvasNodeHeight / 2,
+      y: fromNode.y + hydraulicCanvasNodeHeight,
     };
     const end = {
       x: toNode.x + hydraulicCanvasNodeWidth / 2,
-      y: toNode.y + hydraulicCanvasNodeHeight / 2,
+      y: toNode.y,
     };
-    const dx = end.x - start.x;
+    const dy = end.y - start.y;
     const curve =
-      (dx === 0 ? 1 : Math.sign(dx)) * Math.max(80, Math.abs(dx) * 0.35);
-    return `M ${start.x} ${start.y} C ${start.x + curve} ${start.y}, ${
-      end.x - curve
-    } ${end.y}, ${end.x} ${end.y}`;
+      (dy === 0 ? 1 : Math.sign(dy)) * Math.max(40, Math.abs(dy) * 0.4);
+    return `M ${start.x} ${start.y} C ${start.x} ${start.y + curve}, ${
+      end.x
+    } ${end.y - curve}, ${end.x} ${end.y}`;
+  }
+
+  const plantEdges: {
+    fromKey: string;
+    toKey: string;
+    plantKey: string;
+  }[] = [];
+  for (const node of nodes) {
+    if (node.component_type !== "plant") continue;
+    const intakes = new Set<string>();
+    const discharges = new Set<string>();
+    for (const unit of node.units ?? []) {
+      if (unit.intake_node_key) intakes.add(unit.intake_node_key);
+      if (unit.discharge_node_key) discharges.add(unit.discharge_node_key);
+    }
+    for (const key of intakes) {
+      plantEdges.push({
+        fromKey: key,
+        toKey: node.technical_key,
+        plantKey: node.technical_key,
+      });
+    }
+    for (const key of discharges) {
+      plantEdges.push({
+        fromKey: node.technical_key,
+        toKey: key,
+        plantKey: node.technical_key,
+      });
+    }
   }
 
   return (
@@ -1426,13 +1448,14 @@ function HydraulicDiagramCanvas({
             <defs>
               <marker
                 id="hydraulic-arrowhead"
-                markerWidth="12"
-                markerHeight="12"
-                refX="10"
-                refY="6"
+                markerUnits="userSpaceOnUse"
+                markerWidth="10"
+                markerHeight="10"
+                refX="8.5"
+                refY="5"
                 orient="auto"
               >
-                <path d="M 0 0 L 12 6 L 0 12 z" />
+                <path d="M 0 0 L 10 5 L 0 10 z" />
               </marker>
             </defs>
             {reaches.map((reach) => {
@@ -1443,11 +1466,33 @@ function HydraulicDiagramCanvas({
                 <path
                   key={reach.technical_key}
                   className="hydraulic-canvas-link"
+                  data-testid={`hydraulic-link-${reach.technical_key}`}
                   data-focused={
                     focusedEntityKey === reach.technical_key
                       ? "true"
                       : undefined
                   }
+                  style={{ cursor: "pointer", pointerEvents: "stroke" }}
+                  onClick={() => focusEntity(reach.technical_key)}
+                  d={edgePath(fromNode, toNode)}
+                  markerEnd="url(#hydraulic-arrowhead)"
+                />
+              );
+            })}
+            {plantEdges.map((edge) => {
+              const fromNode = nodeByKey.get(edge.fromKey);
+              const toNode = nodeByKey.get(edge.toKey);
+              if (!fromNode || !toNode) return null;
+              return (
+                <path
+                  key={`plant-${edge.fromKey}-${edge.toKey}`}
+                  className="hydraulic-canvas-link hydraulic-canvas-link-plant"
+                  data-testid={`hydraulic-plant-link-${edge.fromKey}-${edge.toKey}`}
+                  data-focused={
+                    focusedEntityKey === edge.plantKey ? "true" : undefined
+                  }
+                  style={{ cursor: "pointer", pointerEvents: "stroke" }}
+                  onClick={() => focusEntity(edge.plantKey)}
                   d={edgePath(fromNode, toNode)}
                   markerEnd="url(#hydraulic-arrowhead)"
                 />
@@ -1455,7 +1500,6 @@ function HydraulicDiagramCanvas({
             })}
           </svg>
           {nodes.map((node) => {
-            const canConnect = node.component_type !== "plant";
             return (
               <div
                 key={node.technical_key}
@@ -1482,6 +1526,32 @@ function HydraulicDiagramCanvas({
                 onPointerCancel={endNodeDrag}
                 onKeyDown={(event) => moveNodeWithKeyboard(event, node)}
               >
+                <button
+                  type="button"
+                  className="hydraulic-canvas-port hydraulic-canvas-port-in"
+                  data-hydraulic-connector="true"
+                  data-testid={`hydraulic-node-in-${node.technical_key}`}
+                  aria-label={`Entrada ${node.technical_key}`}
+                  title={`Entrada ${node.technical_key}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    finishConnection(node.technical_key);
+                  }}
+                  onDragOver={(event: DragEvent<HTMLButtonElement>) => {
+                    event.preventDefault();
+                    if (event.dataTransfer) {
+                      event.dataTransfer.dropEffect = "link";
+                    }
+                  }}
+                  onDrop={(event: DragEvent<HTMLButtonElement>) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    finishConnection(
+                      node.technical_key,
+                      event.dataTransfer.getData("text/plain") || undefined,
+                    );
+                  }}
+                />
                 <span className="hydraulic-canvas-node-type">
                   {hydraulicComponentLabels[node.component_type]}
                 </span>
@@ -1489,47 +1559,29 @@ function HydraulicDiagramCanvas({
                 <span className="hydraulic-canvas-node-key">
                   {node.technical_key}
                 </span>
-                {canConnect ? (
-                  <button
-                    type="button"
-                    className="hydraulic-canvas-connector"
-                    data-hydraulic-connector="true"
-                    data-testid={`hydraulic-node-${node.technical_key}`}
-                    draggable
-                    aria-label={`Conectar ${node.technical_key}`}
-                    title={`Conectar ${node.technical_key}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      clickConnector(node.technical_key);
-                    }}
-                    onDragStart={(event: DragEvent<HTMLButtonElement>) => {
-                      event.stopPropagation();
-                      event.dataTransfer.setData(
-                        "text/plain",
-                        node.technical_key,
-                      );
-                      event.dataTransfer.effectAllowed = "link";
-                      setPendingConnector(node.technical_key);
-                    }}
-                    onDragOver={(event: DragEvent<HTMLButtonElement>) => {
-                      event.preventDefault();
-                      if (event.dataTransfer) {
-                        event.dataTransfer.dropEffect = "link";
-                      }
-                    }}
-                    onDrop={(event: DragEvent<HTMLButtonElement>) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      const fromNodeKey =
-                        event.dataTransfer.getData("text/plain");
-                      if (fromNodeKey) {
-                        createFocusedReach(fromNodeKey, node.technical_key);
-                      }
-                      setPendingConnector(null);
-                    }}
-                    onDragEnd={() => setPendingConnector(null)}
-                  />
-                ) : null}
+                <button
+                  type="button"
+                  className="hydraulic-canvas-port hydraulic-canvas-port-out"
+                  data-hydraulic-connector="true"
+                  data-testid={`hydraulic-node-out-${node.technical_key}`}
+                  draggable
+                  aria-label={`Salida ${node.technical_key}`}
+                  title={`Salida ${node.technical_key}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    beginConnection(node.technical_key);
+                  }}
+                  onDragStart={(event: DragEvent<HTMLButtonElement>) => {
+                    event.stopPropagation();
+                    event.dataTransfer.setData(
+                      "text/plain",
+                      node.technical_key,
+                    );
+                    event.dataTransfer.effectAllowed = "link";
+                    setPendingConnector(node.technical_key);
+                  }}
+                  onDragEnd={() => setPendingConnector(null)}
+                />
               </div>
             );
           })}
@@ -1543,98 +1595,6 @@ function HydraulicDiagramCanvas({
         </div>
       </div>
     </div>
-  );
-}
-
-function HydraulicNodeList({
-  nodes,
-  updateNode,
-  focusedEntityKey,
-}: {
-  nodes: HydraulicDiagramNodeWrite[];
-  updateNode: (
-    technicalKey: string,
-    patch: Partial<HydraulicDiagramNodeWrite>,
-  ) => void;
-  focusedEntityKey: string | null;
-}) {
-  if (!nodes.length) {
-    return (
-      <EmptyState>
-        Agrega nodos para crear la topologia hidraulica visible.
-      </EmptyState>
-    );
-  }
-  return (
-    <ul className="resource-list hydraulic-node-list">
-      {nodes.map((node) => (
-        <li
-          key={node.technical_key}
-          data-focused={
-            focusedEntityKey === node.technical_key ? "true" : undefined
-          }
-          aria-current={
-            focusedEntityKey === node.technical_key ? "true" : undefined
-          }
-        >
-          <strong>{node.display_name}</strong>
-          <p>
-            {hydraulicComponentLabels[node.component_type]} |{" "}
-            {node.technical_key}
-          </p>
-          <div className="draft-field-grid">
-            <label
-              className="field-row"
-              htmlFor={`hydraulic-label-${node.technical_key}`}
-            >
-              <span>Etiqueta {node.technical_key}</span>
-              <input
-                id={`hydraulic-label-${node.technical_key}`}
-                type="text"
-                value={node.display_name}
-                onChange={(event) =>
-                  updateNode(node.technical_key, {
-                    display_name: event.target.value,
-                  })
-                }
-              />
-            </label>
-            <label
-              className="field-row"
-              htmlFor={`hydraulic-x-${node.technical_key}`}
-            >
-              <span>X {node.technical_key}</span>
-              <input
-                id={`hydraulic-x-${node.technical_key}`}
-                type="number"
-                value={node.x}
-                onChange={(event) =>
-                  updateNode(node.technical_key, {
-                    x: Number(event.target.value) || 0,
-                  })
-                }
-              />
-            </label>
-            <label
-              className="field-row"
-              htmlFor={`hydraulic-y-${node.technical_key}`}
-            >
-              <span>Y {node.technical_key}</span>
-              <input
-                id={`hydraulic-y-${node.technical_key}`}
-                type="number"
-                value={node.y}
-                onChange={(event) =>
-                  updateNode(node.technical_key, {
-                    y: Number(event.target.value) || 0,
-                  })
-                }
-              />
-            </label>
-          </div>
-        </li>
-      ))}
-    </ul>
   );
 }
 
@@ -2793,6 +2753,213 @@ function HydraulicPlantPanel({
   );
 }
 
+function HydraulicNodeLabelField({
+  node,
+  updateNode,
+}: {
+  node: HydraulicDiagramNodeWrite;
+  updateNode: (
+    technicalKey: string,
+    patch: Partial<HydraulicDiagramNodeWrite>,
+  ) => void;
+}) {
+  return (
+    <label
+      className="field-row"
+      htmlFor={`hydraulic-label-${node.technical_key}`}
+    >
+      <span>Etiqueta {node.technical_key}</span>
+      <input
+        id={`hydraulic-label-${node.technical_key}`}
+        type="text"
+        value={node.display_name}
+        onChange={(event) =>
+          updateNode(node.technical_key, { display_name: event.target.value })
+        }
+      />
+    </label>
+  );
+}
+
+function HydraulicPropertiesPanel({
+  nodes,
+  reaches,
+  focusedEntityKey,
+  deleteEntity,
+  updateNode,
+  updateReservoir,
+  updateCurve,
+  updateInflowSeries,
+  updatePlant,
+  addUnit,
+  updateUnit,
+  removeUnit,
+  updateUnitCurve,
+  updateReach,
+  availableCurves,
+  unitCurves,
+  availableInflowSeries,
+  availableMinimumFlowSeries,
+}: {
+  nodes: HydraulicDiagramNodeWrite[];
+  reaches: HydraulicDiagramReachWrite[];
+  focusedEntityKey: string | null;
+  deleteEntity: (technicalKey: string) => void;
+  updateNode: (
+    technicalKey: string,
+    patch: Partial<HydraulicDiagramNodeWrite>,
+  ) => void;
+  updateReservoir: (
+    technicalKey: string,
+    patch: Partial<HydraulicReservoirParameters>,
+  ) => void;
+  updateCurve: (
+    technicalKey: string,
+    curve: HydraulicStorageElevationCurveWrite,
+  ) => void;
+  updateInflowSeries: (
+    technicalKey: string,
+    series: HydraulicNaturalInflowSeriesWrite,
+  ) => void;
+  updatePlant: (
+    plantKey: string,
+    patch: Partial<HydraulicPlantParameters>,
+  ) => void;
+  addUnit: (plantKey: string) => void;
+  updateUnit: (
+    plantKey: string,
+    unitKey: string,
+    patch: Partial<HydraulicUnitWrite>,
+  ) => void;
+  removeUnit: (plantKey: string, unitKey: string) => void;
+  updateUnitCurve: (
+    plantKey: string,
+    unitKey: string,
+    curve: HydraulicCurveWrite,
+  ) => void;
+  updateReach: (
+    technicalKey: string,
+    patch: Partial<HydraulicDiagramReachWrite>,
+  ) => void;
+  availableCurves: Record<string, HydraulicCurveSummary[]>;
+  unitCurves: Record<string, HydraulicCurveSummary[]>;
+  availableInflowSeries: Record<string, HydraulicNaturalInflowSeriesSummary[]>;
+  availableMinimumFlowSeries: Record<
+    string,
+    HydraulicNaturalInflowSeriesSummary[]
+  >;
+}) {
+  const node = focusedEntityKey
+    ? (nodes.find(
+        (candidate) => candidate.technical_key === focusedEntityKey,
+      ) ?? null)
+    : null;
+  const reach = focusedEntityKey
+    ? (reaches.find(
+        (candidate) => candidate.technical_key === focusedEntityKey,
+      ) ?? null)
+    : null;
+
+  if (!node && !reach) {
+    return (
+      <EmptyState>
+        Selecciona un objeto del diagrama para editar sus propiedades.
+      </EmptyState>
+    );
+  }
+
+  if (reach) {
+    return (
+      <div
+        className="hydraulic-properties-panel"
+        data-testid={`hydraulic-properties-${reach.technical_key}`}
+      >
+        <div className="draft-section-heading">
+          <p className="hydraulic-properties-heading">
+            Tramo | {reach.technical_key}
+          </p>
+          <button
+            type="button"
+            className="secondary-action"
+            onClick={() => deleteEntity(reach.technical_key)}
+          >
+            Eliminar componente
+          </button>
+        </div>
+        <HydraulicReachList
+          nodes={nodes}
+          reaches={[reach]}
+          updateReach={updateReach}
+          minimumFlowSeriesByReach={availableMinimumFlowSeries}
+          focusedEntityKey={focusedEntityKey}
+        />
+      </div>
+    );
+  }
+
+  const selected = node as HydraulicDiagramNodeWrite;
+  return (
+    <div
+      className="hydraulic-properties-panel"
+      data-testid={`hydraulic-properties-${selected.technical_key}`}
+    >
+      <div className="draft-section-heading">
+        <p className="hydraulic-properties-heading">
+          {hydraulicComponentLabels[selected.component_type]} |{" "}
+          {selected.technical_key}
+        </p>
+        <button
+          type="button"
+          className="secondary-action"
+          onClick={() => deleteEntity(selected.technical_key)}
+        >
+          Eliminar componente
+        </button>
+      </div>
+      <div className="draft-field-grid">
+        <HydraulicNodeLabelField node={selected} updateNode={updateNode} />
+      </div>
+      {selected.component_type === "reservoir" ? (
+        <ul className="resource-list hydraulic-reservoir-list">
+          <HydraulicReservoirPanel
+            node={selected}
+            availableCurves={availableCurves[selected.technical_key] ?? []}
+            updateReservoir={updateReservoir}
+            updateCurve={updateCurve}
+          />
+        </ul>
+      ) : null}
+      {selected.component_type !== "plant" ? (
+        <ul className="resource-list hydraulic-inflow-list">
+          <HydraulicInflowPanel
+            node={selected}
+            availableSeries={
+              availableInflowSeries[selected.technical_key] ?? []
+            }
+            updateInflowSeries={updateInflowSeries}
+          />
+        </ul>
+      ) : null}
+      {selected.component_type === "plant" ? (
+        <ul className="resource-list hydraulic-plant-list">
+          <HydraulicPlantPanel
+            node={selected}
+            nodeKeys={nodes
+              .filter((other) => other.component_type !== "plant")
+              .map((other) => other.technical_key)}
+            unitCurves={unitCurves}
+            updatePlant={updatePlant}
+            addUnit={addUnit}
+            updateUnit={updateUnit}
+            removeUnit={removeUnit}
+            updateUnitCurve={updateUnitCurve}
+          />
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 function HydraulicDiagramEditor({
   scenario,
   project,
@@ -3148,6 +3315,92 @@ function HydraulicDiagramEditor({
     markDirty();
   }
 
+  function setPlantConnection(
+    plantKey: string,
+    nodeKey: string,
+    side: "intake" | "discharge",
+  ) {
+    const field = side === "intake" ? "intake_node_key" : "discharge_node_key";
+    setNodes((current) =>
+      current.map((node) => {
+        if (node.technical_key !== plantKey) return node;
+        const existing = node.units ?? [];
+        const units = existing.length
+          ? existing
+          : [defaultHydraulicUnit(nextHydraulicUnitKey(current))];
+        return {
+          ...node,
+          units: units.map((unit) => ({ ...unit, [field]: nodeKey })),
+        };
+      }),
+    );
+    markDirty();
+  }
+
+  function connectPorts(fromNodeKey: string, toNodeKey: string) {
+    if (fromNodeKey === toNodeKey) return;
+    const fromNode = nodes.find((node) => node.technical_key === fromNodeKey);
+    const toNode = nodes.find((node) => node.technical_key === toNodeKey);
+    if (!fromNode || !toNode) return;
+    const fromPlant = fromNode.component_type === "plant";
+    const toPlant = toNode.component_type === "plant";
+    if (fromPlant && toPlant) return;
+    if (toPlant) {
+      setPlantConnection(toNodeKey, fromNodeKey, "intake");
+      setFocusedEntityKey(toNodeKey);
+      return;
+    }
+    if (fromPlant) {
+      setPlantConnection(fromNodeKey, toNodeKey, "discharge");
+      setFocusedEntityKey(fromNodeKey);
+      return;
+    }
+    const nextKey = nextHydraulicReachKey(reaches, fromNodeKey, toNodeKey);
+    createReach(fromNodeKey, toNodeKey);
+    setFocusedEntityKey(nextKey);
+  }
+
+  function deleteEntity(technicalKey: string) {
+    const isNode = nodes.some((node) => node.technical_key === technicalKey);
+    if (isNode) {
+      setNodes((current) =>
+        current
+          .filter((node) => node.technical_key !== technicalKey)
+          .map((node) =>
+            node.units?.length
+              ? {
+                  ...node,
+                  units: node.units.map((unit) => ({
+                    ...unit,
+                    intake_node_key:
+                      unit.intake_node_key === technicalKey
+                        ? null
+                        : unit.intake_node_key,
+                    discharge_node_key:
+                      unit.discharge_node_key === technicalKey
+                        ? null
+                        : unit.discharge_node_key,
+                  })),
+                }
+              : node,
+          ),
+      );
+      setReaches((current) =>
+        current.filter(
+          (reach) =>
+            reach.from_node_key !== technicalKey &&
+            reach.to_node_key !== technicalKey,
+        ),
+      );
+    } else {
+      setReaches((current) =>
+        current.filter((reach) => reach.technical_key !== technicalKey),
+      );
+    }
+    setFocusedEntityKey(null);
+    markDirty();
+  }
+
   return (
     <section className="workspace-view">
       <Breadcrumbs>
@@ -3299,114 +3552,38 @@ function HydraulicDiagramEditor({
             reaches={reaches}
             viewport={viewport}
             updateNode={updateNode}
-            createReach={createReach}
+            connectPorts={connectPorts}
             focusEntity={setFocusedEntityKey}
-            focusedEntityKey={focusedEntityKey}
-          />
-        </section>
-        <section className="workspace-section" aria-labelledby="node-tools">
-          <div className="draft-section-heading">
-            <h2 id="node-tools">Propiedades de nodos</h2>
-          </div>
-          <HydraulicNodeList
-            nodes={nodes}
-            updateNode={updateNode}
-            focusedEntityKey={focusedEntityKey}
-          />
-        </section>
-        <section className="workspace-section" aria-labelledby="reach-tools">
-          <div className="draft-section-heading">
-            <h2 id="reach-tools">Tramos dirigidos</h2>
-          </div>
-          <HydraulicReachList
-            nodes={nodes}
-            reaches={reaches}
-            updateReach={updateReach}
-            minimumFlowSeriesByReach={availableMinimumFlowSeries}
             focusedEntityKey={focusedEntityKey}
           />
         </section>
         <section
           className="workspace-section"
-          aria-labelledby="reservoir-tools"
+          aria-labelledby="properties-tools"
         >
           <div className="draft-section-heading">
-            <h2 id="reservoir-tools">Parametros de embalse</h2>
+            <h2 id="properties-tools">Propiedades</h2>
           </div>
-          {nodes.some((node) => node.component_type === "reservoir") ? (
-            <ul className="resource-list hydraulic-reservoir-list">
-              {nodes
-                .filter((node) => node.component_type === "reservoir")
-                .map((node) => (
-                  <HydraulicReservoirPanel
-                    key={node.technical_key}
-                    node={node}
-                    availableCurves={availableCurves[node.technical_key] ?? []}
-                    updateReservoir={updateReservoir}
-                    updateCurve={updateCurve}
-                  />
-                ))}
-            </ul>
-          ) : (
-            <EmptyState>
-              Agrega un embalse para editar almacenamiento y curva cota-volumen.
-            </EmptyState>
-          )}
-        </section>
-        <section className="workspace-section" aria-labelledby="inflow-tools">
-          <div className="draft-section-heading">
-            <h2 id="inflow-tools">Afluentes naturales</h2>
-          </div>
-          {nodes.some((node) => node.component_type !== "plant") ? (
-            <ul className="resource-list hydraulic-inflow-list">
-              {nodes
-                .filter((node) => node.component_type !== "plant")
-                .map((node) => (
-                  <HydraulicInflowPanel
-                    key={node.technical_key}
-                    node={node}
-                    availableSeries={
-                      availableInflowSeries[node.technical_key] ?? []
-                    }
-                    updateInflowSeries={updateInflowSeries}
-                  />
-                ))}
-            </ul>
-          ) : (
-            <EmptyState>
-              Agrega un nodo hidraulico para vincular afluentes naturales.
-            </EmptyState>
-          )}
-        </section>
-        <section className="workspace-section" aria-labelledby="plant-tools">
-          <div className="draft-section-heading">
-            <h2 id="plant-tools">Centrales y unidades</h2>
-          </div>
-          {nodes.some((node) => node.component_type === "plant") ? (
-            <ul className="resource-list hydraulic-plant-list">
-              {nodes
-                .filter((node) => node.component_type === "plant")
-                .map((node) => (
-                  <HydraulicPlantPanel
-                    key={node.technical_key}
-                    node={node}
-                    nodeKeys={nodes
-                      .filter((other) => other.component_type !== "plant")
-                      .map((other) => other.technical_key)}
-                    unitCurves={unitCurves}
-                    updatePlant={updatePlant}
-                    addUnit={addUnit}
-                    updateUnit={updateUnit}
-                    removeUnit={removeUnit}
-                    updateUnitCurve={updateUnitCurve}
-                  />
-                ))}
-            </ul>
-          ) : (
-            <EmptyState>
-              Agrega una central para editar sus unidades generadoras.
-            </EmptyState>
-          )}
+          <HydraulicPropertiesPanel
+            nodes={nodes}
+            reaches={reaches}
+            focusedEntityKey={focusedEntityKey}
+            deleteEntity={deleteEntity}
+            updateNode={updateNode}
+            updateReservoir={updateReservoir}
+            updateCurve={updateCurve}
+            updateInflowSeries={updateInflowSeries}
+            updatePlant={updatePlant}
+            addUnit={addUnit}
+            updateUnit={updateUnit}
+            removeUnit={removeUnit}
+            updateUnitCurve={updateUnitCurve}
+            updateReach={updateReach}
+            availableCurves={availableCurves}
+            unitCurves={unitCurves}
+            availableInflowSeries={availableInflowSeries}
+            availableMinimumFlowSeries={availableMinimumFlowSeries}
+          />
         </section>
       </form>
     </section>

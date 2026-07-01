@@ -521,6 +521,11 @@ button:focus-visible {
   stroke-width: 4;
 }
 
+.hydraulic-canvas-link-plant {
+  stroke: #0f766e;
+  stroke-dasharray: 7 5;
+}
+
 .hydraulic-canvas-node {
   position: absolute;
   display: grid;
@@ -586,30 +591,40 @@ button:focus-visible {
   font-weight: 700;
 }
 
-.hydraulic-canvas-connector {
+.hydraulic-canvas-port {
   position: absolute;
-  top: 50%;
-  right: -12px;
-  width: 24px;
-  height: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 22px;
+  height: 22px;
   padding: 0;
   border: 2px solid #ffffff;
   border-radius: 999px;
   background: #075985;
   box-shadow: 0 4px 12px rgb(16 42 67 / 20%);
   cursor: crosshair;
+  z-index: 2;
 }
 
-.hydraulic-canvas-connector::after {
+.hydraulic-canvas-port-in {
+  top: -12px;
+}
+
+.hydraulic-canvas-port-out {
+  bottom: -12px;
+  background: #0f766e;
+}
+
+.hydraulic-canvas-port::after {
   position: absolute;
-  inset: 6px;
+  inset: 5px;
   border-radius: 999px;
   background: #ffffff;
   content: "";
 }
 
-.hydraulic-canvas-connector:hover,
-.hydraulic-canvas-connector:focus-visible {
+.hydraulic-canvas-port:hover,
+.hydraulic-canvas-port:focus-visible {
   background: #c2410c;
 }
 
