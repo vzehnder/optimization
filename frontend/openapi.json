@@ -235,6 +235,579 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HydraulicCurvePointRequest": {
+        "properties": {
+          "x_value": {
+            "title": "X Value",
+            "type": "number"
+          },
+          "y_value": {
+            "title": "Y Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x_value",
+          "y_value"
+        ],
+        "title": "HydraulicCurvePointRequest",
+        "type": "object"
+      },
+      "HydraulicDiagramNodeRequest": {
+        "properties": {
+          "component_type": {
+            "enum": [
+              "reservoir",
+              "junction",
+              "plant"
+            ],
+            "title": "Component Type",
+            "type": "string"
+          },
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "natural_inflow_series": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HydraulicNaturalInflowSeriesRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "plant": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HydraulicPlantParametersRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reservoir": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HydraulicReservoirParametersRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "storage_elevation_curve": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HydraulicStorageElevationCurveRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "technical_key": {
+            "minLength": 1,
+            "title": "Technical Key",
+            "type": "string"
+          },
+          "units": {
+            "items": {
+              "$ref": "#/components/schemas/HydraulicUnitRequest"
+            },
+            "title": "Units",
+            "type": "array"
+          },
+          "x": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "X"
+          },
+          "y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Y"
+          }
+        },
+        "required": [
+          "component_type",
+          "technical_key",
+          "display_name"
+        ],
+        "title": "HydraulicDiagramNodeRequest",
+        "type": "object"
+      },
+      "HydraulicDiagramReachRequest": {
+        "properties": {
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "flow_min_m3s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flow Min M3S"
+          },
+          "from_node_key": {
+            "minLength": 1,
+            "title": "From Node Key",
+            "type": "string"
+          },
+          "minimum_flow_series": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HydraulicNaturalInflowSeriesRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reach_type": {
+            "minLength": 1,
+            "title": "Reach Type",
+            "type": "string"
+          },
+          "routing_method": {
+            "default": "none",
+            "title": "Routing Method",
+            "type": "string"
+          },
+          "spill_penalty_usd_per_hm3": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spill Penalty Usd Per Hm3"
+          },
+          "technical_key": {
+            "minLength": 1,
+            "title": "Technical Key",
+            "type": "string"
+          },
+          "to_node_key": {
+            "minLength": 1,
+            "title": "To Node Key",
+            "type": "string"
+          },
+          "travel_time_hours": {
+            "default": 0.0,
+            "title": "Travel Time Hours",
+            "type": "number"
+          }
+        },
+        "required": [
+          "technical_key",
+          "display_name",
+          "from_node_key",
+          "to_node_key",
+          "reach_type"
+        ],
+        "title": "HydraulicDiagramReachRequest",
+        "type": "object"
+      },
+      "HydraulicDiagramSaveRequest": {
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/HydraulicDiagramNodeRequest"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "reaches": {
+            "items": {
+              "$ref": "#/components/schemas/HydraulicDiagramReachRequest"
+            },
+            "title": "Reaches",
+            "type": "array"
+          },
+          "revision": {
+            "minLength": 1,
+            "title": "Revision",
+            "type": "string"
+          },
+          "viewport": {
+            "$ref": "#/components/schemas/HydraulicDiagramViewportRequest"
+          }
+        },
+        "required": [
+          "revision",
+          "nodes"
+        ],
+        "title": "HydraulicDiagramSaveRequest",
+        "type": "object"
+      },
+      "HydraulicDiagramViewportRequest": {
+        "properties": {
+          "x": {
+            "default": 0.0,
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "default": 0.0,
+            "title": "Y",
+            "type": "number"
+          },
+          "zoom": {
+            "default": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Zoom",
+            "type": "number"
+          }
+        },
+        "title": "HydraulicDiagramViewportRequest",
+        "type": "object"
+      },
+      "HydraulicFlowPowerCurveRequest": {
+        "properties": {
+          "curve_set_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Curve Set Id"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/HydraulicCurvePointRequest"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "version_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Label"
+          }
+        },
+        "title": "HydraulicFlowPowerCurveRequest",
+        "type": "object"
+      },
+      "HydraulicNaturalInflowSeriesPointRequest": {
+        "properties": {
+          "duration_hours": {
+            "default": 1.0,
+            "title": "Duration Hours",
+            "type": "number"
+          },
+          "timestamp": {
+            "minLength": 1,
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "value_m3s": {
+            "title": "Value M3S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "timestamp",
+          "value_m3s"
+        ],
+        "title": "HydraulicNaturalInflowSeriesPointRequest",
+        "type": "object"
+      },
+      "HydraulicNaturalInflowSeriesRequest": {
+        "properties": {
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/HydraulicNaturalInflowSeriesPointRequest"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "time_series_set_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Series Set Id"
+          },
+          "version_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Label"
+          }
+        },
+        "title": "HydraulicNaturalInflowSeriesRequest",
+        "type": "object"
+      },
+      "HydraulicPlantParametersRequest": {
+        "properties": {
+          "max_power_mw": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Power Mw"
+          },
+          "min_power_mw": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Power Mw"
+          },
+          "non_modeled": {
+            "default": false,
+            "title": "Non Modeled",
+            "type": "boolean"
+          }
+        },
+        "title": "HydraulicPlantParametersRequest",
+        "type": "object"
+      },
+      "HydraulicReservoirParametersRequest": {
+        "properties": {
+          "initial_storage_hm3": {
+            "title": "Initial Storage Hm3",
+            "type": "number"
+          },
+          "storage_max_hm3": {
+            "title": "Storage Max Hm3",
+            "type": "number"
+          },
+          "storage_min_hm3": {
+            "title": "Storage Min Hm3",
+            "type": "number"
+          },
+          "terminal_condition": {
+            "default": "none",
+            "enum": [
+              "none",
+              "equal_initial",
+              "min_terminal"
+            ],
+            "title": "Terminal Condition",
+            "type": "string"
+          },
+          "terminal_storage_min_hm3": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal Storage Min Hm3"
+          },
+          "terminal_water_value_usd_per_hm3": {
+            "default": 0.0,
+            "title": "Terminal Water Value Usd Per Hm3",
+            "type": "number"
+          }
+        },
+        "required": [
+          "storage_min_hm3",
+          "storage_max_hm3",
+          "initial_storage_hm3"
+        ],
+        "title": "HydraulicReservoirParametersRequest",
+        "type": "object"
+      },
+      "HydraulicStorageElevationCurveRequest": {
+        "properties": {
+          "curve_set_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Curve Set Id"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/HydraulicCurvePointRequest"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "version_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Label"
+          }
+        },
+        "title": "HydraulicStorageElevationCurveRequest",
+        "type": "object"
+      },
+      "HydraulicUnitRequest": {
+        "properties": {
+          "discharge_node_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discharge Node Key"
+          },
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "flow_power_curve": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HydraulicFlowPowerCurveRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "generation_mode": {
+            "default": "flow_power_curve",
+            "title": "Generation Mode",
+            "type": "string"
+          },
+          "intake_node_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intake Node Key"
+          },
+          "is_active": {
+            "default": true,
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "max_flow_m3s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Flow M3S"
+          },
+          "max_power_mw": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Power Mw"
+          },
+          "min_flow_m3s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Flow M3S"
+          },
+          "min_power_mw": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Power Mw"
+          },
+          "operation_mode": {
+            "default": "generation",
+            "title": "Operation Mode",
+            "type": "string"
+          },
+          "technical_key": {
+            "minLength": 1,
+            "title": "Technical Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "technical_key",
+          "display_name"
+        ],
+        "title": "HydraulicUnitRequest",
+        "type": "object"
+      },
       "LoginRequest": {
         "properties": {
           "email": {
@@ -1863,6 +2436,43 @@
         "summary": "Get Scenario Version"
       }
     },
+    "/api/scenario-versions/{scenario_version_id}/hydraulic-diagram-snapshot": {
+      "get": {
+        "operationId": "get_scenario_version_hydraulic_diagram_snapshot_api_scenario_versions__scenario_version_id__hydraulic_diagram_snapshot_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_version_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Version Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Scenario Version Hydraulic Diagram Snapshot"
+      }
+    },
     "/api/scenario-versions/{scenario_version_id}/runs": {
       "post": {
         "operationId": "create_manual_run_api_scenario_versions__scenario_version_id__runs_post",
@@ -2376,6 +2986,234 @@
           }
         },
         "summary": "Save Draft Time Series Rows"
+      }
+    },
+    "/api/scenarios/{scenario_id}/hydraulic-diagram": {
+      "get": {
+        "operationId": "get_hydraulic_diagram_api_scenarios__scenario_id__hydraulic_diagram_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Hydraulic Diagram"
+      },
+      "post": {
+        "operationId": "create_hydraulic_diagram_api_scenarios__scenario_id__hydraulic_diagram_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Hydraulic Diagram"
+      },
+      "put": {
+        "operationId": "save_hydraulic_diagram_api_scenarios__scenario_id__hydraulic_diagram_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HydraulicDiagramSaveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Hydraulic Diagram"
+      }
+    },
+    "/api/scenarios/{scenario_id}/hydraulic-diagram/promote": {
+      "post": {
+        "operationId": "promote_hydraulic_diagram_api_scenarios__scenario_id__hydraulic_diagram_promote_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Promote Hydraulic Diagram"
+      }
+    },
+    "/api/scenarios/{scenario_id}/hydraulic-diagram/v3-preview": {
+      "post": {
+        "operationId": "validate_hydraulic_v3_preview_api_scenarios__scenario_id__hydraulic_diagram_v3_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Hydraulic V3 Preview"
+      }
+    },
+    "/api/scenarios/{scenario_id}/hydraulic-diagram/validate": {
+      "post": {
+        "operationId": "validate_hydraulic_diagram_api_scenarios__scenario_id__hydraulic_diagram_validate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Hydraulic Diagram"
       }
     },
     "/api/scenarios/{scenario_id}/runs": {

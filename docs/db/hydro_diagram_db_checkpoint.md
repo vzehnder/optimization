@@ -1,0 +1,161 @@
+# Hydro Diagram DB Checkpoint
+
+Fecha inicial: 2026-06-26
+
+Este documento es el checkpoint vivo de BBDD para el PRD del editor de diagrama
+hidraulico en `docs/hydro_diagram/iter1/prd_hydro_diagram_editor.md`.
+
+Debe actualizarse en cada issue que agregue, cambie o conecte tablas,
+migraciones, indices, constraints, generadores o validaciones persistidas.
+
+## Estado General
+
+| Area | Estado objetivo | Estado implementado | Pendiente | Ultima issue BBDD |
+| --- | --- | --- | --- | --- |
+| Caso normalizado | `optimization_cases` como fuente editable y `scenario_versions` como snapshot inmutable. | `optimization_cases` implementada y conectada 1:1 con `scenarios` para el editor hidraulico. Campos: `scenario_id`, `case_key`, `display_name`, `validation_payload_json`, auditoria create/update. `validation_payload_json` guarda snapshots exitosos `hydraulic_v3_preview` con `validation_hash`, `system_case`, `julia_validation` y estado `stale`. La promocion v3 crea `scenario_versions` inmutables desde el snapshot validado vigente y registra `generation_metadata.kind = hydraulic_diagram_v3`. Desde BESS-HYDRO-DIAGRAM-009 la promocion tambien congela un snapshot visual en `scenario_version_hydraulic_diagram_snapshots`. | Snapshots de layout cubiertos; sin pendientes para esta area. | BESS-HYDRO-DIAGRAM-009 |
+| Red hidraulica base | `hydraulic_systems`, `hydraulic_nodes`, `hydraulic_reaches`, `hydraulic_plants`, `hydraulic_units`. | Implementadas `hydraulic_systems`, `hydraulic_nodes`, `hydraulic_reaches` (el guardado ahora persiste `routing_method`/`travel_time_hours` por reach), `hydraulic_plants` y `hydraulic_units` (con `intake_node_id`/`discharge_node_id`, y desde BESS-HYDRO-DIAGRAM-010 las columnas `operation_mode`/`generation_mode`, default `generation`/`flow_power_curve`). | Fixtures/parametros base avanzados en slices posteriores. | BESS-HYDRO-DIAGRAM-010 |
+| Red activa por caso | `case_hydraulic_systems`, `case_hydraulic_nodes`, `case_hydraulic_reaches`, `case_hydraulic_plants`, `case_hydraulic_units`. | Implementadas `case_hydraulic_systems`, `case_hydraulic_nodes`, `case_hydraulic_reaches` (ahora persiste `flow_min_m3s` y `spill_penalty_usd_per_hm3` escalares por reach), `case_hydraulic_plants` (con `non_modeled`, `min_power_mw`, `max_power_mw`) y `case_hydraulic_units` (intake/descarga, limites de potencia/caudal, binding `flow_power`). | Parametros operacionales avanzados de reach en slices posteriores. | BESS-HYDRO-DIAGRAM-008 |
+| Parametros de embalse | `case_hydraulic_reservoir_parameters`. | Implementada con `storage_min_hm3`, `storage_max_hm3`, `initial_storage_hm3`, `terminal_condition` (`none`/`equal_initial`/`min_terminal`), `terminal_storage_min_hm3` y `terminal_water_value_usd_per_hm3` por nodo embalse activo del caso. | Conectar al payload v3 y validar bounds avanzados en slices posteriores. | BESS-HYDRO-DIAGRAM-003 |
+| Curvas versionadas | `hydraulic_curve_sets`, `hydraulic_curve_points`, `case_hydraulic_curve_bindings`. | Implementadas para `storage_elevation` (entidad `hydraulic_node`) y `flow_power` (entidad `hydraulic_unit`): curvas versionadas a nivel proyecto (reuso por `content_hash`, version incremental), puntos ordenados y binding por caso con `curve_role` por entidad activa. | Roles de curva preparados restantes (`storage_area`, `flow_head_efficiency`, etc.). | BESS-HYDRO-DIAGRAM-004 |
+| Series hidraulicas | `case_time_series_bindings` con entidades hidraulicas activas. | Implementadas `hydraulic_time_series_sets`, `hydraulic_time_series_points` y `case_hydraulic_time_series_bindings` para `natural_inflow_m3s` y `minimum_flow_m3s` (estilo curvas: sets versionados a nivel proyecto con reuso por `content_hash`, puntos ordenados `timestamp`/`duration_hours`/`value`, binding por caso por entidad/`signal_key`). El guardado persiste `natural_inflow_m3s` por cualquier nodo activo y `minimum_flow_m3s` por reach activo (`entity_type = 'hydraulic_reach'`/`'case_hydraulic_reach'`). El preview v3 resuelve la serie de afluente al bloque `time_series` y la serie de caudal minimo a bloques `time_series[*].minimum_flow_m3s` por reach. La validacion exige afluente en embalses, rechaza valores negativos/no finitos y horizontes inconsistentes para afluente y caudal minimo. | Alinear con el diseno central completo `time_series_sets/periods/signals/values`. | BESS-HYDRO-DIAGRAM-008 |
+| Layout editable | `case_hydraulic_diagram_layouts`, `case_hydraulic_diagram_items`. | Implementado con viewport, `layout_engine`, `layout_version` como token de revision, posiciones por entidad activa y constraints de unicidad. `case_hydraulic_diagram_items.entity_type` acepta nodos, plantas y reaches. Las entidades guardadas sin posicion reciben autolayout determinista (`hydraulic_autolayout_position`); el request de guardado acepta `x`/`y` opcionales. | Estilos avanzados/collapse en slices posteriores. | BESS-HYDRO-DIAGRAM-009 |
+| Snapshot visual promovido | `scenario_version_hydraulic_diagram_snapshots`. | Implementada. La promocion congela un snapshot visual no ejecutable (posiciones, viewport, labels y conectividad via `build_hydraulic_diagram_layout_snapshot`) y se lee read-only en `GET /api/scenario-versions/{id}/hydraulic-diagram-snapshot`. El snapshot omite fisica hidraulica; editar el caso activo (mover nodos) no altera el snapshot historico ni el `system_case_json`. | Vista React historica del snapshot (API ya disponible). | BESS-HYDRO-DIAGRAM-009 |
+| Validacion topologica | Resultado en `optimization_cases.validation_payload_json.hydraulic_islands`. | Validacion persistida para reaches (tipos y endpoints activos), embalses activos (parametros, curva `storage_elevation`, monotonia/dominio, condicion terminal) y centrales/unidades activas: central activa requiere unidad activa salvo `non_modeled`, unidad activa requiere nodos toma/descarga activos y distintos, binding `flow_power` y curva con caudal creciente y potencia no decreciente. Cada error reporta `entity_type`, `entity_id` y `technical_key`. La validacion v3 genera un preview ejecutable `bess_system_dispatch.v3`, llama validacion Julia, persiste snapshot exitoso y bloquea promocion si el snapshot esta stale. Desde BESS-HYDRO-DIAGRAM-007 agrega reglas de afluente natural (`missing_natural_inflow_series` en embalses, `negative_inflow_value`, `nonnumeric_inflow_value`, `inflow_horizon_mismatch`). Desde BESS-HYDRO-DIAGRAM-008 agrega reglas de control de reach (`negative_minimum_flow`, `negative_spill_penalty`, `spill_penalty_requires_spillway`, `minimum_flow_horizon_mismatch`). Desde BESS-HYDRO-DIAGRAM-010 agrega `_validate_unsupported_topology` (deep module con helpers puros `hydraulic_first_cycle`/`hydraulic_weakly_connected_components`): `unsupported_reach_routing`, `unsupported_reach_travel_time`, `unsupported_cycle`, `island_without_boundary` (componentes sin embalse ni afluente natural), `unsupported_unit_operation_mode` (pump_only/reversible) y `unsupported_unit_generation_mode` (head_dependent). | Reglas hidraulicas avanzadas adicionales en iteraciones futuras. | BESS-HYDRO-DIAGRAM-010 |
+
+## Reglas De Actualizacion
+
+Cuando una issue toque BBDD:
+
+1. Actualizar la fila correspondiente de `Estado General`.
+2. Agregar una entrada al log.
+3. Registrar migraciones o scripts creados.
+4. Registrar constraints, indices o validaciones nuevas.
+5. Marcar explicitamente lo que queda pendiente.
+
+## Log De Cambios
+
+| Fecha | Issue | Cambio | Verificacion |
+| --- | --- | --- | --- |
+| 2026-06-26 | N/A | Checkpoint inicial creado desde el PRD y la extension de BBDD. | Documental. |
+| 2026-06-26 | BESS-HYDRO-DIAGRAM-001 | Se implementaron tablas normalizadas minimas para caso hidraulico, sistema base, nodos/centrales activos y layout editable. | `.\\.venv\\Scripts\\python.exe -m unittest tests.test_hydraulic_diagram`; `npm.cmd test -- App.test.tsx -t "opens a persisted hydraulic diagram"`. |
+| 2026-06-26 | BESS-HYDRO-DIAGRAM-002 | Se implementaron tramos hidraulicos dirigidos base/activos, layout para reaches, validacion topologica inicial y API/UI de guardado/validacion. | `.\\.venv\\Scripts\\python.exe -m unittest tests.test_hydraulic_diagram`; `.\\.venv\\Scripts\\python.exe -m unittest discover tests`; `npm.cmd test`; `npm.cmd run test:browser`. |
+| 2026-06-26 | BESS-HYDRO-DIAGRAM-003 | Se implementaron `case_hydraulic_reservoir_parameters`, `hydraulic_curve_sets`, `hydraulic_curve_points` y `case_hydraulic_curve_bindings`; el guardado persiste parametros de embalse y curvas `storage_elevation` versionadas con binding por caso; la validacion exige parametros y curva, y rechaza curvas/condiciones terminales invalidas. | `.\\.venv\\Scripts\\python.exe -m unittest tests.test_hydraulic_diagram`; `.\\.venv\\Scripts\\python.exe -m unittest discover tests`; `npm.cmd test`; `npm.cmd run check`; `npm.cmd run api:check`; `npx playwright test`. |
+| 2026-06-26 | BESS-HYDRO-DIAGRAM-004 | Se implementaron `hydraulic_units` y `case_hydraulic_units`, columnas de agregado/`non_modeled` en `case_hydraulic_plants` y curvas `flow_power` versionadas por unidad; el guardado persiste central, unidades (toma/descarga, limites) y binding `flow_power`; la validacion exige unidades activas, nodos toma/descarga activos y distintos, y curva `flow_power` valida. | `.\\.venv\\Scripts\\python.exe -m unittest tests.test_hydraulic_diagram` (13 ok); `.\\.venv\\Scripts\\python.exe -m unittest discover tests` (116 ok); `npm test` (25 ok); `npm run api:check`; `npm run test:browser -- -g "hydraulic diagram persists"` (1 passed). `tsc`/`eslint` ok; `prettier --check` falla solo por CRLF preexistente en el checkout. |
+| 2026-06-26 | BESS-HYDRO-DIAGRAM-005 | Se implemento generacion deterministica de preview `bess_system_dispatch.v3` desde caso hidraulico normalizado, validacion Julia v3 sin solve, persistencia de snapshot exitoso en `optimization_cases.validation_payload_json` y marcado `stale` cuando un guardado cambia el hash del payload. | `.\\.venv\\Scripts\\python.exe -m unittest tests.test_hydraulic_diagram` (14 ok); `.\\.venv\\Scripts\\python.exe -m unittest discover tests` (117 ok, 1 skipped); `npm.cmd test` (25 ok); `npm.cmd run build`; `npm.cmd run api:check`; `julia --project=. test\\runtests.jl` (489 ok); Chrome smoke local verifico preview v3 renderizado. |
+| 2026-06-27 | BESS-HYDRO-DIAGRAM-006 | Se conecto promocion v3 desde el snapshot validado de `optimization_cases.validation_payload_json` hacia `scenario_versions`; el preview v3 ahora incluye `time_series.natural_inflow_m3s` minimo ejecutable; Julia ejecuta el contrato `bess_system_dispatch.v3` soportado y escribe artifacts auditables. | `.\\.venv\\Scripts\\python.exe -m unittest tests.test_hydraulic_diagram tests.test_manual_runs tests.test_draft_generated_system_case -v`; `.\\.venv\\Scripts\\python.exe -m unittest discover tests -v` (118 ok, 1 skipped); `julia --project=. test\\runtests.jl` (513 ok); `npm.cmd test` (25 ok); `npm.cmd run build`; `npm.cmd run api:check`; Chrome/@chrome smoke local promovio version v3 desde el editor. |
+| 2026-06-27 | BESS-HYDRO-DIAGRAM-007 | Se implementaron `hydraulic_time_series_sets`, `hydraulic_time_series_points` y `case_hydraulic_time_series_bindings` para `natural_inflow_m3s`; el guardado vincula series por cualquier nodo activo (estilo curvas versionadas), el preview v3 resuelve la serie al bloque `time_series`, la validacion exige serie en embalses y rechaza valores negativos/no finitos y horizontes inconsistentes, y el solver v3 usa la serie en el balance hidrico. | `.\\.venv\\Scripts\\python.exe -m unittest tests.test_hydraulic_diagram` (21 ok); `.\\.venv\\Scripts\\python.exe -m unittest discover tests` (124 ok, 1 skipped); `julia --project=. test\\runtests.jl` (519 ok); `npm.cmd test` (25 ok); `npm.cmd run check` (tsc+eslint ok; prettier CRLF preexistente); `npm.cmd run api:generate`; `npm.cmd run test:browser -- -g "hydraulic diagram persists"` (1 passed). |
+| 2026-06-29 | BESS-HYDRO-DIAGRAM-009 | Se creo `scenario_version_hydraulic_diagram_snapshots`; la promocion congela un snapshot visual no ejecutable (via `build_hydraulic_diagram_layout_snapshot`) leido en `GET /api/scenario-versions/{id}/hydraulic-diagram-snapshot`. `normalize_hydraulic_diagram_nodes` aplica autolayout determinista cuando faltan `x`/`y`. Se corrigieron dos defectos preexistentes de PostgreSQL: nueve tablas hidraulicas con `id` ausentes de `ID_TABLES` (sus inserts no devolvian id) y el check `case_hydraulic_diagram_items_entity_type_check` obsoleto en bases creadas antes del soporte de reach/plant (nueva migracion `_ensure_hydraulic_diagram_items_entity_types_postgres`). | `python -m unittest discover tests` (136 ok, 1 skipped); `julia --project=. Pkg.test()` (532 ok); `npm test` (26 ok); `npm run build`; `eslint .`; `npm run api:generate`+`api:check`; `npm run test:browser -- -g "hydraulic diagram persists"` (1 passed); Chrome DevTools MCP smoke end-to-end contra PostgreSQL + Julia (guardar/validar/promover/snapshot/inmutabilidad/autolayout). |
+| 2026-06-29 | BESS-HYDRO-DIAGRAM-010 | Se agregaron las columnas `operation_mode`/`generation_mode` a `hydraulic_units` via `_ensure_column` (default `generation`/`flow_power_curve`); el guardado persiste `routing_method`/`travel_time_hours` por reach (columnas existentes desde BESS-HYDRO-DIAGRAM-002, ahora usadas). `validate_hydraulic_diagram` agrega `_validate_unsupported_topology` (ciclos, islas sin boundary, routing/travel-time y modos de unidad no soportados), con referencias de entidad. | `.\\.venv\\Scripts\\python.exe -m unittest discover tests` (155 ok, 1 skipped); `julia --project=. -e "import Pkg; Pkg.test()"` (532 ok); `npm test` (26 ok); `npm run build`; `eslint .`; `npm run api:generate`+`api:check`; `npx playwright test -g "hydraulic diagram persists"` (1 passed); smoke API contra PostgreSQL (cycle/routing/pump/island) y Chrome DevTools MCP UI contra PostgreSQL (error de ciclo + enfoque de componente). |
+| 2026-06-28 | BESS-HYDRO-DIAGRAM-008 | El guardado persiste `flow_min_m3s` y `spill_penalty_usd_per_hm3` escalares en `case_hydraulic_reaches`, y vincula `minimum_flow_m3s` por reach activo via `case_hydraulic_time_series_bindings` (sets versionados con `entity_type = 'hydraulic_reach'`). El preview v3 emite controles por reach y bloques `time_series[*].minimum_flow_m3s`; la validacion agrega `negative_minimum_flow`, `negative_spill_penalty`, `spill_penalty_requires_spillway` y `minimum_flow_horizon_mismatch`. El solver v3 fuerza caudal minimo en el reach origen-embalse, penaliza el vertedero en el objetivo y reporta `total_spill_penalty_usd`. | `.\\.venv\\Scripts\\python.exe -m unittest tests.test_hydraulic_diagram` (28 ok); `.\\.venv\\Scripts\\python.exe -m unittest discover tests` (131 ok, 1 skipped); `julia --project=. test\\runtests.jl` (532 ok); `npm.cmd test` (25 ok); `npm.cmd run build` (tsc ok); `npx eslint` (ok); `npm.cmd run api:generate` + `npm.cmd run api:check`. |
+| 2026-06-29 | BESS-HYDRO-DIAGRAM-011 | Cierre documental de BBDD de Hydro Diagram Iteracion 1. No crea tablas, columnas ni migraciones nuevas; confirma que el checkpoint refleja el estado final implementado: caso normalizado, red base/activa, parametros de embalse, curvas, series hidraulicas, layout editable, snapshot visual promovido y validacion topologica MVP. | `tests.test_hydro_diagram_acceptance` (2 ok); `tests.test_hydraulic_diagram` (45 ok); Python completa (157 ok, 1 skipped); Julia `Pkg.test()` (532 ok); React unit (26 ok); TypeScript/ESLint; OpenAPI generate/check; Playwright hydraulic browser (1 passed); Chrome/@chrome read-only smoke. `npm.cmd run check` falla solo en Prettier por formato/CRLF preexistente de frontend. |
+
+## Migraciones Aplicadas
+
+- `AnalystStore._initialize_schema` auto-crea `optimization_cases`.
+- `AnalystStore._initialize_schema` auto-crea `hydraulic_systems`,
+  `hydraulic_nodes` y `hydraulic_plants`.
+- `AnalystStore._initialize_schema` auto-crea `case_hydraulic_systems`,
+  `case_hydraulic_nodes` y `case_hydraulic_plants`.
+- `AnalystStore._initialize_schema` auto-crea
+  `case_hydraulic_diagram_layouts` y `case_hydraulic_diagram_items`.
+- `AnalystStore._initialize_schema` auto-crea `hydraulic_reaches` y
+  `case_hydraulic_reaches`.
+- `AnalystStore._ensure_hydraulic_diagram_items_support_reaches` migra SQLite
+  local para aceptar `case_hydraulic_reach` en
+  `case_hydraulic_diagram_items.entity_type`.
+- `AnalystStore._initialize_schema` auto-crea
+  `case_hydraulic_reservoir_parameters`, `hydraulic_curve_sets`,
+  `hydraulic_curve_points` y `case_hydraulic_curve_bindings`.
+- `AnalystStore.validate_hydraulic_diagram` persiste el resultado de
+  validacion de topologia en `optimization_cases.validation_payload_json`,
+  incluyendo reglas de embalse (parametros, curva `storage_elevation`,
+  monotonia, dominio y condicion terminal).
+- `AnalystStore._initialize_schema` auto-crea `hydraulic_units` y
+  `case_hydraulic_units`, y agrega via `_ensure_column` las columnas
+  `non_modeled`, `min_power_mw` y `max_power_mw` a `case_hydraulic_plants`.
+- `AnalystStore.validate_hydraulic_diagram` agrega reglas de central/unidad
+  (`plant_without_active_units`, `inactive_or_equal_unit_nodes`,
+  `missing_flow_power_curve`, `invalid_flow_power_curve`).
+- `AnalystStore.generate_hydraulic_v3_preview` arma el contrato
+  `bess_system_dispatch.v3` con nodos, tramos, centrales, unidades, curvas y
+  requerimientos `natural_inflow_m3s`; desde BESS-HYDRO-DIAGRAM-006 incluye
+  un bloque `time_series` minimo ejecutable con `natural_inflow_m3s`;
+  `persist_hydraulic_v3_validation`
+  guarda snapshot exitoso y `validation_hash` en
+  `optimization_cases.validation_payload_json`.
+- `AnalystStore.save_hydraulic_diagram` marca validaciones v3 previas como
+  `stale` cuando el payload generado cambia despues de editar el diagrama.
+- `AnalystStore._initialize_schema` auto-crea `hydraulic_time_series_sets`,
+  `hydraulic_time_series_points` y `case_hydraulic_time_series_bindings`.
+- `AnalystStore.save_hydraulic_diagram` persiste `natural_inflow_m3s` por nodo
+  activo via `_persist_hydraulic_inflow_series` (sets versionados por
+  `content_hash`) y binding por caso; `generate_hydraulic_v3_preview` resuelve
+  la serie vinculada al bloque `time_series` (`hydraulic_v3_time_series_from_inflows`).
+- `AnalystStore.validate_hydraulic_diagram` agrega `_validate_node_inflow_series`
+  (`missing_natural_inflow_series`, `negative_inflow_value`,
+  `nonnumeric_inflow_value`, `inflow_horizon_mismatch`).
+- `/api/scenarios/{scenario_id}/hydraulic-diagram/promote` crea una
+  `scenario_version` desde el snapshot v3 validado vigente y revalida el hash
+  actual antes de persistir.
+- `AnalystStore.save_hydraulic_diagram` persiste `flow_min_m3s` y
+  `spill_penalty_usd_per_hm3` en `case_hydraulic_reaches` y vincula
+  `minimum_flow_m3s` por reach via `_persist_hydraulic_inflow_series`
+  (generalizado con `signal_key`/`base_entity_type`); las columnas escalares ya
+  existian en el esquema desde BESS-HYDRO-DIAGRAM-002, esta issue las empieza a
+  usar. `generate_hydraulic_v3_preview` agrega controles por reach y bloques
+  `minimum_flow_m3s` por periodo, y `validate_hydraulic_diagram` agrega
+  `_validate_reach_controls`.
+- `AnalystStore._initialize_schema` auto-crea
+  `scenario_version_hydraulic_diagram_snapshots` (FK a `scenario_versions` y
+  `optimization_cases`, `UNIQUE (scenario_version_id, layout_key)`); registrada
+  en `app.database.ID_TABLES`.
+- `AnalystStore.persist_scenario_version_hydraulic_diagram_snapshot` y
+  `get_scenario_version_hydraulic_diagram_snapshot` escriben/leen el snapshot;
+  la promocion lo congela tras crear la `scenario_version`.
+- `normalize_hydraulic_diagram_nodes` aplica `hydraulic_autolayout_position`
+  (grilla determinista) cuando `x`/`y` faltan en el guardado.
+- Correccion multi-backend: se agregaron a `app.database.ID_TABLES` las tablas
+  `hydraulic_curve_sets`, `hydraulic_curve_points`, `case_hydraulic_curve_bindings`,
+  `case_hydraulic_reservoir_parameters`, `hydraulic_units`, `case_hydraulic_units`,
+  `hydraulic_time_series_sets`, `hydraulic_time_series_points` y
+  `case_hydraulic_time_series_bindings` para que sus inserts devuelvan `id` en
+  PostgreSQL. Test guardia en `tests/test_postgres_persistence.py` evita la
+  regresion.
+- `AnalystStore._ensure_hydraulic_diagram_items_entity_types_postgres` refresca
+  (idempotente) el check `case_hydraulic_diagram_items_entity_type_check` en
+  PostgreSQL para aceptar `case_hydraulic_node`, `case_hydraulic_reach` y
+  `case_hydraulic_plant` en bases creadas antes de ese soporte.
+- `_initialize_schema` agrega via `_ensure_column` las columnas
+  `operation_mode` y `generation_mode` a `hydraulic_units` (default
+  `generation`/`flow_power_curve`). `_create_case_hydraulic_reach` persiste
+  `routing_method`/`travel_time_hours`; `_persist_case_hydraulic_unit` persiste
+  los modos de unidad. `validate_hydraulic_diagram` agrega
+  `_validate_unsupported_topology` (helpers puros `hydraulic_first_cycle`,
+  `hydraulic_weakly_connected_components`) con los codigos
+  `unsupported_reach_routing`, `unsupported_reach_travel_time`,
+  `unsupported_cycle`, `island_without_boundary`,
+  `unsupported_unit_operation_mode` y `unsupported_unit_generation_mode`.
+
+## Cierre BESS-HYDRO-DIAGRAM-011
+
+La Iteracion 1 del editor de diagrama hidraulico queda cerrada sin cambios de
+esquema adicionales en BESS-HYDRO-DIAGRAM-011. El estado implementado real de
+BBDD es el documentado en `Estado General` y `Migraciones Aplicadas`.
+
+Quedan como trabajo futuro, no como deuda de esquema de esta iteracion:
+
+- topology import desde CSV/XLSX.
+- routing hidraulico avanzado y tiempo de viaje ejecutable.
+- head-dependent generation.
+- pumped storage, bombeo puro y unidades reversibles ejecutables.
+- collaborative editing y resolucion de conflictos multiusuario.
+
+## Riesgos Activos
+
+- La propuesta central de BBDD es mas amplia que el MVP; el checkpoint debe
+  evitar que tablas aun no implementadas se confundan con estado real.
+- Las FK polimorficas por `entity_type` y `entity_id` requieren validacion de
+  aplicacion o triggers dedicados.
+- El layout visual no debe contaminar la fisica ni el payload ejecutable.
+- La promocion debe congelar el layout historico sin hacer que las corridas
+  dependan de ese layout.

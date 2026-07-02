@@ -327,6 +327,248 @@ export interface ScenarioDraftWritePayload {
   source_version_id?: number | null;
 }
 
+export type HydraulicComponentType = "reservoir" | "junction" | "plant";
+export type HydraulicReachType =
+  | "river"
+  | "canal"
+  | "tunnel"
+  | "gate"
+  | "spillway"
+  | "bypass"
+  | "tailrace"
+  | "other";
+
+export type HydraulicTerminalCondition =
+  | "none"
+  | "equal_initial"
+  | "min_terminal";
+
+export interface HydraulicReservoirParameters {
+  storage_min_hm3: number;
+  storage_max_hm3: number;
+  initial_storage_hm3: number;
+  terminal_condition: HydraulicTerminalCondition;
+  terminal_storage_min_hm3: number | null;
+  terminal_water_value_usd_per_hm3: number;
+}
+
+export interface HydraulicCurvePoint {
+  x_value: number;
+  y_value: number;
+}
+
+export interface HydraulicCurveSummary {
+  curve_set_id: number;
+  version_number: number;
+  version_label: string;
+  points: HydraulicCurvePoint[];
+}
+
+export interface HydraulicStorageElevationCurveWrite {
+  curve_set_id?: number | null;
+  version_label?: string | null;
+  points: HydraulicCurvePoint[];
+}
+
+export type HydraulicCurveWrite = HydraulicStorageElevationCurveWrite;
+
+export interface HydraulicNaturalInflowSeriesPoint {
+  timestamp: string;
+  duration_hours: number;
+  value_m3s: number;
+}
+
+export interface HydraulicNaturalInflowSeriesSummary {
+  time_series_set_id: number;
+  version_number: number;
+  version_label: string;
+  points: HydraulicNaturalInflowSeriesPoint[];
+}
+
+export interface HydraulicNaturalInflowSeriesWrite {
+  time_series_set_id?: number | null;
+  version_label?: string | null;
+  points: HydraulicNaturalInflowSeriesPoint[];
+}
+
+export interface HydraulicPlantParameters {
+  non_modeled: boolean;
+  min_power_mw: number | null;
+  max_power_mw: number | null;
+}
+
+export interface HydraulicUnitWrite {
+  technical_key: string;
+  display_name: string;
+  is_active: boolean;
+  intake_node_key: string | null;
+  discharge_node_key: string | null;
+  min_power_mw: number | null;
+  max_power_mw: number | null;
+  min_flow_m3s: number | null;
+  max_flow_m3s: number | null;
+  flow_power_curve?: HydraulicCurveWrite | null;
+}
+
+export interface HydraulicUnit extends HydraulicUnitWrite {
+  flow_power_curve: HydraulicCurveSummary | null;
+  available_curves: HydraulicCurveSummary[];
+}
+
+export interface HydraulicDiagramNodeWrite {
+  component_type: HydraulicComponentType;
+  technical_key: string;
+  display_name: string;
+  x: number;
+  y: number;
+  reservoir?: HydraulicReservoirParameters | null;
+  storage_elevation_curve?: HydraulicStorageElevationCurveWrite | null;
+  natural_inflow_series?: HydraulicNaturalInflowSeriesWrite | null;
+  plant?: HydraulicPlantParameters | null;
+  units?: HydraulicUnitWrite[];
+}
+
+export interface HydraulicDiagramNode extends HydraulicDiagramNodeWrite {
+  layout_item_id: number;
+  entity_type: string;
+  entity_id: number;
+  z_index: number;
+  reservoir: HydraulicReservoirParameters | null;
+  storage_elevation_curve: HydraulicCurveSummary | null;
+  available_curves: HydraulicCurveSummary[];
+  natural_inflow_series: HydraulicNaturalInflowSeriesSummary | null;
+  available_inflow_series: HydraulicNaturalInflowSeriesSummary[];
+  plant: HydraulicPlantParameters | null;
+  units: HydraulicUnit[];
+}
+
+export interface HydraulicDiagramReachWrite {
+  technical_key: string;
+  display_name: string;
+  from_node_key: string;
+  to_node_key: string;
+  reach_type: HydraulicReachType;
+  flow_min_m3s?: number | null;
+  spill_penalty_usd_per_hm3?: number | null;
+  minimum_flow_series?: HydraulicNaturalInflowSeriesWrite | null;
+}
+
+export interface HydraulicDiagramReach extends HydraulicDiagramReachWrite {
+  layout_item_id: number | null;
+  entity_type: string;
+  entity_id: number;
+  z_index: number;
+  flow_min_m3s: number | null;
+  spill_penalty_usd_per_hm3: number | null;
+  minimum_flow_series: HydraulicNaturalInflowSeriesSummary | null;
+  available_minimum_flow_series: HydraulicNaturalInflowSeriesSummary[];
+}
+
+export interface HydraulicDiagramViewport {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
+export interface HydraulicDiagram {
+  scenario_id: number;
+  optimization_case: {
+    id: number;
+    scenario_id: number;
+    case_key: string;
+    display_name: string;
+    updated_at: string;
+  };
+  hydraulic_system: {
+    id: number;
+    project_id: number;
+    system_key: string;
+    display_name: string;
+  };
+  layout: {
+    id: number;
+    case_id: number;
+    layout_key: string;
+    layout_engine?: string | null;
+    layout_version: number;
+    revision: string;
+    viewport: HydraulicDiagramViewport;
+    updated_at: string;
+    updated_by: string;
+  };
+  revision: string;
+  validation?: HydraulicDiagramValidation;
+  nodes: HydraulicDiagramNode[];
+  reaches: HydraulicDiagramReach[];
+}
+
+export interface HydraulicDiagramSavePayload {
+  revision: string;
+  viewport: HydraulicDiagramViewport;
+  nodes: HydraulicDiagramNodeWrite[];
+  reaches: HydraulicDiagramReachWrite[];
+}
+
+export interface HydraulicDiagramLayoutSnapshotNode {
+  entity_type: string;
+  entity_id: number;
+  component_type: HydraulicComponentType;
+  technical_key: string;
+  display_name: string;
+  x: number;
+  y: number;
+  z_index: number;
+}
+
+export interface HydraulicDiagramLayoutSnapshotReach {
+  entity_type: string;
+  entity_id: number;
+  technical_key: string;
+  display_name: string;
+  from_node_key: string;
+  to_node_key: string;
+  reach_type: HydraulicReachType;
+  z_index: number;
+}
+
+export interface HydraulicDiagramLayoutSnapshot {
+  id: number;
+  scenario_version_id: number;
+  source_case_id: number | null;
+  layout_key: string;
+  layout_content_hash: string | null;
+  created_at: string;
+  created_by: string;
+  layout_snapshot: {
+    layout_key: string;
+    layout_engine?: string | null;
+    viewport: HydraulicDiagramViewport;
+    nodes: HydraulicDiagramLayoutSnapshotNode[];
+    reaches: HydraulicDiagramLayoutSnapshotReach[];
+  };
+}
+
+export interface HydraulicDiagramValidationIssue {
+  severity?: "error" | "warning";
+  code: string;
+  message: string;
+  entity_type: string;
+  entity_id: number;
+  technical_key: string;
+}
+
+export interface HydraulicDiagramValidation {
+  kind?: string;
+  ok: boolean;
+  stale?: boolean;
+  status?: string;
+  summary: string;
+  errors: HydraulicDiagramValidationIssue[];
+  warnings: HydraulicDiagramValidationIssue[];
+  system_case?: unknown;
+  julia_validation?: unknown;
+}
+
 interface StructuredErrorBody {
   error?: {
     category?: string;
@@ -634,6 +876,18 @@ export async function getScenarioVersion(
   return response.scenario_version;
 }
 
+export async function getScenarioVersionHydraulicDiagramSnapshot(
+  scenarioVersionId: number,
+  signal?: AbortSignal,
+): Promise<HydraulicDiagramLayoutSnapshot> {
+  const response = await requestJson<{
+    snapshot: HydraulicDiagramLayoutSnapshot;
+  }>(`/api/scenario-versions/${scenarioVersionId}/hydraulic-diagram-snapshot`, {
+    signal,
+  });
+  return response.snapshot;
+}
+
 export async function deleteScenarioVersion(
   scenarioVersionId: number,
 ): Promise<ScenarioVersionDetail> {
@@ -898,6 +1152,71 @@ export async function updateScenarioDraft(
     },
     body: JSON.stringify({ document }),
   });
+}
+
+export async function createHydraulicDiagram(
+  scenarioId: number,
+): Promise<HydraulicDiagram> {
+  const response = await postJsonWithCsrf<{ diagram: HydraulicDiagram }>(
+    `/api/scenarios/${scenarioId}/hydraulic-diagram`,
+  );
+  return response.diagram;
+}
+
+export async function getHydraulicDiagram(
+  scenarioId: number,
+  signal?: AbortSignal,
+): Promise<HydraulicDiagram> {
+  const response = await requestJson<{ diagram: HydraulicDiagram }>(
+    `/api/scenarios/${scenarioId}/hydraulic-diagram`,
+    { signal },
+  );
+  return response.diagram;
+}
+
+export async function saveHydraulicDiagram(
+  scenarioId: number,
+  payload: HydraulicDiagramSavePayload,
+): Promise<HydraulicDiagram> {
+  const csrfToken = await getCsrfToken();
+  const response = await requestJson<{ diagram: HydraulicDiagram }>(
+    `/api/scenarios/${scenarioId}/hydraulic-diagram`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrfToken,
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+  return response.diagram;
+}
+
+export async function validateHydraulicDiagram(
+  scenarioId: number,
+): Promise<HydraulicDiagramValidation> {
+  const response = await postJsonWithCsrf<{
+    validation: HydraulicDiagramValidation;
+  }>(`/api/scenarios/${scenarioId}/hydraulic-diagram/validate`);
+  return response.validation;
+}
+
+export async function validateHydraulicV3Preview(
+  scenarioId: number,
+): Promise<HydraulicDiagramValidation> {
+  const response = await postJsonWithCsrf<{
+    validation: HydraulicDiagramValidation;
+  }>(`/api/scenarios/${scenarioId}/hydraulic-diagram/v3-preview`);
+  return response.validation;
+}
+
+export async function promoteHydraulicDiagram(
+  scenarioId: number,
+): Promise<ScenarioVersion> {
+  return postJsonWithCsrf<ScenarioVersion>(
+    `/api/scenarios/${scenarioId}/hydraulic-diagram/promote`,
+  );
 }
 
 export async function getGeneratedSystemCasePreview(

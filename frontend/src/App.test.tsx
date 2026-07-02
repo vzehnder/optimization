@@ -1,9 +1,22 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
 import type { AdminUser } from "./api/client";
+
+// Select a diagram node on the canvas so the contextual properties panel
+// renders its editors (pointer down + up focuses without moving it).
+function selectDiagramNode(technicalKey: string) {
+  const node = screen.getByTestId(`hydraulic-canvas-node-${technicalKey}`);
+  fireEvent.pointerDown(node, {
+    button: 0,
+    clientX: 12,
+    clientY: 12,
+    pointerId: 1,
+  });
+  fireEvent.pointerUp(node, { clientX: 12, clientY: 12, pointerId: 1 });
+}
 
 describe("application shell", () => {
   it("renders succeeded run results with Plotly charts, bounded tables, and safe artifacts", async () => {
@@ -755,6 +768,2419 @@ describe("application shell", () => {
     );
     expect(screen.queryByLabelText("BESS asset ID")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Hydro asset ID")).toHaveValue("hydro_north");
+  });
+
+  it("saves the draft and opens the hydraulic diagram when editing a hydro component", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10/draft");
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Hydro modeling branch",
+      created_at: "2026-06-30T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hydro PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-06-30T12:00:00Z",
+    };
+    let draft: unknown = null;
+    let savedHydroAsset = false;
+    const diagram = {
+      scenario_id: 10,
+      optimization_case: {
+        id: 4,
+        scenario_id: 10,
+        case_key: "scenario_10_hydraulic_case",
+        display_name: "Base case",
+        updated_at: "2026-06-30T12:10:00Z",
+      },
+      hydraulic_system: {
+        id: 5,
+        project_id: 1,
+        system_key: "default_hydraulic_system",
+        display_name: "Default hydraulic system",
+      },
+      layout: {
+        id: 6,
+        case_id: 4,
+        layout_key: "default",
+        layout_engine: "auto_dag",
+        layout_version: 1,
+        revision: "1",
+        viewport: { x: 0, y: 0, zoom: 1 },
+        updated_at: "2026-06-30T12:10:00Z",
+        updated_by: "internal_analyst",
+      },
+      revision: "1",
+      nodes: [],
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/draft" && method === "GET") {
+          if (!draft) {
+            return new Response(JSON.stringify({ detail: "not found" }), {
+              status: 404,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          return new Response(JSON.stringify({ draft }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/draft" && method === "POST") {
+          draft = {
+            id: 3,
+            scenario_id: 10,
+            source_version_id: null,
+            created_at: "2026-06-30T12:10:00Z",
+            updated_at: "2026-06-30T12:10:00Z",
+            document: {
+              schema_version: "bess_editor_draft.v1",
+              case: { name: "Base case" },
+              source: null,
+              pcc: { id: "bus_1", type: "bus" },
+              grid: {
+                id: "grid_1",
+                import_power_max_mw: null,
+                export_power_max_mw: null,
+                prevent_simultaneous_grid_import_export: true,
+              },
+              assets: [],
+              time_series: { sources: [] },
+              solver: { name: "HiGHS", options: {} },
+            },
+          };
+          return new Response(JSON.stringify(draft), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/draft" && method === "PUT") {
+          const body = JSON.parse(String(init?.body));
+          savedHydroAsset = Boolean(
+            body.document?.assets?.some(
+              (asset: { type?: string }) => asset.type === "hydro",
+            ),
+          );
+          draft = {
+            ...(draft as object),
+            updated_at: "2026-06-30T12:12:00Z",
+            document: body.document,
+          };
+          return new Response(JSON.stringify(draft), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "POST"
+        ) {
+          return new Response(JSON.stringify({ diagram }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Draft estructurado" }),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Crear draft" }));
+    expect(await screen.findByText("Guardado")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Agregar hydro" }));
+    await user.click(
+      screen.getByRole("button", { name: "Editar diagrama hidraulico" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Diagrama hidraulico" }),
+    ).toBeVisible();
+    expect(savedHydroAsset).toBe(true);
+  });
+
+  it("opens a persisted hydraulic diagram, saves visible nodes, recovers from save failure, and reloads server data", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Hydraulic branch",
+      created_at: "2026-06-26T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hydro PMGD",
+      description: "Hydraulic workspace",
+      created_at: "2026-06-26T12:00:00Z",
+    };
+    let diagram = {
+      scenario_id: 10,
+      optimization_case: {
+        id: 4,
+        scenario_id: 10,
+        case_key: "scenario_10_hydraulic_case",
+        display_name: "Base case",
+        updated_at: "2026-06-26T12:10:00Z",
+      },
+      hydraulic_system: {
+        id: 5,
+        project_id: 1,
+        system_key: "default_hydraulic_system",
+        display_name: "Default hydraulic system",
+      },
+      layout: {
+        id: 6,
+        case_id: 4,
+        layout_key: "default",
+        layout_engine: "auto_dag",
+        layout_version: 1,
+        revision: "1",
+        viewport: { x: 0, y: 0, zoom: 1 },
+        updated_at: "2026-06-26T12:10:00Z",
+        updated_by: "internal_analyst",
+      },
+      revision: "1",
+      nodes: [] as Array<{
+        layout_item_id: number;
+        entity_type: string;
+        entity_id: number;
+        component_type: "reservoir" | "junction" | "plant";
+        technical_key: string;
+        display_name: string;
+        x: number;
+        y: number;
+        z_index: number;
+      }>,
+    };
+    let failNextSave = true;
+    let reloadCount = 0;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "POST"
+        ) {
+          return new Response(JSON.stringify({ diagram }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "GET"
+        ) {
+          reloadCount += 1;
+          return new Response(JSON.stringify({ diagram }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "PUT"
+        ) {
+          if (failNextSave) {
+            failNextSave = false;
+            return new Response(
+              JSON.stringify({ detail: "database unavailable" }),
+              {
+                status: 503,
+                headers: { "Content-Type": "application/json" },
+              },
+            );
+          }
+          const body = JSON.parse(String(init?.body));
+          diagram = {
+            ...diagram,
+            revision: "2",
+            layout: {
+              ...diagram.layout,
+              layout_version: 2,
+              revision: "2",
+              layout_engine: "manual",
+              updated_at: "2026-06-26T12:12:00Z",
+            },
+            nodes: body.nodes.map(
+              (
+                node: {
+                  component_type: "reservoir" | "junction" | "plant";
+                  technical_key: string;
+                  display_name: string;
+                  x: number;
+                  y: number;
+                },
+                index: number,
+              ) => ({
+                ...node,
+                layout_item_id: index + 1,
+                entity_type:
+                  node.component_type === "plant"
+                    ? "case_hydraulic_plant"
+                    : "case_hydraulic_node",
+                entity_id: index + 1,
+                z_index: index,
+              }),
+            ),
+          };
+          return new Response(JSON.stringify({ diagram }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Base case" }),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("link", { name: "Abrir diagrama hidraulico" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Diagrama hidraulico" }),
+    ).toBeVisible();
+    expect(screen.getByText("Estado: saved")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Agregar embalse" }));
+    await user.click(screen.getByRole("button", { name: "Agregar union" }));
+    await user.click(screen.getByRole("button", { name: "Agregar central" }));
+    selectDiagramNode("plant_1");
+    await user.clear(screen.getByLabelText("Etiqueta plant_1"));
+    await user.type(screen.getByLabelText("Etiqueta plant_1"), "Plant Laja");
+    expect(screen.getByText("Estado: dirty")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Guardar diagrama" }));
+    expect(await screen.findByText("Estado: failed")).toBeVisible();
+    expect(screen.getByRole("alert")).toHaveTextContent("database unavailable");
+    expect(screen.getByLabelText("Etiqueta plant_1")).toHaveValue("Plant Laja");
+
+    await user.click(screen.getByRole("button", { name: "Guardar diagrama" }));
+    expect(await screen.findByText("Estado: saved")).toBeVisible();
+    // The plant label now appears both in the node list and the plant panel.
+    expect(screen.getAllByText("Plant Laja").length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: "Recargar diagrama" }));
+    await waitFor(() => expect(reloadCount).toBeGreaterThan(0));
+    selectDiagramNode("plant_1");
+    expect(screen.getByLabelText("Etiqueta plant_1")).toHaveValue("Plant Laja");
+  });
+
+  it("moves a node, saves the layout, and reloads the persisted position", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Layout case",
+      description: "Hydraulic layout branch",
+      created_at: "2026-06-26T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hydro PMGD",
+      description: "Hydraulic workspace",
+      created_at: "2026-06-26T12:00:00Z",
+    };
+    let diagram = {
+      scenario_id: 10,
+      optimization_case: {
+        id: 4,
+        scenario_id: 10,
+        case_key: "scenario_10_hydraulic_case",
+        display_name: "Layout case",
+        updated_at: "2026-06-26T12:10:00Z",
+      },
+      hydraulic_system: {
+        id: 5,
+        project_id: 1,
+        system_key: "default_hydraulic_system",
+        display_name: "Default hydraulic system",
+      },
+      layout: {
+        id: 6,
+        case_id: 4,
+        layout_key: "default",
+        layout_engine: "auto_dag",
+        layout_version: 1,
+        revision: "1",
+        viewport: { x: 0, y: 0, zoom: 1 },
+        updated_at: "2026-06-26T12:10:00Z",
+        updated_by: "internal_analyst",
+      },
+      revision: "1",
+      nodes: [] as Array<{
+        layout_item_id: number;
+        entity_type: string;
+        entity_id: number;
+        component_type: "reservoir" | "junction" | "plant";
+        technical_key: string;
+        display_name: string;
+        x: number;
+        y: number;
+        z_index: number;
+      }>,
+    };
+    let savedRevision = 1;
+    let reloadCount = 0;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "POST"
+        ) {
+          return new Response(JSON.stringify({ diagram }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "GET"
+        ) {
+          reloadCount += 1;
+          return new Response(JSON.stringify({ diagram }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "PUT"
+        ) {
+          const body = JSON.parse(String(init?.body));
+          savedRevision += 1;
+          diagram = {
+            ...diagram,
+            revision: String(savedRevision),
+            layout: {
+              ...diagram.layout,
+              layout_version: savedRevision,
+              revision: String(savedRevision),
+              layout_engine: "manual",
+              viewport: body.viewport,
+              updated_at: "2026-06-26T12:12:00Z",
+            },
+            nodes: body.nodes.map(
+              (
+                node: {
+                  component_type: "reservoir" | "junction" | "plant";
+                  technical_key: string;
+                  display_name: string;
+                  x: number;
+                  y: number;
+                },
+                index: number,
+              ) => ({
+                ...node,
+                layout_item_id: index + 1,
+                entity_type:
+                  node.component_type === "plant"
+                    ? "case_hydraulic_plant"
+                    : "case_hydraulic_node",
+                entity_id: index + 1,
+                z_index: index,
+              }),
+            ),
+          };
+          return new Response(JSON.stringify({ diagram }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Layout case" }),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("link", { name: "Abrir diagrama hidraulico" }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Diagrama hidraulico" }),
+    ).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Agregar union" }));
+    // Move the new node on the visual canvas to a deliberate position.
+    const canvasNode = screen.getByTestId("hydraulic-canvas-node-junction_1");
+    fireEvent.pointerDown(canvasNode, {
+      button: 0,
+      clientX: 140,
+      clientY: 100,
+      pointerId: 1,
+    });
+    fireEvent.pointerMove(canvasNode, {
+      buttons: 1,
+      clientX: 660,
+      clientY: 380,
+      pointerId: 1,
+    });
+    fireEvent.pointerUp(canvasNode, {
+      clientX: 660,
+      clientY: 380,
+      pointerId: 1,
+    });
+    expect(screen.getByText("Estado: dirty")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Guardar diagrama" }));
+    expect(await screen.findByText("Estado: saved")).toBeVisible();
+    // Position is edited only on the diagram, so it is reflected by the node's
+    // canvas placement rather than by x/y form fields.
+    expect(screen.getByTestId("hydraulic-canvas-node-junction_1")).toHaveStyle({
+      left: "640px",
+      top: "360px",
+    });
+
+    await user.click(screen.getByRole("button", { name: "Recargar diagrama" }));
+    await waitFor(() => expect(reloadCount).toBeGreaterThan(0));
+    // The persisted position survives a reload from the server.
+    expect(screen.getByTestId("hydraulic-canvas-node-junction_1")).toHaveStyle({
+      left: "640px",
+      top: "360px",
+    });
+  });
+
+  it("creates directed hydraulic reaches by drag, edits them through the fallback form, and displays validation errors", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Reach case",
+      description: "Hydraulic reach branch",
+      created_at: "2026-06-26T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hydro PMGD",
+      description: "Hydraulic workspace",
+      created_at: "2026-06-26T12:00:00Z",
+    };
+    let diagram = {
+      scenario_id: 10,
+      optimization_case: {
+        id: 4,
+        scenario_id: 10,
+        case_key: "scenario_10_hydraulic_case",
+        display_name: "Reach case",
+        updated_at: "2026-06-26T12:10:00Z",
+      },
+      hydraulic_system: {
+        id: 5,
+        project_id: 1,
+        system_key: "default_hydraulic_system",
+        display_name: "Default hydraulic system",
+      },
+      layout: {
+        id: 6,
+        case_id: 4,
+        layout_key: "default",
+        layout_engine: "auto_dag",
+        layout_version: 1,
+        revision: "1",
+        viewport: { x: 0, y: 0, zoom: 1 },
+        updated_at: "2026-06-26T12:10:00Z",
+        updated_by: "internal_analyst",
+      },
+      revision: "1",
+      nodes: [] as Array<{
+        layout_item_id: number;
+        entity_type: string;
+        entity_id: number;
+        component_type: "reservoir" | "junction" | "plant";
+        technical_key: string;
+        display_name: string;
+        x: number;
+        y: number;
+        z_index: number;
+      }>,
+      reaches: [] as Array<{
+        layout_item_id: number;
+        entity_type: string;
+        entity_id: number;
+        technical_key: string;
+        display_name: string;
+        from_node_key: string;
+        to_node_key: string;
+        reach_type: string;
+        z_index: number;
+      }>,
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "POST"
+        ) {
+          return new Response(JSON.stringify({ diagram }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "PUT"
+        ) {
+          const body = JSON.parse(String(init?.body));
+          diagram = {
+            ...diagram,
+            revision: "2",
+            layout: {
+              ...diagram.layout,
+              layout_version: 2,
+              revision: "2",
+              layout_engine: "manual",
+            },
+            nodes: body.nodes.map(
+              (
+                node: {
+                  component_type: "reservoir" | "junction" | "plant";
+                  technical_key: string;
+                  display_name: string;
+                  x: number;
+                  y: number;
+                },
+                index: number,
+              ) => ({
+                ...node,
+                layout_item_id: index + 1,
+                entity_type:
+                  node.component_type === "plant"
+                    ? "case_hydraulic_plant"
+                    : "case_hydraulic_node",
+                entity_id: index + 1,
+                z_index: index,
+              }),
+            ),
+            reaches: body.reaches.map(
+              (
+                reach: {
+                  technical_key: string;
+                  display_name: string;
+                  from_node_key: string;
+                  to_node_key: string;
+                  reach_type: string;
+                },
+                index: number,
+              ) => ({
+                ...reach,
+                layout_item_id: 100 + index,
+                entity_type: "case_hydraulic_reach",
+                entity_id: 200 + index,
+                z_index: 10 + index,
+              }),
+            ),
+          };
+          return new Response(JSON.stringify({ diagram }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram/validate" &&
+          method === "POST"
+        ) {
+          return new Response(
+            JSON.stringify({
+              validation: {
+                ok: false,
+                summary: "Hydraulic topology has errors",
+                errors: [
+                  {
+                    code: "inactive_or_missing_endpoint",
+                    message:
+                      "Reach reach_reservoir_1_junction_1 must connect active hydraulic nodes in this case.",
+                    entity_type: "case_hydraulic_reach",
+                    entity_id: 200,
+                    technical_key: "reach_reservoir_1_junction_1",
+                  },
+                ],
+                warnings: [],
+              },
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Reach case" }),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("link", { name: "Abrir diagrama hidraulico" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Agregar embalse" }));
+    await user.click(screen.getByRole("button", { name: "Agregar union" }));
+
+    const dataTransfer = {
+      source: "",
+      setData: vi.fn((_: string, value: string) => {
+        dataTransfer.source = value;
+      }),
+      getData: vi.fn(() => dataTransfer.source),
+    };
+    fireEvent.dragStart(screen.getByTestId("hydraulic-node-out-reservoir_1"), {
+      dataTransfer,
+    });
+    fireEvent.dragOver(screen.getByTestId("hydraulic-node-in-junction_1"));
+    fireEvent.drop(screen.getByTestId("hydraulic-node-in-junction_1"), {
+      dataTransfer,
+    });
+
+    expect(screen.getByText("reach_reservoir_1_junction_1")).toBeVisible();
+    await user.selectOptions(
+      screen.getByLabelText("Origen reach_reservoir_1_junction_1"),
+      "junction_1",
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Destino reach_reservoir_1_junction_1"),
+      "reservoir_1",
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Tipo reach_reservoir_1_junction_1"),
+      "spillway",
+    );
+    await user.clear(
+      screen.getByLabelText("Etiqueta reach_reservoir_1_junction_1"),
+    );
+    await user.type(
+      screen.getByLabelText("Etiqueta reach_reservoir_1_junction_1"),
+      "Spillway A",
+    );
+    await user.type(
+      screen.getByLabelText("Caudal minimo m3/s reach_reservoir_1_junction_1"),
+      "4",
+    );
+    await user.type(
+      screen.getByLabelText(
+        "Penalidad vertedero USD/hm3 reach_reservoir_1_junction_1",
+      ),
+      "120",
+    );
+    expect(
+      screen.getByTestId("reach-minimum-flow-reach_reservoir_1_junction_1"),
+    ).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Guardar diagrama" }));
+    expect(await screen.findByText("Estado: saved")).toBeVisible();
+    // Saving resets the selection, so re-select the reach on the canvas to
+    // confirm the edited values were persisted.
+    fireEvent.click(
+      screen.getByTestId("hydraulic-link-reach_reservoir_1_junction_1"),
+    );
+    expect(screen.getByDisplayValue("Spillway A")).toBeVisible();
+    expect(
+      screen.getByLabelText("Caudal minimo m3/s reach_reservoir_1_junction_1"),
+    ).toHaveValue(4);
+    expect(
+      screen.getByLabelText(
+        "Penalidad vertedero USD/hm3 reach_reservoir_1_junction_1",
+      ),
+    ).toHaveValue(120);
+
+    await user.click(screen.getByRole("button", { name: "Validar topologia" }));
+    expect(
+      await screen.findByText("Hydraulic topology has errors"),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/must connect active hydraulic nodes/),
+    ).toBeVisible();
+    expect(screen.getByDisplayValue("Spillway A")).toBeVisible();
+
+    // Selecting another node hides the reach editor; the validation message can
+    // re-focus the reach so its properties panel returns.
+    selectDiagramNode("reservoir_1");
+    expect(screen.queryByDisplayValue("Spillway A")).toBeNull();
+    await user.click(
+      screen.getByRole("button", {
+        name: "Enfocar reach_reservoir_1_junction_1",
+      }),
+    );
+    expect(
+      screen.getByTestId("hydraulic-properties-reach_reservoir_1_junction_1"),
+    ).toBeVisible();
+    expect(screen.getByDisplayValue("Spillway A")).toBeVisible();
+  });
+
+  it("wires a plant through ports: intake from the input port, discharge from the output port, auto-creating a unit", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Plant ports case",
+      description: "Plant port wiring",
+      created_at: "2026-06-26T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hydro PMGD",
+      description: "Hydraulic workspace",
+      created_at: "2026-06-26T12:00:00Z",
+    };
+    const diagram = {
+      scenario_id: 10,
+      optimization_case: {
+        id: 4,
+        scenario_id: 10,
+        case_key: "scenario_10_hydraulic_case",
+        display_name: "Plant ports case",
+        updated_at: "2026-06-26T12:10:00Z",
+      },
+      hydraulic_system: {
+        id: 5,
+        project_id: 1,
+        system_key: "default_hydraulic_system",
+        display_name: "Default hydraulic system",
+      },
+      layout: {
+        id: 6,
+        case_id: 4,
+        layout_key: "default",
+        layout_engine: "auto_dag",
+        layout_version: 1,
+        revision: "1",
+        viewport: { x: 0, y: 0, zoom: 1 },
+        updated_at: "2026-06-26T12:10:00Z",
+        updated_by: "internal_analyst",
+      },
+      revision: "1",
+      nodes: [],
+      reaches: [],
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "POST"
+        ) {
+          return new Response(JSON.stringify({ diagram }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          { status: 500, headers: { "Content-Type": "application/json" } },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Plant ports case" }),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("link", { name: "Abrir diagrama hidraulico" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Agregar embalse" }));
+    await user.click(screen.getByRole("button", { name: "Agregar central" }));
+    await user.click(screen.getByRole("button", { name: "Agregar union" }));
+
+    const dataTransfer = {
+      source: "",
+      setData: vi.fn((_: string, value: string) => {
+        dataTransfer.source = value;
+      }),
+      getData: vi.fn(() => dataTransfer.source),
+    };
+
+    // Reservoir output -> plant input wires the intake on an auto-created unit.
+    fireEvent.dragStart(screen.getByTestId("hydraulic-node-out-reservoir_1"), {
+      dataTransfer,
+    });
+    fireEvent.dragOver(screen.getByTestId("hydraulic-node-in-plant_1"));
+    fireEvent.drop(screen.getByTestId("hydraulic-node-in-plant_1"), {
+      dataTransfer,
+    });
+
+    expect(screen.getByLabelText("Nodo de toma unit_1")).toHaveValue(
+      "reservoir_1",
+    );
+
+    // Plant output -> junction input wires the discharge on the same unit.
+    fireEvent.dragStart(screen.getByTestId("hydraulic-node-out-plant_1"), {
+      dataTransfer,
+    });
+    fireEvent.dragOver(screen.getByTestId("hydraulic-node-in-junction_1"));
+    fireEvent.drop(screen.getByTestId("hydraulic-node-in-junction_1"), {
+      dataTransfer,
+    });
+
+    expect(screen.getByLabelText("Nodo de descarga unit_1")).toHaveValue(
+      "junction_1",
+    );
+    expect(screen.getByLabelText("Nodo de toma unit_1")).toHaveValue(
+      "reservoir_1",
+    );
+    // No second unit was created by the second connection.
+    expect(screen.queryByLabelText("Nodo de toma unit_2")).toBeNull();
+  });
+
+  it("only links output ports to input ports and allows fan-in and fan-out", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Port rules case",
+      description: "Port direction rules",
+      created_at: "2026-06-26T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hydro PMGD",
+      description: "Hydraulic workspace",
+      created_at: "2026-06-26T12:00:00Z",
+    };
+    const diagram = {
+      scenario_id: 10,
+      optimization_case: {
+        id: 4,
+        scenario_id: 10,
+        case_key: "scenario_10_hydraulic_case",
+        display_name: "Port rules case",
+        updated_at: "2026-06-26T12:10:00Z",
+      },
+      hydraulic_system: {
+        id: 5,
+        project_id: 1,
+        system_key: "default_hydraulic_system",
+        display_name: "Default hydraulic system",
+      },
+      layout: {
+        id: 6,
+        case_id: 4,
+        layout_key: "default",
+        layout_engine: "auto_dag",
+        layout_version: 1,
+        revision: "1",
+        viewport: { x: 0, y: 0, zoom: 1 },
+        updated_at: "2026-06-26T12:10:00Z",
+        updated_by: "internal_analyst",
+      },
+      revision: "1",
+      nodes: [],
+      reaches: [],
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "POST"
+        ) {
+          return new Response(JSON.stringify({ diagram }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          { status: 500, headers: { "Content-Type": "application/json" } },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Port rules case" }),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("link", { name: "Abrir diagrama hidraulico" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Agregar embalse" }));
+    await user.click(screen.getByRole("button", { name: "Agregar embalse" }));
+    await user.click(screen.getByRole("button", { name: "Agregar union" }));
+
+    const dataTransfer = {
+      source: "",
+      setData: vi.fn((_: string, value: string) => {
+        dataTransfer.source = value;
+      }),
+      getData: vi.fn(() => dataTransfer.source),
+    };
+    const link = (fromKey: string, toKey: string) => {
+      fireEvent.dragStart(screen.getByTestId(`hydraulic-node-out-${fromKey}`), {
+        dataTransfer,
+      });
+      fireEvent.dragOver(screen.getByTestId(`hydraulic-node-in-${toKey}`));
+      fireEvent.drop(screen.getByTestId(`hydraulic-node-in-${toKey}`), {
+        dataTransfer,
+      });
+    };
+
+    // Fan-in: two outputs into one input.
+    link("reservoir_1", "junction_1");
+    link("reservoir_2", "junction_1");
+    expect(
+      screen.getByTestId("hydraulic-link-reach_reservoir_1_junction_1"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("hydraulic-link-reach_reservoir_2_junction_1"),
+    ).toBeInTheDocument();
+
+    // Fan-out: one output into a second input.
+    link("reservoir_1", "reservoir_2");
+    expect(
+      screen.getByTestId("hydraulic-link-reach_reservoir_1_reservoir_2"),
+    ).toBeInTheDocument();
+
+    // Output-to-output is rejected: dropping on an output port does nothing.
+    dataTransfer.source = "";
+    fireEvent.dragStart(screen.getByTestId("hydraulic-node-out-junction_1"), {
+      dataTransfer,
+    });
+    fireEvent.drop(screen.getByTestId("hydraulic-node-out-reservoir_1"), {
+      dataTransfer,
+    });
+    expect(
+      screen.queryByTestId("hydraulic-link-reach_junction_1_reservoir_1"),
+    ).toBeNull();
+  });
+
+  it("shows a contextual properties panel for the selected object and never exposes x/y there", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Panel case",
+      description: "Contextual panel",
+      created_at: "2026-06-26T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hydro PMGD",
+      description: "Hydraulic workspace",
+      created_at: "2026-06-26T12:00:00Z",
+    };
+    const diagram = {
+      scenario_id: 10,
+      optimization_case: {
+        id: 4,
+        scenario_id: 10,
+        case_key: "scenario_10_hydraulic_case",
+        display_name: "Panel case",
+        updated_at: "2026-06-26T12:10:00Z",
+      },
+      hydraulic_system: {
+        id: 5,
+        project_id: 1,
+        system_key: "default_hydraulic_system",
+        display_name: "Default hydraulic system",
+      },
+      layout: {
+        id: 6,
+        case_id: 4,
+        layout_key: "default",
+        layout_engine: "auto_dag",
+        layout_version: 1,
+        revision: "1",
+        viewport: { x: 0, y: 0, zoom: 1 },
+        updated_at: "2026-06-26T12:10:00Z",
+        updated_by: "internal_analyst",
+      },
+      revision: "1",
+      nodes: [],
+      reaches: [],
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "POST"
+        ) {
+          return new Response(JSON.stringify({ diagram }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          { status: 500, headers: { "Content-Type": "application/json" } },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Panel case" }),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("link", { name: "Abrir diagrama hidraulico" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Agregar union" }));
+
+    // Nothing is selected yet: the panel prompts for a selection.
+    expect(
+      screen.getByText(
+        "Selecciona un objeto del diagrama para editar sus propiedades.",
+      ),
+    ).toBeVisible();
+
+    // Select the node on the canvas.
+    const canvasNode = screen.getByTestId("hydraulic-canvas-node-junction_1");
+    fireEvent.pointerDown(canvasNode, {
+      button: 0,
+      clientX: 140,
+      clientY: 100,
+      pointerId: 1,
+    });
+    fireEvent.pointerUp(canvasNode, {
+      clientX: 140,
+      clientY: 100,
+      pointerId: 1,
+    });
+
+    // The panel now edits the selected node's label, but never its x/y.
+    expect(screen.getByLabelText("Etiqueta junction_1")).toBeVisible();
+    expect(screen.queryByLabelText("X junction_1")).toBeNull();
+    expect(screen.queryByLabelText("Y junction_1")).toBeNull();
+  });
+
+  it("deletes the selected component and removes its connections", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Delete case",
+      description: "Component deletion",
+      created_at: "2026-06-26T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hydro PMGD",
+      description: "Hydraulic workspace",
+      created_at: "2026-06-26T12:00:00Z",
+    };
+    const diagram = {
+      scenario_id: 10,
+      optimization_case: {
+        id: 4,
+        scenario_id: 10,
+        case_key: "scenario_10_hydraulic_case",
+        display_name: "Delete case",
+        updated_at: "2026-06-26T12:10:00Z",
+      },
+      hydraulic_system: {
+        id: 5,
+        project_id: 1,
+        system_key: "default_hydraulic_system",
+        display_name: "Default hydraulic system",
+      },
+      layout: {
+        id: 6,
+        case_id: 4,
+        layout_key: "default",
+        layout_engine: "auto_dag",
+        layout_version: 1,
+        revision: "1",
+        viewport: { x: 0, y: 0, zoom: 1 },
+        updated_at: "2026-06-26T12:10:00Z",
+        updated_by: "internal_analyst",
+      },
+      revision: "1",
+      nodes: [],
+      reaches: [],
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "POST"
+        ) {
+          return new Response(JSON.stringify({ diagram }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          { status: 500, headers: { "Content-Type": "application/json" } },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Delete case" }),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("link", { name: "Abrir diagrama hidraulico" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Agregar embalse" }));
+    await user.click(screen.getByRole("button", { name: "Agregar union" }));
+
+    const dataTransfer = {
+      source: "",
+      setData: vi.fn((_: string, value: string) => {
+        dataTransfer.source = value;
+      }),
+      getData: vi.fn(() => dataTransfer.source),
+    };
+    fireEvent.dragStart(screen.getByTestId("hydraulic-node-out-reservoir_1"), {
+      dataTransfer,
+    });
+    fireEvent.dragOver(screen.getByTestId("hydraulic-node-in-junction_1"));
+    fireEvent.drop(screen.getByTestId("hydraulic-node-in-junction_1"), {
+      dataTransfer,
+    });
+    expect(
+      screen.getByTestId("hydraulic-link-reach_reservoir_1_junction_1"),
+    ).toBeInTheDocument();
+
+    // Select the reservoir and delete it through the properties panel.
+    selectDiagramNode("reservoir_1");
+    await user.click(
+      screen.getByRole("button", { name: "Eliminar componente" }),
+    );
+
+    // The node, its reach, and the panel selection are all gone.
+    expect(
+      screen.queryByTestId("hydraulic-canvas-node-reservoir_1"),
+    ).toBeNull();
+    expect(
+      screen.queryByTestId("hydraulic-link-reach_reservoir_1_junction_1"),
+    ).toBeNull();
+    expect(
+      screen.getByTestId("hydraulic-canvas-node-junction_1"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Selecciona un objeto del diagrama para editar sus propiedades.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("draws plant connection edges and routes edges between the node ports", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Edges case",
+      description: "Edge routing",
+      created_at: "2026-06-26T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hydro PMGD",
+      description: "Hydraulic workspace",
+      created_at: "2026-06-26T12:00:00Z",
+    };
+    const diagram = {
+      scenario_id: 10,
+      optimization_case: {
+        id: 4,
+        scenario_id: 10,
+        case_key: "scenario_10_hydraulic_case",
+        display_name: "Edges case",
+        updated_at: "2026-06-26T12:10:00Z",
+      },
+      hydraulic_system: {
+        id: 5,
+        project_id: 1,
+        system_key: "default_hydraulic_system",
+        display_name: "Default hydraulic system",
+      },
+      layout: {
+        id: 6,
+        case_id: 4,
+        layout_key: "default",
+        layout_engine: "auto_dag",
+        layout_version: 1,
+        revision: "1",
+        viewport: { x: 0, y: 0, zoom: 1 },
+        updated_at: "2026-06-26T12:10:00Z",
+        updated_by: "internal_analyst",
+      },
+      revision: "1",
+      nodes: [],
+      reaches: [],
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "POST"
+        ) {
+          return new Response(JSON.stringify({ diagram }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          { status: 500, headers: { "Content-Type": "application/json" } },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Edges case" }),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("link", { name: "Abrir diagrama hidraulico" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Agregar embalse" }));
+    await user.click(screen.getByRole("button", { name: "Agregar union" }));
+    await user.click(screen.getByRole("button", { name: "Agregar central" }));
+
+    const dataTransfer = {
+      source: "",
+      setData: vi.fn((_: string, value: string) => {
+        dataTransfer.source = value;
+      }),
+      getData: vi.fn(() => dataTransfer.source),
+    };
+    const link = (fromKey: string, toKey: string) => {
+      fireEvent.dragStart(screen.getByTestId(`hydraulic-node-out-${fromKey}`), {
+        dataTransfer,
+      });
+      fireEvent.dragOver(screen.getByTestId(`hydraulic-node-in-${toKey}`));
+      fireEvent.drop(screen.getByTestId(`hydraulic-node-in-${toKey}`), {
+        dataTransfer,
+      });
+    };
+
+    // Reservoir output -> junction input draws a reach edge. Default positions:
+    // reservoir_1 (120,80), junction_1 (300,110); node is 150x76. The edge must
+    // leave the source's bottom port (195,156) and reach the target's top port
+    // (375,110), not the node centers.
+    link("reservoir_1", "junction_1");
+    const reachPath = screen.getByTestId(
+      "hydraulic-link-reach_reservoir_1_junction_1",
+    );
+    expect(reachPath.getAttribute("d")).toMatch(/^M 195 156/);
+    expect(reachPath.getAttribute("d")).toMatch(/375 110$/);
+
+    // Reservoir output -> plant input draws a visible intake edge from the
+    // reservoir to the plant (the plant has no reach, only a unit intake).
+    link("reservoir_1", "plant_1");
+    const plantPath = screen.getByTestId(
+      "hydraulic-plant-link-reservoir_1-plant_1",
+    );
+    expect(plantPath).toBeInTheDocument();
+    expect(plantPath.getAttribute("d")).toMatch(/^M 195 156/);
+    expect(plantPath.getAttribute("d")).toMatch(/555 180$/);
+  });
+
+  it("edits reservoir parameters and a storage-elevation curve, then shows reservoir validation errors", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    type CurvePoint = { x_value: number; y_value: number };
+    type CurveSummary = {
+      curve_set_id: number;
+      version_number: number;
+      version_label: string;
+      points: CurvePoint[];
+    };
+    type ReservoirParams = {
+      storage_min_hm3: number;
+      storage_max_hm3: number;
+      initial_storage_hm3: number;
+      terminal_condition: string;
+      terminal_storage_min_hm3: number | null;
+      terminal_water_value_usd_per_hm3: number;
+    };
+    type DiagramNode = {
+      layout_item_id: number;
+      entity_type: string;
+      entity_id: number;
+      component_type: "reservoir" | "junction" | "plant";
+      technical_key: string;
+      display_name: string;
+      x: number;
+      y: number;
+      z_index: number;
+      reservoir?: ReservoirParams | null;
+      storage_elevation_curve?: CurveSummary | null;
+      available_curves?: CurveSummary[];
+    };
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Reservoir case",
+      description: "Hydraulic reservoir branch",
+      created_at: "2026-06-26T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hydro PMGD",
+      description: "Hydraulic workspace",
+      created_at: "2026-06-26T12:00:00Z",
+    };
+    let diagram = {
+      scenario_id: 10,
+      optimization_case: {
+        id: 4,
+        scenario_id: 10,
+        case_key: "scenario_10_hydraulic_case",
+        display_name: "Reservoir case",
+        updated_at: "2026-06-26T12:10:00Z",
+      },
+      hydraulic_system: {
+        id: 5,
+        project_id: 1,
+        system_key: "default_hydraulic_system",
+        display_name: "Default hydraulic system",
+      },
+      layout: {
+        id: 6,
+        case_id: 4,
+        layout_key: "default",
+        layout_engine: "auto_dag",
+        layout_version: 1,
+        revision: "1",
+        viewport: { x: 0, y: 0, zoom: 1 },
+        updated_at: "2026-06-26T12:10:00Z",
+        updated_by: "internal_analyst",
+      },
+      revision: "1",
+      nodes: [] as DiagramNode[],
+      reaches: [] as Array<unknown>,
+    };
+    let lastPutBody: { nodes: DiagramNode[] } | null = null;
+    const versions: unknown[] = [];
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "POST"
+        ) {
+          return new Response(JSON.stringify({ diagram }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "PUT"
+        ) {
+          const body = JSON.parse(String(init?.body)) as {
+            nodes: DiagramNode[];
+          };
+          lastPutBody = body;
+          diagram = {
+            ...diagram,
+            revision: "2",
+            layout: {
+              ...diagram.layout,
+              layout_version: 2,
+              revision: "2",
+              layout_engine: "manual",
+            },
+            nodes: body.nodes.map((node, index) => {
+              const base: DiagramNode = {
+                ...node,
+                layout_item_id: index + 1,
+                entity_type:
+                  node.component_type === "plant"
+                    ? "case_hydraulic_plant"
+                    : "case_hydraulic_node",
+                entity_id: index + 1,
+                z_index: index,
+              };
+              if (node.component_type !== "reservoir") return base;
+              const points = node.storage_elevation_curve?.points ?? [];
+              const summary: CurveSummary | null = points.length
+                ? {
+                    curve_set_id: 900,
+                    version_number: 1,
+                    version_label: "v1",
+                    points,
+                  }
+                : null;
+              return {
+                ...base,
+                reservoir: node.reservoir ?? null,
+                storage_elevation_curve: summary,
+                available_curves: summary ? [summary] : [],
+              };
+            }),
+            reaches: [],
+          };
+          return new Response(JSON.stringify({ diagram }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram/validate" &&
+          method === "POST"
+        ) {
+          return new Response(
+            JSON.stringify({
+              validation: {
+                ok: false,
+                summary: "Hydraulic topology has errors",
+                errors: [
+                  {
+                    code: "storage_bounds_outside_curve_domain",
+                    message:
+                      "Reservoir reservoir_1 storage bounds fall outside the curve domain.",
+                    entity_type: "case_hydraulic_node",
+                    entity_id: 1,
+                    technical_key: "reservoir_1",
+                  },
+                ],
+                warnings: [],
+              },
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Reservoir case" }),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("link", { name: "Abrir diagrama hidraulico" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Agregar embalse" }));
+    selectDiagramNode("reservoir_1");
+
+    expect(screen.getByTestId("hydraulic-reservoir-reservoir_1")).toBeVisible();
+    await user.clear(
+      screen.getByLabelText("Almacenamiento minimo reservoir_1"),
+    );
+    await user.type(
+      screen.getByLabelText("Almacenamiento minimo reservoir_1"),
+      "5",
+    );
+    await user.clear(
+      screen.getByLabelText("Almacenamiento maximo reservoir_1"),
+    );
+    await user.type(
+      screen.getByLabelText("Almacenamiento maximo reservoir_1"),
+      "50",
+    );
+    await user.clear(
+      screen.getByLabelText("Almacenamiento inicial reservoir_1"),
+    );
+    await user.type(
+      screen.getByLabelText("Almacenamiento inicial reservoir_1"),
+      "20",
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Condicion terminal reservoir_1"),
+      "min_terminal",
+    );
+    await user.type(
+      screen.getByLabelText("Almacenamiento terminal minimo reservoir_1"),
+      "10",
+    );
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Agregar punto de curva reservoir_1",
+      }),
+    );
+    await user.type(
+      screen.getByLabelText("Almacenamiento punto 1 reservoir_1"),
+      "5",
+    );
+    await user.type(screen.getByLabelText("Cota punto 1 reservoir_1"), "700");
+    await user.click(
+      screen.getByRole("button", {
+        name: "Agregar punto de curva reservoir_1",
+      }),
+    );
+    await user.type(
+      screen.getByLabelText("Almacenamiento punto 2 reservoir_1"),
+      "50",
+    );
+    await user.type(screen.getByLabelText("Cota punto 2 reservoir_1"), "760");
+
+    await user.click(screen.getByRole("button", { name: "Guardar diagrama" }));
+    expect(await screen.findByText("Estado: saved")).toBeVisible();
+
+    expect(lastPutBody).not.toBeNull();
+    const savedNode = lastPutBody!.nodes[0];
+    expect(savedNode.reservoir?.storage_max_hm3).toBe(50);
+    expect(savedNode.reservoir?.terminal_condition).toBe("min_terminal");
+    expect(savedNode.reservoir?.terminal_storage_min_hm3).toBe(10);
+    expect(savedNode.storage_elevation_curve?.points).toEqual([
+      { x_value: 5, y_value: 700 },
+      { x_value: 50, y_value: 760 },
+    ]);
+
+    // The saved version is now selectable as an existing curve version.
+    selectDiagramNode("reservoir_1");
+    expect(screen.getByLabelText("Version de curva reservoir_1")).toHaveValue(
+      "900",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Validar topologia" }));
+    expect(
+      await screen.findByText("Hydraulic topology has errors"),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/storage bounds fall outside the curve domain/),
+    ).toBeVisible();
+  });
+
+  it("edits a plant panel with a generation unit and flow-power curve, then shows unit validation errors", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    type CurvePoint = { x_value: number; y_value: number };
+    type CurveSummary = {
+      curve_set_id: number;
+      version_number: number;
+      version_label: string;
+      points: CurvePoint[];
+    };
+    type Unit = {
+      technical_key: string;
+      display_name: string;
+      is_active: boolean;
+      intake_node_key: string | null;
+      discharge_node_key: string | null;
+      min_power_mw: number | null;
+      max_power_mw: number | null;
+      min_flow_m3s: number | null;
+      max_flow_m3s: number | null;
+      flow_power_curve?: (CurveSummary | { points: CurvePoint[] }) | null;
+      available_curves?: CurveSummary[];
+    };
+    type DiagramNode = {
+      layout_item_id: number;
+      entity_type: string;
+      entity_id: number;
+      component_type: "reservoir" | "junction" | "plant";
+      technical_key: string;
+      display_name: string;
+      x: number;
+      y: number;
+      z_index: number;
+      plant?: {
+        non_modeled: boolean;
+        min_power_mw: number | null;
+        max_power_mw: number | null;
+      } | null;
+      units?: Unit[];
+    };
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Plant case",
+      description: "Hydraulic plant branch",
+      created_at: "2026-06-26T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hydro PMGD",
+      description: "Hydraulic workspace",
+      created_at: "2026-06-26T12:00:00Z",
+    };
+    let diagram = {
+      scenario_id: 10,
+      optimization_case: {
+        id: 4,
+        scenario_id: 10,
+        case_key: "scenario_10_hydraulic_case",
+        display_name: "Plant case",
+        updated_at: "2026-06-26T12:10:00Z",
+      },
+      hydraulic_system: {
+        id: 5,
+        project_id: 1,
+        system_key: "default_hydraulic_system",
+        display_name: "Default hydraulic system",
+      },
+      layout: {
+        id: 6,
+        case_id: 4,
+        layout_key: "default",
+        layout_engine: "auto_dag",
+        layout_version: 1,
+        revision: "1",
+        viewport: { x: 0, y: 0, zoom: 1 },
+        updated_at: "2026-06-26T12:10:00Z",
+        updated_by: "internal_analyst",
+      },
+      revision: "1",
+      nodes: [] as DiagramNode[],
+      reaches: [] as Array<unknown>,
+    };
+    let lastPutBody: { nodes: DiagramNode[] } | null = null;
+    let promoteCalls = 0;
+    const versions: Array<{
+      id: number;
+      scenario_id: number;
+      version_number: number;
+      case_name: string;
+      schema_version: string;
+      period_count: number;
+      asset_counts: Record<string, number>;
+      created_at: string;
+    }> = [];
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "POST"
+        ) {
+          return new Response(JSON.stringify({ diagram }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "PUT"
+        ) {
+          const body = JSON.parse(String(init?.body)) as {
+            nodes: DiagramNode[];
+          };
+          lastPutBody = body;
+          diagram = {
+            ...diagram,
+            revision: "2",
+            layout: {
+              ...diagram.layout,
+              layout_version: 2,
+              revision: "2",
+              layout_engine: "manual",
+            },
+            nodes: body.nodes.map((node, index) => {
+              const base: DiagramNode = {
+                ...node,
+                layout_item_id: index + 1,
+                entity_type:
+                  node.component_type === "plant"
+                    ? "case_hydraulic_plant"
+                    : "case_hydraulic_node",
+                entity_id: index + 1,
+                z_index: index,
+              };
+              if (node.component_type !== "plant") return base;
+              const units = (node.units ?? []).map((unit) => {
+                const points = unit.flow_power_curve?.points ?? [];
+                const summary: CurveSummary | null = points.length
+                  ? {
+                      curve_set_id: 910,
+                      version_number: 1,
+                      version_label: "v1",
+                      points,
+                    }
+                  : null;
+                return {
+                  ...unit,
+                  flow_power_curve: summary,
+                  available_curves: summary ? [summary] : [],
+                };
+              });
+              return {
+                ...base,
+                plant: node.plant ?? {
+                  non_modeled: false,
+                  min_power_mw: null,
+                  max_power_mw: null,
+                },
+                units,
+              };
+            }),
+            reaches: [],
+          };
+          return new Response(JSON.stringify({ diagram }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram/validate" &&
+          method === "POST"
+        ) {
+          return new Response(
+            JSON.stringify({
+              validation: {
+                ok: false,
+                summary: "Hydraulic topology has errors",
+                errors: [
+                  {
+                    code: "inactive_or_equal_unit_nodes",
+                    message:
+                      "Unit unit_1 requires distinct active intake and discharge nodes.",
+                    entity_type: "case_hydraulic_unit",
+                    entity_id: 1,
+                    technical_key: "unit_1",
+                  },
+                ],
+                warnings: [],
+              },
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram/v3-preview" &&
+          method === "POST"
+        ) {
+          return new Response(
+            JSON.stringify({
+              validation: {
+                ok: true,
+                stale: false,
+                summary: "Hydraulic v3 payload validated",
+                errors: [],
+                warnings: [],
+                system_case: {
+                  schema_version: "bess_system_dispatch.v3",
+                  hydraulic_network: {
+                    units: [{ id: "unit_1", plant_id: "plant_1" }],
+                  },
+                },
+                julia_validation: { status: "ok" },
+              },
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram/promote" &&
+          method === "POST"
+        ) {
+          promoteCalls += 1;
+          const version = {
+            id: 81,
+            scenario_id: 10,
+            version_number: 1,
+            case_name: "scenario_10_hydraulic_case",
+            schema_version: "bess_system_dispatch.v3",
+            period_count: 1,
+            asset_counts: {},
+            created_at: "2026-06-26T12:30:00Z",
+          };
+          versions.push(version);
+          return new Response(JSON.stringify(version), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Plant case" }),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("link", { name: "Abrir diagrama hidraulico" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Agregar union" }));
+    await user.click(screen.getByRole("button", { name: "Agregar union" }));
+    await user.click(screen.getByRole("button", { name: "Agregar central" }));
+    selectDiagramNode("plant_1");
+
+    expect(screen.getByTestId("hydraulic-plant-plant_1")).toBeVisible();
+    await user.clear(screen.getByLabelText("Potencia maxima central plant_1"));
+    await user.type(
+      screen.getByLabelText("Potencia maxima central plant_1"),
+      "60",
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Agregar unidad plant_1" }),
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Nodo de toma unit_1"),
+      "junction_1",
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Nodo de descarga unit_1"),
+      "junction_2",
+    );
+    await user.clear(screen.getByLabelText("Potencia maxima unit_1"));
+    await user.type(screen.getByLabelText("Potencia maxima unit_1"), "30");
+    await user.clear(screen.getByLabelText("Caudal maximo unit_1"));
+    await user.type(screen.getByLabelText("Caudal maximo unit_1"), "40");
+
+    await user.click(
+      screen.getByRole("button", { name: "Agregar punto de curva unit_1" }),
+    );
+    await user.type(screen.getByLabelText("Caudal punto 1 unit_1"), "0");
+    await user.type(screen.getByLabelText("Potencia punto 1 unit_1"), "0");
+    await user.click(
+      screen.getByRole("button", { name: "Agregar punto de curva unit_1" }),
+    );
+    await user.type(screen.getByLabelText("Caudal punto 2 unit_1"), "40");
+    await user.type(screen.getByLabelText("Potencia punto 2 unit_1"), "30");
+
+    await user.click(screen.getByRole("button", { name: "Guardar diagrama" }));
+    expect(await screen.findByText("Estado: saved")).toBeVisible();
+
+    expect(lastPutBody).not.toBeNull();
+    const plantNode = lastPutBody!.nodes.find(
+      (node) => node.component_type === "plant",
+    )!;
+    expect(plantNode.plant?.max_power_mw).toBe(60);
+    expect(plantNode.units).toHaveLength(1);
+    const savedUnit = plantNode.units![0];
+    expect(savedUnit.technical_key).toBe("unit_1");
+    expect(savedUnit.intake_node_key).toBe("junction_1");
+    expect(savedUnit.discharge_node_key).toBe("junction_2");
+    expect(savedUnit.max_power_mw).toBe(30);
+    expect(savedUnit.max_flow_m3s).toBe(40);
+    expect(savedUnit.flow_power_curve?.points).toEqual([
+      { x_value: 0, y_value: 0 },
+      { x_value: 40, y_value: 30 },
+    ]);
+
+    // Saved curve is now selectable as an existing version.
+    selectDiagramNode("plant_1");
+    expect(screen.getByLabelText("Version de curva unit_1")).toHaveValue("910");
+
+    await user.click(
+      screen.getByRole("button", { name: "Generar preview v3" }),
+    );
+    expect(
+      await screen.findByText("Hydraulic v3 payload validated"),
+    ).toBeVisible();
+    expect(screen.getByText(/bess_system_dispatch\.v3/)).toBeVisible();
+    expect(screen.getByText(/"id": "unit_1"/)).toBeVisible();
+
+    const promoteButton = screen.getByRole("button", {
+      name: "Promover version v3",
+    });
+    expect(promoteButton).toBeEnabled();
+    await user.click(promoteButton);
+    expect(await screen.findByText("Version v3 promovida: 1")).toBeVisible();
+    expect(promoteCalls).toBe(1);
+
+    await user.click(screen.getByRole("button", { name: "Validar topologia" }));
+    expect(
+      await screen.findByText("Hydraulic topology has errors"),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/distinct active intake and discharge nodes/),
+    ).toBeVisible();
   });
 
   it("keeps newer local draft edits when an older save response arrives late", async () => {

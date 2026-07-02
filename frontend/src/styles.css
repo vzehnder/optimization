@@ -459,6 +459,205 @@ button:focus-visible {
   gap: 1rem;
 }
 
+.hydraulic-editor {
+  display: grid;
+  gap: 1rem;
+}
+
+.hydraulic-editor [role="alert"] {
+  width: auto;
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border-left: 4px solid #c2410c;
+  border-radius: 8px;
+  background: #fff7ed;
+  box-shadow: none;
+}
+
+.hydraulic-canvas {
+  position: relative;
+  min-height: 30rem;
+  overflow: auto;
+  border: 1px solid #b8c7d6;
+  border-radius: 8px;
+  background-color: #f7fafc;
+  background-image:
+    linear-gradient(#d8e2eb 1px, transparent 1px),
+    linear-gradient(90deg, #d8e2eb 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.hydraulic-canvas-surface {
+  position: relative;
+  min-width: 100%;
+}
+
+.hydraulic-canvas-content {
+  position: relative;
+  transform-origin: top left;
+}
+
+.hydraulic-canvas-links {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.hydraulic-canvas-links marker path {
+  fill: #075985;
+}
+
+.hydraulic-canvas-link {
+  fill: none;
+  stroke: #075985;
+  stroke-linecap: round;
+  stroke-width: 3;
+  filter: drop-shadow(0 2px 2px rgb(16 42 67 / 18%));
+}
+
+.hydraulic-canvas-link[data-focused="true"] {
+  stroke: #c2410c;
+  stroke-width: 4;
+}
+
+.hydraulic-canvas-link-plant {
+  stroke: #0f766e;
+  stroke-dasharray: 7 5;
+}
+
+.hydraulic-canvas-node {
+  position: absolute;
+  display: grid;
+  align-content: center;
+  gap: 0.15rem;
+  padding: 0.6rem 0.8rem;
+  border: 2px solid #b8c7d6;
+  border-radius: 8px;
+  color: #102a43;
+  background: #fff;
+  box-shadow: 0 14px 34px rgb(16 42 67 / 12%);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.hydraulic-canvas-node:active {
+  cursor: grabbing;
+}
+
+.hydraulic-canvas-node:focus-visible,
+.hydraulic-canvas-node[data-focused="true"] {
+  outline: 3px solid #fbbf24;
+  outline-offset: 3px;
+}
+
+.hydraulic-canvas-node[data-connecting="true"] {
+  border-color: #c2410c;
+}
+
+.hydraulic-canvas-node-reservoir {
+  border-color: #34d399;
+  background: #ecfdf5;
+}
+
+.hydraulic-canvas-node-junction {
+  border-color: #f59e0b;
+  background: #fff7ed;
+}
+
+.hydraulic-canvas-node-plant {
+  border-color: #60a5fa;
+  background: #eff6ff;
+}
+
+.hydraulic-canvas-node strong,
+.hydraulic-canvas-node span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hydraulic-canvas-node-type {
+  color: #486581;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.hydraulic-canvas-node-key {
+  color: #486581;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.hydraulic-canvas-port {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  background: #075985;
+  box-shadow: 0 4px 12px rgb(16 42 67 / 20%);
+  cursor: crosshair;
+  z-index: 2;
+}
+
+.hydraulic-canvas-port-in {
+  top: -12px;
+}
+
+.hydraulic-canvas-port-out {
+  bottom: -12px;
+  background: #0f766e;
+}
+
+.hydraulic-canvas-port::after {
+  position: absolute;
+  inset: 5px;
+  border-radius: 999px;
+  background: #ffffff;
+  content: "";
+}
+
+.hydraulic-canvas-port:hover,
+.hydraulic-canvas-port:focus-visible {
+  background: #c2410c;
+}
+
+.hydraulic-canvas-empty {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  width: min(28rem, calc(100% - 2rem));
+}
+
+.hydraulic-node-list li {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.hydraulic-reach-list li {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.hydraulic-node-list li[draggable="true"] {
+  cursor: grab;
+}
+
+.resource-list li[data-focused="true"] {
+  border-color: #c2410c;
+  box-shadow: 0 0 0 3px rgb(251 191 36 / 35%);
+}
+
+.validation-summary h2 {
+  margin-top: 0;
+}
+
 .draft-toolbar {
   position: sticky;
   top: 0;
@@ -602,6 +801,29 @@ button:focus-visible {
 .danger-button:focus-visible {
   color: #fff;
   background: #c2410c;
+}
+
+.hydraulic-diagram-link {
+  justify-self: start;
+  border: 1px solid #075985;
+  color: #fff;
+  background: #0369a1;
+  font-weight: 750;
+}
+
+.hydraulic-diagram-link:hover,
+.hydraulic-diagram-link:focus-visible {
+  background: #075985;
+}
+
+.hydro-detail > summary {
+  cursor: pointer;
+  font-weight: 750;
+  color: #17324d;
+}
+
+.hydro-detail[open] > summary {
+  margin-bottom: 0.6rem;
 }
 
 .remove-confirmation {
@@ -945,7 +1167,64 @@ button:focus-visible {
   margin-left: 0.5rem;
 }
 
+/* Hydraulic reservoir + afluente editors */
+.reservoir-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.reservoir-grid > label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-weight: 700;
+}
+
+.reservoir-grid > label > span {
+  font-size: 0.9rem;
+}
+
+.reservoir-grid input,
+.reservoir-grid select {
+  width: 100%;
+  border: 1px solid #b8c7d6;
+  border-radius: 8px;
+  padding: 0.55rem 0.65rem;
+  color: #102a43;
+  font: inherit;
+  background: #fff;
+}
+
+.inflow-import-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.hydraulic-inflow-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.hydraulic-inflow-head {
+  font-weight: 800;
+  color: #334e68;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+}
+
 @media (max-width: 620px) {
+  .reservoir-grid {
+    grid-template-columns: 1fr;
+  }
+
   .topbar,
   .identity {
     align-items: flex-start;
@@ -965,6 +1244,10 @@ button:focus-visible {
 
   .draft-toolbar button {
     margin-left: 0;
+  }
+
+  .hydraulic-canvas {
+    min-height: 24rem;
   }
 
   .source-upload,

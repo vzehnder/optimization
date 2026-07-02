@@ -357,6 +357,107 @@ function grid_anti_sim_disabled_system_case_document()
     return document
 end
 
+function minimal_hydraulic_v3_system_case_document()
+    return Dict{String,Any}(
+        "schema_version" => "bess_system_dispatch.v3",
+        "case_name" => "scenario_1_hydraulic_case",
+        "solver" => Dict{String,Any}(
+            "name" => "HiGHS",
+            "options" => Dict{String,Any}(),
+        ),
+        "time_series" => [
+            Dict{String,Any}(
+                "timestamp" => "2026-01-01T00:00:00",
+                "duration_hours" => 2.0,
+                "natural_inflow_m3s" => Dict{String,Any}(
+                    "reservoir_alpha" => 0.0,
+                ),
+            ),
+        ],
+        "hydraulic_network" => Dict{String,Any}(
+            "nodes" => [
+                Dict{String,Any}(
+                    "id" => "reservoir_alpha",
+                    "display_name" => "Reservoir Alpha",
+                    "type" => "reservoir",
+                    "reservoir" => Dict{String,Any}(
+                        "storage_min_hm3" => 5.0,
+                        "storage_max_hm3" => 50.0,
+                        "initial_storage_hm3" => 20.0,
+                        "terminal_condition" => "min_terminal",
+                        "terminal_storage_min_hm3" => 10.0,
+                        "terminal_water_value_usd_per_hm3" => 8.0,
+                    ),
+                    "curves" => Dict{String,Any}(
+                        "storage_elevation" => [
+                            Dict{String,Any}("storage_hm3" => 5.0, "elevation_masl" => 700.0),
+                            Dict{String,Any}("storage_hm3" => 50.0, "elevation_masl" => 760.0),
+                        ],
+                    ),
+                ),
+                Dict{String,Any}(
+                    "id" => "junction_in",
+                    "display_name" => "Intake",
+                    "type" => "junction",
+                ),
+                Dict{String,Any}(
+                    "id" => "junction_out",
+                    "display_name" => "Tailrace",
+                    "type" => "junction",
+                ),
+            ],
+            "reaches" => [
+                Dict{String,Any}(
+                    "id" => "reach_reservoir_intake",
+                    "display_name" => "Reservoir to intake",
+                    "from_node" => "reservoir_alpha",
+                    "to_node" => "junction_in",
+                    "type" => "river",
+                    "routing_method" => "none",
+                    "travel_time_hours" => 0.0,
+                ),
+            ],
+            "plants" => [
+                Dict{String,Any}(
+                    "id" => "plant_laja",
+                    "display_name" => "Plant Laja",
+                    "non_modeled" => false,
+                    "max_power_mw" => 30.0,
+                    "units" => ["unit_1"],
+                ),
+            ],
+            "units" => [
+                Dict{String,Any}(
+                    "id" => "unit_1",
+                    "display_name" => "Unit 1",
+                    "plant_id" => "plant_laja",
+                    "intake_node" => "junction_in",
+                    "discharge_node" => "junction_out",
+                    "min_power_mw" => 0.0,
+                    "max_power_mw" => 30.0,
+                    "min_flow_m3s" => 0.0,
+                    "max_flow_m3s" => 40.0,
+                    "curves" => Dict{String,Any}(
+                        "flow_power" => [
+                            Dict{String,Any}("flow_m3s" => 0.0, "power_mw" => 0.0),
+                            Dict{String,Any}("flow_m3s" => 40.0, "power_mw" => 30.0),
+                        ],
+                    ),
+                ),
+            ],
+            "curves" => Any[],
+            "required_time_series" => [
+                Dict{String,Any}(
+                    "entity_type" => "hydraulic_node",
+                    "entity_id" => "reservoir_alpha",
+                    "signal_key" => "natural_inflow_m3s",
+                    "binding_status" => "required",
+                ),
+            ],
+        ),
+    )
+end
+
 function write_system_case_json(path::AbstractString, document)
     open(path, "w") do io
         JSON3.write(io, document)
@@ -1411,6 +1512,171 @@ end
         end
 
         mktempdir() do case_dir
+            document = minimal_hydraulic_v3_system_case_document()
+            case_path = write_minimal_system_case_json(case_dir; document = document)
+            validation_stdout = read(system_validation_cli_command(script_path, case_path), String)
+            validation_payload = JSON3.read(validation_stdout)
+
+            @test string(validation_payload.status) == "ok"
+            @test string(validation_payload.case_name) == "scenario_1_hydraulic_case"
+            @test string(validation_payload.schema_version) == "bess_system_dispatch.v3"
+            @test Int(validation_payload.hydraulic_network.nodes) == 3
+            @test Int(validation_payload.hydraulic_network.reaches) == 1
+            @test Int(validation_payload.hydraulic_network.plants) == 1
+            @test Int(validation_payload.hydraulic_network.units) == 1
+        end
+
+        mktempdir() do case_dir
+            document = minimal_hydraulic_v3_system_case_document()
+            document["hydraulic_network"]["units"][1]["intake_node"] = "missing_node"
+            case_path = write_minimal_system_case_json(case_dir; document = document)
+            stdout_path = joinpath(case_dir, "v3_stdout.txt")
+            stderr_path = joinpath(case_dir, "v3_stderr.txt")
+
+            process = open(stdout_path, "w") do stdout_io
+                open(stderr_path, "w") do stderr_io
+                    return run(pipeline(
+                        ignorestatus(system_validation_cli_command(script_path, case_path));
+                        stdout = stdout_io,
+                        stderr = stderr_io,
+                    ))
+                end
+            end
+
+            @test !success(process)
+            @test isempty(strip(read(stdout_path, String)))
+            error_payload = JSON3.read(read(stderr_path, String))
+            @test string(error_payload.status) == "error"
+            @test occursin("unit unit_1 intake_node missing_node not found", string(error_payload.message))
+        end
+
+        mktempdir() do case_dir
+            document = minimal_hydraulic_v3_system_case_document()
+            push!(
+                document["hydraulic_network"]["reaches"],
+                Dict{String,Any}(
+                    "id" => "reach_tailrace_cycle",
+                    "display_name" => "Tailrace cycle",
+                    "from_node" => "junction_out",
+                    "to_node" => "reservoir_alpha",
+                    "type" => "tailrace",
+                    "routing_method" => "none",
+                    "travel_time_hours" => 0.0,
+                ),
+            )
+            case_path = write_minimal_system_case_json(case_dir; document = document)
+            stdout_path = joinpath(case_dir, "v3_cycle_stdout.txt")
+            stderr_path = joinpath(case_dir, "v3_cycle_stderr.txt")
+
+            process = open(stdout_path, "w") do stdout_io
+                open(stderr_path, "w") do stderr_io
+                    return run(pipeline(
+                        ignorestatus(system_validation_cli_command(script_path, case_path));
+                        stdout = stdout_io,
+                        stderr = stderr_io,
+                    ))
+                end
+            end
+
+            @test !success(process)
+            @test isempty(strip(read(stdout_path, String)))
+            error_payload = JSON3.read(read(stderr_path, String))
+            @test string(error_payload.status) == "error"
+            @test occursin("unsupported cycle", string(error_payload.message))
+        end
+
+        mktempdir() do case_dir
+            document = minimal_hydraulic_v3_system_case_document()
+            case_path = write_minimal_system_case_json(case_dir; document = document)
+            run_output = BESSDispatch.run_system_case(
+                case_path;
+                output_root = joinpath(case_dir, "outputs"),
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+
+            @test run_output.result.termination_status == "OPTIMAL"
+            @test isfile(run_output.dispatch_path)
+            @test isfile(run_output.asset_dispatch_path)
+            @test isfile(run_output.summary_path)
+            @test isfile(run_output.system_case_resolved_path)
+            @test isfile(run_output.model_metadata_path)
+
+            dispatch_rows = collect(CSV.File(run_output.dispatch_path))
+            @test length(dispatch_rows) == 1
+            @test dispatch_rows[1].total_hydro_power_mw >= 0.0
+            @test dispatch_rows[1].total_hydro_turbine_flow_m3s >= 0.0
+            @test dispatch_rows[1].total_hydro_storage_hm3 >= 5.0
+            @test dispatch_rows[1].total_hydro_reservoir_elevation_masl >= 700.0
+
+            asset_rows = collect(CSV.File(run_output.asset_dispatch_path))
+            @test any(
+                row -> string(row.asset_type) == "hydraulic_unit" &&
+                    row.hydro_power_mw >= 0.0 &&
+                    row.hydro_turbine_flow_m3s >= 0.0,
+                asset_rows,
+            )
+            @test any(
+                row -> string(row.asset_type) == "hydraulic_reservoir" &&
+                    row.hydro_storage_hm3 >= 5.0 &&
+                    row.hydro_reservoir_elevation_masl >= 700.0,
+                asset_rows,
+            )
+
+            summary = JSON3.read(read(run_output.summary_path, String))
+            @test string(summary.schema_version) == "bess_system_dispatch.v3"
+            @test haskey(summary, :hydraulic_v3_totals)
+            @test haskey(summary.hydraulic_v3_totals, :total_generation_mwh)
+            @test summary.hydraulic_v3_totals.total_generation_mwh ≈
+                dispatch_rows[1].total_hydro_power_mw * dispatch_rows[1].duration_hours
+
+            resolved_case = JSON3.read(read(run_output.system_case_resolved_path, String))
+            @test string(resolved_case.schema_version) == "bess_system_dispatch.v3"
+
+            metadata = JSON3.read(read(run_output.model_metadata_path, String))
+            @test string(metadata.schema_version) == "bess_system_dispatch.v3"
+            @test string(metadata.hydraulic_unit_conventions.flow) == "m3/s"
+        end
+
+        mktempdir() do case_dir
+            # A diagram-promoted run must use the bound natural inflow series in
+            # the reservoir water balance across the whole horizon.
+            document = minimal_hydraulic_v3_system_case_document()
+            document["time_series"] = [
+                Dict{String,Any}(
+                    "timestamp" => "2026-01-01T00:00:00",
+                    "duration_hours" => 2.0,
+                    "natural_inflow_m3s" => Dict{String,Any}("reservoir_alpha" => 10.0),
+                ),
+                Dict{String,Any}(
+                    "timestamp" => "2026-01-01T02:00:00",
+                    "duration_hours" => 2.0,
+                    "natural_inflow_m3s" => Dict{String,Any}("reservoir_alpha" => 4.0),
+                ),
+            ]
+            case_path = write_minimal_system_case_json(case_dir; document = document)
+            run_output = BESSDispatch.run_system_case(
+                case_path;
+                output_root = joinpath(case_dir, "outputs"),
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+
+            @test run_output.result.termination_status == "OPTIMAL"
+            dispatch_rows = collect(CSV.File(run_output.dispatch_path))
+            @test length(dispatch_rows) == 2
+            @test dispatch_rows[1].total_hydro_inflow_m3s ≈ 10.0
+            @test dispatch_rows[2].total_hydro_inflow_m3s ≈ 4.0
+
+            hm3_per_m3s_hour = 3600.0 / 1_000_000.0
+            initial_storage = 20.0
+            @test dispatch_rows[1].total_hydro_storage_hm3 ≈ initial_storage +
+                (10.0 - dispatch_rows[1].total_hydro_turbine_flow_m3s -
+                 dispatch_rows[1].total_hydro_spill_flow_m3s) * 2.0 * hm3_per_m3s_hour
+            @test dispatch_rows[2].total_hydro_storage_hm3 ≈ dispatch_rows[1].total_hydro_storage_hm3 +
+                (4.0 - dispatch_rows[2].total_hydro_turbine_flow_m3s -
+                 dispatch_rows[2].total_hydro_spill_flow_m3s) * 2.0 * hm3_per_m3s_hour
+        end
+
+        mktempdir() do case_dir
             document = minimal_system_case_document()
             delete!(document, "schema_version")
             case_path = write_minimal_system_case_json(case_dir; document = document)
@@ -1435,6 +1701,127 @@ end
         end
     end
 
+    @testset "hydraulic v3 reach minimum flow and spillway controls" begin
+        function reach_control_validation_message(mutator)
+            document = minimal_hydraulic_v3_system_case_document()
+            mutator(document)
+            try
+                BESSDispatch.validate_hydraulic_v3_system_case_document(document)
+                return ""
+            catch error
+                return sprint(showerror, error)
+            end
+        end
+
+        @test occursin(
+            "reach reach_reservoir_intake flow_min_m3s must be nonnegative",
+            reach_control_validation_message(document -> begin
+                document["hydraulic_network"]["reaches"][1]["flow_min_m3s"] = -1.0
+            end),
+        )
+        @test occursin(
+            "reach reach_reservoir_intake spill_penalty_usd_per_hm3 must be nonnegative",
+            reach_control_validation_message(document -> begin
+                document["hydraulic_network"]["reaches"][1]["type"] = "spillway"
+                document["hydraulic_network"]["reaches"][1]["spill_penalty_usd_per_hm3"] = -5.0
+            end),
+        )
+        @test occursin(
+            "spill_penalty_usd_per_hm3 is only supported on spillway reaches",
+            reach_control_validation_message(document -> begin
+                document["hydraulic_network"]["reaches"][1]["spill_penalty_usd_per_hm3"] = 10.0
+            end),
+        )
+
+        # Scalar minimum flow forces the unit to turbine at least the required flow
+        # even when keeping water has higher terminal value.
+        mktempdir() do case_dir
+            document = minimal_hydraulic_v3_system_case_document()
+            document["hydraulic_network"]["nodes"][1]["reservoir"]["terminal_water_value_usd_per_hm3"] = 1000.0
+            document["hydraulic_network"]["reaches"][1]["flow_min_m3s"] = 10.0
+            case_path = write_minimal_system_case_json(case_dir; document = document)
+            run_output = BESSDispatch.run_system_case(
+                case_path;
+                output_root = joinpath(case_dir, "outputs"),
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+            @test run_output.result.termination_status == "OPTIMAL"
+            dispatch_rows = collect(CSV.File(run_output.dispatch_path))
+            @test dispatch_rows[1].total_hydro_turbine_flow_m3s ≈ 10.0
+        end
+
+        # A spillway reach with a spill penalty reports spill volume and the
+        # corresponding penalty in the run summary.
+        mktempdir() do case_dir
+            document = minimal_hydraulic_v3_system_case_document()
+            reservoir = document["hydraulic_network"]["nodes"][1]["reservoir"]
+            reservoir["initial_storage_hm3"] = 50.0
+            reservoir["terminal_condition"] = "none"
+            delete!(reservoir, "terminal_storage_min_hm3")
+            reservoir["terminal_water_value_usd_per_hm3"] = 0.0
+            document["time_series"][1]["natural_inflow_m3s"]["reservoir_alpha"] = 60.0
+            push!(
+                document["hydraulic_network"]["reaches"],
+                Dict{String,Any}(
+                    "id" => "reach_spillway",
+                    "display_name" => "Spillway",
+                    "from_node" => "reservoir_alpha",
+                    "to_node" => "junction_out",
+                    "type" => "spillway",
+                    "routing_method" => "none",
+                    "travel_time_hours" => 0.0,
+                    "spill_penalty_usd_per_hm3" => 100.0,
+                ),
+            )
+            case_path = write_minimal_system_case_json(case_dir; document = document)
+            run_output = BESSDispatch.run_system_case(
+                case_path;
+                output_root = joinpath(case_dir, "outputs"),
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+            @test run_output.result.termination_status == "OPTIMAL"
+            dispatch_rows = collect(CSV.File(run_output.dispatch_path))
+            @test dispatch_rows[1].total_hydro_turbine_flow_m3s ≈ 40.0
+            @test dispatch_rows[1].total_hydro_spill_flow_m3s ≈ 20.0
+            summary = JSON3.read(read(run_output.summary_path, String))
+            hm3_per_m3s_hour = 3600.0 / 1_000_000.0
+            expected_spill_volume = 20.0 * 2.0 * hm3_per_m3s_hour
+            @test summary.hydraulic_v3_totals.total_spill_volume_hm3 ≈ expected_spill_volume
+            @test summary.hydraulic_v3_totals.total_spill_penalty_usd ≈ 100.0 * expected_spill_volume
+        end
+
+        # Series-backed minimum flow enforces the per-period requirement.
+        mktempdir() do case_dir
+            document = minimal_hydraulic_v3_system_case_document()
+            document["hydraulic_network"]["nodes"][1]["reservoir"]["terminal_water_value_usd_per_hm3"] = 1000.0
+            document["time_series"] = [
+                Dict{String,Any}(
+                    "timestamp" => "2026-01-01T00:00:00",
+                    "duration_hours" => 2.0,
+                    "natural_inflow_m3s" => Dict{String,Any}("reservoir_alpha" => 0.0),
+                    "minimum_flow_m3s" => Dict{String,Any}("reach_reservoir_intake" => 10.0),
+                ),
+                Dict{String,Any}(
+                    "timestamp" => "2026-01-01T02:00:00",
+                    "duration_hours" => 2.0,
+                    "natural_inflow_m3s" => Dict{String,Any}("reservoir_alpha" => 0.0),
+                    "minimum_flow_m3s" => Dict{String,Any}("reach_reservoir_intake" => 5.0),
+                ),
+            ]
+            document["hydraulic_network"]["reaches"][1]["flow_min_source"] = "series"
+            case_path = write_minimal_system_case_json(case_dir; document = document)
+            run_output = BESSDispatch.run_system_case(
+                case_path;
+                output_root = joinpath(case_dir, "outputs"),
+                run_timestamp = DateTime("2026-01-02T03:04:05"),
+            )
+            @test run_output.result.termination_status == "OPTIMAL"
+            dispatch_rows = collect(CSV.File(run_output.dispatch_path))
+            @test dispatch_rows[1].total_hydro_turbine_flow_m3s ≈ 10.0
+            @test dispatch_rows[2].total_hydro_turbine_flow_m3s ≈ 5.0
+        end
+    end
+
     @testset "rejects invalid system battery bounds before model construction" begin
         document = minimal_system_case_document()
         battery = system_case_node(document, "battery_1")
@@ -1449,7 +1836,7 @@ end
             document -> delete!(document, "schema_version"),
         ))
         @test occursin("schema_version must be one of", invalid_system_case_error_text(
-            document -> document["schema_version"] = "bess_system_dispatch.v3",
+            document -> document["schema_version"] = "bess_system_dispatch.v4",
         ))
         @test occursin("node id battery_1 is duplicated", invalid_system_case_error_text(
             document -> system_case_node(document, "solar_1")["id"] = "battery_1",

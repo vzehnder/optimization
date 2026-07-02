@@ -33,6 +33,13 @@ end
 function main(args::Vector{String})::Int
     try
         system_case_path = parse_cli_args(args)
+        document = JSON3.read(read(system_case_path, String), Dict{String,Any})
+        schema_version = string(get(document, "schema_version", ""))
+        if schema_version == "bess_system_dispatch.v3"
+            JSON3.write(stdout, BESSDispatch.validate_hydraulic_v3_system_case_document(document))
+            println()
+            return 0
+        end
         system_case = BESSDispatch.load_system_case(system_case_path)
         optimization_data = BESSDispatch.normalize_system_case(system_case)
 

@@ -29,7 +29,12 @@ from app.draft_editor import (
     generate_system_case_from_draft,
     structured_draft_document_from_system_case,
 )
-from app.persistence import AnalystStore, DEFAULT_PUBLICATION_ARTIFACT_TYPES, utc_now_iso
+from app.persistence import (
+    AnalystStore,
+    DEFAULT_PUBLICATION_ARTIFACT_TYPES,
+    build_hydraulic_diagram_layout_snapshot,
+    utc_now_iso,
+)
 from app.results import ResultReadError, apply_dashboard_template, read_run_results
 from app.runner import JuliaRunExecutor, LocalRunQueue
 from app.time_series_ingestion import (
@@ -130,6 +135,104 @@ class ScenarioVersionCreateRequest(BaseModel):
 class ScenarioDraftWriteRequest(BaseModel):
     document: dict[str, Any] | None = None
     source_version_id: int | None = None
+
+
+class HydraulicDiagramViewportRequest(BaseModel):
+    x: float = 0.0
+    y: float = 0.0
+    zoom: float = Field(default=1.0, gt=0)
+
+
+class HydraulicReservoirParametersRequest(BaseModel):
+    storage_min_hm3: float
+    storage_max_hm3: float
+    initial_storage_hm3: float
+    terminal_condition: Literal["none", "equal_initial", "min_terminal"] = "none"
+    terminal_storage_min_hm3: float | None = None
+    terminal_water_value_usd_per_hm3: float = 0.0
+
+
+class HydraulicCurvePointRequest(BaseModel):
+    x_value: float
+    y_value: float
+
+
+class HydraulicStorageElevationCurveRequest(BaseModel):
+    curve_set_id: int | None = None
+    version_label: str | None = None
+    points: list[HydraulicCurvePointRequest] = Field(default_factory=list)
+
+
+class HydraulicFlowPowerCurveRequest(BaseModel):
+    curve_set_id: int | None = None
+    version_label: str | None = None
+    points: list[HydraulicCurvePointRequest] = Field(default_factory=list)
+
+
+class HydraulicNaturalInflowSeriesPointRequest(BaseModel):
+    timestamp: str = Field(min_length=1)
+    duration_hours: float = 1.0
+    value_m3s: float
+
+
+class HydraulicNaturalInflowSeriesRequest(BaseModel):
+    time_series_set_id: int | None = None
+    version_label: str | None = None
+    points: list[HydraulicNaturalInflowSeriesPointRequest] = Field(default_factory=list)
+
+
+class HydraulicPlantParametersRequest(BaseModel):
+    non_modeled: bool = False
+    min_power_mw: float | None = None
+    max_power_mw: float | None = None
+
+
+class HydraulicUnitRequest(BaseModel):
+    technical_key: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    is_active: bool = True
+    operation_mode: str = "generation"
+    generation_mode: str = "flow_power_curve"
+    intake_node_key: str | None = None
+    discharge_node_key: str | None = None
+    min_power_mw: float | None = None
+    max_power_mw: float | None = None
+    min_flow_m3s: float | None = None
+    max_flow_m3s: float | None = None
+    flow_power_curve: HydraulicFlowPowerCurveRequest | None = None
+
+
+class HydraulicDiagramNodeRequest(BaseModel):
+    component_type: Literal["reservoir", "junction", "plant"]
+    technical_key: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    x: float | None = None
+    y: float | None = None
+    reservoir: HydraulicReservoirParametersRequest | None = None
+    storage_elevation_curve: HydraulicStorageElevationCurveRequest | None = None
+    natural_inflow_series: HydraulicNaturalInflowSeriesRequest | None = None
+    plant: HydraulicPlantParametersRequest | None = None
+    units: list[HydraulicUnitRequest] = Field(default_factory=list)
+
+
+class HydraulicDiagramReachRequest(BaseModel):
+    technical_key: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    from_node_key: str = Field(min_length=1)
+    to_node_key: str = Field(min_length=1)
+    reach_type: str = Field(min_length=1)
+    routing_method: str = "none"
+    travel_time_hours: float = 0.0
+    flow_min_m3s: float | None = None
+    spill_penalty_usd_per_hm3: float | None = None
+    minimum_flow_series: HydraulicNaturalInflowSeriesRequest | None = None
+
+
+class HydraulicDiagramSaveRequest(BaseModel):
+    revision: str = Field(min_length=1)
+    nodes: list[HydraulicDiagramNodeRequest]
+    reaches: list[HydraulicDiagramReachRequest] = Field(default_factory=list)
+    viewport: HydraulicDiagramViewportRequest = Field(default_factory=HydraulicDiagramViewportRequest)
 
 
 class TimeSeriesMappingRequest(BaseModel):
@@ -977,6 +1080,136 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"scenario": scenario}
 
+    @app.post("/api/scenarios/{scenario_id}/hydraulic-diagram", status_code=201)
+    async def create_hydraulic_diagram(scenario_id: int):
+        try:
+            diagram = analyst_store.get_or_create_hydraulic_diagram(scenario_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"diagram": diagram}
+
+    @app.get("/api/scenarios/{scenario_id}/hydraulic-diagram")
+    async def get_hydraulic_diagram(scenario_id: int):
+        try:
+            diagram = analyst_store.get_hydraulic_diagram(scenario_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"diagram": diagram}
+
+    @app.put("/api/scenarios/{scenario_id}/hydraulic-diagram")
+    async def save_hydraulic_diagram(scenario_id: int, payload: HydraulicDiagramSaveRequest):
+        try:
+            diagram = analyst_store.save_hydraulic_diagram(
+                scenario_id=scenario_id,
+                revision=payload.revision,
+                nodes=[node.model_dump() for node in payload.nodes],
+                reaches=[reach.model_dump() for reach in payload.reaches],
+                viewport=payload.viewport.model_dump(),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            status_code = 409 if str(error) == "stale hydraulic diagram revision" else 400
+            raise HTTPException(status_code=status_code, detail=str(error)) from error
+        return {"diagram": diagram}
+
+    @app.post("/api/scenarios/{scenario_id}/hydraulic-diagram/validate")
+    async def validate_hydraulic_diagram(scenario_id: int):
+        try:
+            validation = analyst_store.validate_hydraulic_diagram(scenario_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"validation": validation}
+
+    @app.post("/api/scenarios/{scenario_id}/hydraulic-diagram/v3-preview")
+    async def validate_hydraulic_v3_preview(scenario_id: int):
+        try:
+            topology_validation = analyst_store.validate_hydraulic_diagram(scenario_id)
+            if not topology_validation["ok"]:
+                validation = {
+                    **topology_validation,
+                    "kind": "hydraulic_topology",
+                    "stale": False,
+                    "status": "error",
+                    "system_case": None,
+                }
+                return {"validation": validation}
+            system_case = analyst_store.generate_hydraulic_v3_preview(scenario_id)
+            result = service.validate_text(json.dumps(system_case, sort_keys=True))
+            if not result.ok:
+                validation = {
+                    "kind": "hydraulic_v3_preview",
+                    "ok": False,
+                    "stale": False,
+                    "status": "error",
+                    "summary": "Hydraulic v3 payload failed Julia validation",
+                    "errors": [
+                        {
+                            "severity": "error",
+                            "code": "julia_v3_validation_failed",
+                            "message": result.message,
+                            "entity_type": "hydraulic_v3_payload",
+                            "entity_id": 0,
+                            "technical_key": "bess_system_dispatch.v3",
+                        }
+                    ],
+                    "warnings": [],
+                    "system_case": system_case,
+                    "julia_validation": result.payload,
+                }
+                return {"validation": validation}
+            validation = analyst_store.persist_hydraulic_v3_validation(
+                scenario_id=scenario_id,
+                system_case=system_case,
+                julia_payload=result.payload,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return {"validation": validation}
+
+    @app.post("/api/scenarios/{scenario_id}/hydraulic-diagram/promote", status_code=201)
+    async def promote_hydraulic_diagram(scenario_id: int):
+        try:
+            diagram = analyst_store.get_hydraulic_diagram(scenario_id)
+            validation = diagram["validation"]
+            if (
+                validation.get("kind") != "hydraulic_v3_preview"
+                or not validation.get("ok")
+                or validation.get("stale")
+            ):
+                raise DraftPromotionError("hydraulic v3 validation must succeed before promotion")
+            system_case = validation.get("system_case")
+            if not isinstance(system_case, dict):
+                raise DraftPromotionError("hydraulic v3 validation snapshot is missing system_case")
+            current_system_case = analyst_store.generate_hydraulic_v3_preview(scenario_id)
+            if json.dumps(current_system_case, sort_keys=True) != json.dumps(system_case, sort_keys=True):
+                raise DraftPromotionError("hydraulic v3 validation is stale after diagram edits")
+            scenario_version, error = save_validated_scenario_version(
+                scenario_id,
+                json.dumps(system_case, sort_keys=True),
+                {
+                    "kind": "hydraulic_diagram_v3",
+                    "source_case_id": diagram["optimization_case"]["id"],
+                    "validation_hash": validation.get("validation_hash"),
+                    "generated_at": utc_now_iso(),
+                },
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except DraftPromotionError as error:
+            return JSONResponse(error_response_body("promotion", str(error), phase="python_validation"), status_code=400)
+        if error is not None:
+            return JSONResponse(validation_response_body(error), status_code=400)
+        analyst_store.persist_scenario_version_hydraulic_diagram_snapshot(
+            scenario_version_id=scenario_version["id"],
+            layout_snapshot=build_hydraulic_diagram_layout_snapshot(diagram),
+            source_case_id=diagram["optimization_case"]["id"],
+            layout_key=diagram["layout"]["layout_key"],
+        )
+        return scenario_version
+
     @app.post("/api/scenarios/{scenario_id}/draft", status_code=201)
     async def create_scenario_draft(scenario_id: int, payload: ScenarioDraftWriteRequest):
         try:
@@ -1249,6 +1482,16 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"scenario_version": scenario_version}
+
+    @app.get("/api/scenario-versions/{scenario_version_id}/hydraulic-diagram-snapshot")
+    async def get_scenario_version_hydraulic_diagram_snapshot(scenario_version_id: int):
+        try:
+            snapshot = analyst_store.get_scenario_version_hydraulic_diagram_snapshot(
+                scenario_version_id
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"snapshot": snapshot}
 
     @app.delete("/api/scenario-versions/{scenario_version_id}")
     async def delete_scenario_version(scenario_version_id: int):

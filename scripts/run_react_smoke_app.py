@@ -147,6 +147,11 @@ def main() -> None:
         run_queue=SmokeRunQueue(store, artifact_root),
         artifact_root=artifact_root,
     )
+
+    @app.get("/api/auth/smoke-token", include_in_schema=False)
+    async def smoke_token():
+        return {"token": os.environ.get("REACT_SMOKE_TOKEN", "")}
+
     uvicorn.run(
         app,
         host="127.0.0.1",

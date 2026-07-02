@@ -1637,11 +1637,15 @@ function HydroFields({
   jsonTexts,
   setJsonTexts,
   removalProps,
+  onOpenHydraulicDiagram,
 }: AssetFieldProps) {
   const patch = (field: string, value: unknown) =>
     setDocument((current) =>
       replaceAsset(current, assetIndex, { [field]: value }),
     );
+  const hasHydroError = Object.keys(errors).some((key) =>
+    key.startsWith("hydro_"),
+  );
   return (
     <AssetShell asset={asset} {...removalProps}>
       <div className="draft-field-grid">
@@ -1653,132 +1657,152 @@ function HydroFields({
           errors={errors}
           required
         />
-        <NumberInput
-          id="hydro_storage_min_hm3"
-          label="Minimum storage (hm3)"
-          value={asset.storage_min_hm3}
-          onChange={(value) => patch("storage_min_hm3", value)}
-          errors={errors}
-          required
-        />
-        <NumberInput
-          id="hydro_storage_max_hm3"
-          label="Maximum storage (hm3)"
-          value={asset.storage_max_hm3}
-          onChange={(value) => patch("storage_max_hm3", value)}
-          errors={errors}
-          required
-        />
-        <NumberInput
-          id="hydro_initial_storage_hm3"
-          label="Initial storage (hm3)"
-          value={asset.initial_storage_hm3}
-          onChange={(value) => patch("initial_storage_hm3", value)}
-          errors={errors}
-          required
-        />
-        <SelectInput
-          id="hydro_generation_mode"
-          label="Generation mode"
-          value={String(asset.generation_mode || "linear")}
-          onChange={(value) => patch("generation_mode", value)}
-          options={[
-            { value: "linear", label: "Linear" },
-            { value: "piecewise_linear", label: "Piecewise linear" },
-          ]}
-        />
-        <NumberInput
-          id="hydro_power_per_flow_mw_per_m3s"
-          label="Power per flow (MW per m3/s)"
-          value={asset.power_per_flow_mw_per_m3s}
-          onChange={(value) => patch("power_per_flow_mw_per_m3s", value)}
-          errors={errors}
-        />
-        <NumberInput
-          id="hydro_turbine_flow_min_m3s"
-          label="Minimum turbine flow (m3/s)"
-          value={asset.turbine_flow_min_m3s}
-          onChange={(value) => patch("turbine_flow_min_m3s", value)}
-          errors={errors}
-        />
-        <NumberInput
-          id="hydro_turbine_flow_max_m3s"
-          label="Maximum turbine flow (m3/s)"
-          value={asset.turbine_flow_max_m3s}
-          onChange={(value) => patch("turbine_flow_max_m3s", value)}
-          errors={errors}
-        />
-        <NumberInput
-          id="hydro_power_max_mw"
-          label="Maximum power (MW)"
-          value={asset.power_max_mw}
-          onChange={(value) => patch("power_max_mw", value)}
-          errors={errors}
-        />
-        <NumberInput
-          id="hydro_minimum_release_m3s"
-          label="Minimum release (m3/s)"
-          value={asset.minimum_release_m3s}
-          onChange={(value) => patch("minimum_release_m3s", value)}
-          errors={errors}
-        />
-        <NumberInput
-          id="hydro_spill_penalty_usd_per_hm3"
-          label="Spill penalty (USD/hm3)"
-          value={asset.spill_penalty_usd_per_hm3}
-          onChange={(value) => patch("spill_penalty_usd_per_hm3", value)}
-          errors={errors}
-        />
-        <SelectInput
-          id="hydro_terminal_condition"
-          label="Terminal condition"
-          value={String(asset.terminal_condition || "none")}
-          onChange={(value) => patch("terminal_condition", value)}
-          options={[
-            { value: "none", label: "None" },
-            { value: "equal_initial", label: "Equal initial" },
-            { value: "min_terminal", label: "Minimum terminal" },
-          ]}
-        />
-        <NumberInput
-          id="hydro_terminal_storage_min_hm3"
-          label="Minimum terminal storage (hm3)"
-          value={asset.terminal_storage_min_hm3}
-          onChange={(value) => patch("terminal_storage_min_hm3", value)}
-          errors={errors}
-        />
-        <NumberInput
-          id="hydro_terminal_water_value_usd_per_hm3"
-          label="Terminal water value (USD/hm3)"
-          value={asset.terminal_water_value_usd_per_hm3}
-          onChange={(value) => patch("terminal_water_value_usd_per_hm3", value)}
-          errors={errors}
-        />
       </div>
-      <JsonTextarea
-        id="hydro_generation_curve_json"
-        label="Generation curve (JSON)"
-        value={jsonTexts.hydroGenerationCurve}
-        onChange={(value) =>
-          setJsonTexts((current) => ({
-            ...current,
-            hydroGenerationCurve: value,
-          }))
-        }
-        errors={errors}
-      />
-      <JsonTextarea
-        id="hydro_reservoir_curve_json"
-        label="Reservoir curve (JSON)"
-        value={jsonTexts.hydroReservoirCurve}
-        onChange={(value) =>
-          setJsonTexts((current) => ({
-            ...current,
-            hydroReservoirCurve: value,
-          }))
-        }
-        errors={errors}
-      />
+      <p className="source-note">
+        Define la topologia y los parametros completos en el diagrama
+        hidraulico. Los campos de abajo son un resumen editable.
+      </p>
+      {onOpenHydraulicDiagram ? (
+        <button
+          type="button"
+          className="hydraulic-diagram-link"
+          onClick={onOpenHydraulicDiagram}
+        >
+          Editar diagrama hidraulico
+        </button>
+      ) : null}
+      <details className="hydro-detail" open={hasHydroError || undefined}>
+        <summary>Parametros hidraulicos (resumen)</summary>
+        <div className="draft-field-grid">
+          <NumberInput
+            id="hydro_storage_min_hm3"
+            label="Minimum storage (hm3)"
+            value={asset.storage_min_hm3}
+            onChange={(value) => patch("storage_min_hm3", value)}
+            errors={errors}
+            required
+          />
+          <NumberInput
+            id="hydro_storage_max_hm3"
+            label="Maximum storage (hm3)"
+            value={asset.storage_max_hm3}
+            onChange={(value) => patch("storage_max_hm3", value)}
+            errors={errors}
+            required
+          />
+          <NumberInput
+            id="hydro_initial_storage_hm3"
+            label="Initial storage (hm3)"
+            value={asset.initial_storage_hm3}
+            onChange={(value) => patch("initial_storage_hm3", value)}
+            errors={errors}
+            required
+          />
+          <SelectInput
+            id="hydro_generation_mode"
+            label="Generation mode"
+            value={String(asset.generation_mode || "linear")}
+            onChange={(value) => patch("generation_mode", value)}
+            options={[
+              { value: "linear", label: "Linear" },
+              { value: "piecewise_linear", label: "Piecewise linear" },
+            ]}
+          />
+          <NumberInput
+            id="hydro_power_per_flow_mw_per_m3s"
+            label="Power per flow (MW per m3/s)"
+            value={asset.power_per_flow_mw_per_m3s}
+            onChange={(value) => patch("power_per_flow_mw_per_m3s", value)}
+            errors={errors}
+          />
+          <NumberInput
+            id="hydro_turbine_flow_min_m3s"
+            label="Minimum turbine flow (m3/s)"
+            value={asset.turbine_flow_min_m3s}
+            onChange={(value) => patch("turbine_flow_min_m3s", value)}
+            errors={errors}
+          />
+          <NumberInput
+            id="hydro_turbine_flow_max_m3s"
+            label="Maximum turbine flow (m3/s)"
+            value={asset.turbine_flow_max_m3s}
+            onChange={(value) => patch("turbine_flow_max_m3s", value)}
+            errors={errors}
+          />
+          <NumberInput
+            id="hydro_power_max_mw"
+            label="Maximum power (MW)"
+            value={asset.power_max_mw}
+            onChange={(value) => patch("power_max_mw", value)}
+            errors={errors}
+          />
+          <NumberInput
+            id="hydro_minimum_release_m3s"
+            label="Minimum release (m3/s)"
+            value={asset.minimum_release_m3s}
+            onChange={(value) => patch("minimum_release_m3s", value)}
+            errors={errors}
+          />
+          <NumberInput
+            id="hydro_spill_penalty_usd_per_hm3"
+            label="Spill penalty (USD/hm3)"
+            value={asset.spill_penalty_usd_per_hm3}
+            onChange={(value) => patch("spill_penalty_usd_per_hm3", value)}
+            errors={errors}
+          />
+          <SelectInput
+            id="hydro_terminal_condition"
+            label="Terminal condition"
+            value={String(asset.terminal_condition || "none")}
+            onChange={(value) => patch("terminal_condition", value)}
+            options={[
+              { value: "none", label: "None" },
+              { value: "equal_initial", label: "Equal initial" },
+              { value: "min_terminal", label: "Minimum terminal" },
+            ]}
+          />
+          <NumberInput
+            id="hydro_terminal_storage_min_hm3"
+            label="Minimum terminal storage (hm3)"
+            value={asset.terminal_storage_min_hm3}
+            onChange={(value) => patch("terminal_storage_min_hm3", value)}
+            errors={errors}
+          />
+          <NumberInput
+            id="hydro_terminal_water_value_usd_per_hm3"
+            label="Terminal water value (USD/hm3)"
+            value={asset.terminal_water_value_usd_per_hm3}
+            onChange={(value) =>
+              patch("terminal_water_value_usd_per_hm3", value)
+            }
+            errors={errors}
+          />
+        </div>
+        <JsonTextarea
+          id="hydro_generation_curve_json"
+          label="Generation curve (JSON)"
+          value={jsonTexts.hydroGenerationCurve}
+          onChange={(value) =>
+            setJsonTexts((current) => ({
+              ...current,
+              hydroGenerationCurve: value,
+            }))
+          }
+          errors={errors}
+        />
+        <JsonTextarea
+          id="hydro_reservoir_curve_json"
+          label="Reservoir curve (JSON)"
+          value={jsonTexts.hydroReservoirCurve}
+          onChange={(value) =>
+            setJsonTexts((current) => ({
+              ...current,
+              hydroReservoirCurve: value,
+            }))
+          }
+          errors={errors}
+        />
+      </details>
     </AssetShell>
   );
 }
@@ -1797,6 +1821,7 @@ type AssetFieldProps = {
     onCancelRemove: () => void;
     onConfirmRemove: (assetId: string) => void;
   };
+  onOpenHydraulicDiagram?: () => void;
 };
 
 function LoadingView({ label }: { label: string }) {
@@ -2088,6 +2113,27 @@ function DraftEditor({
       candidate: built.document,
       submittedSignature,
     });
+  }
+
+  function openHydraulicDiagram() {
+    if (saveMutation.isPending) return;
+    const built = buildSaveDocument(document, jsonTexts);
+    if (Object.keys(built.errors).length) {
+      setValidationErrors(built.errors);
+      setSaveError("");
+      window.requestAnimationFrame(() => validationSummaryRef.current?.focus());
+      return;
+    }
+    setDocument(cloneDocument(built.document));
+    setValidationErrors({});
+    const submittedSignature = editorSignature(built.document, jsonTexts);
+    saveMutation.mutate(
+      { candidate: built.document, submittedSignature },
+      {
+        onSuccess: () =>
+          navigate(`/scenarios/${scenario.id}/hydraulic-diagram`),
+      },
+    );
   }
 
   function persistTimeSeriesSource(source: TimeSeriesSource) {
@@ -2382,6 +2428,7 @@ function DraftEditor({
               jsonTexts,
               setJsonTexts: updateJsonTexts,
               removalProps,
+              onOpenHydraulicDiagram: openHydraulicDiagram,
             };
             if (asset.type === "battery")
               return <BatteryFields key={assetIndex} {...props} />;
