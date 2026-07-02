@@ -75,6 +75,11 @@ import {
   type ScenarioVersionDetail,
 } from "./api/client";
 import {
+  InflowImportError,
+  parseInflowCsv,
+  parseInflowWorkbook,
+} from "./hydro/inflowImport";
+import {
   DashboardResultsContent,
   RunArtifactsSection,
   RunResultsSection,
@@ -1973,7 +1978,7 @@ const hydraulicTerminalConditionLabels: Record<
   min_terminal: "Minimo terminal",
 };
 
-function HydraulicInflowPanel({
+export function HydraulicInflowPanel({
   node,
   availableSeries,
   updateInflowSeries,
@@ -1988,6 +1993,7 @@ function HydraulicInflowPanel({
   const key = node.technical_key;
   const series = node.natural_inflow_series ?? emptyInflowSeries();
   const points = series.points;
+  const [importError, setImportError] = useState<string | null>(null);
 
   function setPoints(nextPoints: HydraulicNaturalInflowSeriesPoint[]) {
     updateInflowSeries(key, {
@@ -1995,6 +2001,22 @@ function HydraulicInflowPanel({
       version_label: series.version_label ?? null,
       points: nextPoints,
     });
+  }
+
+  async function importFile(file: File) {
+    try {
+      const imported = /\.(xlsx|xls)$/i.test(file.name)
+        ? parseInflowWorkbook(await file.arrayBuffer())
+        : parseInflowCsv(await file.text());
+      setImportError(null);
+      setPoints(imported);
+    } catch (error) {
+      setImportError(
+        error instanceof InflowImportError
+          ? error.message
+          : "No se pudo importar el archivo.",
+      );
+    }
   }
 
   return (
@@ -2005,6 +2027,20 @@ function HydraulicInflowPanel({
       <div className="draft-section-heading">
         <h3>Afluente natural {node.display_name}</h3>
         <div className="draft-actions">
+          <label className="inflow-import-control" htmlFor={`inflow-import-${key}`}>
+            <span>Importar afluentes {key}</span>
+            <input
+              id={`inflow-import-${key}`}
+              data-testid={`inflow-import-${key}`}
+              type="file"
+              accept=".csv,.xlsx,.xls"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (file) void importFile(file);
+              }}
+            />
+          </label>
           {availableSeries.length ? (
             <label htmlFor={`inflow-version-${key}`}>
               <span>Version de serie {key}</span>
@@ -2036,107 +2072,33 @@ function HydraulicInflowPanel({
               </select>
             </label>
           ) : null}
-          <button
-            type="button"
-            data-testid={`inflow-add-point-${key}`}
-            onClick={() =>
-              setPoints([
-                ...points,
-                {
-                  timestamp: "2026-01-01T00:00:00",
-                  duration_hours: 1,
-                  value_m3s: 0,
-                },
-              ])
-            }
-          >
-            Agregar punto de afluente {key}
-          </button>
         </div>
       </div>
+      {importError ? (
+        <p className="field-error" role="alert" data-testid={`inflow-import-error-${key}`}>
+          {importError}
+        </p>
+      ) : null}
       {points.length ? (
         <ul className="resource-list hydraulic-inflow-points">
+          <li className="hydraulic-inflow-row hydraulic-inflow-head">
+            <span>Marca temporal</span>
+            <span>Duracion (h)</span>
+            <span>Caudal (m3/s)</span>
+          </li>
           {points.map((point, index) => (
-            <li key={index}>
-              <label htmlFor={`inflow-timestamp-${key}-${index}`}>
-                <span>
-                  Marca temporal {index + 1} {key}
-                </span>
-                <input
-                  id={`inflow-timestamp-${key}-${index}`}
-                  type="text"
-                  value={point.timestamp}
-                  onChange={(event) =>
-                    setPoints(
-                      points.map((current, currentIndex) =>
-                        currentIndex === index
-                          ? { ...current, timestamp: event.target.value }
-                          : current,
-                      ),
-                    )
-                  }
-                />
-              </label>
-              <label htmlFor={`inflow-duration-${key}-${index}`}>
-                <span>
-                  Duracion horas {index + 1} {key}
-                </span>
-                <input
-                  id={`inflow-duration-${key}-${index}`}
-                  type="number"
-                  value={point.duration_hours}
-                  onChange={(event) =>
-                    setPoints(
-                      points.map((current, currentIndex) =>
-                        currentIndex === index
-                          ? {
-                              ...current,
-                              duration_hours: Number(event.target.value),
-                            }
-                          : current,
-                      ),
-                    )
-                  }
-                />
-              </label>
-              <label htmlFor={`inflow-value-${key}-${index}`}>
-                <span>
-                  Caudal m3/s {index + 1} {key}
-                </span>
-                <input
-                  id={`inflow-value-${key}-${index}`}
-                  type="number"
-                  value={point.value_m3s}
-                  onChange={(event) =>
-                    setPoints(
-                      points.map((current, currentIndex) =>
-                        currentIndex === index
-                          ? {
-                              ...current,
-                              value_m3s: Number(event.target.value),
-                            }
-                          : current,
-                      ),
-                    )
-                  }
-                />
-              </label>
-              <button
-                type="button"
-                className="secondary-action"
-                onClick={() =>
-                  setPoints(
-                    points.filter((_, currentIndex) => currentIndex !== index),
-                  )
-                }
-              >
-                Quitar punto {index + 1} {key}
-              </button>
+            <li key={index} className="hydraulic-inflow-row">
+              <span>{point.timestamp}</span>
+              <span>{point.duration_hours}</span>
+              <span>{point.value_m3s}</span>
             </li>
           ))}
         </ul>
       ) : (
-        <EmptyState>Sin afluente natural vinculado a este nodo.</EmptyState>
+        <EmptyState>
+          Importa un archivo CSV o Excel con columnas timestamp, duration_hours
+          y value_m3s para cargar los afluentes de este nodo.
+        </EmptyState>
       )}
     </li>
   );
@@ -3719,12 +3681,6 @@ export function ScenarioDetailView() {
             to={`/scenarios/${scenario.data.id}/draft`}
           >
             Abrir draft
-          </Link>
-          <Link
-            className="button-link"
-            to={`/scenarios/${scenario.data.id}/hydraulic-diagram`}
-          >
-            Abrir diagrama hidraulico
           </Link>
         </div>
       </header>
