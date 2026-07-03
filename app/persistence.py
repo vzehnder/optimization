@@ -2176,6 +2176,10 @@ class AnalystStore:
         metadata = extract_system_case_metadata(system_case_json)
         version_number = self._next_version_number(scenario_id)
         created_at = utc_now_iso()
+        full_generation_metadata = {
+            **(generation_metadata or {}),
+            **derive_case_hierarchy_provenance(system_case_json),
+        }
         cursor = self.connection.execute(
             """
             INSERT INTO scenario_versions (
@@ -2202,7 +2206,7 @@ class AnalystStore:
                 metadata["period_count"],
                 json.dumps(metadata["asset_counts"], sort_keys=True),
                 json.dumps(validation_payload, sort_keys=True),
-                json.dumps(generation_metadata or {}, sort_keys=True),
+                json.dumps(full_generation_metadata, sort_keys=True),
                 created_at,
                 created_by,
             ),
@@ -5682,6 +5686,58 @@ def hydraulic_diagram_reach_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) ->
         "from_anchor": _optional_float(metadata.get("from_anchor")),
         "to_anchor": _optional_float(metadata.get("to_anchor")),
         "z_index": int(value["z_index"] or 0),
+    }
+
+
+def _content_hash(value: Any) -> str:
+    canonical = json.dumps(value, sort_keys=True, default=str)
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def derive_case_hierarchy_provenance(document: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Split a ``system_case_json`` document into topology and parameter views.
+
+    Topology is component membership and connectivity: which nodes exist, what
+    type each node is, and how they are connected. Parameters are the
+    executable assumptions layered on that structure: scalar limits, initial
+    states, costs, curves, time series and solver settings. The split is
+    schema-agnostic on purpose so it stays valid across the one-bus and
+    hydraulic-diagram case shapes without needing a per-schema migration.
+    """
+    nodes = document.get("nodes")
+    if isinstance(nodes, list) and all(isinstance(node, dict) for node in nodes):
+        topology_view = {
+            "schema_version": document.get("schema_version"),
+            "nodes": sorted(
+                (
+                    {"id": node.get("id"), "type": node.get("type")}
+                    for node in nodes
+                ),
+                key=lambda node: (str(node["id"]), str(node["type"])),
+            ),
+            "edges": sorted(
+                (
+                    {"from": edge.get("from"), "to": edge.get("to")}
+                    for edge in document.get("edges", [])
+                    if isinstance(edge, dict)
+                ),
+                key=lambda edge: (str(edge["from"]), str(edge["to"])),
+            ),
+        }
+        parameters_view = {
+            key: value for key, value in document.items() if key not in {"nodes", "edges", "schema_version"}
+        }
+        parameters_view["node_parameters"] = {
+            str(node.get("id")): {k: v for k, v in node.items() if k not in {"id", "type"}}
+            for node in nodes
+        }
+    else:
+        topology_view = {"schema_version": document.get("schema_version")}
+        parameters_view = {key: value for key, value in document.items() if key != "schema_version"}
+
+    return {
+        "topology": {"content_hash": _content_hash(topology_view)},
+        "parameters": {"content_hash": _content_hash(parameters_view)},
     }
 
 
