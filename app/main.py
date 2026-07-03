@@ -213,6 +213,7 @@ class HydraulicDiagramNodeRequest(BaseModel):
     natural_inflow_series: HydraulicNaturalInflowSeriesRequest | None = None
     plant: HydraulicPlantParametersRequest | None = None
     units: list[HydraulicUnitRequest] = Field(default_factory=list)
+    link_anchors: dict[str, Any] | None = None
 
 
 class HydraulicDiagramReachRequest(BaseModel):
@@ -226,6 +227,8 @@ class HydraulicDiagramReachRequest(BaseModel):
     flow_min_m3s: float | None = None
     spill_penalty_usd_per_hm3: float | None = None
     minimum_flow_series: HydraulicNaturalInflowSeriesRequest | None = None
+    from_anchor: float | None = None
+    to_anchor: float | None = None
 
 
 class HydraulicDiagramSaveRequest(BaseModel):

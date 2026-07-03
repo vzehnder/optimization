@@ -1692,6 +1692,9 @@ class AnalystStore:
                                 updated_by=updated_by,
                                 now=now,
                             )
+                item_metadata: dict[str, Any] = {}
+                if node["component_type"] == "plant" and node.get("link_anchors"):
+                    item_metadata["link_anchors"] = node["link_anchors"]
                 self.connection.execute(
                     """
                     INSERT INTO case_hydraulic_diagram_items (
@@ -1706,7 +1709,7 @@ class AnalystStore:
                         metadata_json,
                         updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, 0, '{}', '{}', ?)
+                    VALUES (?, ?, ?, ?, ?, ?, 0, '{}', ?, ?)
                     """,
                     (
                         layout_id,
@@ -1715,6 +1718,7 @@ class AnalystStore:
                         node["x"],
                         node["y"],
                         index,
+                        json.dumps(item_metadata),
                         now,
                     ),
                 )
@@ -1783,6 +1787,11 @@ class AnalystStore:
                 else:
                     x = 0.0
                     y = 0.0
+                reach_metadata: dict[str, Any] = {}
+                if reach.get("from_anchor") is not None:
+                    reach_metadata["from_anchor"] = reach["from_anchor"]
+                if reach.get("to_anchor") is not None:
+                    reach_metadata["to_anchor"] = reach["to_anchor"]
                 self.connection.execute(
                     """
                     INSERT INTO case_hydraulic_diagram_items (
@@ -1797,7 +1806,7 @@ class AnalystStore:
                         metadata_json,
                         updated_at
                     )
-                    VALUES (?, 'case_hydraulic_reach', ?, ?, ?, ?, 0, '{}', '{}', ?)
+                    VALUES (?, 'case_hydraulic_reach', ?, ?, ?, ?, 0, '{}', ?, ?)
                     """,
                     (
                         layout_id,
@@ -1805,6 +1814,7 @@ class AnalystStore:
                         x,
                         y,
                         len(normalized_nodes) + index,
+                        json.dumps(reach_metadata),
                         now,
                     ),
                 )
@@ -3047,6 +3057,7 @@ class AnalystStore:
                 case_hydraulic_diagram_items.x,
                 case_hydraulic_diagram_items.y,
                 case_hydraulic_diagram_items.z_index,
+                case_hydraulic_diagram_items.metadata_json,
                 hydraulic_nodes.node_type AS component_type,
                 hydraulic_nodes.node_key AS technical_key,
                 case_hydraulic_nodes.case_label AS display_name
@@ -3069,6 +3080,7 @@ class AnalystStore:
                 case_hydraulic_diagram_items.x,
                 case_hydraulic_diagram_items.y,
                 case_hydraulic_diagram_items.z_index,
+                case_hydraulic_diagram_items.metadata_json,
                 'plant' AS component_type,
                 hydraulic_plants.plant_key AS technical_key,
                 case_hydraulic_plants.case_label AS display_name
@@ -3095,6 +3107,7 @@ class AnalystStore:
             SELECT
                 case_hydraulic_diagram_items.id AS layout_item_id,
                 case_hydraulic_diagram_items.z_index,
+                case_hydraulic_diagram_items.metadata_json,
                 case_hydraulic_reaches.id AS entity_id,
                 case_hydraulic_reaches.hydraulic_reach_id AS base_reach_id,
                 case_hydraulic_reaches.flow_min_m3s,
@@ -5222,12 +5235,41 @@ def normalize_hydraulic_diagram_nodes(nodes: list[dict[str, Any]]) -> list[dict[
                 node.get("plant") or {}
             )
             normalized_node["units"] = normalize_hydraulic_units(node.get("units") or [])
+            normalized_node["link_anchors"] = normalize_hydraulic_link_anchors(
+                node.get("link_anchors")
+            )
         normalized.append(normalized_node)
     return normalized
 
 
 def _optional_float(value: Any) -> float | None:
     return None if value is None else float(value)
+
+
+def _optional_anchor(value: Any) -> float | None:
+    if value is None:
+        return None
+    anchor = float(value)
+    if not 0.0 <= anchor <= 1.0:
+        raise ValueError("hydraulic anchor must be between 0 and 1")
+    return anchor
+
+
+def normalize_hydraulic_link_anchors(raw: Any) -> dict[str, dict[str, float | None]]:
+    anchors: dict[str, dict[str, float | None]] = {}
+    if not isinstance(raw, Mapping):
+        return anchors
+    for key, value in raw.items():
+        if not isinstance(value, Mapping):
+            continue
+        entry = {
+            "from": _optional_anchor(value.get("from")),
+            "to": _optional_anchor(value.get("to")),
+        }
+        if entry["from"] is None and entry["to"] is None:
+            continue
+        anchors[str(key)] = entry
+    return anchors
 
 
 def normalize_hydraulic_plant_parameters(plant: Mapping[str, Any]) -> dict[str, Any]:
@@ -5491,6 +5533,8 @@ def normalize_hydraulic_diagram_reaches(reaches: list[dict[str, Any]]) -> list[d
                     reach.get("spill_penalty_usd_per_hm3")
                 ),
                 "minimum_flow_series": minimum_flow_series,
+                "from_anchor": _optional_anchor(reach.get("from_anchor")),
+                "to_anchor": _optional_anchor(reach.get("to_anchor")),
             }
         )
     return normalized
@@ -5587,9 +5631,17 @@ def hydraulic_layout_public_dict(row: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _hydraulic_item_metadata(value: Mapping[str, Any]) -> dict[str, Any]:
+    try:
+        metadata = json.loads(str(value.get("metadata_json") or "{}"))
+    except json.JSONDecodeError:
+        metadata = {}
+    return metadata if isinstance(metadata, dict) else {}
+
+
 def hydraulic_diagram_node_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
     value = row_to_dict(row)
-    return {
+    node = {
         "layout_item_id": value["layout_item_id"],
         "entity_type": value["entity_type"],
         "entity_id": value["entity_id"],
@@ -5600,10 +5652,16 @@ def hydraulic_diagram_node_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> 
         "y": float(value["y"]),
         "z_index": int(value["z_index"]),
     }
+    if value["component_type"] == "plant":
+        metadata = _hydraulic_item_metadata(value)
+        anchors = metadata.get("link_anchors")
+        node["link_anchors"] = anchors if isinstance(anchors, dict) else {}
+    return node
 
 
 def hydraulic_diagram_reach_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
     value = row_to_dict(row)
+    metadata = _hydraulic_item_metadata(value)
     return {
         "layout_item_id": value["layout_item_id"],
         "entity_type": "case_hydraulic_reach",
@@ -5621,6 +5679,8 @@ def hydraulic_diagram_reach_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) ->
         ),
         "minimum_flow_series": None,
         "available_minimum_flow_series": [],
+        "from_anchor": _optional_float(metadata.get("from_anchor")),
+        "to_anchor": _optional_float(metadata.get("to_anchor")),
         "z_index": int(value["z_index"] or 0),
     }
 

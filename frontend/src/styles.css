@@ -492,6 +492,40 @@ button:focus-visible {
   min-width: 100%;
 }
 
+.hydraulic-reach-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.9rem;
+  margin: 0.5rem 0 0;
+  padding: 0.45rem 0.7rem;
+  list-style: none;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  font-size: 0.78rem;
+  color: #1f2937;
+}
+
+.hydraulic-reach-legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.hydraulic-reach-legend-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 4px;
+  border-radius: 2px;
+}
+
+.hydraulic-reach-legend-swatch-plant {
+  height: 0;
+  border-top: 3px dashed #0f766e;
+  background: transparent !important;
+  border-radius: 0;
+}
+
 .hydraulic-canvas-content {
   position: relative;
   transform-origin: top left;
@@ -509,8 +543,9 @@ button:focus-visible {
 }
 
 .hydraulic-canvas-link {
+  /* Reach color comes from the SVG stroke attribute (per reach type); the
+     focused rule below still overrides it because CSS beats attributes. */
   fill: none;
-  stroke: #075985;
   stroke-linecap: round;
   stroke-width: 3;
   filter: drop-shadow(0 2px 2px rgb(16 42 67 / 18%));
@@ -591,41 +626,51 @@ button:focus-visible {
   font-weight: 700;
 }
 
+/* Full-width border strips: a connection can start anywhere on the bottom
+   border (salida) and end anywhere on the top border (entrada), anchoring
+   at the exact point used. */
 .hydraulic-canvas-port {
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 22px;
-  height: 22px;
+  left: 0;
+  right: 0;
+  height: 12px;
   padding: 0;
-  border: 2px solid #ffffff;
-  border-radius: 999px;
-  background: #075985;
-  box-shadow: 0 4px 12px rgb(16 42 67 / 20%);
+  border: none;
+  border-radius: 6px;
+  background: transparent;
   cursor: crosshair;
   z-index: 2;
 }
 
 .hydraulic-canvas-port-in {
-  top: -12px;
+  top: -7px;
 }
 
 .hydraulic-canvas-port-out {
-  bottom: -12px;
-  background: #0f766e;
+  bottom: -7px;
 }
 
 .hydraulic-canvas-port::after {
   position: absolute;
-  inset: 5px;
+  left: 8px;
+  right: 8px;
+  top: 50%;
+  height: 4px;
+  transform: translateY(-50%);
   border-radius: 999px;
-  background: #ffffff;
+  background: #075985;
+  opacity: 0.55;
   content: "";
 }
 
-.hydraulic-canvas-port:hover,
-.hydraulic-canvas-port:focus-visible {
+.hydraulic-canvas-port-out::after {
+  background: #0f766e;
+}
+
+.hydraulic-canvas-port:hover::after,
+.hydraulic-canvas-port:focus-visible::after {
   background: #c2410c;
+  opacity: 1;
 }
 
 .hydraulic-canvas-empty {

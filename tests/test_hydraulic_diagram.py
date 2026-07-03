@@ -294,6 +294,81 @@ class HydraulicDiagramApiTests(unittest.TestCase):
         self.assertTrue(validation["ok"])
         self.assertEqual(validation["errors"], [])
 
+    def test_reach_and_plant_link_anchors_round_trip(self):
+        created = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram"
+        ).json()["diagram"]
+
+        save_response = self.client.put(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram",
+            json={
+                "revision": created["revision"],
+                "nodes": [
+                    {
+                        "component_type": "junction",
+                        "technical_key": "junction_up",
+                        "display_name": "Junction Up",
+                        "x": 120.0,
+                        "y": 80.0,
+                    },
+                    {
+                        "component_type": "junction",
+                        "technical_key": "junction_a",
+                        "display_name": "Junction A",
+                        "x": 300.0,
+                        "y": 110.0,
+                    },
+                    {
+                        "component_type": "plant",
+                        "technical_key": "plant_laja",
+                        "display_name": "Plant Laja",
+                        "x": 480.0,
+                        "y": 180.0,
+                        "units": [
+                            {
+                                "technical_key": "unit_1",
+                                "display_name": "Unit 1",
+                                "intake_node_key": "junction_a",
+                            }
+                        ],
+                        "link_anchors": {
+                            "in:junction_a": {"from": 0.25, "to": 0.75}
+                        },
+                    },
+                ],
+                "reaches": [
+                    {
+                        "technical_key": "reach_up_a",
+                        "display_name": "Up to A",
+                        "from_node_key": "junction_up",
+                        "to_node_key": "junction_a",
+                        "reach_type": "river",
+                        "from_anchor": 0.2,
+                        "to_anchor": 0.8,
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(save_response.status_code, 200)
+        saved = save_response.json()["diagram"]
+        saved_reach = saved["reaches"][0]
+        self.assertEqual(saved_reach["from_anchor"], 0.2)
+        self.assertEqual(saved_reach["to_anchor"], 0.8)
+        saved_plant = next(
+            node for node in saved["nodes"] if node["technical_key"] == "plant_laja"
+        )
+        self.assertEqual(
+            saved_plant["link_anchors"],
+            {"in:junction_a": {"from": 0.25, "to": 0.75}},
+        )
+
+        reloaded = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram"
+        ).json()["diagram"]
+        self.assertEqual(reloaded["reaches"], saved["reaches"])
+        self.assertEqual(reloaded["nodes"], saved["nodes"])
+
     def test_directed_reach_validation_identifies_missing_inactive_and_bad_type_errors(self):
         created = self.client.post(
             f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram"

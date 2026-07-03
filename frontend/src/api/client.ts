@@ -415,6 +415,11 @@ export interface HydraulicUnit extends HydraulicUnitWrite {
   available_curves: HydraulicCurveSummary[];
 }
 
+export interface HydraulicPlantLinkAnchor {
+  from?: number | null;
+  to?: number | null;
+}
+
 export interface HydraulicDiagramNodeWrite {
   component_type: HydraulicComponentType;
   technical_key: string;
@@ -426,6 +431,9 @@ export interface HydraulicDiagramNodeWrite {
   natural_inflow_series?: HydraulicNaturalInflowSeriesWrite | null;
   plant?: HydraulicPlantParameters | null;
   units?: HydraulicUnitWrite[];
+  // Plant only: border anchors for derived plant links, keyed by
+  // "in:<nodeKey>" (intake) / "out:<nodeKey>" (discharge).
+  link_anchors?: Record<string, HydraulicPlantLinkAnchor> | null;
 }
 
 export interface HydraulicDiagramNode extends HydraulicDiagramNodeWrite {
@@ -448,6 +456,10 @@ export interface HydraulicDiagramReachWrite {
   from_node_key: string;
   to_node_key: string;
   reach_type: HydraulicReachType;
+  // Fraction (0..1) along the source bottom / target top border where the
+  // edge attaches; null/absent means center (0.5).
+  from_anchor?: number | null;
+  to_anchor?: number | null;
   flow_min_m3s?: number | null;
   spill_penalty_usd_per_hm3?: number | null;
   minimum_flow_series?: HydraulicNaturalInflowSeriesWrite | null;
