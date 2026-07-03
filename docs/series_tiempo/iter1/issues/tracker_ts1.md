@@ -29,7 +29,7 @@ really begins and ends.
 
 | ID | Title | Type | Triage | Status | Fecha de inicio planificada | Fecha de termino planificada | Blocked by | Issue file |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| BESS-TS1-000 | Review TS-1 PRD And Hierarchy Semantics | HITL | ready-for-agent | Todo | 2026-07-03 | 2026-07-03 | None | [BESS-TS1-000-review-ts1-prd-and-hierarchy-semantics.md](BESS-TS1-000-review-ts1-prd-and-hierarchy-semantics.md) |
+| BESS-TS1-000 | Review TS-1 PRD And Hierarchy Semantics | HITL | ready-for-agent | Done | 2026-07-03 | 2026-07-03 | None | [BESS-TS1-000-review-ts1-prd-and-hierarchy-semantics.md](BESS-TS1-000-review-ts1-prd-and-hierarchy-semantics.md) |
 | BESS-TS1-001 | Introduce Case Hierarchy Provenance For Existing Runs | AFK | ready-for-agent | Todo | 2026-07-06 | 2026-07-07 | BESS-TS1-000 | [BESS-TS1-001-introduce-case-hierarchy-provenance-for-existing-runs.md](BESS-TS1-001-introduce-case-hierarchy-provenance-for-existing-runs.md) |
 | BESS-TS1-002 | Add Topology And Parameter Snapshot Metadata For Structured Drafts | AFK | ready-for-agent | Todo | 2026-07-08 | 2026-07-09 | BESS-TS1-001 | [BESS-TS1-002-add-topology-and-parameter-snapshot-metadata-for-structured-drafts.md](BESS-TS1-002-add-topology-and-parameter-snapshot-metadata-for-structured-drafts.md) |
 | BESS-TS1-003 | Add Topology And Parameter Snapshot Metadata For Hydraulic Diagrams | AFK | ready-for-agent | Todo | 2026-07-10 | 2026-07-13 | BESS-TS1-001 | [BESS-TS1-003-add-topology-and-parameter-snapshot-metadata-for-hydraulic-diagrams.md](BESS-TS1-003-add-topology-and-parameter-snapshot-metadata-for-hydraulic-diagrams.md) |
@@ -49,6 +49,13 @@ really begins and ends.
 6. BESS-TS1-006 exposes provenance in React once backend metadata is stable.
 7. BESS-TS1-007 runs compatibility and regression hardening across old flows.
 8. BESS-TS1-008 closes the iteration with acceptance coverage and docs.
+
+## Progress Log
+
+| Date | Issue | Status change | Notes |
+| --- | --- | --- | --- |
+| 2026-07-03 | All | Created | Initial local issue set generated from the TS-1 PRD and hierarchy roadmap. |
+| 2026-07-03 | BESS-TS1-000 | Todo -> Done | Reviewed and accepted TS-1 hierarchy semantics against the full docs context. `OptimizationCase` is the main editable case concept; `ScenarioVersion` remains the immutable executable snapshot; topology/parameter boundaries and curve treatment are accepted; `Scenario -> OptimizationCase` cardinality migration is deferred; structured draft, paste/upload, hydraulic diagram and run compatibility remain required. No PRD correction was needed. |
 
 ## Regression Guard
 
