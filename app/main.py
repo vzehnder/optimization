@@ -41,6 +41,7 @@ from app.persistence import (
 from app.results import ResultReadError, apply_dashboard_template, read_run_results
 from app.time_series_catalog import (
     CatalogImportRequest as PreparedCatalogImportRequest,
+    CatalogSignalMappingRequest as PreparedCatalogSignalMappingRequest,
     TimeSeriesCatalogError,
     prepare_time_series_catalog_import,
 )
@@ -254,6 +255,12 @@ class TimeSeriesRowsRequest(BaseModel):
     rows: list[dict[str, Any]]
 
 
+class TimeSeriesCatalogSignalMappingRequest(BaseModel):
+    source_column: str = Field(min_length=1)
+    signal_key: str = Field(min_length=1)
+    source_unit: str | None = None
+
+
 class TimeSeriesCatalogImportRequest(BaseModel):
     set_name: str = Field(min_length=1)
     version_label: str = Field(min_length=1)
@@ -261,8 +268,10 @@ class TimeSeriesCatalogImportRequest(BaseModel):
     timezone: str = Field(min_length=1)
     timestamp_column: str = Field(min_length=1)
     duration_hours_column: str = Field(min_length=1)
-    value_column: str = Field(min_length=1)
-    signal_key: str = Field(min_length=1)
+    value_column: str | None = None
+    signal_key: str | None = None
+    source_unit: str | None = None
+    signal_mappings: list[TimeSeriesCatalogSignalMappingRequest] = Field(default_factory=list)
 
 
 class DraftPromotionError(ValueError):
@@ -1486,6 +1495,15 @@ def create_app(
                     duration_hours_column=payload.duration_hours_column,
                     value_column=payload.value_column,
                     signal_key=payload.signal_key,
+                    source_unit=payload.source_unit,
+                    signal_mappings=[
+                        PreparedCatalogSignalMappingRequest(
+                            source_column=item.source_column,
+                            signal_key=item.signal_key,
+                            source_unit=item.source_unit,
+                        )
+                        for item in payload.signal_mappings
+                    ],
                 ),
             )
             created_set = analyst_store.import_time_series_catalog_set(

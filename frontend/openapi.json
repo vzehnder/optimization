@@ -1031,9 +1031,33 @@
             "type": "string"
           },
           "signal_key": {
-            "minLength": 1,
-            "title": "Signal Key",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal Key"
+          },
+          "signal_mappings": {
+            "items": {
+              "$ref": "#/components/schemas/TimeSeriesCatalogSignalMappingRequest"
+            },
+            "title": "Signal Mappings",
+            "type": "array"
+          },
+          "source_unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Unit"
           },
           "timestamp_column": {
             "minLength": 1,
@@ -1046,9 +1070,15 @@
             "type": "string"
           },
           "value_column": {
-            "minLength": 1,
-            "title": "Value Column",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Column"
           },
           "version_label": {
             "minLength": 1,
@@ -1062,11 +1092,40 @@
           "data_kind",
           "timezone",
           "timestamp_column",
-          "duration_hours_column",
-          "value_column",
-          "signal_key"
+          "duration_hours_column"
         ],
         "title": "TimeSeriesCatalogImportRequest",
+        "type": "object"
+      },
+      "TimeSeriesCatalogSignalMappingRequest": {
+        "properties": {
+          "signal_key": {
+            "minLength": 1,
+            "title": "Signal Key",
+            "type": "string"
+          },
+          "source_column": {
+            "minLength": 1,
+            "title": "Source Column",
+            "type": "string"
+          },
+          "source_unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Unit"
+          }
+        },
+        "required": [
+          "source_column",
+          "signal_key"
+        ],
+        "title": "TimeSeriesCatalogSignalMappingRequest",
         "type": "object"
       },
       "TimeSeriesMappingRequest": {

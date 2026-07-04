@@ -1,11 +1,13 @@
 # BESS-TS2-002: Preview Sources And Map Columns To Canonical Signals
 
-Status: Todo
+Status: In Review
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter2/prd.md`
-Fecha de inicio planificada: 2026-07-09
-Fecha de termino planificada: 2026-07-10
+Fecha de inicio planificada: 2026-07-04
+Fecha de termino planificada: 2026-07-04
+Fecha de inicio real: 2026-07-04
+Fecha de termino real: 2026-07-04
 
 ## User stories covered
 
@@ -29,14 +31,43 @@ share the same rules in later slices.
 
 ## Acceptance criteria
 
-- [ ] An uploaded source can be previewed with columns and sample rows before import.
-- [ ] A signal catalog defines allowed signal keys, expected units and validation rules.
-- [ ] Column mapping resolves arbitrary source column names to canonical signal keys.
-- [ ] Origin unit and canonical unit are recorded on mapped signals, without complex conversion.
-- [ ] Unmapped or unknown columns produce clear, column-tied errors.
-- [ ] The mapping used by an import persists on the revision for audit.
-- [ ] React shows the preview-and-map step before confirming an import.
-- [ ] Mapping validation is centralized for reuse by later import and edit paths.
+- [x] An uploaded source can be previewed with columns and sample rows before import.
+- [x] A signal catalog defines allowed signal keys, expected units and validation rules.
+- [x] Column mapping resolves arbitrary source column names to canonical signal keys.
+- [x] Origin unit and canonical unit are recorded on mapped signals, without complex conversion.
+- [x] Unmapped or unknown columns produce clear, column-tied errors.
+- [x] The mapping used by an import persists on the revision for audit.
+- [x] React shows the preview-and-map step before confirming an import.
+- [x] Mapping validation is centralized for reuse by later import and edit paths.
+
+## Implementation notes
+
+- The TS-2 deep import module now accepts multiple `signal_mappings` per import
+  instead of a single `value_column`/`signal_key` pair.
+- Each mapped signal persists `source_column`, `source_unit` and canonical
+  `unit` on `time_series_signals`, and the revision audit metadata now exposes
+  the full mapping used by the import.
+- React now renders a dedicated preview-and-map step with one or more signal
+  mappings before import confirmation.
+
+## Verification
+
+- `.\\.venv\\Scripts\\python.exe -m unittest tests.test_ts2_time_series_catalog`
+- `.\\.venv\\Scripts\\python.exe -m unittest discover tests`
+- `npm.cmd test`
+- `npm.cmd run build`
+- `npx.cmd eslint .`
+- `npm.cmd run api:generate`
+- `npm.cmd run api:check`
+
+## Manual QA note
+
+Attempted Chrome smoke with both `chrome:control-chrome` and
+`mcp__chrome_devtools`. Automation connected to the user Chrome session, but
+the local PostgreSQL-backed app could not be kept alive from this sandboxed
+agent session and Chrome policy then rejected navigation to the temporary local
+port used for the retry. Automated coverage above is green; manual Chrome smoke
+remains pending review outside the sandbox.
 
 ## Blocked by
 

@@ -78,6 +78,13 @@ class TimeSeriesCatalogError(ValueError):
 
 
 @dataclass(frozen=True)
+class CatalogSignalMappingRequest:
+    source_column: str
+    signal_key: str
+    source_unit: str | None = None
+
+
+@dataclass(frozen=True)
 class CatalogImportRequest:
     set_name: str
     version_label: str
@@ -85,8 +92,10 @@ class CatalogImportRequest:
     timezone: str
     timestamp_column: str
     duration_hours_column: str
-    value_column: str
-    signal_key: str
+    signal_mappings: list[CatalogSignalMappingRequest]
+    value_column: str | None = None
+    signal_key: str | None = None
+    source_unit: str | None = None
 
 
 @dataclass(frozen=True)
@@ -101,6 +110,8 @@ class CatalogPeriod:
 class CatalogSignal:
     signal_key: str
     unit: str
+    source_column: str
+    source_unit: str
     entity_type: str | None = None
     entity_key: str | None = None
 
@@ -119,7 +130,7 @@ class PreparedTimeSeriesCatalogImport:
     version_label: str
     data_kind: str
     timezone: str
-    signal: CatalogSignal
+    signals: list[CatalogSignal]
     periods: list[CatalogPeriod]
     values: list[CatalogValue]
     content_hash: str
@@ -136,11 +147,67 @@ def prepare_time_series_catalog_import(
     if not rows:
         raise TimeSeriesCatalogError("source file does not contain data rows")
 
-    definition = TIME_SERIES_SIGNAL_CATALOG.get(request.signal_key)
-    if definition is None:
-        raise TimeSeriesCatalogError(f"unsupported signal_key {request.signal_key!r}")
-
     timezone = resolve_timezone(request.timezone)
+    signal_mappings = normalize_catalog_signal_mappings(request)
+    available_columns = {
+        str(column)
+        for row in rows
+        for column in row
+    }
+    if request.timestamp_column not in available_columns:
+        raise TimeSeriesCatalogError(
+            f"timestamp column {request.timestamp_column!r} was not found in source preview"
+        )
+    if request.duration_hours_column not in available_columns:
+        raise TimeSeriesCatalogError(
+            f"duration column {request.duration_hours_column!r} was not found in source preview"
+        )
+
+    signals: list[CatalogSignal] = []
+    definitions_by_signal_key: dict[str, TimeSeriesSignalDefinition] = {}
+    seen_source_columns: set[str] = set()
+    seen_signal_keys: set[str] = set()
+    for signal_mapping in signal_mappings:
+        definition = TIME_SERIES_SIGNAL_CATALOG.get(signal_mapping.signal_key)
+        if definition is None:
+            raise TimeSeriesCatalogError(
+                f"unsupported signal_key {signal_mapping.signal_key!r} for column "
+                f"{signal_mapping.source_column!r}"
+            )
+        if signal_mapping.source_column not in available_columns:
+            raise TimeSeriesCatalogError(
+                f"column {signal_mapping.source_column!r} was not found for signal "
+                f"{signal_mapping.signal_key!r}"
+            )
+        if signal_mapping.source_column in seen_source_columns:
+            raise TimeSeriesCatalogError(
+                f"column {signal_mapping.source_column!r} is mapped more than once"
+            )
+        if signal_mapping.signal_key in seen_signal_keys:
+            raise TimeSeriesCatalogError(
+                f"signal_key {signal_mapping.signal_key!r} is mapped more than once"
+            )
+        source_unit = normalize_source_unit(signal_mapping.source_unit, definition.unit)
+        if not units_match(source_unit, definition.unit):
+            raise TimeSeriesCatalogError(
+                f"column {signal_mapping.source_column!r}: source unit {source_unit!r} does "
+                f"not match canonical unit {definition.unit!r} for signal "
+                f"{signal_mapping.signal_key!r}"
+            )
+        signals.append(
+            CatalogSignal(
+                signal_key=definition.signal_key,
+                unit=definition.unit,
+                source_column=signal_mapping.source_column,
+                source_unit=source_unit,
+                entity_type=definition.entity_type,
+                entity_key=None,
+            )
+        )
+        definitions_by_signal_key[definition.signal_key] = definition
+        seen_source_columns.add(signal_mapping.source_column)
+        seen_signal_keys.add(signal_mapping.signal_key)
+
     periods: list[CatalogPeriod] = []
     values: list[CatalogValue] = []
     for period_index, row in enumerate(rows):
@@ -162,17 +229,6 @@ def prepare_time_series_catalog_import(
             )
         timestamp_end = timestamp_start + timedelta(hours=duration_hours)
 
-        value_text = str(row.get(request.value_column) or "").strip()
-        value_numeric = parse_catalog_float(
-            value_text,
-            source_row_number,
-            request.value_column,
-        )
-        if definition.nonnegative and value_numeric < 0:
-            raise TimeSeriesCatalogError(
-                f"row {source_row_number}: {request.signal_key} must be nonnegative"
-            )
-
         periods.append(
             CatalogPeriod(
                 period_index=period_index,
@@ -181,27 +237,40 @@ def prepare_time_series_catalog_import(
                 duration_hours=duration_hours,
             )
         )
-        values.append(
-            CatalogValue(
-                period_index=period_index,
-                signal_key=request.signal_key,
-                value_numeric=value_numeric,
-                source_row_number=source_row_number,
+        for signal in signals:
+            value_text = str(row.get(signal.source_column) or "").strip()
+            value_numeric = parse_catalog_float(
+                value_text,
+                source_row_number,
+                signal.source_column,
             )
-        )
+            definition = definitions_by_signal_key[signal.signal_key]
+            if definition.nonnegative and value_numeric < 0:
+                raise TimeSeriesCatalogError(
+                    f"row {source_row_number}: column {signal.source_column!r} mapped to "
+                    f"{signal.signal_key} must be nonnegative"
+                )
+            values.append(
+                CatalogValue(
+                    period_index=period_index,
+                    signal_key=signal.signal_key,
+                    value_numeric=value_numeric,
+                    source_row_number=source_row_number,
+                )
+            )
 
-    signal = CatalogSignal(
-        signal_key=definition.signal_key,
-        unit=definition.unit,
-        entity_type=None,
-        entity_key=None,
-    )
     mapping_summary = {
         "timestamp_column": request.timestamp_column,
         "duration_hours_column": request.duration_hours_column,
-        "value_column": request.value_column,
-        "signal_key": request.signal_key,
-        "unit": definition.unit,
+        "signals": [
+            {
+                "source_column": signal.source_column,
+                "signal_key": signal.signal_key,
+                "source_unit": signal.source_unit,
+                "canonical_unit": signal.unit,
+            }
+            for signal in signals
+        ],
     }
     content_hash = catalog_content_hash(
         {
@@ -209,7 +278,7 @@ def prepare_time_series_catalog_import(
             "version_label": request.version_label,
             "data_kind": request.data_kind,
             "timezone": request.timezone,
-            "signal": signal.__dict__,
+            "signals": [signal.__dict__ for signal in signals],
             "periods": [period.__dict__ for period in periods],
             "values": [value.__dict__ for value in values],
         }
@@ -219,12 +288,56 @@ def prepare_time_series_catalog_import(
         version_label=request.version_label,
         data_kind=request.data_kind,
         timezone=request.timezone,
-        signal=signal,
+        signals=signals,
         periods=periods,
         values=values,
         content_hash=content_hash,
         mapping_summary=mapping_summary,
     )
+
+
+def normalize_catalog_signal_mappings(
+    request: CatalogImportRequest,
+) -> list[CatalogSignalMappingRequest]:
+    normalized = [
+        CatalogSignalMappingRequest(
+            source_column=str(item.source_column).strip(),
+            signal_key=str(item.signal_key).strip(),
+            source_unit=normalize_optional_text(item.source_unit),
+        )
+        for item in request.signal_mappings
+        if str(item.source_column).strip() and str(item.signal_key).strip()
+    ]
+    if normalized:
+        return normalized
+    if request.value_column and request.signal_key:
+        return [
+            CatalogSignalMappingRequest(
+                source_column=str(request.value_column).strip(),
+                signal_key=str(request.signal_key).strip(),
+                source_unit=normalize_optional_text(request.source_unit),
+            )
+        ]
+    raise TimeSeriesCatalogError("at least one signal mapping is required")
+
+
+def normalize_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def normalize_source_unit(source_unit: str | None, canonical_unit: str) -> str:
+    return normalize_optional_text(source_unit) or canonical_unit
+
+
+def units_match(source_unit: str, canonical_unit: str) -> bool:
+    return normalize_unit_token(source_unit) == normalize_unit_token(canonical_unit)
+
+
+def normalize_unit_token(value: str) -> str:
+    return "".join(value.split()).lower()
 
 
 def resolve_timezone(timezone_name: str) -> ZoneInfo:

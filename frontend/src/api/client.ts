@@ -269,13 +269,23 @@ export interface TimeSeriesCatalogImportPayload {
   timezone: string;
   timestamp_column: string;
   duration_hours_column: string;
-  value_column: string;
+  signal_mappings: TimeSeriesCatalogSignalMappingPayload[];
+  value_column?: string | null;
+  signal_key?: string | null;
+  source_unit?: string | null;
+}
+
+export interface TimeSeriesCatalogSignalMappingPayload {
+  source_column: string;
   signal_key: string;
+  source_unit?: string | null;
 }
 
 export interface ProjectTimeSeriesSetSignal {
   signal_key: string;
   unit: string;
+  source_column?: string | null;
+  source_unit?: string | null;
   entity_type: string | null;
   entity_key: string | null;
 }
@@ -316,6 +326,7 @@ export interface ProjectTimeSeriesSet {
   period_count: number;
   created_at?: string;
   updated_at?: string;
+  revision_metadata?: Record<string, unknown>;
   source: ProjectTimeSeriesSetSource | null;
   signals: ProjectTimeSeriesSetSignal[];
   periods: ProjectTimeSeriesSetPeriod[];

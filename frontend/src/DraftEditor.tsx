@@ -23,6 +23,7 @@ import {
   saveTimeSeriesMapping,
   saveTimeSeriesRows,
   type TimeSeriesCatalogImportPayload,
+  type TimeSeriesCatalogSignalMappingPayload,
   updateScenarioDraft,
   uploadTimeSeriesSource,
   validateGeneratedSystemCase,
@@ -233,6 +234,17 @@ const timeSeriesCatalogSignalOptions = [
   { value: "minimum_flow_m3s", label: "minimum_flow_m3s (m3/s)" },
 ] as const;
 
+const timeSeriesCatalogSignalUnits: Record<string, string> = {
+  price_usd_per_mwh: "USD/MWh",
+  import_price_usd_per_mwh: "USD/MWh",
+  export_price_usd_per_mwh: "USD/MWh",
+  load_demand_mw: "MW",
+  renewable_available_power_mw: "MW",
+  hydro_inflow_m3s: "m3/s",
+  natural_inflow_m3s: "m3/s",
+  minimum_flow_m3s: "m3/s",
+};
+
 const timeSeriesCatalogDataKindOptions = [
   { value: "real", label: "real" },
   { value: "programmed", label: "programmed" },
@@ -243,6 +255,12 @@ const timeSeriesCatalogDataKindOptions = [
 ] as const;
 
 const rowRenderLimit = 50;
+
+type CatalogSignalMappingDraft = {
+  source_column: string;
+  signal_key: string;
+  source_unit: string;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -355,6 +373,56 @@ function findSuggestedCatalogColumn(
   );
 }
 
+function catalogSignalUnit(signalKey: string): string {
+  return timeSeriesCatalogSignalUnits[signalKey] || "";
+}
+
+function firstNestedMappingColumn(value: unknown): string {
+  if (!isRecord(value)) return "";
+  for (const nestedValue of Object.values(value)) {
+    const text = mappingString(nestedValue);
+    if (text) return text;
+  }
+  return "";
+}
+
+function suggestedCatalogMappings(
+  source: TimeSeriesSource | null,
+): CatalogSignalMappingDraft[] {
+  const suggestions = source?.mapping_suggestions;
+  const candidateMappings: CatalogSignalMappingDraft[] = [];
+  const scalarKeys = [
+    "price_usd_per_mwh",
+    "import_price_usd_per_mwh",
+    "export_price_usd_per_mwh",
+    "load_demand_mw",
+    "renewable_available_power_mw",
+    "hydro_inflow_m3s",
+    "natural_inflow_m3s",
+    "minimum_flow_m3s",
+  ] as const;
+  for (const key of scalarKeys) {
+    const suggestedColumn =
+      key === "load_demand_mw" ||
+      key === "renewable_available_power_mw" ||
+      key === "hydro_inflow_m3s"
+        ? firstNestedMappingColumn(suggestions?.[key])
+        : mappingString(suggestions?.[key]);
+    if (!suggestedColumn) continue;
+    candidateMappings.push({
+      source_column: suggestedColumn,
+      signal_key: key,
+      source_unit: catalogSignalUnit(key),
+    });
+  }
+  const deduped = new Map<string, CatalogSignalMappingDraft>();
+  for (const mapping of candidateMappings) {
+    const dedupeKey = `${mapping.source_column}::${mapping.signal_key}`;
+    if (!deduped.has(dedupeKey)) deduped.set(dedupeKey, mapping);
+  }
+  return Array.from(deduped.values());
+}
+
 function defaultCatalogSetName(source: TimeSeriesSource | null): string {
   const filename = String(source?.original_filename || "").trim();
   if (!filename) return "Imported time-series set";
@@ -378,6 +446,7 @@ function defaultCatalogImportPayload(
   source: TimeSeriesSource | null,
 ): TimeSeriesCatalogImportPayload {
   const columns = Array.isArray(source?.columns) ? source.columns : [];
+  const signalMappings = suggestedCatalogMappings(source);
   return {
     set_name: defaultCatalogSetName(source),
     version_label: "v1",
@@ -394,8 +463,16 @@ function defaultCatalogImportPayload(
       "hours",
       "duration",
     ]),
-    value_column: defaultCatalogValueColumn(columns),
-    signal_key: "price_usd_per_mwh",
+    signal_mappings:
+      signalMappings.length > 0
+        ? signalMappings
+        : [
+            {
+              source_column: defaultCatalogValueColumn(columns),
+              signal_key: "price_usd_per_mwh",
+              source_unit: "USD/MWh",
+            },
+          ],
   };
 }
 
@@ -1250,20 +1327,69 @@ function TimeSeriesCatalogImportPanel({
       label: String(column),
     })) as Array<{ value: string; label: string }>),
   ];
+  const signalMappings = payload.signal_mappings || [];
+  const completeSignalMappings = signalMappings.filter(
+    (mapping) =>
+      Boolean(mapping.source_column.trim()) && Boolean(mapping.signal_key.trim()),
+  );
   const canImport =
     Boolean(payload.set_name.trim()) &&
     Boolean(payload.version_label.trim()) &&
     Boolean(payload.timezone.trim()) &&
     Boolean(payload.timestamp_column) &&
     Boolean(payload.duration_hours_column) &&
-    Boolean(payload.value_column) &&
-    Boolean(payload.signal_key);
+    completeSignalMappings.length > 0 &&
+    completeSignalMappings.length === signalMappings.length;
+
+  function updateSignalMapping(
+    index: number,
+    patch: Partial<TimeSeriesCatalogSignalMappingPayload>,
+  ) {
+    setPayload((current) => {
+      const nextMappings = [...current.signal_mappings];
+      const existing = nextMappings[index] || {
+        source_column: "",
+        signal_key: "",
+        source_unit: "",
+      };
+      const nextMapping = { ...existing, ...patch };
+      if (
+        patch.signal_key !== undefined &&
+        !patch.source_unit &&
+        !String(existing.source_unit || "").trim()
+      ) {
+        nextMapping.source_unit = catalogSignalUnit(patch.signal_key);
+      }
+      nextMappings[index] = nextMapping;
+      return { ...current, signal_mappings: nextMappings };
+    });
+  }
+
+  function addSignalMapping() {
+    setPayload((current) => ({
+      ...current,
+      signal_mappings: [
+        ...current.signal_mappings,
+        { source_column: "", signal_key: "", source_unit: "" },
+      ],
+    }));
+  }
+
+  function removeSignalMapping(index: number) {
+    setPayload((current) => ({
+      ...current,
+      signal_mappings: current.signal_mappings.filter(
+        (_mapping, mappingIndex) => mappingIndex !== index,
+      ),
+    }));
+  }
 
   return (
     <section className="source-catalog">
       <h3>TS-2 catalog import</h3>
       <p className="source-note">
-        Create one project-scoped catalog set from this uploaded source.
+        Preview source, map columns to canonical signals, then create one
+        project-scoped catalog set.
       </p>
       <div className="draft-field-grid">
         <TextInput
@@ -1329,28 +1455,60 @@ function TimeSeriesCatalogImportPanel({
             }))
           }
         />
-        <SelectInput
-          id="catalog_value_column"
-          label="Catalog value column"
-          value={payload.value_column}
-          options={columnOptions}
-          onChange={(value) =>
-            setPayload((current) => ({ ...current, value_column: value }))
-          }
-        />
-        <SelectInput
-          id="catalog_signal"
-          label="Catalog signal"
-          value={payload.signal_key}
-          options={timeSeriesCatalogSignalOptions.map((option) => ({
-            value: option.value,
-            label: option.label,
-          }))}
-          onChange={(value) =>
-            setPayload((current) => ({ ...current, signal_key: value }))
-          }
-        />
       </div>
+      <div className="source-mapping">
+        <h4>Signal mappings</h4>
+        {signalMappings.map((mapping, mappingIndex) => (
+          <div className="draft-field-grid" key={`catalog-signal-${mappingIndex}`}>
+            <SelectInput
+              id={`catalog_signal_source_${mappingIndex}`}
+              label={`Mapped source column ${mappingIndex + 1}`}
+              value={mapping.source_column}
+              options={columnOptions}
+              onChange={(value) =>
+                updateSignalMapping(mappingIndex, { source_column: value })
+              }
+            />
+            <SelectInput
+              id={`catalog_signal_key_${mappingIndex}`}
+              label={`Canonical signal ${mappingIndex + 1}`}
+              value={mapping.signal_key}
+              options={timeSeriesCatalogSignalOptions.map((option) => ({
+                value: option.value,
+                label: option.label,
+              }))}
+              onChange={(value) =>
+                updateSignalMapping(mappingIndex, { signal_key: value })
+              }
+            />
+            <TextInput
+              id={`catalog_signal_unit_${mappingIndex}`}
+              label={`Source unit ${mappingIndex + 1}`}
+              value={String(mapping.source_unit || "")}
+              onChange={(value) =>
+                updateSignalMapping(mappingIndex, { source_unit: value })
+              }
+              errors={{}}
+            />
+            {signalMappings.length > 1 ? (
+              <button
+                type="button"
+                onClick={() => removeSignalMapping(mappingIndex)}
+                disabled={disabled || importMutation.isPending}
+              >
+                Remove mapping {mappingIndex + 1}
+              </button>
+            ) : null}
+          </div>
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={addSignalMapping}
+        disabled={disabled || importMutation.isPending}
+      >
+        Add signal mapping
+      </button>
       <button
         type="button"
         onClick={() => importMutation.mutate()}
@@ -1370,8 +1528,14 @@ function TimeSeriesCatalogImportPanel({
               <dd>{createdSet.name}</dd>
             </div>
             <div>
-              <dt>Signal</dt>
-              <dd>{createdSet.signals[0]?.signal_key || payload.signal_key}</dd>
+              <dt>Signals</dt>
+              <dd>
+                <ul className="source-signal-list">
+                  {createdSet.signals.map((signal) => (
+                    <li key={signal.signal_key}>{signal.signal_key}</li>
+                  ))}
+                </ul>
+              </dd>
             </div>
             <div>
               <dt>Version</dt>

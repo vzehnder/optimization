@@ -1289,15 +1289,28 @@ export interface components {
             /** Set Name */
             set_name: string;
             /** Signal Key */
-            signal_key: string;
+            signal_key?: string | null;
+            /** Signal Mappings */
+            signal_mappings?: components["schemas"]["TimeSeriesCatalogSignalMappingRequest"][];
+            /** Source Unit */
+            source_unit?: string | null;
             /** Timestamp Column */
             timestamp_column: string;
             /** Timezone */
             timezone: string;
             /** Value Column */
-            value_column: string;
+            value_column?: string | null;
             /** Version Label */
             version_label: string;
+        };
+        /** TimeSeriesCatalogSignalMappingRequest */
+        TimeSeriesCatalogSignalMappingRequest: {
+            /** Signal Key */
+            signal_key: string;
+            /** Source Column */
+            source_column: string;
+            /** Source Unit */
+            source_unit?: string | null;
         };
         /** TimeSeriesMappingRequest */
         TimeSeriesMappingRequest: {

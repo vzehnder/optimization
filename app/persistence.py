@@ -739,6 +739,8 @@ class AnalystStore:
         self._ensure_column("runs", "stderr_log_path", "TEXT")
         self._ensure_column("runs", "error_message", "TEXT NOT NULL DEFAULT ''")
         self._ensure_column("scenario_versions", "generation_metadata_json", "TEXT NOT NULL DEFAULT '{}'")
+        self._ensure_column("time_series_signals", "source_column", "TEXT")
+        self._ensure_column("time_series_signals", "source_unit", "TEXT")
         self._ensure_hydraulic_diagram_items_support_reaches()
         self._ensure_hydraulic_diagram_items_entity_types_postgres()
         self._ensure_column("case_hydraulic_plants", "non_modeled", "INTEGER NOT NULL DEFAULT 0")
@@ -1730,30 +1732,36 @@ class AnalystStore:
                 ),
             )
 
-            signal_cursor = self.connection.execute(
-                """
-                INSERT INTO time_series_signals (
-                    time_series_set_id,
-                    signal_key,
-                    unit,
-                    entity_type,
-                    entity_key,
-                    signal_role,
-                    aggregation,
-                    created_at
+            signal_ids_by_key: dict[str, int] = {}
+            for signal in prepared_import.signals:
+                signal_cursor = self.connection.execute(
+                    """
+                    INSERT INTO time_series_signals (
+                        time_series_set_id,
+                        signal_key,
+                        unit,
+                        source_column,
+                        source_unit,
+                        entity_type,
+                        entity_key,
+                        signal_role,
+                        aggregation,
+                        created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'input', 'period_average', ?)
+                    """,
+                    (
+                        time_series_set_id,
+                        signal.signal_key,
+                        signal.unit,
+                        signal.source_column,
+                        signal.source_unit,
+                        signal.entity_type,
+                        signal.entity_key,
+                        now,
+                    ),
                 )
-                VALUES (?, ?, ?, ?, ?, 'input', 'period_average', ?)
-                """,
-                (
-                    time_series_set_id,
-                    prepared_import.signal.signal_key,
-                    prepared_import.signal.unit,
-                    prepared_import.signal.entity_type,
-                    prepared_import.signal.entity_key,
-                    now,
-                ),
-            )
-            signal_id = int(signal_cursor.lastrowid)
+                signal_ids_by_key[signal.signal_key] = int(signal_cursor.lastrowid)
             period_ids_by_index: dict[int, int] = {}
             for period in prepared_import.periods:
                 period_cursor = self.connection.execute(
@@ -1794,7 +1802,7 @@ class AnalystStore:
                     """,
                     (
                         time_series_set_id,
-                        signal_id,
+                        signal_ids_by_key[value.signal_key],
                         period_ids_by_index[value.period_index],
                         value.value_numeric,
                         value.source_row_number,
@@ -1851,7 +1859,13 @@ class AnalystStore:
 
         signal_rows = self.connection.execute(
             """
-            SELECT signal_key, unit, entity_type, entity_key
+            SELECT
+                signal_key,
+                unit,
+                entity_type,
+                entity_key,
+                source_column,
+                source_unit
             FROM time_series_signals
             WHERE time_series_set_id = ?
             ORDER BY id
@@ -1883,6 +1897,16 @@ class AnalystStore:
             """,
             (time_series_set_id,),
         ).fetchall()
+
+        revision_metadata: dict[str, Any] = {}
+        metadata_json = revision_row["metadata_json"]
+        if metadata_json:
+            try:
+                parsed_metadata = json.loads(str(metadata_json))
+            except json.JSONDecodeError:
+                parsed_metadata = {}
+            if isinstance(parsed_metadata, dict):
+                revision_metadata = parsed_metadata
 
         source = None
         if revision_row["time_series_source_id"] is not None:
@@ -1929,10 +1953,13 @@ class AnalystStore:
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
             "source": source,
+            "revision_metadata": revision_metadata,
             "signals": [
                 {
                     "signal_key": signal_row["signal_key"],
                     "unit": signal_row["unit"],
+                    "source_column": signal_row["source_column"],
+                    "source_unit": signal_row["source_unit"],
                     "entity_type": signal_row["entity_type"],
                     "entity_key": signal_row["entity_key"],
                 }

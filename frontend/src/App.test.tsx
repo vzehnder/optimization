@@ -3787,7 +3787,7 @@ describe("application shell", () => {
     expect(screen.getByText("Cambios sin guardar")).toBeVisible();
   });
 
-  it("imports an uploaded CSV source into the TS-2 catalog and shows the created set confirmation", async () => {
+  it("imports an uploaded CSV source into the TS-2 catalog with multiple mapped signals and shows the created set confirmation", async () => {
     window.history.replaceState({}, "", "/react/scenarios/10/draft");
     const scenario = {
       id: 10,
@@ -3830,12 +3830,13 @@ describe("application shell", () => {
       original_filename: "price.csv",
       media_type: "text/csv",
       checksum: "sha256:source123",
-      columns: ["period_start", "hours", "spot_price"],
+      columns: ["period_start", "hours", "buy_price", "sell_price"],
       preview_rows: [
         {
           period_start: "2026-01-01T00:00:00",
           hours: "1.0",
-          spot_price: "55.0",
+          buy_price: "55.0",
+          sell_price: "45.0",
         },
       ],
     };
@@ -3899,7 +3900,7 @@ describe("application shell", () => {
               time_series_set: {
                 id: 91,
                 project_id: 1,
-                name: "Spot price Jan 2026",
+                name: "Dual price Jan 2026",
                 version_number: 1,
                 version_label: "v1",
                 revision_number: 1,
@@ -3909,6 +3910,26 @@ describe("application shell", () => {
                 content_hash: "sha256:cataloghash123",
                 source_checksum: "sha256:source123",
                 signal_count: 1,
+                revision_metadata: {
+                  mapping: {
+                    timestamp_column: "period_start",
+                    duration_hours_column: "hours",
+                    signals: [
+                      {
+                        source_column: "buy_price",
+                        signal_key: "import_price_usd_per_mwh",
+                        source_unit: "USD/MWh",
+                        canonical_unit: "USD/MWh",
+                      },
+                      {
+                        source_column: "sell_price",
+                        signal_key: "export_price_usd_per_mwh",
+                        source_unit: "USD/MWh",
+                        canonical_unit: "USD/MWh",
+                      },
+                    ],
+                  },
+                },
                 period_count: 2,
                 source: {
                   original_filename: "price.csv",
@@ -3917,7 +3938,17 @@ describe("application shell", () => {
                 },
                 signals: [
                   {
-                    signal_key: "price_usd_per_mwh",
+                    signal_key: "import_price_usd_per_mwh",
+                    source_column: "buy_price",
+                    source_unit: "USD/MWh",
+                    unit: "USD/MWh",
+                    entity_type: null,
+                    entity_key: null,
+                  },
+                  {
+                    signal_key: "export_price_usd_per_mwh",
+                    source_column: "sell_price",
+                    source_unit: "USD/MWh",
                     unit: "USD/MWh",
                     entity_type: null,
                     entity_key: null,
@@ -3940,13 +3971,23 @@ describe("application shell", () => {
                 values: [
                   {
                     period_index: 0,
-                    signal_key: "price_usd_per_mwh",
+                    signal_key: "import_price_usd_per_mwh",
                     value_numeric: 55,
                   },
                   {
+                    period_index: 0,
+                    signal_key: "export_price_usd_per_mwh",
+                    value_numeric: 45,
+                  },
+                  {
                     period_index: 1,
-                    signal_key: "price_usd_per_mwh",
+                    signal_key: "import_price_usd_per_mwh",
                     value_numeric: 60,
+                  },
+                  {
+                    period_index: 1,
+                    signal_key: "export_price_usd_per_mwh",
+                    value_numeric: 48,
                   },
                 ],
               },
@@ -3998,7 +4039,7 @@ describe("application shell", () => {
     await user.clear(screen.getByLabelText("Catalog set name"));
     await user.type(
       screen.getByLabelText("Catalog set name"),
-      "Spot price Jan 2026",
+      "Dual price Jan 2026",
     );
     await user.clear(screen.getByLabelText("Catalog version label"));
     await user.type(screen.getByLabelText("Catalog version label"), "v1");
@@ -4011,28 +4052,51 @@ describe("application shell", () => {
       "hours",
     );
     await user.selectOptions(
-      screen.getByLabelText("Catalog value column"),
-      "spot_price",
+      screen.getByLabelText("Mapped source column 1"),
+      "buy_price",
     );
     await user.selectOptions(
-      screen.getByLabelText("Catalog signal"),
-      "price_usd_per_mwh",
+      screen.getByLabelText("Canonical signal 1"),
+      "import_price_usd_per_mwh",
     );
+    await user.clear(screen.getByLabelText("Source unit 1"));
+    await user.type(screen.getByLabelText("Source unit 1"), "USD/MWh");
+    await user.click(screen.getByRole("button", { name: "Add signal mapping" }));
+    await user.selectOptions(
+      screen.getByLabelText("Mapped source column 2"),
+      "sell_price",
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Canonical signal 2"),
+      "export_price_usd_per_mwh",
+    );
+    await user.clear(screen.getByLabelText("Source unit 2"));
+    await user.type(screen.getByLabelText("Source unit 2"), "USD/MWh");
     await user.click(screen.getByRole("button", { name: "Import to catalog" }));
 
     expect(lastImportBody).toEqual({
-      set_name: "Spot price Jan 2026",
+      set_name: "Dual price Jan 2026",
       version_label: "v1",
       data_kind: "real",
       timezone: "America/Santiago",
       timestamp_column: "period_start",
       duration_hours_column: "hours",
-      value_column: "spot_price",
-      signal_key: "price_usd_per_mwh",
+      signal_mappings: [
+        {
+          source_column: "buy_price",
+          signal_key: "import_price_usd_per_mwh",
+          source_unit: "USD/MWh",
+        },
+        {
+          source_column: "sell_price",
+          signal_key: "export_price_usd_per_mwh",
+          source_unit: "USD/MWh",
+        },
+      ],
     });
     expect(await screen.findByText("Catalog import created")).toBeVisible();
-    expect(screen.getByText("Spot price Jan 2026")).toBeVisible();
-    expect(screen.getByText("price_usd_per_mwh")).toBeVisible();
+    expect(screen.getByText("Dual price Jan 2026")).toBeVisible();
+    expect(screen.getByText("import_price_usd_per_mwh")).toBeVisible();
     expect(screen.getByText("2 periods")).toBeVisible();
     expect(screen.getByText("Revision 1")).toBeVisible();
   });
