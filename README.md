@@ -707,3 +707,95 @@ formats:
 ```powershell
 julia --project=. -e "import Pkg; Pkg.test()"
 ```
+
+## TS-1: Topology And Parameter Hierarchy
+
+TS-1 (`docs/series_tiempo/iter1/`) introduces an explicit hierarchy inside the
+existing `OptimizationCase` model without changing the executable contract:
+
+```text
+OptimizationCase
+-> TopologyVersion
+-> CaseParameterVersion
+-> ScenarioVersion / execution snapshot
+```
+
+`ScenarioVersion` remains the immutable snapshot that Julia validates and
+`Run` records reference. TS-1 does not add new tables or change that contract;
+it splits the same `system_case_json` into a topology view (component
+identity and connectivity) and a parameters view (limits, initial states,
+costs, curve selections and solver settings), hashes each with SHA-256, and
+stores both hashes as `generation_metadata` on the scenario version.
+
+### Topology Versus Parameters
+
+- **Topology**: component/node identity and type, one-bus edges, and for
+  hydraulic diagrams the active nodes, reaches, plants, units and their
+  intake/discharge relationships. Node layout (x/y position) is never
+  topology.
+- **Parameters**: scalar limits, initial states, efficiencies, costs,
+  penalties, active constraints, solver settings, reservoir/curve/unit-limit
+  values, and the concrete curve version selected for a run. Whether an
+  entity requires a curve is topology; which curve version is selected is a
+  parameter.
+
+### Provenance And Stale Validation
+
+Every scenario version created through `create_scenario_version` records
+`generation_metadata.topology.content_hash` and
+`generation_metadata.parameters.content_hash`. Structured drafts and
+hydraulic v3 diagrams additionally stamp `generation_metadata.kind`
+(`structured_draft` or `hydraulic_diagram_v3`).
+
+Hydraulic diagram and structured draft validation snapshots record the same
+two hashes. When a later edit changes one or both hashes relative to the
+validated snapshot, the diagram/draft becomes stale and promotion is blocked
+with a message naming exactly which part drifted ("topology", "parameters",
+or "topology and parameters"). Layout-only edits never trigger staleness,
+since node position is not part of either generated view. Revalidating
+recomputes both hashes and clears staleness.
+
+The React app surfaces this as a "Procedencia" section on scenario version
+and run detail views (topology/parameter hash prefixes, plus a "Modelo" row
+when `kind` is present) and as distinct amber/purple badges on the hydraulic
+diagram editor when topology and/or parameters are stale.
+
+### Legacy Compatibility
+
+Scenario versions created before TS-1 have `generation_metadata: {}`. They
+still list, load, launch runs, register artifacts and back publications
+identically to hierarchy-generated versions; the React provenance panel falls
+back to "Sin datos de procedencia" per hash instead of failing.
+
+### Deferred To Later Iterations
+
+TS-1 is architectural and semantic only. Out of scope, deferred to TS-2
+through TS-6:
+
+- Generic time-series catalog storage and input variant selection.
+- Result series storage.
+- Resampling, interpolation or other time-series transformations.
+- A full migration off `ScenarioDraft` or a `Scenario -> OptimizationCase`
+  cardinality change (multiple cases per scenario).
+
+### TS-1 Acceptance Verification
+
+Run the focused TS-1 acceptance suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_ts1_acceptance -v
+```
+
+Run the full Python web acceptance suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+TS-1 does not change Julia-facing contracts or artifact formats. Run the
+Julia suite only when a later change touches optimizer behavior or output
+formats:
+
+```powershell
+julia --project=. -e "import Pkg; Pkg.test()"
+```
