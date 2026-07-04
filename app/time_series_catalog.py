@@ -210,12 +210,35 @@ def prepare_time_series_catalog_import(
 
     periods: list[CatalogPeriod] = []
     values: list[CatalogValue] = []
+    seen_timestamp_rows: dict[datetime, int] = {}
     for period_index, row in enumerate(rows):
         source_row_number = period_index + 2
         timestamp_text = str(row.get(request.timestamp_column) or "").strip()
         if not timestamp_text:
             raise TimeSeriesCatalogError(f"row {source_row_number}: timestamp is required")
-        timestamp_start = parse_catalog_timestamp(timestamp_text, timezone)
+        timestamp_start = parse_catalog_timestamp(timestamp_text, timezone, source_row_number)
+        duplicate_row_number = seen_timestamp_rows.get(timestamp_start)
+        if duplicate_row_number is not None:
+            raise TimeSeriesCatalogError(
+                f"row {source_row_number}: duplicate timestamp {timestamp_text!r} "
+                f"(already used by row {duplicate_row_number})"
+            )
+        seen_timestamp_rows[timestamp_start] = source_row_number
+        if periods:
+            previous_period = periods[-1]
+            previous_row_number = previous_period.period_index + 2
+            if timestamp_start < datetime.fromisoformat(previous_period.timestamp_start):
+                raise TimeSeriesCatalogError(
+                    f"row {source_row_number}: timestamp {timestamp_text!r} must come "
+                    f"after row {previous_row_number} ({previous_period.timestamp_start!r}); "
+                    "periods must be ordered"
+                )
+            if timestamp_start < datetime.fromisoformat(previous_period.timestamp_end):
+                raise TimeSeriesCatalogError(
+                    f"row {source_row_number}: period starts before row "
+                    f"{previous_row_number} ends ({previous_period.timestamp_end!r}); "
+                    f"row {previous_row_number} duration is incoherent"
+                )
 
         duration_text = str(row.get(request.duration_hours_column) or "").strip()
         duration_hours = parse_catalog_float(
@@ -347,11 +370,13 @@ def resolve_timezone(timezone_name: str) -> ZoneInfo:
         raise TimeSeriesCatalogError(f"timezone {timezone_name!r} is not a valid IANA timezone") from error
 
 
-def parse_catalog_timestamp(value: str, timezone: ZoneInfo) -> datetime:
+def parse_catalog_timestamp(value: str, timezone: ZoneInfo, row_number: int) -> datetime:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as error:
-        raise TimeSeriesCatalogError(f"timestamp {value!r} must be ISO-8601") from error
+        raise TimeSeriesCatalogError(
+            f"row {row_number}: timestamp {value!r} must be ISO-8601"
+        ) from error
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone)
     return parsed.astimezone(timezone)

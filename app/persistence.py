@@ -1700,118 +1700,147 @@ class AnalystStore:
                 ),
             )
             time_series_set_id = int(cursor.lastrowid)
-
-            self.connection.execute(
-                """
-                INSERT INTO time_series_set_revisions (
-                    time_series_set_id,
-                    revision_number,
-                    time_series_source_id,
-                    content_hash,
-                    change_summary,
-                    created_at,
-                    created_by,
-                    metadata_json
+            try:
+                self._insert_time_series_catalog_children(
+                    time_series_set_id=time_series_set_id,
+                    source=source,
+                    source_record=source_record,
+                    prepared_import=prepared_import,
+                    created_by=created_by,
+                    now=now,
                 )
-                VALUES (?, 1, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    time_series_set_id,
-                    int(source_record["id"]),
-                    prepared_import.content_hash,
-                    "Initial CSV/XLSX catalog import",
-                    now,
-                    created_by,
-                    json.dumps(
-                        {
-                            "mapping": prepared_import.mapping_summary,
-                            "source_key": source.get("id"),
-                        },
-                        sort_keys=True,
-                    ),
-                ),
-            )
-
-            signal_ids_by_key: dict[str, int] = {}
-            for signal in prepared_import.signals:
-                signal_cursor = self.connection.execute(
-                    """
-                    INSERT INTO time_series_signals (
-                        time_series_set_id,
-                        signal_key,
-                        unit,
-                        source_column,
-                        source_unit,
-                        entity_type,
-                        entity_key,
-                        signal_role,
-                        aggregation,
-                        created_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'input', 'period_average', ?)
-                    """,
-                    (
-                        time_series_set_id,
-                        signal.signal_key,
-                        signal.unit,
-                        signal.source_column,
-                        signal.source_unit,
-                        signal.entity_type,
-                        signal.entity_key,
-                        now,
-                    ),
-                )
-                signal_ids_by_key[signal.signal_key] = int(signal_cursor.lastrowid)
-            period_ids_by_index: dict[int, int] = {}
-            for period in prepared_import.periods:
-                period_cursor = self.connection.execute(
-                    """
-                    INSERT INTO time_series_periods (
-                        time_series_set_id,
-                        period_index,
-                        timestamp_start,
-                        timestamp_end,
-                        duration_hours,
-                        created_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        time_series_set_id,
-                        period.period_index,
-                        period.timestamp_start,
-                        period.timestamp_end,
-                        period.duration_hours,
-                        now,
-                    ),
-                )
-                period_ids_by_index[period.period_index] = int(period_cursor.lastrowid)
-
-            for value in prepared_import.values:
+            except Exception:
+                # PostgreSQL runs autocommit, so a mid-import failure must clean
+                # up the already-inserted rows instead of relying on rollback.
+                self.connection.rollback()
                 self.connection.execute(
-                    """
-                    INSERT INTO time_series_values (
-                        time_series_set_id,
-                        time_series_signal_id,
-                        time_series_period_id,
-                        value_numeric,
-                        source_row_number,
-                        created_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        time_series_set_id,
-                        signal_ids_by_key[value.signal_key],
-                        period_ids_by_index[value.period_index],
-                        value.value_numeric,
-                        value.source_row_number,
-                        now,
-                    ),
+                    "DELETE FROM time_series_sets WHERE id = ?",
+                    (time_series_set_id,),
                 )
+                self.connection.commit()
+                raise
 
             self.connection.commit()
             return self.get_time_series_set(project_id, time_series_set_id)
+
+    def _insert_time_series_catalog_children(
+        self,
+        *,
+        time_series_set_id: int,
+        source: dict[str, Any],
+        source_record: dict[str, Any],
+        prepared_import: PreparedTimeSeriesCatalogImport,
+        created_by: str,
+        now: str,
+    ) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO time_series_set_revisions (
+                time_series_set_id,
+                revision_number,
+                time_series_source_id,
+                content_hash,
+                change_summary,
+                created_at,
+                created_by,
+                metadata_json
+            )
+            VALUES (?, 1, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                time_series_set_id,
+                int(source_record["id"]),
+                prepared_import.content_hash,
+                "Initial CSV/XLSX catalog import",
+                now,
+                created_by,
+                json.dumps(
+                    {
+                        "mapping": prepared_import.mapping_summary,
+                        "source_key": source.get("id"),
+                    },
+                    sort_keys=True,
+                ),
+            ),
+        )
+
+        signal_ids_by_key: dict[str, int] = {}
+        for signal in prepared_import.signals:
+            signal_cursor = self.connection.execute(
+                """
+                INSERT INTO time_series_signals (
+                    time_series_set_id,
+                    signal_key,
+                    unit,
+                    source_column,
+                    source_unit,
+                    entity_type,
+                    entity_key,
+                    signal_role,
+                    aggregation,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'input', 'period_average', ?)
+                """,
+                (
+                    time_series_set_id,
+                    signal.signal_key,
+                    signal.unit,
+                    signal.source_column,
+                    signal.source_unit,
+                    signal.entity_type,
+                    signal.entity_key,
+                    now,
+                ),
+            )
+            signal_ids_by_key[signal.signal_key] = int(signal_cursor.lastrowid)
+        period_ids_by_index: dict[int, int] = {}
+        for period in prepared_import.periods:
+            period_cursor = self.connection.execute(
+                """
+                INSERT INTO time_series_periods (
+                    time_series_set_id,
+                    period_index,
+                    timestamp_start,
+                    timestamp_end,
+                    duration_hours,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    time_series_set_id,
+                    period.period_index,
+                    period.timestamp_start,
+                    period.timestamp_end,
+                    period.duration_hours,
+                    now,
+                ),
+            )
+            period_ids_by_index[period.period_index] = int(period_cursor.lastrowid)
+
+        for value in prepared_import.values:
+            self.connection.execute(
+                """
+                INSERT INTO time_series_values (
+                    time_series_set_id,
+                    time_series_signal_id,
+                    time_series_period_id,
+                    value_numeric,
+                    source_row_number,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    time_series_set_id,
+                    signal_ids_by_key[value.signal_key],
+                    period_ids_by_index[value.period_index],
+                    value.value_numeric,
+                    value.source_row_number,
+                    now,
+                ),
+            )
 
     def get_time_series_set(self, project_id: int, time_series_set_id: int) -> dict[str, Any]:
         self.get_project(project_id)

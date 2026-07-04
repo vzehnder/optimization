@@ -1544,6 +1544,10 @@ function TimeSeriesCatalogImportPanel({
               </dd>
             </div>
             <div>
+              <dt>Timezone</dt>
+              <dd>{createdSet.timezone} (IANA)</dd>
+            </div>
+            <div>
               <dt>Revision</dt>
               <dd>Revision {createdSet.revision_number}</dd>
             </div>

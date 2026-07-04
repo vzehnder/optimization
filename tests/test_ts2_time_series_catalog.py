@@ -1,3 +1,4 @@
+import dataclasses
 import tempfile
 import unittest
 from pathlib import Path
@@ -5,6 +6,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.persistence import AnalystStore
 from app.time_series_catalog import (
     CatalogImportRequest,
     CatalogSignalMappingRequest,
@@ -23,7 +25,203 @@ class StubValidationService:
         )
 
 
+def spot_price_import_request() -> CatalogImportRequest:
+    return CatalogImportRequest(
+        set_name="Spot price Jan 2026",
+        version_label="v1",
+        data_kind="real",
+        timezone="America/Santiago",
+        timestamp_column="period_start",
+        duration_hours_column="hours",
+        signal_mappings=[
+            CatalogSignalMappingRequest(
+                source_column="spot_price",
+                signal_key="price_usd_per_mwh",
+            )
+        ],
+    )
+
+
 class TimeSeriesCatalogImportTests(unittest.TestCase):
+    def test_rejects_duplicate_timestamps_with_row_context(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"row 3: duplicate timestamp '2026-01-01T00:00:00'.*row 2",
+        ):
+            prepare_time_series_catalog_import(
+                rows=[
+                    {
+                        "period_start": "2026-01-01T00:00:00",
+                        "hours": "1.0",
+                        "spot_price": "55.0",
+                    },
+                    {
+                        "period_start": "2026-01-01T00:00:00",
+                        "hours": "1.0",
+                        "spot_price": "60.0",
+                    },
+                ],
+                request=spot_price_import_request(),
+            )
+
+    def test_rejects_unordered_timestamps_with_row_context(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"row 3: timestamp '2026-01-01T00:00:00' must come after row 2",
+        ):
+            prepare_time_series_catalog_import(
+                rows=[
+                    {
+                        "period_start": "2026-01-01T01:00:00",
+                        "hours": "1.0",
+                        "spot_price": "55.0",
+                    },
+                    {
+                        "period_start": "2026-01-01T00:00:00",
+                        "hours": "1.0",
+                        "spot_price": "60.0",
+                    },
+                ],
+                request=spot_price_import_request(),
+            )
+
+    def test_rejects_overlapping_periods_from_incoherent_durations(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"row 3: period starts before row 2 ends",
+        ):
+            prepare_time_series_catalog_import(
+                rows=[
+                    {
+                        "period_start": "2026-01-01T00:00:00",
+                        "hours": "2.0",
+                        "spot_price": "55.0",
+                    },
+                    {
+                        "period_start": "2026-01-01T01:00:00",
+                        "hours": "1.0",
+                        "spot_price": "60.0",
+                    },
+                ],
+                request=spot_price_import_request(),
+            )
+
+    def test_rejects_malformed_timestamp_with_row_context(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"row 2: timestamp 'not-a-date' must be ISO-8601",
+        ):
+            prepare_time_series_catalog_import(
+                rows=[
+                    {
+                        "period_start": "not-a-date",
+                        "hours": "1.0",
+                        "spot_price": "55.0",
+                    },
+                ],
+                request=spot_price_import_request(),
+            )
+
+    def test_rejects_nonnumeric_values_with_row_and_column_context(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"row 3: spot_price must be numeric",
+        ):
+            prepare_time_series_catalog_import(
+                rows=[
+                    {
+                        "period_start": "2026-01-01T00:00:00",
+                        "hours": "1.0",
+                        "spot_price": "55.0",
+                    },
+                    {
+                        "period_start": "2026-01-01T01:00:00",
+                        "hours": "1.0",
+                        "spot_price": "not-a-number",
+                    },
+                ],
+                request=spot_price_import_request(),
+            )
+
+    def test_rejects_negative_values_for_nonnegative_signals(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"row 3: column 'demand' mapped to load_demand_mw must be nonnegative",
+        ):
+            prepare_time_series_catalog_import(
+                rows=[
+                    {
+                        "period_start": "2026-01-01T00:00:00",
+                        "hours": "1.0",
+                        "demand": "12.5",
+                    },
+                    {
+                        "period_start": "2026-01-01T01:00:00",
+                        "hours": "1.0",
+                        "demand": "-1.0",
+                    },
+                ],
+                request=CatalogImportRequest(
+                    set_name="Demand Jan 2026",
+                    version_label="v1",
+                    data_kind="real",
+                    timezone="America/Santiago",
+                    timestamp_column="period_start",
+                    duration_hours_column="hours",
+                    signal_mappings=[
+                        CatalogSignalMappingRequest(
+                            source_column="demand",
+                            signal_key="load_demand_mw",
+                        )
+                    ],
+                ),
+            )
+
+    def test_rejects_invalid_iana_timezone(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"timezone 'America/Springfield' is not a valid IANA timezone",
+        ):
+            prepare_time_series_catalog_import(
+                rows=[
+                    {
+                        "period_start": "2026-01-01T00:00:00",
+                        "hours": "1.0",
+                        "spot_price": "55.0",
+                    },
+                ],
+                request=CatalogImportRequest(
+                    set_name="Spot price Jan 2026",
+                    version_label="v1",
+                    data_kind="real",
+                    timezone="America/Springfield",
+                    timestamp_column="period_start",
+                    duration_hours_column="hours",
+                    signal_mappings=[
+                        CatalogSignalMappingRequest(
+                            source_column="spot_price",
+                            signal_key="price_usd_per_mwh",
+                        )
+                    ],
+                ),
+            )
+
+    def test_rejects_nonpositive_durations_with_row_context(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"row 2: hours must be positive",
+        ):
+            prepare_time_series_catalog_import(
+                rows=[
+                    {
+                        "period_start": "2026-01-01T00:00:00",
+                        "hours": "0.0",
+                        "spot_price": "55.0",
+                    },
+                ],
+                request=spot_price_import_request(),
+            )
+
     def test_deep_import_module_normalizes_rows_without_http_or_ui(self):
         prepared = prepare_time_series_catalog_import(
             rows=[
@@ -191,6 +389,105 @@ class TimeSeriesCatalogImportTests(unittest.TestCase):
             },
         )
         return client, project, scenario
+
+    def test_failed_import_persists_no_partial_set_and_can_be_retried(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, _project, scenario = self.make_client_and_context(input_source_root)
+            invalid_csv_text = (
+                "period_start,hours,spot_price\n"
+                "2026-01-01T00:00:00,1.0,55.0\n"
+                "2026-01-01T01:00:00,1.0,not-a-number\n"
+            )
+            import_payload = {
+                "set_name": "Spot price Jan 2026",
+                "version_label": "v1",
+                "data_kind": "real",
+                "timezone": "America/Santiago",
+                "timestamp_column": "period_start",
+                "duration_hours_column": "hours",
+                "signal_mappings": [
+                    {
+                        "source_column": "spot_price",
+                        "signal_key": "price_usd_per_mwh",
+                    }
+                ],
+            }
+
+            invalid_upload = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                files={"source_file": ("price.csv", invalid_csv_text, "text/csv")},
+            )
+            invalid_source = invalid_upload.json()["source"]
+            failed_import = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/{invalid_source['id']}/catalog-import",
+                json=import_payload,
+            )
+            self.assertEqual(failed_import.status_code, 400)
+            self.assertIn("row 3", failed_import.json()["detail"])
+
+            corrected_csv_text = (
+                "period_start,hours,spot_price\n"
+                "2026-01-01T00:00:00,1.0,55.0\n"
+                "2026-01-01T01:00:00,1.0,60.0\n"
+            )
+            corrected_upload = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                files={"source_file": ("price.csv", corrected_csv_text, "text/csv")},
+            )
+            corrected_source = corrected_upload.json()["source"]
+            retried_import = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/{corrected_source['id']}/catalog-import",
+                json=import_payload,
+            )
+
+            self.assertEqual(retried_import.status_code, 201)
+            created_set = retried_import.json()["time_series_set"]
+            self.assertEqual(created_set["version_label"], "v1")
+            self.assertEqual(created_set["period_count"], 2)
+
+    def test_persistence_failure_mid_import_leaves_no_partial_set(self):
+        store = AnalystStore("sqlite:///:memory:")
+        project = store.create_project(name="TS-2 partial import project")
+        scenario = store.create_scenario(project_id=project["id"], name="Catalog import")
+        valid_import = prepare_time_series_catalog_import(
+            rows=[
+                {
+                    "period_start": "2026-01-01T00:00:00",
+                    "hours": "1.0",
+                    "spot_price": "55.0",
+                },
+            ],
+            request=spot_price_import_request(),
+        )
+        source = {
+            "id": "csv_source_1",
+            "original_filename": "price.csv",
+            "media_type": "text/csv",
+            "checksum": "sha256:test",
+        }
+        poisoned_import = dataclasses.replace(
+            valid_import,
+            values=[
+                dataclasses.replace(value, signal_key="unknown_signal_key")
+                for value in valid_import.values
+            ],
+        )
+
+        with self.assertRaises(Exception):
+            store.import_time_series_catalog_set(
+                scenario_id=scenario["id"],
+                source=source,
+                prepared_import=poisoned_import,
+            )
+
+        created_set = store.import_time_series_catalog_set(
+            scenario_id=scenario["id"],
+            source=source,
+            prepared_import=valid_import,
+        )
+        self.assertEqual(created_set["version_label"], "v1")
+        self.assertEqual(created_set["period_count"], 1)
 
     def test_csv_source_imports_a_project_time_series_set_and_reads_it_back(self):
         with tempfile.TemporaryDirectory() as temp_dir:

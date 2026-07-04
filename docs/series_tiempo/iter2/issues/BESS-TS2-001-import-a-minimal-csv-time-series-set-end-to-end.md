@@ -1,11 +1,13 @@
 # BESS-TS2-001: Import A Minimal CSV Time-Series Set End-To-End
 
-Status: In Review
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter2/prd.md`
 Fecha de inicio planificada: 2026-07-04
 Fecha de termino planificada: 2026-07-04
+Fecha de inicio real: 2026-07-04
+Fecha de termino real: 2026-07-04
 
 ## User stories covered
 
@@ -30,14 +32,25 @@ browsing polish belong to later slices.
 
 ## Acceptance criteria
 
-- [ ] A CSV upload creates a time-series source with provenance metadata (file name, media type, checksum).
-- [ ] Importing creates a project-scoped set with name, version label, data kind, timezone and status.
-- [ ] Imported periods and values are stored in BBDD in long format keyed by set, signal and period.
-- [ ] The initial import records revision 1 and a content hash for the set.
-- [ ] The set, its signals and its values can be read back through the API without reopening the file.
-- [ ] Import parsing, mapping and value persistence live in a deep module testable without UI.
-- [ ] A minimal React flow uploads the CSV and confirms the created set.
-- [ ] No binding of sets to optimization cases is introduced.
+- [x] A CSV upload creates a time-series source with provenance metadata (file name, media type, checksum).
+- [x] Importing creates a project-scoped set with name, version label, data kind, timezone and status.
+- [x] Imported periods and values are stored in BBDD in long format keyed by set, signal and period.
+- [x] The initial import records revision 1 and a content hash for the set.
+- [x] The set, its signals and its values can be read back through the API without reopening the file.
+- [x] Import parsing, mapping and value persistence live in a deep module testable without UI.
+- [x] A minimal React flow uploads the CSV and confirms the created set.
+- [x] No binding of sets to optimization cases is introduced.
+
+## Review outcome (2026-07-04)
+
+Reviewed together with BESS-TS2-002. Focused TS-2 backend tests, full Python
+discovery, full Vitest suite, `eslint .`, production build and API drift check
+all passed. The pending manual Chrome QA was completed with
+`chrome-devtools` MCP against the PostgreSQL-backed app on
+`http://127.0.0.1:8000`: a dual-price CSV upload in project `TS2 Chrome QA 002`
+produced the confirmation panel (set `ts2_qa_dual_price`, version `v1`,
+revision 1, 3 periods, sha256 content hash) and PostgreSQL showed the set
+persisted in long format (2 signals, 3 periods, 6 values, 1 revision).
 
 ## Blocked by
 

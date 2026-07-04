@@ -1,6 +1,6 @@
 # BESS-TS2-002: Preview Sources And Map Columns To Canonical Signals
 
-Status: In Review
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter2/prd.md`
@@ -68,6 +68,13 @@ the local PostgreSQL-backed app could not be kept alive from this sandboxed
 agent session and Chrome policy then rejected navigation to the temporary local
 port used for the retry. Automated coverage above is green; manual Chrome smoke
 remains pending review outside the sandbox.
+
+Resolved 2026-07-04: Chrome smoke completed with the `chrome-devtools` MCP
+against the PostgreSQL-backed app on `http://127.0.0.1:8000`. The uploaded
+dual-price CSV showed the preview (detected columns plus sample rows), the
+preview-and-map step auto-suggested `buy_price -> import_price_usd_per_mwh`
+and `sell_price -> export_price_usd_per_mwh` with source units, and the import
+confirmation listed both canonical signals. Issue closed as Done.
 
 ## Blocked by
 

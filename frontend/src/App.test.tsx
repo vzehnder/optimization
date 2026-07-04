@@ -4099,6 +4099,7 @@ describe("application shell", () => {
     expect(screen.getByText("import_price_usd_per_mwh")).toBeVisible();
     expect(screen.getByText("2 periods")).toBeVisible();
     expect(screen.getByText("Revision 1")).toBeVisible();
+    expect(screen.getByText("America/Santiago (IANA)")).toBeVisible();
   });
 
   it("lets analysts inspect, validate, stale, and promote a generated system_case once", async () => {
