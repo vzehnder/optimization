@@ -12,6 +12,10 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { ProjectClientAccessSection } from "./Admin";
 import {
+  CaseHierarchyProvenanceSummary,
+  HierarchyStaleBadges,
+} from "./CaseHierarchyProvenance";
+import {
   ApiError,
   createManualRun,
   createDashboardTemplate,
@@ -3716,7 +3720,11 @@ function HydraulicDiagramEditor({
               </ul>
             ) : null}
             {validation.stale ? (
-              <p role="status">Validacion hidraulica v3 stale</p>
+              <HierarchyStaleBadges
+                topologyStale={validation.topology_stale}
+                parametersStale={validation.parameters_stale}
+                fallbackMessage="Validacion hidraulica v3 stale"
+              />
             ) : null}
             {validation.system_case ? (
               <section
@@ -4010,6 +4018,12 @@ function VersionMetadata({ version }: { version: ScenarioVersionDetail }) {
   );
 }
 
+function VersionProvenance({ version }: { version: ScenarioVersionDetail }) {
+  return (
+    <CaseHierarchyProvenanceSummary provenance={version.generation_metadata} />
+  );
+}
+
 export function ScenarioVersionDetailView() {
   const versionId = useNumericParam("versionId");
   const version = useQuery({
@@ -4060,6 +4074,13 @@ export function ScenarioVersionDetailView() {
         <section className="workspace-section" aria-labelledby="version-meta">
           <h2 id="version-meta">Metadata</h2>
           <VersionMetadata version={version.data} />
+        </section>
+        <section
+          className="workspace-section"
+          aria-labelledby="version-provenance"
+        >
+          <h2 id="version-provenance">Procedencia</h2>
+          <VersionProvenance version={version.data} />
         </section>
         <section
           className="workspace-section"
@@ -4193,6 +4214,15 @@ function RunLineage({
         <dd>{run.scenario_version_id}</dd>
       </div>
     </dl>
+  );
+}
+
+function RunProvenance({ version }: { version?: ScenarioVersionDetail }) {
+  if (!version) {
+    return <p className="source-note">Cargando procedencia de la version.</p>;
+  }
+  return (
+    <CaseHierarchyProvenanceSummary provenance={version.generation_metadata} />
   );
 }
 
@@ -4892,6 +4922,10 @@ export function RunDetailView() {
             scenario={scenario.data}
             project={project.data}
           />
+        </section>
+        <section className="workspace-section" aria-labelledby="run-provenance">
+          <h2 id="run-provenance">Procedencia</h2>
+          <RunProvenance version={version.data} />
         </section>
         <RunFailureDetails run={runData} />
         <RunResultsSection run={runData} />

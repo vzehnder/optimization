@@ -34,6 +34,7 @@ import {
   type TimeSeriesRow,
   type TimeSeriesSource,
 } from "./api/client";
+import { CaseHierarchyProvenanceSummary } from "./CaseHierarchyProvenance";
 import { ForbiddenView, NotFoundView } from "./Workspace";
 
 const scenarioQueryKey = (scenarioId: number) =>
@@ -1336,20 +1337,23 @@ function GeneratedSystemCasePanel({
         </p>
       ) : null}
       {snapshot ? (
-        <dl className="generated-validation">
-          <div>
-            <dt>Ultima validacion guardada</dt>
-            <dd>{validation?.phase || "validation"}</dd>
-          </div>
-          <div>
-            <dt>Status</dt>
-            <dd>{validation?.ok ? "ok" : "error"}</dd>
-          </div>
-          <div>
-            <dt>Mensaje</dt>
-            <dd>{validation?.message || "Sin mensaje."}</dd>
-          </div>
-        </dl>
+        <>
+          <dl className="generated-validation">
+            <div>
+              <dt>Ultima validacion guardada</dt>
+              <dd>{validation?.phase || "validation"}</dd>
+            </div>
+            <div>
+              <dt>Status</dt>
+              <dd>{validation?.ok ? "ok" : "error"}</dd>
+            </div>
+            <div>
+              <dt>Mensaje</dt>
+              <dd>{validation?.message || "Sin mensaje."}</dd>
+            </div>
+          </dl>
+          <CaseHierarchyProvenanceSummary provenance={snapshot} />
+        </>
       ) : (
         <p className="empty-state">
           Genera y valida el caso antes de crear una version.

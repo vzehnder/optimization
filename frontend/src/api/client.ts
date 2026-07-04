@@ -1,4 +1,5 @@
 import type { components } from "./schema";
+import type { CaseHierarchyProvenance } from "../caseHierarchy";
 
 export type CurrentUser = components["schemas"]["CurrentUser"];
 export type CurrentUserResponse = components["schemas"]["CurrentUserResponse"];
@@ -75,7 +76,7 @@ export interface ScenarioVersion {
 export interface ScenarioVersionDetail extends ScenarioVersion {
   system_case_json: unknown;
   validation_payload: unknown;
-  generation_metadata: Record<string, unknown>;
+  generation_metadata: CaseHierarchyProvenance;
 }
 
 export interface ScenarioRun {
@@ -269,7 +270,7 @@ export interface GeneratedCaseValidation {
   [key: string]: unknown;
 }
 
-export interface GeneratedSystemCaseSnapshot {
+export interface GeneratedSystemCaseSnapshot extends CaseHierarchyProvenance {
   system_case: unknown;
   validation: GeneratedCaseValidation;
 }
@@ -569,7 +570,7 @@ export interface HydraulicDiagramValidationIssue {
   technical_key: string;
 }
 
-export interface HydraulicDiagramValidation {
+export interface HydraulicDiagramValidation extends CaseHierarchyProvenance {
   kind?: string;
   ok: boolean;
   stale?: boolean;
@@ -579,6 +580,8 @@ export interface HydraulicDiagramValidation {
   warnings: HydraulicDiagramValidationIssue[];
   system_case?: unknown;
   julia_validation?: unknown;
+  topology_stale?: boolean;
+  parameters_stale?: boolean;
 }
 
 interface StructuredErrorBody {

@@ -4039,6 +4039,137 @@ describe("application shell", () => {
     expect(screen.getByText(/Summer case/)).toBeVisible();
   });
 
+  it("shows topology and parameter provenance on the generated system_case panel", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10/draft");
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Initial modeling branch",
+      created_at: "2026-06-23T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-06-23T12:00:00Z",
+    };
+    const generatedCase = {
+      schema_version: "bess_system_dispatch.v1",
+      case_name: "Base case",
+      time_series: [{ duration_hours: 1, price_usd_per_mwh: 55 }],
+      assets: [{ type: "battery", id: "battery_1" }],
+    };
+    const draft = {
+      id: 3,
+      scenario_id: 10,
+      source_version_id: null,
+      created_at: "2026-06-23T12:10:00Z",
+      updated_at: "2026-06-23T12:10:00Z",
+      document: {
+        schema_version: "bess_editor_draft.v1",
+        case: { name: "Base case" },
+        source: null,
+        pcc: { id: "bus_1", type: "bus" },
+        grid: {
+          id: "grid_1",
+          import_power_max_mw: null,
+          export_power_max_mw: null,
+          prevent_simultaneous_grid_import_export: true,
+        },
+        assets: [
+          {
+            id: "battery_1",
+            type: "battery",
+            charge_power_max_mw: 4,
+            discharge_power_max_mw: 4,
+            energy_min_mwh: 0,
+            energy_max_mwh: 8,
+            initial_energy_mwh: 4,
+            charge_efficiency: 0.95,
+            discharge_efficiency: 0.95,
+            degradation_cost_per_mwh_delta_soc: 0,
+            terminal_condition: "equal_initial",
+            terminal_energy_min_mwh: null,
+            prevent_simultaneous_charge_discharge: true,
+            degradation_linear_delta_soc: true,
+          },
+        ],
+        time_series: { sources: [] },
+        solver: { name: "HiGHS", options: {} },
+        generated_system_case: {
+          system_case: generatedCase,
+          validation: {
+            ok: true,
+            phase: "julia",
+            message: "Validation succeeded",
+            payload: { status: "ok", case_name: "Base case" },
+          },
+          topology: { content_hash: "topo1111hash2222aaaa3333" },
+          parameters: { content_hash: "param4444hash5555bbbb6666" },
+        },
+      },
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/draft" && method === "GET") {
+          return new Response(JSON.stringify({ draft }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Draft estructurado" }),
+    ).toBeVisible();
+    expect(screen.getByText("Validation succeeded")).toBeVisible();
+    expect(screen.getByText("topo1111hash")).toBeVisible();
+    expect(screen.getByText("param4444has")).toBeVisible();
+  });
+
   it("keeps expert version paste/upload, immutable detail, and protected delete visible", async () => {
     window.history.replaceState({}, "", "/react/scenarios/10");
     const scenario = {
@@ -4290,6 +4421,399 @@ describe("application shell", () => {
     await waitFor(() => {
       expect(screen.queryByText("Version 1")).not.toBeInTheDocument();
     });
+  });
+
+  it("shows topology and parameter provenance on scenario version detail, with graceful fallback for versions without it", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Initial modeling branch",
+      created_at: "2026-06-23T12:05:00Z",
+    };
+    const versionWithProvenance = {
+      id: 41,
+      scenario_id: 10,
+      version_number: 1,
+      case_name: "structured_case",
+      schema_version: "bess_system_dispatch.v1",
+      period_count: 1,
+      asset_counts: { battery: 1 },
+      created_at: "2026-06-23T12:13:00Z",
+      system_case_json: { case_name: "structured_case" },
+      validation_payload: { status: "ok" },
+      generation_metadata: {
+        kind: "structured_draft",
+        topology: { content_hash: "aaaa1111bbbb2222cccc3333" },
+        parameters: { content_hash: "dddd4444eeee5555ffff6666" },
+      },
+    };
+    const legacyVersion = {
+      id: 42,
+      scenario_id: 10,
+      version_number: 2,
+      case_name: "legacy_case",
+      schema_version: "bess_system_dispatch.v1",
+      period_count: 1,
+      asset_counts: { battery: 1 },
+      created_at: "2026-06-23T12:14:00Z",
+      system_case_json: { case_name: "legacy_case" },
+      validation_payload: { status: "ok" },
+      generation_metadata: {},
+    };
+    const versions = [versionWithProvenance, legacyVersion];
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path.startsWith("/api/scenario-versions/") && method === "GET") {
+          const id = Number(path.split("/").at(-1));
+          const version = versions.find((item) => item.id === id);
+          return new Response(JSON.stringify({ scenario_version: version }), {
+            headers: { "Content-Type": "application/json" },
+            status: version ? 200 : 404,
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(await screen.findByText("Version 1")).toBeVisible();
+    await user.click(screen.getByRole("link", { name: "Version 1" }));
+    expect(
+      await screen.findByRole("heading", { name: "Version 1" }),
+    ).toBeVisible();
+    expect(screen.getByText("Draft estructurado")).toBeVisible();
+    expect(screen.getByText("aaaa1111bbbb")).toBeVisible();
+    expect(screen.getByText("dddd4444eeee")).toBeVisible();
+
+    await user.click(screen.getByRole("link", { name: "Base case" }));
+    await screen.findByRole("heading", { name: "Base case" });
+    await user.click(screen.getByRole("link", { name: "Version 2" }));
+    expect(
+      await screen.findByRole("heading", { name: "Version 2" }),
+    ).toBeVisible();
+    expect(screen.getAllByText("Sin datos de procedencia").length).toBe(2);
+  });
+
+  it("shows run detail provenance inherited from its scenario version", async () => {
+    window.history.replaceState({}, "", "/react/runs/99");
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-06-23T12:00:00Z",
+    };
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Initial modeling branch",
+      created_at: "2026-06-23T12:05:00Z",
+    };
+    const version = {
+      id: 41,
+      scenario_id: 10,
+      version_number: 3,
+      case_name: "hydraulic_case",
+      schema_version: "bess_system_dispatch.v3",
+      period_count: 2,
+      asset_counts: { hydro: 1 },
+      created_at: "2026-06-23T12:14:00Z",
+      system_case_json: { case_name: "hydraulic_case" },
+      validation_payload: { status: "ok" },
+      generation_metadata: {
+        kind: "hydraulic_diagram_v3",
+        topology: { content_hash: "1111aaaa2222bbbb3333cccc" },
+        parameters: { content_hash: "4444dddd5555eeee6666ffff" },
+      },
+    };
+    const run = {
+      id: 99,
+      scenario_version_id: 41,
+      status: "failed",
+      created_at: "2026-06-23T12:15:00Z",
+      started_at: "2026-06-23T12:15:01Z",
+      finished_at: "2026-06-23T12:15:03Z",
+      duration_seconds: 1,
+      exit_code: 1,
+      error_message: "solver failed",
+      stdout: "",
+      stderr: "",
+      trigger_type: "manual",
+      triggered_by: "internal_analyst",
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/runs/99") {
+          return new Response(JSON.stringify({ run }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenario-versions/41" && method === "GET") {
+          return new Response(JSON.stringify({ scenario_version: version }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Run 99" }),
+    ).toBeVisible();
+    expect(await screen.findByText("Diagrama hidraulico v3")).toBeVisible();
+    expect(screen.getByText("1111aaaa2222")).toBeVisible();
+    expect(screen.getByText("4444dddd5555")).toBeVisible();
+  });
+
+  it("visually distinguishes topology-stale from parameters-stale hydraulic v3 validation", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/react/scenarios/10/hydraulic-diagram",
+    );
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Hydraulic branch",
+      created_at: "2026-06-26T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hydro PMGD",
+      description: "Hydraulic workspace",
+      created_at: "2026-06-26T12:00:00Z",
+    };
+    let getCount = 0;
+    const baseDiagram = {
+      scenario_id: 10,
+      optimization_case: {
+        id: 4,
+        scenario_id: 10,
+        case_key: "scenario_10_hydraulic_case",
+        display_name: "Base case",
+        updated_at: "2026-06-26T12:10:00Z",
+      },
+      hydraulic_system: {
+        id: 5,
+        project_id: 1,
+        system_key: "default_hydraulic_system",
+        display_name: "Default hydraulic system",
+      },
+      layout: {
+        id: 6,
+        case_id: 4,
+        layout_key: "default",
+        layout_engine: "auto_dag",
+        layout_version: 1,
+        revision: "1",
+        viewport: { x: 0, y: 0, zoom: 1 },
+        updated_at: "2026-06-26T12:10:00Z",
+        updated_by: "internal_analyst",
+      },
+      revision: "1",
+      nodes: [] as unknown[],
+      reaches: [] as unknown[],
+    };
+    const topologyStaleValidation = {
+      kind: "hydraulic_v3_preview",
+      ok: false,
+      stale: true,
+      status: "stale",
+      summary: "Hydraulic v3 validation is stale after topology edits",
+      errors: [],
+      warnings: [],
+      topology_stale: true,
+      parameters_stale: false,
+    };
+    const parametersStaleValidation = {
+      kind: "hydraulic_v3_preview",
+      ok: false,
+      stale: true,
+      status: "stale",
+      summary: "Hydraulic v3 validation is stale after parameters edits",
+      errors: [],
+      warnings: [],
+      topology_stale: false,
+      parameters_stale: true,
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "POST"
+        ) {
+          return new Response(
+            JSON.stringify({
+              diagram: { ...baseDiagram, validation: topologyStaleValidation },
+            }),
+            { status: 201, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (
+          path === "/api/scenarios/10/hydraulic-diagram" &&
+          method === "GET"
+        ) {
+          getCount += 1;
+          return new Response(
+            JSON.stringify({
+              diagram: {
+                ...baseDiagram,
+                validation: parametersStaleValidation,
+              },
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Diagrama hidraulico" }),
+    ).toBeVisible();
+    expect(await screen.findByText("Topologia desactualizada")).toBeVisible();
+    expect(
+      screen.queryByText("Parametros desactualizados"),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Recargar diagrama" }));
+    expect(await screen.findByText("Parametros desactualizados")).toBeVisible();
+    expect(
+      screen.queryByText("Topologia desactualizada"),
+    ).not.toBeInTheDocument();
+    expect(getCount).toBe(1);
   });
 
   it("lets internal users create projects and scenarios, then refresh a direct scenario link", async () => {

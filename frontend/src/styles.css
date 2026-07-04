@@ -1035,7 +1035,8 @@ button:focus-visible {
 }
 
 .generated-validation,
-.version-metadata {
+.version-metadata,
+.hierarchy-provenance {
   margin: 0;
 }
 
@@ -1043,6 +1044,32 @@ button:focus-visible {
   margin: 0;
   color: #9a3412;
   font-weight: 800;
+}
+
+.hierarchy-stale-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.5rem 0 0;
+}
+
+.hierarchy-stale-badge {
+  display: inline-block;
+  margin: 0.5rem 0 0;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.hierarchy-stale-badge-topology {
+  color: #9a3412;
+  background: #ffedd5;
+}
+
+.hierarchy-stale-badge-parameters {
+  color: #6d28d9;
+  background: #ede9fe;
 }
 
 .json-panel {
