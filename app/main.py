@@ -33,6 +33,9 @@ from app.persistence import (
     AnalystStore,
     DEFAULT_PUBLICATION_ARTIFACT_TYPES,
     build_hydraulic_diagram_layout_snapshot,
+    derive_case_hierarchy_provenance,
+    hierarchy_stale_state,
+    hierarchy_stale_summary,
     utc_now_iso,
 )
 from app.results import ResultReadError, apply_dashboard_template, read_run_results
@@ -1177,18 +1180,29 @@ def create_app(
         try:
             diagram = analyst_store.get_hydraulic_diagram(scenario_id)
             validation = diagram["validation"]
-            if (
-                validation.get("kind") != "hydraulic_v3_preview"
-                or not validation.get("ok")
-                or validation.get("stale")
-            ):
+            if validation.get("kind") != "hydraulic_v3_preview":
+                raise DraftPromotionError("hydraulic v3 validation must succeed before promotion")
+            if validation.get("stale"):
+                stale_state = {
+                    "topology_stale": bool(validation.get("topology_stale")),
+                    "parameters_stale": bool(validation.get("parameters_stale")),
+                }
+                raise DraftPromotionError(
+                    hierarchy_stale_summary("hydraulic v3 validation", stale_state)
+                    + "; validate again before promotion"
+                )
+            if not validation.get("ok"):
                 raise DraftPromotionError("hydraulic v3 validation must succeed before promotion")
             system_case = validation.get("system_case")
             if not isinstance(system_case, dict):
                 raise DraftPromotionError("hydraulic v3 validation snapshot is missing system_case")
             current_system_case = analyst_store.generate_hydraulic_v3_preview(scenario_id)
-            if json.dumps(current_system_case, sort_keys=True) != json.dumps(system_case, sort_keys=True):
-                raise DraftPromotionError("hydraulic v3 validation is stale after diagram edits")
+            stale_state = hierarchy_stale_state(system_case, current_system_case)
+            if stale_state is not None:
+                raise DraftPromotionError(
+                    hierarchy_stale_summary("hydraulic v3 validation", stale_state)
+                    + "; validate again before promotion"
+                )
             scenario_version, error = save_validated_scenario_version(
                 scenario_id,
                 json.dumps(system_case, sort_keys=True),
@@ -1813,6 +1827,7 @@ def generated_system_case_snapshot(system_case: dict[str, Any], result: Validati
     return {
         "system_case": copy.deepcopy(system_case),
         "validation": validation,
+        **derive_case_hierarchy_provenance(system_case),
     }
 
 
@@ -1828,6 +1843,15 @@ def validated_generated_system_case_from_draft(document: dict[str, Any]) -> dict
     validation = snapshot.get("validation")
     if not isinstance(validation, dict) or not validation.get("ok"):
         raise DraftPromotionError("generated system case validation must succeed before promotion")
+
+    previous_system_case = snapshot.get("system_case")
+    if isinstance(previous_system_case, dict):
+        stale_state = hierarchy_stale_state(previous_system_case, system_case)
+        if stale_state is not None:
+            raise DraftPromotionError(
+                hierarchy_stale_summary("generated system case validation", stale_state)
+                + "; validate again before promotion"
+            )
 
     raise DraftPromotionError("generated system case validation is stale; validate again before promotion")
 

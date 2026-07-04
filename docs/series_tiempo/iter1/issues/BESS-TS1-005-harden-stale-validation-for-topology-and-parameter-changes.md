@@ -1,6 +1,6 @@
 # BESS-TS1-005: Harden Stale Validation For Topology And Parameter Changes
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter1/prd.md`
@@ -22,15 +22,15 @@ validation where possible, while keeping existing error behavior controlled.
 
 ## Acceptance criteria
 
-- [ ] Validation snapshots store topology hash at validation time.
-- [ ] Validation snapshots store parameter hash at validation time.
-- [ ] Topology edits after validation mark the validation stale.
-- [ ] Parameter edits after validation mark the validation stale.
-- [ ] Layout-only edits do not mark topology or parameter validation stale.
-- [ ] Promotion or run creation blocks stale validation snapshots.
-- [ ] Error payloads identify whether topology or parameters caused stale state when known.
-- [ ] Backend tests cover topology stale, parameter stale and layout-only non-stale behavior.
-- [ ] Existing stale promotion protections for hydraulic diagrams remain green.
+- [x] Validation snapshots store topology hash at validation time.
+- [x] Validation snapshots store parameter hash at validation time.
+- [x] Topology edits after validation mark the validation stale.
+- [x] Parameter edits after validation mark the validation stale.
+- [x] Layout-only edits do not mark topology or parameter validation stale.
+- [x] Promotion or run creation blocks stale validation snapshots.
+- [x] Error payloads identify whether topology or parameters caused stale state when known.
+- [x] Backend tests cover topology stale, parameter stale and layout-only non-stale behavior.
+- [x] Existing stale promotion protections for hydraulic diagrams remain green.
 
 ## Blocked by
 

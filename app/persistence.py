@@ -2029,6 +2029,7 @@ class AnalystStore:
                 "validation_hash": payload_hash,
                 "system_case": system_case,
                 "julia_validation": julia_payload,
+                **derive_case_hierarchy_provenance(system_case),
             }
             self.connection.execute(
                 """
@@ -2061,19 +2062,26 @@ class AnalystStore:
         ):
             return None
 
-        previous_hash = previous_validation.get("validation_hash")
+        previous_system_case = previous_validation.get("system_case")
         try:
-            current_hash = hydraulic_payload_hash(self.generate_hydraulic_v3_preview(scenario_id))
+            current_system_case = self.generate_hydraulic_v3_preview(scenario_id)
         except Exception:
-            current_hash = None
-        if current_hash == previous_hash:
-            return None
+            current_system_case = None
+
+        if current_system_case is None or not isinstance(previous_system_case, dict):
+            stale_state = {"topology_stale": True, "parameters_stale": True}
+        else:
+            stale_state = hierarchy_stale_state(previous_system_case, current_system_case)
+            if stale_state is None:
+                return None
 
         stale = dict(previous_validation)
         stale["ok"] = False
         stale["stale"] = True
         stale["status"] = "stale"
-        stale["summary"] = "Hydraulic v3 validation is stale after diagram edits"
+        stale["topology_stale"] = stale_state["topology_stale"]
+        stale["parameters_stale"] = stale_state["parameters_stale"]
+        stale["summary"] = hierarchy_stale_summary("Hydraulic v3 validation", stale_state)
         stale["stale_at"] = updated_at
         return stale
 
@@ -5829,6 +5837,40 @@ def derive_case_hierarchy_provenance(document: dict[str, Any]) -> dict[str, dict
         "topology": {"content_hash": _content_hash(views["topology"])},
         "parameters": {"content_hash": _content_hash(views["parameters"])},
     }
+
+
+def hierarchy_stale_state(
+    previous_system_case: dict[str, Any], current_system_case: dict[str, Any]
+) -> dict[str, bool] | None:
+    """Identify whether topology and/or parameters drifted between two cases.
+
+    Compares the topology/parameter provenance hashes of a previously
+    validated ``system_case_json`` against a freshly generated one. Returns
+    ``None`` when both hashes still match (validation is still current), or a
+    dict with ``topology_stale``/``parameters_stale`` booleans otherwise.
+    """
+    previous_provenance = derive_case_hierarchy_provenance(previous_system_case)
+    current_provenance = derive_case_hierarchy_provenance(current_system_case)
+    topology_stale = (
+        previous_provenance["topology"]["content_hash"] != current_provenance["topology"]["content_hash"]
+    )
+    parameters_stale = (
+        previous_provenance["parameters"]["content_hash"] != current_provenance["parameters"]["content_hash"]
+    )
+    if not topology_stale and not parameters_stale:
+        return None
+    return {"topology_stale": topology_stale, "parameters_stale": parameters_stale}
+
+
+def hierarchy_stale_summary(label: str, stale_state: Mapping[str, bool]) -> str:
+    """Human-readable summary naming which hierarchy part(s) went stale."""
+    if stale_state["topology_stale"] and stale_state["parameters_stale"]:
+        changed = "topology and parameters"
+    elif stale_state["topology_stale"]:
+        changed = "topology"
+    else:
+        changed = "parameters"
+    return f"{label} is stale after {changed} edits"
 
 
 def generate_system_case_from_hierarchy(
