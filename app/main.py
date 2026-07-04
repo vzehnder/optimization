@@ -39,6 +39,11 @@ from app.persistence import (
     utc_now_iso,
 )
 from app.results import ResultReadError, apply_dashboard_template, read_run_results
+from app.time_series_catalog import (
+    CatalogImportRequest as PreparedCatalogImportRequest,
+    TimeSeriesCatalogError,
+    prepare_time_series_catalog_import,
+)
 from app.runner import JuliaRunExecutor, LocalRunQueue
 from app.time_series_ingestion import (
     TimeSeriesIngestionError,
@@ -247,6 +252,17 @@ class TimeSeriesMappingRequest(BaseModel):
 
 class TimeSeriesRowsRequest(BaseModel):
     rows: list[dict[str, Any]]
+
+
+class TimeSeriesCatalogImportRequest(BaseModel):
+    set_name: str = Field(min_length=1)
+    version_label: str = Field(min_length=1)
+    data_kind: str = Field(min_length=1)
+    timezone: str = Field(min_length=1)
+    timestamp_column: str = Field(min_length=1)
+    duration_hours_column: str = Field(min_length=1)
+    value_column: str = Field(min_length=1)
+    signal_key: str = Field(min_length=1)
 
 
 class DraftPromotionError(ValueError):
@@ -1430,6 +1446,71 @@ def create_app(
         except TimeSeriesIngestionError as error:
             return JSONResponse(error_response_body("source_file", str(error)), status_code=400)
         return {"source": source}
+
+    @app.post(
+        "/api/scenarios/{scenario_id}/draft/time-series-sources/{source_id}/catalog-import",
+        status_code=201,
+    )
+    async def import_draft_time_series_source_to_catalog(
+        scenario_id: int,
+        source_id: str,
+        payload: TimeSeriesCatalogImportRequest,
+    ):
+        try:
+            draft = analyst_store.get_scenario_draft(scenario_id)
+            time_series = draft["document"].get("time_series")
+            sources = time_series.get("sources") if isinstance(time_series, dict) else None
+            source = next(
+                (
+                    item
+                    for item in sources or []
+                    if isinstance(item, dict) and item.get("id") == source_id
+                ),
+                None,
+            )
+            if source is None:
+                raise KeyError(f"time-series source {source_id} not found")
+            _columns, rows = get_time_series_source_rows(
+                document=draft["document"],
+                source_id=source_id,
+                input_source_root=configured_input_source_root,
+            )
+            prepared_import = prepare_time_series_catalog_import(
+                rows=rows,
+                request=PreparedCatalogImportRequest(
+                    set_name=payload.set_name,
+                    version_label=payload.version_label,
+                    data_kind=payload.data_kind,
+                    timezone=payload.timezone,
+                    timestamp_column=payload.timestamp_column,
+                    duration_hours_column=payload.duration_hours_column,
+                    value_column=payload.value_column,
+                    signal_key=payload.signal_key,
+                ),
+            )
+            created_set = analyst_store.import_time_series_catalog_set(
+                scenario_id=scenario_id,
+                source=source,
+                prepared_import=prepared_import,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except TimeSeriesIngestionError as error:
+            return JSONResponse(error_response_body("source_file", str(error)), status_code=400)
+        except (TimeSeriesCatalogError, ValueError) as error:
+            return JSONResponse(
+                error_response_body("catalog_import", str(error), phase="python_validation"),
+                status_code=400,
+            )
+        return {"time_series_set": created_set}
+
+    @app.get("/api/projects/{project_id}/time-series-sets/{time_series_set_id}")
+    async def get_project_time_series_set(project_id: int, time_series_set_id: int):
+        try:
+            time_series_set = analyst_store.get_time_series_set(project_id, time_series_set_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"time_series_set": time_series_set}
 
     @app.put("/api/scenarios/{scenario_id}/draft")
     async def update_scenario_draft(scenario_id: int, payload: ScenarioDraftWriteRequest):

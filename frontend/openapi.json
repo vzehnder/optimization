@@ -269,6 +269,18 @@
             "title": "Display Name",
             "type": "string"
           },
+          "link_anchors": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Anchors"
+          },
           "natural_inflow_series": {
             "anyOf": [
               {
@@ -370,6 +382,17 @@
             ],
             "title": "Flow Min M3S"
           },
+          "from_anchor": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Anchor"
+          },
           "from_node_key": {
             "minLength": 1,
             "title": "From Node Key",
@@ -410,6 +433,17 @@
             "minLength": 1,
             "title": "Technical Key",
             "type": "string"
+          },
+          "to_anchor": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Anchor"
           },
           "to_node_key": {
             "minLength": 1,
@@ -977,6 +1011,62 @@
           "system_case_json"
         ],
         "title": "SystemCaseValidationRequest",
+        "type": "object"
+      },
+      "TimeSeriesCatalogImportRequest": {
+        "properties": {
+          "data_kind": {
+            "minLength": 1,
+            "title": "Data Kind",
+            "type": "string"
+          },
+          "duration_hours_column": {
+            "minLength": 1,
+            "title": "Duration Hours Column",
+            "type": "string"
+          },
+          "set_name": {
+            "minLength": 1,
+            "title": "Set Name",
+            "type": "string"
+          },
+          "signal_key": {
+            "minLength": 1,
+            "title": "Signal Key",
+            "type": "string"
+          },
+          "timestamp_column": {
+            "minLength": 1,
+            "title": "Timestamp Column",
+            "type": "string"
+          },
+          "timezone": {
+            "minLength": 1,
+            "title": "Timezone",
+            "type": "string"
+          },
+          "value_column": {
+            "minLength": 1,
+            "title": "Value Column",
+            "type": "string"
+          },
+          "version_label": {
+            "minLength": 1,
+            "title": "Version Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "set_name",
+          "version_label",
+          "data_kind",
+          "timezone",
+          "timestamp_column",
+          "duration_hours_column",
+          "value_column",
+          "signal_key"
+        ],
+        "title": "TimeSeriesCatalogImportRequest",
         "type": "object"
       },
       "TimeSeriesMappingRequest": {
@@ -1976,6 +2066,52 @@
         "summary": "Create Scenario"
       }
     },
+    "/api/projects/{project_id}/time-series-sets/{time_series_set_id}": {
+      "get": {
+        "operationId": "get_project_time_series_set_api_projects__project_id__time_series_sets__time_series_set_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "time_series_set_id",
+            "required": true,
+            "schema": {
+              "title": "Time Series Set Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Project Time Series Set"
+      }
+    },
     "/api/publications/{publication_id}": {
       "put": {
         "operationId": "update_publication_draft_api_publications__publication_id__put",
@@ -2830,6 +2966,62 @@
           }
         },
         "summary": "Upload Draft Time Series Source"
+      }
+    },
+    "/api/scenarios/{scenario_id}/draft/time-series-sources/{source_id}/catalog-import": {
+      "post": {
+        "operationId": "import_draft_time_series_source_to_catalog_api_scenarios__scenario_id__draft_time_series_sources__source_id__catalog_import_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TimeSeriesCatalogImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Draft Time Series Source To Catalog"
       }
     },
     "/api/scenarios/{scenario_id}/draft/time-series-sources/{source_id}/mapping": {

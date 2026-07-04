@@ -3787,6 +3787,256 @@ describe("application shell", () => {
     expect(screen.getByText("Cambios sin guardar")).toBeVisible();
   });
 
+  it("imports an uploaded CSV source into the TS-2 catalog and shows the created set confirmation", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10/draft");
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Catalog branch",
+      created_at: "2026-07-04T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-07-04T12:00:00Z",
+    };
+    const draft = {
+      id: 3,
+      scenario_id: 10,
+      source_version_id: null,
+      created_at: "2026-07-04T12:10:00Z",
+      updated_at: "2026-07-04T12:10:00Z",
+      document: {
+        schema_version: "bess_editor_draft.v1",
+        case: { name: "Base case" },
+        source: null,
+        pcc: { id: "bus_1", type: "bus" },
+        grid: {
+          id: "grid_1",
+          import_power_max_mw: null,
+          export_power_max_mw: null,
+          prevent_simultaneous_grid_import_export: true,
+        },
+        assets: [],
+        time_series: { sources: [] },
+        solver: { name: "HiGHS", options: {} },
+      },
+    };
+    const uploadedSource = {
+      id: "csv_source_1",
+      kind: "csv",
+      original_filename: "price.csv",
+      media_type: "text/csv",
+      checksum: "sha256:source123",
+      columns: ["period_start", "hours", "spot_price"],
+      preview_rows: [
+        {
+          period_start: "2026-01-01T00:00:00",
+          hours: "1.0",
+          spot_price: "55.0",
+        },
+      ],
+    };
+    let lastImportBody: unknown = null;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/draft" && method === "GET") {
+          return new Response(JSON.stringify({ draft }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/draft/time-series-sources/upload" &&
+          method === "POST"
+        ) {
+          return new Response(JSON.stringify({ source: uploadedSource }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path ===
+            "/api/scenarios/10/draft/time-series-sources/csv_source_1/catalog-import" &&
+          method === "POST"
+        ) {
+          lastImportBody = JSON.parse(String(init?.body));
+          return new Response(
+            JSON.stringify({
+              time_series_set: {
+                id: 91,
+                project_id: 1,
+                name: "Spot price Jan 2026",
+                version_number: 1,
+                version_label: "v1",
+                revision_number: 1,
+                data_kind: "real",
+                timezone: "America/Santiago",
+                status: "validated",
+                content_hash: "sha256:cataloghash123",
+                source_checksum: "sha256:source123",
+                signal_count: 1,
+                period_count: 2,
+                source: {
+                  original_filename: "price.csv",
+                  media_type: "text/csv",
+                  checksum: "sha256:source123",
+                },
+                signals: [
+                  {
+                    signal_key: "price_usd_per_mwh",
+                    unit: "USD/MWh",
+                    entity_type: null,
+                    entity_key: null,
+                  },
+                ],
+                periods: [
+                  {
+                    period_index: 0,
+                    timestamp_start: "2026-01-01T00:00:00-03:00",
+                    timestamp_end: "2026-01-01T01:00:00-03:00",
+                    duration_hours: 1,
+                  },
+                  {
+                    period_index: 1,
+                    timestamp_start: "2026-01-01T01:00:00-03:00",
+                    timestamp_end: "2026-01-01T02:00:00-03:00",
+                    duration_hours: 1,
+                  },
+                ],
+                values: [
+                  {
+                    period_index: 0,
+                    signal_key: "price_usd_per_mwh",
+                    value_numeric: 55,
+                  },
+                  {
+                    period_index: 1,
+                    signal_key: "price_usd_per_mwh",
+                    value_numeric: 60,
+                  },
+                ],
+              },
+            }),
+            {
+              status: 201,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Draft estructurado" }),
+    ).toBeVisible();
+    await user.upload(
+      screen.getByLabelText("Source file"),
+      new File(
+        ["period_start,hours,spot_price\n2026-01-01T00:00:00,1.0,55.0\n"],
+        "price.csv",
+        { type: "text/csv" },
+      ),
+    );
+    await user.click(screen.getByRole("button", { name: "Upload source" }));
+    expect(await screen.findByText("price.csv")).toBeVisible();
+
+    await user.clear(screen.getByLabelText("Catalog set name"));
+    await user.type(
+      screen.getByLabelText("Catalog set name"),
+      "Spot price Jan 2026",
+    );
+    await user.clear(screen.getByLabelText("Catalog version label"));
+    await user.type(screen.getByLabelText("Catalog version label"), "v1");
+    await user.selectOptions(
+      screen.getByLabelText("Catalog timestamp column"),
+      "period_start",
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Catalog duration column"),
+      "hours",
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Catalog value column"),
+      "spot_price",
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Catalog signal"),
+      "price_usd_per_mwh",
+    );
+    await user.click(screen.getByRole("button", { name: "Import to catalog" }));
+
+    expect(lastImportBody).toEqual({
+      set_name: "Spot price Jan 2026",
+      version_label: "v1",
+      data_kind: "real",
+      timezone: "America/Santiago",
+      timestamp_column: "period_start",
+      duration_hours_column: "hours",
+      value_column: "spot_price",
+      signal_key: "price_usd_per_mwh",
+    });
+    expect(await screen.findByText("Catalog import created")).toBeVisible();
+    expect(screen.getByText("Spot price Jan 2026")).toBeVisible();
+    expect(screen.getByText("price_usd_per_mwh")).toBeVisible();
+    expect(screen.getByText("2 periods")).toBeVisible();
+    expect(screen.getByText("Revision 1")).toBeVisible();
+  });
+
   it("lets analysts inspect, validate, stale, and promote a generated system_case once", async () => {
     window.history.replaceState({}, "", "/react/scenarios/10/draft");
     const scenario = {

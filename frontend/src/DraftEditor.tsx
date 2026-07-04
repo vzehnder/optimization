@@ -17,9 +17,12 @@ import {
   getScenario,
   getScenarioDraft,
   getTimeSeriesRows,
+  importTimeSeriesSourceToCatalog,
   promoteGeneratedSystemCase,
+  type ProjectTimeSeriesSet,
   saveTimeSeriesMapping,
   saveTimeSeriesRows,
+  type TimeSeriesCatalogImportPayload,
   updateScenarioDraft,
   uploadTimeSeriesSource,
   validateGeneratedSystemCase,
@@ -210,6 +213,35 @@ const assetMappingTypes: Record<AssetMappingKey, DraftAssetType> = {
   hydro_inflow_m3s: "hydro",
 };
 
+const timeSeriesCatalogSignalOptions = [
+  { value: "price_usd_per_mwh", label: "price_usd_per_mwh (USD/MWh)" },
+  {
+    value: "import_price_usd_per_mwh",
+    label: "import_price_usd_per_mwh (USD/MWh)",
+  },
+  {
+    value: "export_price_usd_per_mwh",
+    label: "export_price_usd_per_mwh (USD/MWh)",
+  },
+  { value: "load_demand_mw", label: "load_demand_mw (MW)" },
+  {
+    value: "renewable_available_power_mw",
+    label: "renewable_available_power_mw (MW)",
+  },
+  { value: "hydro_inflow_m3s", label: "hydro_inflow_m3s (m3/s)" },
+  { value: "natural_inflow_m3s", label: "natural_inflow_m3s (m3/s)" },
+  { value: "minimum_flow_m3s", label: "minimum_flow_m3s (m3/s)" },
+] as const;
+
+const timeSeriesCatalogDataKindOptions = [
+  { value: "real", label: "real" },
+  { value: "programmed", label: "programmed" },
+  { value: "forecast", label: "forecast" },
+  { value: "simulated", label: "simulated" },
+  { value: "synthetic", label: "synthetic" },
+  { value: "mixed", label: "mixed" },
+] as const;
+
 const rowRenderLimit = 50;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -304,6 +336,67 @@ function mappingFromSource(
     );
   }
   return mapping;
+}
+
+function normalizeColumnName(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_");
+}
+
+function findSuggestedCatalogColumn(
+  columns: string[],
+  aliases: string[],
+): string {
+  const aliasSet = new Set(aliases.map((alias) => normalizeColumnName(alias)));
+  return (
+    columns.find((column) => aliasSet.has(normalizeColumnName(column))) || ""
+  );
+}
+
+function defaultCatalogSetName(source: TimeSeriesSource | null): string {
+  const filename = String(source?.original_filename || "").trim();
+  if (!filename) return "Imported time-series set";
+  return filename.replace(/\.[^.]+$/, "") || "Imported time-series set";
+}
+
+function defaultCatalogValueColumn(columns: string[]): string {
+  const preferred =
+    findSuggestedCatalogColumn(columns, [
+      "spot_price",
+      "price",
+      "value",
+      "price_usd_per_mwh",
+      "import_price_usd_per_mwh",
+    ]) || "";
+  if (preferred) return preferred;
+  return columns[2] || columns[0] || "";
+}
+
+function defaultCatalogImportPayload(
+  source: TimeSeriesSource | null,
+): TimeSeriesCatalogImportPayload {
+  const columns = Array.isArray(source?.columns) ? source.columns : [];
+  return {
+    set_name: defaultCatalogSetName(source),
+    version_label: "v1",
+    data_kind: "real",
+    timezone: "America/Santiago",
+    timestamp_column: findSuggestedCatalogColumn(columns, [
+      "timestamp",
+      "period_start",
+      "datetime",
+      "time",
+    ]),
+    duration_hours_column: findSuggestedCatalogColumn(columns, [
+      "duration_hours",
+      "hours",
+      "duration",
+    ]),
+    value_column: defaultCatalogValueColumn(columns),
+    signal_key: "price_usd_per_mwh",
+  };
 }
 
 function isAssetType(value: unknown): value is DraftAssetType {
@@ -1120,6 +1213,191 @@ function TimeSeriesRowsEditor({
   );
 }
 
+function TimeSeriesCatalogImportPanel({
+  scenarioId,
+  source,
+  disabled,
+}: {
+  scenarioId: number;
+  source: TimeSeriesSource;
+  disabled: boolean;
+}) {
+  const [payload, setPayload] = useState<TimeSeriesCatalogImportPayload>(() =>
+    defaultCatalogImportPayload(source),
+  );
+  const [importError, setImportError] = useState("");
+  const [createdSet, setCreatedSet] = useState<ProjectTimeSeriesSet | null>(
+    null,
+  );
+
+  const importMutation = useMutation({
+    mutationFn: () =>
+      importTimeSeriesSourceToCatalog(scenarioId, source.id, payload),
+    onSuccess: (timeSeriesSet) => {
+      setCreatedSet(timeSeriesSet);
+      setImportError("");
+    },
+    onError: (error) => {
+      setImportError(errorMessage(error));
+      setCreatedSet(null);
+    },
+  });
+
+  const columnOptions = [
+    { value: "", label: "Select column" },
+    ...((source.columns || []).map((column) => ({
+      value: String(column),
+      label: String(column),
+    })) as Array<{ value: string; label: string }>),
+  ];
+  const canImport =
+    Boolean(payload.set_name.trim()) &&
+    Boolean(payload.version_label.trim()) &&
+    Boolean(payload.timezone.trim()) &&
+    Boolean(payload.timestamp_column) &&
+    Boolean(payload.duration_hours_column) &&
+    Boolean(payload.value_column) &&
+    Boolean(payload.signal_key);
+
+  return (
+    <section className="source-catalog">
+      <h3>TS-2 catalog import</h3>
+      <p className="source-note">
+        Create one project-scoped catalog set from this uploaded source.
+      </p>
+      <div className="draft-field-grid">
+        <TextInput
+          id="catalog_set_name"
+          label="Catalog set name"
+          value={payload.set_name}
+          onChange={(value) =>
+            setPayload((current) => ({ ...current, set_name: value }))
+          }
+          errors={{}}
+          required
+        />
+        <TextInput
+          id="catalog_version_label"
+          label="Catalog version label"
+          value={payload.version_label}
+          onChange={(value) =>
+            setPayload((current) => ({ ...current, version_label: value }))
+          }
+          errors={{}}
+          required
+        />
+        <SelectInput
+          id="catalog_data_kind"
+          label="Catalog data kind"
+          value={payload.data_kind}
+          options={timeSeriesCatalogDataKindOptions.map((option) => ({
+            value: option.value,
+            label: option.label,
+          }))}
+          onChange={(value) =>
+            setPayload((current) => ({ ...current, data_kind: value }))
+          }
+        />
+        <TextInput
+          id="catalog_timezone"
+          label="Catalog timezone"
+          value={payload.timezone}
+          onChange={(value) =>
+            setPayload((current) => ({ ...current, timezone: value }))
+          }
+          errors={{}}
+          required
+        />
+        <SelectInput
+          id="catalog_timestamp_column"
+          label="Catalog timestamp column"
+          value={payload.timestamp_column}
+          options={columnOptions}
+          onChange={(value) =>
+            setPayload((current) => ({ ...current, timestamp_column: value }))
+          }
+        />
+        <SelectInput
+          id="catalog_duration_column"
+          label="Catalog duration column"
+          value={payload.duration_hours_column}
+          options={columnOptions}
+          onChange={(value) =>
+            setPayload((current) => ({
+              ...current,
+              duration_hours_column: value,
+            }))
+          }
+        />
+        <SelectInput
+          id="catalog_value_column"
+          label="Catalog value column"
+          value={payload.value_column}
+          options={columnOptions}
+          onChange={(value) =>
+            setPayload((current) => ({ ...current, value_column: value }))
+          }
+        />
+        <SelectInput
+          id="catalog_signal"
+          label="Catalog signal"
+          value={payload.signal_key}
+          options={timeSeriesCatalogSignalOptions.map((option) => ({
+            value: option.value,
+            label: option.label,
+          }))}
+          onChange={(value) =>
+            setPayload((current) => ({ ...current, signal_key: value }))
+          }
+        />
+      </div>
+      <button
+        type="button"
+        onClick={() => importMutation.mutate()}
+        disabled={disabled || importMutation.isPending || !canImport}
+      >
+        {importMutation.isPending
+          ? "Importing to catalog"
+          : "Import to catalog"}
+      </button>
+      {importError ? <p role="alert">{importError}</p> : null}
+      {createdSet ? (
+        <div className="source-summary">
+          <p className="source-ok">Catalog import created</p>
+          <dl className="source-metadata">
+            <div>
+              <dt>Name</dt>
+              <dd>{createdSet.name}</dd>
+            </div>
+            <div>
+              <dt>Signal</dt>
+              <dd>{createdSet.signals[0]?.signal_key || payload.signal_key}</dd>
+            </div>
+            <div>
+              <dt>Version</dt>
+              <dd>
+                {createdSet.version_label} (v{createdSet.version_number})
+              </dd>
+            </div>
+            <div>
+              <dt>Revision</dt>
+              <dd>Revision {createdSet.revision_number}</dd>
+            </div>
+            <div>
+              <dt>Periods</dt>
+              <dd>{createdSet.period_count} periods</dd>
+            </div>
+            <div>
+              <dt>Checksum</dt>
+              <dd>{createdSet.content_hash}</dd>
+            </div>
+          </dl>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function TimeSeriesWorkflow({
   scenarioId,
   document,
@@ -1194,6 +1472,12 @@ function TimeSeriesWorkflow({
       {source ? (
         <>
           <SourceSummary source={source} />
+          <TimeSeriesCatalogImportPanel
+            key={`catalog-${source.id}`}
+            scenarioId={scenarioId}
+            source={source}
+            disabled={dirty}
+          />
           <TimeSeriesMappingPanel
             key={`mapping-${source.id}`}
             scenarioId={scenarioId}

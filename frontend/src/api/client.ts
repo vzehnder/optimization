@@ -249,6 +249,7 @@ export interface TimeSeriesSource {
   kind?: string;
   original_filename?: string;
   media_type?: string;
+  checksum?: string;
   stored_path?: string;
   selected_sheet?: string;
   columns?: string[];
@@ -259,6 +260,66 @@ export interface TimeSeriesSource {
   validation?: TimeSeriesValidation;
   validated_rows?: unknown[];
   [key: string]: unknown;
+}
+
+export interface TimeSeriesCatalogImportPayload {
+  set_name: string;
+  version_label: string;
+  data_kind: string;
+  timezone: string;
+  timestamp_column: string;
+  duration_hours_column: string;
+  value_column: string;
+  signal_key: string;
+}
+
+export interface ProjectTimeSeriesSetSignal {
+  signal_key: string;
+  unit: string;
+  entity_type: string | null;
+  entity_key: string | null;
+}
+
+export interface ProjectTimeSeriesSetPeriod {
+  period_index: number;
+  timestamp_start: string;
+  timestamp_end: string;
+  duration_hours: number;
+}
+
+export interface ProjectTimeSeriesSetValue {
+  period_index: number;
+  signal_key: string;
+  value_numeric: number;
+}
+
+export interface ProjectTimeSeriesSetSource {
+  original_filename: string;
+  media_type: string;
+  checksum: string;
+  selected_sheet?: string | null;
+}
+
+export interface ProjectTimeSeriesSet {
+  id: number;
+  project_id: number;
+  name: string;
+  version_number: number;
+  version_label: string;
+  revision_number: number;
+  data_kind: string;
+  timezone: string;
+  status: string;
+  content_hash: string;
+  source_checksum: string | null;
+  signal_count: number;
+  period_count: number;
+  created_at?: string;
+  updated_at?: string;
+  source: ProjectTimeSeriesSetSource | null;
+  signals: ProjectTimeSeriesSetSignal[];
+  periods: ProjectTimeSeriesSetPeriod[];
+  values: ProjectTimeSeriesSetValue[];
 }
 
 export interface GeneratedCaseValidation {
@@ -1334,4 +1395,26 @@ export async function saveTimeSeriesMapping(
     },
   );
   return response.source;
+}
+
+export async function importTimeSeriesSourceToCatalog(
+  scenarioId: number,
+  sourceId: string,
+  payload: TimeSeriesCatalogImportPayload,
+): Promise<ProjectTimeSeriesSet> {
+  const csrfToken = await getCsrfToken();
+  const response = await requestJson<{ time_series_set: ProjectTimeSeriesSet }>(
+    `/api/scenarios/${scenarioId}/draft/time-series-sources/${encodeURIComponent(
+      sourceId,
+    )}/catalog-import`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrfToken,
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+  return response.time_series_set;
 }

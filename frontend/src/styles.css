@@ -902,6 +902,7 @@ button:focus-visible {
 
 .time-series-workflow,
 .source-summary,
+.source-catalog,
 .source-mapping,
 .source-rows {
   display: grid;
@@ -926,6 +927,7 @@ button:focus-visible {
 }
 
 .source-summary,
+.source-catalog,
 .source-mapping,
 .source-rows {
   padding: 0.85rem;
@@ -935,6 +937,7 @@ button:focus-visible {
 }
 
 .source-summary h3,
+.source-catalog h3,
 .source-mapping h3,
 .source-rows h3 {
   margin: 0;

@@ -30,7 +30,7 @@ really begins and ends.
 | ID | Title | Type | Triage | Status | Fecha de inicio planificada | Fecha de termino planificada | Blocked by | Issue file |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | BESS-TS2-000 | Review TS-2 PRD And Series Catalog Semantics | HITL | ready-for-agent | Done | 2026-07-06 | 2026-07-06 | None | [BESS-TS2-000-review-ts2-prd-and-series-catalog-semantics.md](BESS-TS2-000-review-ts2-prd-and-series-catalog-semantics.md) |
-| BESS-TS2-001 | Import A Minimal CSV Time-Series Set End-To-End | AFK | ready-for-agent | Todo | 2026-07-07 | 2026-07-08 | BESS-TS2-000 | [BESS-TS2-001-import-a-minimal-csv-time-series-set-end-to-end.md](BESS-TS2-001-import-a-minimal-csv-time-series-set-end-to-end.md) |
+| BESS-TS2-001 | Import A Minimal CSV Time-Series Set End-To-End | AFK | ready-for-agent | In Review | 2026-07-04 | 2026-07-04 | BESS-TS2-000 | [BESS-TS2-001-import-a-minimal-csv-time-series-set-end-to-end.md](BESS-TS2-001-import-a-minimal-csv-time-series-set-end-to-end.md) |
 | BESS-TS2-002 | Preview Sources And Map Columns To Canonical Signals | AFK | ready-for-agent | Todo | 2026-07-09 | 2026-07-10 | BESS-TS2-001 | [BESS-TS2-002-preview-sources-and-map-columns-to-canonical-signals.md](BESS-TS2-002-preview-sources-and-map-columns-to-canonical-signals.md) |
 | BESS-TS2-003 | Enforce Temporal And Physical Value Validation | AFK | ready-for-agent | Todo | 2026-07-13 | 2026-07-14 | BESS-TS2-002 | [BESS-TS2-003-enforce-temporal-and-physical-value-validation.md](BESS-TS2-003-enforce-temporal-and-physical-value-validation.md) |
 | BESS-TS2-004 | Add XLSX Import With Sheet Selection | AFK | ready-for-agent | Todo | 2026-07-15 | 2026-07-16 | BESS-TS2-003 | [BESS-TS2-004-add-xlsx-import-with-sheet-selection.md](BESS-TS2-004-add-xlsx-import-with-sheet-selection.md) |
@@ -59,6 +59,7 @@ really begins and ends.
 | --- | --- | --- | --- |
 | 2026-07-04 | All | Created | Initial local issue set generated from the TS-2 PRD and the series hierarchy roadmap. |
 | 2026-07-04 | BESS-TS2-000 | Todo -> Done | Accepted TS-2 catalog semantics in `docs/series_tiempo/iter2/decision_record_ts2_catalog_semantics.md`. No PRD correction required. Also removed TS-1 verification scenarios/cases (`TS1-00x provenance/verification` scenarios under projects 1, 5-10) from the `energy_dispatch` database so per-issue manual QA data does not keep accumulating across iterations. |
+| 2026-07-04 | BESS-TS2-001 | Todo -> In Review | Implemented TS-2 tracer bullet end-to-end: generic catalog tables, deep import module, persisted source/set/revision/hash path, API readback, and React upload/import confirmation flow. Focused Python backend tests, React tests, OpenAPI generation, API drift check, and production frontend build passed. Chrome control against the local app reached login and project setup on the PostgreSQL-backed app, but final manual import verification was interrupted by another installed browser extension UI blocking automation. |
 
 ## Regression Guard
 

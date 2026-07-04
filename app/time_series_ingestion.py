@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import csv
+import hashlib
 import io
 import math
 import re
@@ -76,6 +77,7 @@ def ingest_csv_source(
         "kind": "csv",
         "original_filename": safe_filename,
         "media_type": content_type or "text/csv",
+        "checksum": source_checksum(content),
         "stored_path": str(stored_path),
         "columns": columns,
         "preview_rows": rows,
@@ -112,6 +114,7 @@ def ingest_xlsx_source(
         "kind": "xlsx",
         "original_filename": safe_filename,
         "media_type": content_type or XLSX_MEDIA_TYPE,
+        "checksum": source_checksum(content),
         "stored_path": str(stored_path),
         "selected_sheet": selected_sheet,
         "columns": columns,
@@ -293,6 +296,10 @@ def decode_csv_content(content: bytes) -> str:
         return content.decode("utf-8-sig")
     except UnicodeDecodeError as error:
         raise TimeSeriesIngestionError("CSV source file must be UTF-8 encoded") from error
+
+
+def source_checksum(content: bytes) -> str:
+    return "sha256:" + hashlib.sha256(content).hexdigest()
 
 
 def parse_csv_preview(text: str, *, preview_limit: int) -> tuple[list[str], list[dict[str, str]]]:

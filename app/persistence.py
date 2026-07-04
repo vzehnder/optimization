@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 from app.auth import VALID_USER_ROLES
 from app.database import connect_database, database_url_from_env, postgres_schema_from_sqlite
+from app.time_series_catalog import PreparedTimeSeriesCatalogImport
 
 
 DASHBOARD_TEMPLATE_FLAGS = [
@@ -515,6 +516,99 @@ class AnalystStore:
                 updated_by TEXT NOT NULL,
                 FOREIGN KEY (scenario_id) REFERENCES scenarios(id) ON DELETE CASCADE,
                 FOREIGN KEY (source_version_id) REFERENCES scenario_versions(id) ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS time_series_sources (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                source_key TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                original_filename TEXT NOT NULL,
+                media_type TEXT NOT NULL,
+                checksum TEXT NOT NULL,
+                stored_path TEXT NOT NULL,
+                selected_sheet TEXT,
+                created_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                UNIQUE (project_id, source_key)
+            );
+
+            CREATE TABLE IF NOT EXISTS time_series_sets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                version_number INTEGER NOT NULL,
+                version_label TEXT NOT NULL,
+                data_kind TEXT NOT NULL,
+                timezone TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'draft',
+                content_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                UNIQUE (project_id, name, version_number),
+                UNIQUE (project_id, name, version_label),
+                CHECK (status IN ('draft', 'validated', 'archived'))
+            );
+
+            CREATE TABLE IF NOT EXISTS time_series_set_revisions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                time_series_set_id INTEGER NOT NULL,
+                revision_number INTEGER NOT NULL,
+                time_series_source_id INTEGER,
+                content_hash TEXT NOT NULL,
+                change_summary TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                FOREIGN KEY (time_series_set_id) REFERENCES time_series_sets(id) ON DELETE CASCADE,
+                FOREIGN KEY (time_series_source_id) REFERENCES time_series_sources(id) ON DELETE SET NULL,
+                UNIQUE (time_series_set_id, revision_number)
+            );
+
+            CREATE TABLE IF NOT EXISTS time_series_periods (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                time_series_set_id INTEGER NOT NULL,
+                period_index INTEGER NOT NULL,
+                timestamp_start TEXT NOT NULL,
+                timestamp_end TEXT NOT NULL,
+                duration_hours REAL NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (time_series_set_id) REFERENCES time_series_sets(id) ON DELETE CASCADE,
+                UNIQUE (time_series_set_id, period_index),
+                UNIQUE (time_series_set_id, timestamp_start)
+            );
+
+            CREATE TABLE IF NOT EXISTS time_series_signals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                time_series_set_id INTEGER NOT NULL,
+                signal_key TEXT NOT NULL,
+                unit TEXT NOT NULL,
+                entity_type TEXT,
+                entity_key TEXT,
+                signal_role TEXT NOT NULL DEFAULT 'input',
+                aggregation TEXT NOT NULL DEFAULT 'period_average',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (time_series_set_id) REFERENCES time_series_sets(id) ON DELETE CASCADE,
+                UNIQUE (time_series_set_id, signal_key, entity_type, entity_key)
+            );
+
+            CREATE TABLE IF NOT EXISTS time_series_values (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                time_series_set_id INTEGER NOT NULL,
+                time_series_signal_id INTEGER NOT NULL,
+                time_series_period_id INTEGER NOT NULL,
+                value_numeric REAL NOT NULL,
+                source_row_number INTEGER,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (time_series_set_id) REFERENCES time_series_sets(id) ON DELETE CASCADE,
+                FOREIGN KEY (time_series_signal_id) REFERENCES time_series_signals(id) ON DELETE CASCADE,
+                FOREIGN KEY (time_series_period_id) REFERENCES time_series_periods(id) ON DELETE CASCADE,
+                UNIQUE (time_series_signal_id, time_series_period_id)
             );
 
             CREATE TABLE IF NOT EXISTS runs (
@@ -1529,6 +1623,394 @@ class AnalystStore:
         if row is None:
             raise KeyError(f"scenario {scenario_id} not found")
         return row_to_dict(row)
+
+    def import_time_series_catalog_set(
+        self,
+        *,
+        scenario_id: int,
+        source: dict[str, Any],
+        prepared_import: PreparedTimeSeriesCatalogImport,
+        created_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        with self._lock:
+            scenario = self.get_scenario(scenario_id)
+            project_id = int(scenario["project_id"])
+            now = utc_now_iso()
+            source_record = self._get_or_create_time_series_source_record(
+                project_id=project_id,
+                source=source,
+                created_by=created_by,
+                now=now,
+            )
+            existing = self.connection.execute(
+                """
+                SELECT id
+                FROM time_series_sets
+                WHERE project_id = ? AND name = ? AND version_label = ?
+                """,
+                (project_id, prepared_import.set_name, prepared_import.version_label),
+            ).fetchone()
+            if existing is not None:
+                raise ValueError(
+                    f"time-series set {prepared_import.set_name!r} already has version_label "
+                    f"{prepared_import.version_label!r}"
+                )
+
+            version_row = self.connection.execute(
+                """
+                SELECT COALESCE(MAX(version_number), 0) AS max_version
+                FROM time_series_sets
+                WHERE project_id = ? AND name = ?
+                """,
+                (project_id, prepared_import.set_name),
+            ).fetchone()
+            version_number = int(version_row["max_version"]) + 1
+            cursor = self.connection.execute(
+                """
+                INSERT INTO time_series_sets (
+                    project_id,
+                    name,
+                    version_number,
+                    version_label,
+                    data_kind,
+                    timezone,
+                    status,
+                    content_hash,
+                    created_at,
+                    updated_at,
+                    created_by,
+                    updated_by
+                )
+                VALUES (?, ?, ?, ?, ?, ?, 'validated', ?, ?, ?, ?, ?)
+                """,
+                (
+                    project_id,
+                    prepared_import.set_name,
+                    version_number,
+                    prepared_import.version_label,
+                    prepared_import.data_kind,
+                    prepared_import.timezone,
+                    prepared_import.content_hash,
+                    now,
+                    now,
+                    created_by,
+                    created_by,
+                ),
+            )
+            time_series_set_id = int(cursor.lastrowid)
+
+            self.connection.execute(
+                """
+                INSERT INTO time_series_set_revisions (
+                    time_series_set_id,
+                    revision_number,
+                    time_series_source_id,
+                    content_hash,
+                    change_summary,
+                    created_at,
+                    created_by,
+                    metadata_json
+                )
+                VALUES (?, 1, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    time_series_set_id,
+                    int(source_record["id"]),
+                    prepared_import.content_hash,
+                    "Initial CSV/XLSX catalog import",
+                    now,
+                    created_by,
+                    json.dumps(
+                        {
+                            "mapping": prepared_import.mapping_summary,
+                            "source_key": source.get("id"),
+                        },
+                        sort_keys=True,
+                    ),
+                ),
+            )
+
+            signal_cursor = self.connection.execute(
+                """
+                INSERT INTO time_series_signals (
+                    time_series_set_id,
+                    signal_key,
+                    unit,
+                    entity_type,
+                    entity_key,
+                    signal_role,
+                    aggregation,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, 'input', 'period_average', ?)
+                """,
+                (
+                    time_series_set_id,
+                    prepared_import.signal.signal_key,
+                    prepared_import.signal.unit,
+                    prepared_import.signal.entity_type,
+                    prepared_import.signal.entity_key,
+                    now,
+                ),
+            )
+            signal_id = int(signal_cursor.lastrowid)
+            period_ids_by_index: dict[int, int] = {}
+            for period in prepared_import.periods:
+                period_cursor = self.connection.execute(
+                    """
+                    INSERT INTO time_series_periods (
+                        time_series_set_id,
+                        period_index,
+                        timestamp_start,
+                        timestamp_end,
+                        duration_hours,
+                        created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        time_series_set_id,
+                        period.period_index,
+                        period.timestamp_start,
+                        period.timestamp_end,
+                        period.duration_hours,
+                        now,
+                    ),
+                )
+                period_ids_by_index[period.period_index] = int(period_cursor.lastrowid)
+
+            for value in prepared_import.values:
+                self.connection.execute(
+                    """
+                    INSERT INTO time_series_values (
+                        time_series_set_id,
+                        time_series_signal_id,
+                        time_series_period_id,
+                        value_numeric,
+                        source_row_number,
+                        created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        time_series_set_id,
+                        signal_id,
+                        period_ids_by_index[value.period_index],
+                        value.value_numeric,
+                        value.source_row_number,
+                        now,
+                    ),
+                )
+
+            self.connection.commit()
+            return self.get_time_series_set(project_id, time_series_set_id)
+
+    def get_time_series_set(self, project_id: int, time_series_set_id: int) -> dict[str, Any]:
+        self.get_project(project_id)
+        row = self.connection.execute(
+            """
+            SELECT
+                id,
+                project_id,
+                name,
+                version_number,
+                version_label,
+                data_kind,
+                timezone,
+                status,
+                content_hash,
+                created_at,
+                updated_at
+            FROM time_series_sets
+            WHERE project_id = ? AND id = ?
+            """,
+            (project_id, time_series_set_id),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"time-series set {time_series_set_id} not found")
+
+        revision_row = self.connection.execute(
+            """
+            SELECT
+                id,
+                revision_number,
+                time_series_source_id,
+                content_hash,
+                change_summary,
+                created_at,
+                metadata_json
+            FROM time_series_set_revisions
+            WHERE time_series_set_id = ?
+            ORDER BY revision_number DESC, id DESC
+            LIMIT 1
+            """,
+            (time_series_set_id,),
+        ).fetchone()
+        if revision_row is None:
+            raise KeyError(f"time-series set {time_series_set_id} has no revisions")
+
+        signal_rows = self.connection.execute(
+            """
+            SELECT signal_key, unit, entity_type, entity_key
+            FROM time_series_signals
+            WHERE time_series_set_id = ?
+            ORDER BY id
+            """,
+            (time_series_set_id,),
+        ).fetchall()
+        period_rows = self.connection.execute(
+            """
+            SELECT period_index, timestamp_start, timestamp_end, duration_hours
+            FROM time_series_periods
+            WHERE time_series_set_id = ?
+            ORDER BY period_index
+            """,
+            (time_series_set_id,),
+        ).fetchall()
+        value_rows = self.connection.execute(
+            """
+            SELECT
+                time_series_periods.period_index,
+                time_series_signals.signal_key,
+                time_series_values.value_numeric
+            FROM time_series_values
+            JOIN time_series_periods
+              ON time_series_periods.id = time_series_values.time_series_period_id
+            JOIN time_series_signals
+              ON time_series_signals.id = time_series_values.time_series_signal_id
+            WHERE time_series_values.time_series_set_id = ?
+            ORDER BY time_series_periods.period_index, time_series_signals.signal_key
+            """,
+            (time_series_set_id,),
+        ).fetchall()
+
+        source = None
+        if revision_row["time_series_source_id"] is not None:
+            source_row = self.connection.execute(
+                """
+                SELECT
+                    source_key,
+                    kind,
+                    original_filename,
+                    media_type,
+                    checksum,
+                    selected_sheet,
+                    created_at
+                FROM time_series_sources
+                WHERE id = ?
+                """,
+                (int(revision_row["time_series_source_id"]),),
+            ).fetchone()
+            if source_row is not None:
+                source = {
+                    "source_key": source_row["source_key"],
+                    "kind": source_row["kind"],
+                    "original_filename": source_row["original_filename"],
+                    "media_type": source_row["media_type"],
+                    "checksum": source_row["checksum"],
+                    "selected_sheet": source_row["selected_sheet"],
+                    "created_at": source_row["created_at"],
+                }
+
+        return {
+            "id": int(row["id"]),
+            "project_id": int(row["project_id"]),
+            "name": str(row["name"]),
+            "version_number": int(row["version_number"]),
+            "version_label": str(row["version_label"]),
+            "revision_number": int(revision_row["revision_number"]),
+            "data_kind": str(row["data_kind"]),
+            "timezone": str(row["timezone"]),
+            "status": str(row["status"]),
+            "content_hash": str(revision_row["content_hash"]),
+            "source_checksum": source["checksum"] if isinstance(source, dict) else None,
+            "signal_count": len(signal_rows),
+            "period_count": len(period_rows),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "source": source,
+            "signals": [
+                {
+                    "signal_key": signal_row["signal_key"],
+                    "unit": signal_row["unit"],
+                    "entity_type": signal_row["entity_type"],
+                    "entity_key": signal_row["entity_key"],
+                }
+                for signal_row in signal_rows
+            ],
+            "periods": [
+                {
+                    "period_index": int(period_row["period_index"]),
+                    "timestamp_start": str(period_row["timestamp_start"]),
+                    "timestamp_end": str(period_row["timestamp_end"]),
+                    "duration_hours": float(period_row["duration_hours"]),
+                }
+                for period_row in period_rows
+            ],
+            "values": [
+                {
+                    "period_index": int(value_row["period_index"]),
+                    "signal_key": str(value_row["signal_key"]),
+                    "value_numeric": float(value_row["value_numeric"]),
+                }
+                for value_row in value_rows
+            ],
+        }
+
+    def _get_or_create_time_series_source_record(
+        self,
+        *,
+        project_id: int,
+        source: dict[str, Any],
+        created_by: str,
+        now: str,
+    ) -> dict[str, Any]:
+        source_key = str(source.get("id") or "").strip()
+        if not source_key:
+            raise ValueError("time-series source is missing id")
+        existing = self.connection.execute(
+            """
+            SELECT id, checksum
+            FROM time_series_sources
+            WHERE project_id = ? AND source_key = ?
+            """,
+            (project_id, source_key),
+        ).fetchone()
+        if existing is not None:
+            return row_to_dict(existing)
+
+        cursor = self.connection.execute(
+            """
+            INSERT INTO time_series_sources (
+                project_id,
+                source_key,
+                kind,
+                original_filename,
+                media_type,
+                checksum,
+                stored_path,
+                selected_sheet,
+                created_at,
+                created_by,
+                metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                project_id,
+                source_key,
+                str(source.get("kind") or "csv"),
+                str(source.get("original_filename") or "source.csv"),
+                str(source.get("media_type") or "text/csv"),
+                str(source.get("checksum") or ""),
+                str(source.get("stored_path") or ""),
+                source.get("selected_sheet"),
+                now,
+                created_by,
+                json.dumps({}, sort_keys=True),
+            ),
+        )
+        return {"id": int(cursor.lastrowid), "checksum": str(source.get("checksum") or "")}
 
     def get_or_create_hydraulic_diagram(self, scenario_id: int) -> dict[str, Any]:
         with self._lock:

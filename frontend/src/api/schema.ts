@@ -350,6 +350,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/time-series-sets/{time_series_set_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Project Time Series Set */
+        get: operations["get_project_time_series_set_api_projects__project_id__time_series_sets__time_series_set_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/publications/{publication_id}": {
         parameters: {
             query?: never;
@@ -654,6 +671,23 @@ export interface paths {
         put?: never;
         /** Upload Draft Time Series Source */
         post: operations["upload_draft_time_series_source_api_scenarios__scenario_id__draft_time_series_sources_upload_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/draft/time-series-sources/{source_id}/catalog-import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import Draft Time Series Source To Catalog */
+        post: operations["import_draft_time_series_source_to_catalog_api_scenarios__scenario_id__draft_time_series_sources__source_id__catalog_import_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -991,6 +1025,10 @@ export interface components {
             component_type: "reservoir" | "junction" | "plant";
             /** Display Name */
             display_name: string;
+            /** Link Anchors */
+            link_anchors?: {
+                [key: string]: unknown;
+            } | null;
             natural_inflow_series?: components["schemas"]["HydraulicNaturalInflowSeriesRequest"] | null;
             plant?: components["schemas"]["HydraulicPlantParametersRequest"] | null;
             reservoir?: components["schemas"]["HydraulicReservoirParametersRequest"] | null;
@@ -1010,6 +1048,8 @@ export interface components {
             display_name: string;
             /** Flow Min M3S */
             flow_min_m3s?: number | null;
+            /** From Anchor */
+            from_anchor?: number | null;
             /** From Node Key */
             from_node_key: string;
             minimum_flow_series?: components["schemas"]["HydraulicNaturalInflowSeriesRequest"] | null;
@@ -1024,6 +1064,8 @@ export interface components {
             spill_penalty_usd_per_hm3?: number | null;
             /** Technical Key */
             technical_key: string;
+            /** To Anchor */
+            to_anchor?: number | null;
             /** To Node Key */
             to_node_key: string;
             /**
@@ -1237,6 +1279,25 @@ export interface components {
         SystemCaseValidationRequest: {
             /** System Case Json */
             system_case_json: string;
+        };
+        /** TimeSeriesCatalogImportRequest */
+        TimeSeriesCatalogImportRequest: {
+            /** Data Kind */
+            data_kind: string;
+            /** Duration Hours Column */
+            duration_hours_column: string;
+            /** Set Name */
+            set_name: string;
+            /** Signal Key */
+            signal_key: string;
+            /** Timestamp Column */
+            timestamp_column: string;
+            /** Timezone */
+            timezone: string;
+            /** Value Column */
+            value_column: string;
+            /** Version Label */
+            version_label: string;
         };
         /** TimeSeriesMappingRequest */
         TimeSeriesMappingRequest: {
@@ -2044,6 +2105,38 @@ export interface operations {
             };
         };
     };
+    get_project_time_series_set_api_projects__project_id__time_series_sets__time_series_set_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                time_series_set_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     update_publication_draft_api_publications__publication_id__put: {
         parameters: {
             query?: never;
@@ -2723,6 +2816,42 @@ export interface operations {
         requestBody: {
             content: {
                 "multipart/form-data": components["schemas"]["Body_upload_draft_time_series_source_api_scenarios__scenario_id__draft_time_series_sources_upload_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_draft_time_series_source_to_catalog_api_scenarios__scenario_id__draft_time_series_sources__source_id__catalog_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TimeSeriesCatalogImportRequest"];
             };
         };
         responses: {

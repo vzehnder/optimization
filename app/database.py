@@ -53,6 +53,12 @@ ID_TABLES = {
     "scenario_version_hydraulic_diagram_snapshots",
     "scenario_versions",
     "scenarios",
+    "time_series_periods",
+    "time_series_set_revisions",
+    "time_series_sets",
+    "time_series_signals",
+    "time_series_sources",
+    "time_series_values",
     "users",
 }
 

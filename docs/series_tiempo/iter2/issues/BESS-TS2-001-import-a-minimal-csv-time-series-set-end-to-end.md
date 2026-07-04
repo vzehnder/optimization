@@ -1,11 +1,11 @@
 # BESS-TS2-001: Import A Minimal CSV Time-Series Set End-To-End
 
-Status: Todo
+Status: In Review
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter2/prd.md`
-Fecha de inicio planificada: 2026-07-07
-Fecha de termino planificada: 2026-07-08
+Fecha de inicio planificada: 2026-07-04
+Fecha de termino planificada: 2026-07-04
 
 ## User stories covered
 
