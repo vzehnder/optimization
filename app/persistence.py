@@ -5701,10 +5701,15 @@ def derive_case_hierarchy_provenance(document: dict[str, Any]) -> dict[str, dict
     type each node is, and how they are connected. Parameters are the
     executable assumptions layered on that structure: scalar limits, initial
     states, costs, curves, time series and solver settings. The split is
-    schema-agnostic on purpose so it stays valid across the one-bus and
-    hydraulic-diagram case shapes without needing a per-schema migration.
+    shape-driven on purpose: a flat ``nodes``/``edges`` document is treated as
+    the one-bus case shape, a ``hydraulic_network`` document is treated as the
+    hydraulic-diagram (v3) case shape with its own node/reach/plant/unit
+    membership and connectivity, and anything else falls back to a
+    schema-version-only topology so it still stays valid without a per-schema
+    migration.
     """
     nodes = document.get("nodes")
+    hydraulic_network = document.get("hydraulic_network")
     if isinstance(nodes, list) and all(isinstance(node, dict) for node in nodes):
         topology_view = {
             "schema_version": document.get("schema_version"),
@@ -5730,6 +5735,82 @@ def derive_case_hierarchy_provenance(document: dict[str, Any]) -> dict[str, dict
         parameters_view["node_parameters"] = {
             str(node.get("id")): {k: v for k, v in node.items() if k not in {"id", "type"}}
             for node in nodes
+        }
+    elif isinstance(hydraulic_network, dict):
+        network_nodes = [n for n in hydraulic_network.get("nodes", []) if isinstance(n, dict)]
+        reaches = [r for r in hydraulic_network.get("reaches", []) if isinstance(r, dict)]
+        plants = [p for p in hydraulic_network.get("plants", []) if isinstance(p, dict)]
+        units = [u for u in hydraulic_network.get("units", []) if isinstance(u, dict)]
+
+        topology_view = {
+            "schema_version": document.get("schema_version"),
+            "nodes": sorted(
+                (
+                    {"id": node.get("id"), "type": node.get("type")}
+                    for node in network_nodes
+                ),
+                key=lambda node: str(node["id"]),
+            ),
+            "reaches": sorted(
+                (
+                    {
+                        "id": reach.get("id"),
+                        "from_node": reach.get("from_node"),
+                        "to_node": reach.get("to_node"),
+                        "type": reach.get("type"),
+                    }
+                    for reach in reaches
+                ),
+                key=lambda reach: str(reach["id"]),
+            ),
+            "plants": sorted(
+                (
+                    {"id": plant.get("id"), "units": sorted(str(unit) for unit in plant.get("units", []))}
+                    for plant in plants
+                ),
+                key=lambda plant: str(plant["id"]),
+            ),
+            "units": sorted(
+                (
+                    {
+                        "id": unit.get("id"),
+                        "plant_id": unit.get("plant_id"),
+                        "intake_node": unit.get("intake_node"),
+                        "discharge_node": unit.get("discharge_node"),
+                    }
+                    for unit in units
+                ),
+                key=lambda unit: str(unit["id"]),
+            ),
+        }
+        parameters_view = {
+            key: value for key, value in document.items() if key not in {"hydraulic_network", "schema_version"}
+        }
+        parameters_view["hydraulic_network_parameters"] = {
+            "nodes": {
+                str(node.get("id")): {k: v for k, v in node.items() if k not in {"id", "type"}}
+                for node in network_nodes
+            },
+            "reaches": {
+                str(reach.get("id")): {
+                    k: v for k, v in reach.items() if k not in {"id", "from_node", "to_node", "type"}
+                }
+                for reach in reaches
+            },
+            "plants": {
+                str(plant.get("id")): {k: v for k, v in plant.items() if k not in {"id", "units"}}
+                for plant in plants
+            },
+            "units": {
+                str(unit.get("id")): {
+                    k: v
+                    for k, v in unit.items()
+                    if k not in {"id", "plant_id", "intake_node", "discharge_node"}
+                }
+                for unit in units
+            },
+            "curves": hydraulic_network.get("curves", []),
+            "required_time_series": hydraulic_network.get("required_time_series", []),
         }
     else:
         topology_view = {"schema_version": document.get("schema_version")}
