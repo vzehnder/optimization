@@ -5694,7 +5694,7 @@ def _content_hash(value: Any) -> str:
     return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def derive_case_hierarchy_provenance(document: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def derive_case_hierarchy_views(document: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Split a ``system_case_json`` document into topology and parameter views.
 
     Topology is component membership and connectivity: which nodes exist, what
@@ -5707,6 +5707,9 @@ def derive_case_hierarchy_provenance(document: dict[str, Any]) -> dict[str, dict
     membership and connectivity, and anything else falls back to a
     schema-version-only topology so it still stays valid without a per-schema
     migration.
+
+    This is the read side of the hierarchy generation boundary; see
+    ``generate_system_case_from_hierarchy`` for the inverse.
     """
     nodes = document.get("nodes")
     hydraulic_network = document.get("hydraulic_network")
@@ -5816,10 +5819,101 @@ def derive_case_hierarchy_provenance(document: dict[str, Any]) -> dict[str, dict
         topology_view = {"schema_version": document.get("schema_version")}
         parameters_view = {key: value for key, value in document.items() if key != "schema_version"}
 
+    return {"topology": topology_view, "parameters": parameters_view}
+
+
+def derive_case_hierarchy_provenance(document: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Hash the topology/parameter views from ``derive_case_hierarchy_views``."""
+    views = derive_case_hierarchy_views(document)
     return {
-        "topology": {"content_hash": _content_hash(topology_view)},
-        "parameters": {"content_hash": _content_hash(parameters_view)},
+        "topology": {"content_hash": _content_hash(views["topology"])},
+        "parameters": {"content_hash": _content_hash(views["parameters"])},
     }
+
+
+def generate_system_case_from_hierarchy(
+    topology: dict[str, Any], parameters: dict[str, Any]
+) -> dict[str, Any]:
+    """Reassemble an executable ``system_case_json`` from its topology/parameter views.
+
+    This is the shared generation boundary: the inverse of
+    ``derive_case_hierarchy_views``. It dispatches on the same shape signals
+    (flat ``edges`` for one-bus, ``reaches`` for hydraulic v3, otherwise the
+    schema-version-only fallback) so a case built from its own topology and
+    parameter views regenerates a document whose hierarchy views are
+    identical to the inputs.
+    """
+    if "edges" in topology:
+        node_parameters = parameters.get("node_parameters", {})
+        document = {key: value for key, value in parameters.items() if key != "node_parameters"}
+        document["schema_version"] = topology.get("schema_version")
+        document["nodes"] = [
+            {
+                "id": node.get("id"),
+                "type": node.get("type"),
+                **node_parameters.get(str(node.get("id")), {}),
+            }
+            for node in topology.get("nodes", [])
+        ]
+        document["edges"] = [dict(edge) for edge in topology.get("edges", [])]
+        return document
+
+    if "reaches" in topology:
+        network_parameters = parameters.get("hydraulic_network_parameters", {})
+        node_parameters = network_parameters.get("nodes", {})
+        reach_parameters = network_parameters.get("reaches", {})
+        plant_parameters = network_parameters.get("plants", {})
+        unit_parameters = network_parameters.get("units", {})
+
+        document = {
+            key: value for key, value in parameters.items() if key != "hydraulic_network_parameters"
+        }
+        document["schema_version"] = topology.get("schema_version")
+        document["hydraulic_network"] = {
+            "nodes": [
+                {
+                    "id": node.get("id"),
+                    "type": node.get("type"),
+                    **node_parameters.get(str(node.get("id")), {}),
+                }
+                for node in topology.get("nodes", [])
+            ],
+            "reaches": [
+                {
+                    "id": reach.get("id"),
+                    "from_node": reach.get("from_node"),
+                    "to_node": reach.get("to_node"),
+                    "type": reach.get("type"),
+                    **reach_parameters.get(str(reach.get("id")), {}),
+                }
+                for reach in topology.get("reaches", [])
+            ],
+            "plants": [
+                {
+                    "id": plant.get("id"),
+                    **plant_parameters.get(str(plant.get("id")), {}),
+                    "units": list(plant.get("units", [])),
+                }
+                for plant in topology.get("plants", [])
+            ],
+            "units": [
+                {
+                    "id": unit.get("id"),
+                    "plant_id": unit.get("plant_id"),
+                    "intake_node": unit.get("intake_node"),
+                    "discharge_node": unit.get("discharge_node"),
+                    **unit_parameters.get(str(unit.get("id")), {}),
+                }
+                for unit in topology.get("units", [])
+            ],
+            "curves": network_parameters.get("curves", []),
+            "required_time_series": network_parameters.get("required_time_series", []),
+        }
+        return document
+
+    document = dict(parameters)
+    document["schema_version"] = topology.get("schema_version")
+    return document
 
 
 def extract_system_case_metadata(document: dict[str, Any]) -> dict[str, Any]:
