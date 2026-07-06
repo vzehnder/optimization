@@ -799,3 +799,99 @@ formats:
 ```powershell
 julia --project=. -e "import Pkg; Pkg.test()"
 ```
+
+## TS-2: Generic Time-Series Catalog
+
+TS-2 (`docs/series_tiempo/iter2/`) introduces a generic, project-scoped
+time-series catalog in the database, independent of any single optimization
+case:
+
+```text
+TimeSeriesSource
+-> TimeSeriesSet (name, version_number, version_label, data_kind, timezone)
+-> TimeSeriesSetRevision (revision_number, content_hash, change_summary, source)
+-> TimeSeriesPeriod
+-> TimeSeriesSignal
+-> TimeSeriesValue
+```
+
+CSV and XLSX files remain the accepted way to load or correct data, but each
+upload is recorded as a `time_series_source` (file name, media type,
+checksum, sheet name) and the values consumed by the app live in the catalog
+tables, not in the uploaded file. A set supports both a multi-signal package
+(prices, demand and renewables aligned on one horizon) and a single-signal
+set (one inflow series); the schema does not force one signal per set.
+
+### Version Versus Revision
+
+- `version_number`/`version_label` is the version an analyst picks (`v1`,
+  `dry_year`, `corrected`), unique within `(project_id, name)`.
+- `time_series_set_revisions.revision_number` records in-place edits to that
+  same version: a manual value correction or a replacement file upload. Both
+  create a new revision, recompute `content_hash` and leave
+  `version_number`/`version_label` untouched, so identity cannot drift.
+- Every revision records its source (or `NULL` for a manual edit),
+  `superseded_revision_number`, `change_summary`, `created_by` and
+  `created_at`, so audit lineage survives edit -> replace chains.
+- Runs and future case bindings (TS-3) freeze the exact `content_hash` they
+  used; older revisions remain queryable by their own stable hash.
+
+### Signal Catalog And Validation
+
+An initial code-level `signal_key` registry
+(`app/time_series_catalog.py`) defines allowed keys, canonical units, entity
+type and a nonnegative-or-any-sign rule, shared by CSV import, XLSX import
+and manual edits so the three paths cannot diverge. Import, edit and
+replacement validation is tied to source row and column (or, for manual
+edits, to the specific edit index and period): duplicate/unordered/
+overlapping timestamps, malformed timestamps, nonnumeric values and negative
+values for nonnegative signals are all rejected with a message naming the
+exact row/column/edit at fault, prefixed with the source file name (and XLSX
+sheet, when applicable). A failed import, edit or replacement leaves no
+partial set and no partial revision behind; the prior revision and its
+content hash are provably untouched.
+
+### Browsing The Catalog
+
+`GET /api/projects/{project_id}/time-series-sets` lists every set in a
+project with its latest revision number, content hash, signal count and
+period count. `GET .../time-series-sets/{id}` returns full signal/period/
+value detail plus a horizon summary and source provenance (including the
+XLSX sheet, when relevant). `GET .../time-series-sets/{id}/revisions`
+returns the full audit history. React exposes these as `TimeSeriesCatalogView`
+and `TimeSeriesSetDetailView` under
+`/projects/:projectId/time-series-sets[/:timeSeriesSetId]`.
+
+### Deferred To Later Iterations
+
+TS-2 builds the data library only. Out of scope, deferred to TS-3 and TS-4:
+
+- Binding time-series sets to optimization cases or input variants, and
+  running cases from a selected series version (TS-3).
+- Result series storage (TS-4).
+- Resampling, interpolation and other time-series transformations.
+- Complex unit conversion beyond recording source unit and canonical unit.
+- Migrating the legacy `hydraulic_time_series_sets`/`hydraulic_time_series_points`
+  tables, which remain the draft-embedded ingestion path until TS-5.
+
+### TS-2 Acceptance Verification
+
+Run the focused TS-2 acceptance suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_ts2_acceptance -v
+```
+
+Run the full Python web acceptance suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+TS-2 does not change Julia-facing contracts or artifact formats. Run the
+Julia suite only when a later change touches optimizer behavior or output
+formats:
+
+```powershell
+julia --project=. -e "import Pkg; Pkg.test()"
+```
