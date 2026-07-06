@@ -1,9 +1,11 @@
 import dataclasses
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from openpyxl import Workbook
 
 from app.main import create_app
 from app.persistence import AnalystStore
@@ -13,6 +15,21 @@ from app.time_series_catalog import (
     prepare_time_series_catalog_import,
 )
 from app.validation import ValidationResult
+
+
+def make_xlsx_bytes(rows, *, extra_sheet_name=None, extra_sheet_rows=None):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Sheet"
+    for row in rows:
+        sheet.append(row)
+    if extra_sheet_rows:
+        extra = workbook.create_sheet(extra_sheet_name or "Extra")
+        for row in extra_sheet_rows:
+            extra.append(row)
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
 
 
 class StubValidationService:
@@ -638,4 +655,114 @@ class TimeSeriesCatalogImportTests(unittest.TestCase):
                     ],
                     "timestamp_column": "period_start",
                 },
+            )
+
+    def test_xlsx_source_on_chosen_sheet_imports_a_project_time_series_set(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, project, scenario = self.make_client_and_context(input_source_root)
+            workbook_bytes = make_xlsx_bytes(
+                [["ignored"]],
+                extra_sheet_name="Prices",
+                extra_sheet_rows=[
+                    ["period_start", "hours", "spot_price"],
+                    ["2026-01-01T00:00:00", 1.0, 55.0],
+                    ["2026-01-01T01:00:00", 1.0, 60.0],
+                ],
+            )
+
+            upload_response = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                data={"sheet_name": "Prices"},
+                files={
+                    "source_file": (
+                        "prices.xlsx",
+                        workbook_bytes,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+                },
+            )
+            self.assertEqual(upload_response.status_code, 201)
+            source = upload_response.json()["source"]
+            self.assertEqual(source["kind"], "xlsx")
+            self.assertEqual(source["selected_sheet"], "Prices")
+            self.assertEqual(source["available_sheets"], ["Sheet", "Prices"])
+
+            import_response = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/{source['id']}/catalog-import",
+                json={
+                    "set_name": "Spot price Jan 2026",
+                    "version_label": "v1",
+                    "data_kind": "real",
+                    "timezone": "America/Santiago",
+                    "timestamp_column": "period_start",
+                    "duration_hours_column": "hours",
+                    "signal_mappings": [
+                        {
+                            "source_column": "spot_price",
+                            "signal_key": "price_usd_per_mwh",
+                        }
+                    ],
+                },
+            )
+
+            self.assertEqual(import_response.status_code, 201)
+            created_set = import_response.json()["time_series_set"]
+            self.assertEqual(created_set["project_id"], project["id"])
+            self.assertEqual(created_set["period_count"], 2)
+            self.assertEqual(created_set["signal_count"], 1)
+
+            detail_response = client.get(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}"
+            )
+            detail = detail_response.json()["time_series_set"]
+            self.assertEqual(detail["source"]["original_filename"], "prices.xlsx")
+            self.assertEqual(detail["source"]["selected_sheet"], "Prices")
+
+    def test_xlsx_source_shares_centralized_validation_with_csv(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, _project, scenario = self.make_client_and_context(input_source_root)
+            workbook_bytes = make_xlsx_bytes(
+                [
+                    ["period_start", "hours", "spot_price"],
+                    ["2026-01-01T00:00:00", 1.0, 55.0],
+                    ["2026-01-01T00:00:00", 1.0, 60.0],
+                ],
+            )
+
+            upload_response = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                files={
+                    "source_file": (
+                        "prices.xlsx",
+                        workbook_bytes,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+                },
+            )
+            source = upload_response.json()["source"]
+
+            import_response = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/{source['id']}/catalog-import",
+                json={
+                    "set_name": "Spot price Jan 2026",
+                    "version_label": "v1",
+                    "data_kind": "real",
+                    "timezone": "America/Santiago",
+                    "timestamp_column": "period_start",
+                    "duration_hours_column": "hours",
+                    "signal_mappings": [
+                        {
+                            "source_column": "spot_price",
+                            "signal_key": "price_usd_per_mwh",
+                        }
+                    ],
+                },
+            )
+
+            self.assertEqual(import_response.status_code, 400)
+            self.assertIn(
+                "row 3: duplicate timestamp '2026-01-01T00:00:00' (already used by row 2)",
+                import_response.json()["detail"],
             )

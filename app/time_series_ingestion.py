@@ -102,7 +102,7 @@ def ingest_xlsx_source(
     stored_path.parent.mkdir(parents=True, exist_ok=True)
     stored_path.write_bytes(content)
 
-    selected_sheet, columns, rows = parse_xlsx_preview(
+    selected_sheet, available_sheets, columns, rows = parse_xlsx_preview(
         content,
         preview_limit=preview_limit,
         sheet_name=sheet_name,
@@ -117,6 +117,7 @@ def ingest_xlsx_source(
         "checksum": source_checksum(content),
         "stored_path": str(stored_path),
         "selected_sheet": selected_sheet,
+        "available_sheets": available_sheets,
         "columns": columns,
         "preview_rows": rows,
         "mapping_suggestions": mapping_suggestions,
@@ -219,7 +220,7 @@ def read_time_series_source_rows(
 
     stored_path = safe_stored_source_path(source, input_source_root)
     if source.get("kind") == "xlsx":
-        _, parsed_columns, rows = parse_xlsx_rows(
+        _, _, parsed_columns, rows = parse_xlsx_rows(
             stored_path.read_bytes(),
             sheet_name=source.get("selected_sheet"),
         )
@@ -324,12 +325,14 @@ def parse_xlsx_preview(
     *,
     preview_limit: int,
     sheet_name: str | None = None,
-) -> tuple[str, list[str], list[dict[str, str]]]:
-    selected_sheet, columns, rows = parse_xlsx_rows(content, sheet_name=sheet_name)
-    return selected_sheet, columns, rows[:preview_limit]
+) -> tuple[str, list[str], list[str], list[dict[str, str]]]:
+    selected_sheet, available_sheets, columns, rows = parse_xlsx_rows(content, sheet_name=sheet_name)
+    return selected_sheet, available_sheets, columns, rows[:preview_limit]
 
 
-def parse_xlsx_rows(content: bytes, *, sheet_name: str | None = None) -> tuple[str, list[str], list[dict[str, str]]]:
+def parse_xlsx_rows(
+    content: bytes, *, sheet_name: str | None = None
+) -> tuple[str, list[str], list[str], list[dict[str, str]]]:
     try:
         workbook = load_workbook(io.BytesIO(content), read_only=False, data_only=False)
     except (InvalidFileException, OSError, KeyError, ValueError) as error:
@@ -337,10 +340,14 @@ def parse_xlsx_rows(content: bytes, *, sheet_name: str | None = None) -> tuple[s
 
     if not workbook.sheetnames:
         raise TimeSeriesIngestionError("XLSX source file must include at least one sheet")
+    available_sheets = list(workbook.sheetnames)
     requested_sheet = str(sheet_name or "").strip()
-    selected_sheet = requested_sheet or workbook.sheetnames[0]
-    if selected_sheet not in workbook.sheetnames:
-        raise TimeSeriesIngestionError(f"XLSX sheet {selected_sheet!r} was not found")
+    selected_sheet = requested_sheet or available_sheets[0]
+    if selected_sheet not in available_sheets:
+        raise TimeSeriesIngestionError(
+            f"XLSX sheet {selected_sheet!r} was not found; available sheets: "
+            f"{', '.join(available_sheets)}"
+        )
 
     sheet = workbook[selected_sheet]
     if sheet.merged_cells.ranges:
@@ -372,7 +379,7 @@ def parse_xlsx_rows(content: bytes, *, sheet_name: str | None = None) -> tuple[s
         values = raw_row[: len(columns)]
         values.extend([""] * (len(columns) - len(values)))
         rows.append({column: values[index] for index, column in enumerate(columns)})
-    return selected_sheet, columns, rows
+    return selected_sheet, available_sheets, columns, rows
 
 
 def xlsx_cell_to_text(cell) -> str:

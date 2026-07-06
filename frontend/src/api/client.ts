@@ -252,6 +252,7 @@ export interface TimeSeriesSource {
   checksum?: string;
   stored_path?: string;
   selected_sheet?: string;
+  available_sheets?: string[];
   columns?: string[];
   preview_rows?: TimeSeriesRow[];
   edited_rows?: TimeSeriesRow[];

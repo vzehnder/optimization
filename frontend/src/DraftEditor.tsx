@@ -1579,7 +1579,6 @@ function TimeSeriesWorkflow({
 }) {
   const source = activeTimeSeriesSource(document);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [sheetName, setSheetName] = useState("");
   const [uploadError, setUploadError] = useState("");
   const uploadMutation = useMutation({
     mutationFn: ({ file, sheet }: { file: File; sheet: string }) =>
@@ -1598,7 +1597,17 @@ function TimeSeriesWorkflow({
       return;
     }
     setUploadError("");
-    uploadMutation.mutate({ file, sheet: sheetName });
+    uploadMutation.mutate({ file, sheet: "" });
+  }
+
+  function selectSheet(sheet: string) {
+    const file = fileInputRef.current?.files?.[0];
+    if (!file) {
+      setUploadError("Re-select the source file to change sheets.");
+      return;
+    }
+    setUploadError("");
+    uploadMutation.mutate({ file, sheet });
   }
 
   const controlsDisabled = dirty || uploadMutation.isPending;
@@ -1621,13 +1630,6 @@ function TimeSeriesWorkflow({
             disabled={controlsDisabled}
           />
         </label>
-        <TextInput
-          id="time_series_sheet_name"
-          label="XLSX sheet"
-          value={sheetName}
-          onChange={setSheetName}
-          errors={{}}
-        />
         <button
           type="button"
           onClick={uploadSource}
@@ -1637,6 +1639,23 @@ function TimeSeriesWorkflow({
         </button>
       </div>
       {uploadError ? <p role="alert">{uploadError}</p> : null}
+      {source?.kind === "xlsx" && (source.available_sheets?.length ?? 0) > 1 ? (
+        <label className="field-row" htmlFor="time_series_sheet_select">
+          <span>Sheet</span>
+          <select
+            id="time_series_sheet_select"
+            value={source.selected_sheet || ""}
+            onChange={(event) => selectSheet(event.target.value)}
+            disabled={controlsDisabled}
+          >
+            {source.available_sheets?.map((sheet) => (
+              <option key={sheet} value={sheet}>
+                {sheet}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       {source ? (
         <>
           <SourceSummary source={source} />

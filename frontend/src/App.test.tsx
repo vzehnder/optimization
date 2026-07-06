@@ -4102,6 +4102,177 @@ describe("application shell", () => {
     expect(screen.getByText("America/Santiago (IANA)")).toBeVisible();
   });
 
+  it("lists available XLSX sheets after upload and re-imports the preview when the analyst picks another one", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10/draft");
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Catalog branch",
+      created_at: "2026-07-04T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-07-04T12:00:00Z",
+    };
+    const draft = {
+      id: 3,
+      scenario_id: 10,
+      source_version_id: null,
+      created_at: "2026-07-04T12:10:00Z",
+      updated_at: "2026-07-04T12:10:00Z",
+      document: {
+        schema_version: "bess_editor_draft.v1",
+        case: { name: "Base case" },
+        source: null,
+        pcc: { id: "bus_1", type: "bus" },
+        grid: {
+          id: "grid_1",
+          import_power_max_mw: null,
+          export_power_max_mw: null,
+          prevent_simultaneous_grid_import_export: true,
+        },
+        assets: [],
+        time_series: { sources: [] },
+        solver: { name: "HiGHS", options: {} },
+      },
+    };
+    const sheet1Source = {
+      id: "xlsx_source_1",
+      kind: "xlsx",
+      original_filename: "prices.xlsx",
+      media_type:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      checksum: "sha256:xlsx1",
+      selected_sheet: "Sheet1",
+      available_sheets: ["Sheet1", "Sheet2"],
+      columns: ["period_start", "hours", "spot_price"],
+      preview_rows: [
+        { period_start: "2026-01-01T00:00:00", hours: "1.0", spot_price: "55.0" },
+      ],
+    };
+    const sheet2Source = {
+      id: "xlsx_source_2",
+      kind: "xlsx",
+      original_filename: "prices.xlsx",
+      media_type:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      checksum: "sha256:xlsx2",
+      selected_sheet: "Sheet2",
+      available_sheets: ["Sheet1", "Sheet2"],
+      columns: ["period_start", "hours", "demand"],
+      preview_rows: [
+        { period_start: "2026-01-01T00:00:00", hours: "1.0", demand: "12.5" },
+      ],
+    };
+    const uploadedSheetNames: (string | null)[] = [];
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/draft" && method === "GET") {
+          return new Response(JSON.stringify({ draft }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/draft/time-series-sources/upload" &&
+          method === "POST"
+        ) {
+          const body = init?.body as FormData;
+          const sheetName = String(body.get("sheet_name") || "") || null;
+          uploadedSheetNames.push(sheetName);
+          const source = sheetName === "Sheet2" ? sheet2Source : sheet1Source;
+          return new Response(JSON.stringify({ source }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Draft estructurado" }),
+    ).toBeVisible();
+    await user.upload(
+      screen.getByLabelText("Source file"),
+      new File(["xlsx-bytes"], "prices.xlsx", {
+        type:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Upload source" }));
+    expect(await screen.findByText("prices.xlsx")).toBeVisible();
+    expect(screen.getByText("Selected sheet: Sheet1")).toBeVisible();
+
+    const sheetSelect = screen.getByLabelText("Sheet") as HTMLSelectElement;
+    expect(
+      Array.from(sheetSelect.options).map((option) => option.value),
+    ).toEqual(["Sheet1", "Sheet2"]);
+    expect(sheetSelect.value).toBe("Sheet1");
+
+    await user.selectOptions(sheetSelect, "Sheet2");
+
+    expect(await screen.findByText("Selected sheet: Sheet2")).toBeVisible();
+    expect(
+      screen.getByText("Detected columns: period_start, hours, demand"),
+    ).toBeVisible();
+    expect(uploadedSheetNames).toEqual([null, "Sheet2"]);
+  });
+
   it("lets analysts inspect, validate, stale, and promote a generated system_case once", async () => {
     window.history.replaceState({}, "", "/react/scenarios/10/draft");
     const scenario = {

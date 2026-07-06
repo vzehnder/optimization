@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
+from openpyxl.worksheet.table import Table
 
 from app.main import create_app
 from app.persistence import AnalystStore
@@ -347,6 +348,7 @@ class CsvTimeSeriesIngestionTests(unittest.TestCase):
             source = response.json()["source"]
             self.assertEqual(source["kind"], "xlsx")
             self.assertEqual(source["selected_sheet"], "Sheet")
+            self.assertEqual(source["available_sheets"], ["Sheet", "Extra"])
             self.assertEqual(
                 source["columns"],
                 ["period_start", "hours", "buy", "sell", "solar_1_available_mw", "load_1_demand_mw"],
@@ -416,6 +418,91 @@ class CsvTimeSeriesIngestionTests(unittest.TestCase):
             self.assertEqual(source["selected_sheet"], "Inputs")
             self.assertEqual(source["columns"][0], "period_start")
             self.assertEqual(source["preview_rows"][0]["load_1_demand_mw"], "2")
+
+    def test_xlsx_upload_rejects_unknown_sheet_name_with_available_sheets_listed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, scenario = self.make_client_and_scenario(input_source_root)
+            workbook_bytes = make_xlsx_bytes(
+                [["period_start", "hours"], ["2026-01-01T00:00:00", 1.0]],
+                extra_sheet_rows=[["ignored"]],
+            )
+
+            response = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                data={"sheet_name": "Missing"},
+                files={
+                    "source_file": (
+                        "source.xlsx",
+                        workbook_bytes,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+                },
+            )
+
+            self.assertEqual(response.status_code, 400)
+            payload = response.json()
+            self.assertEqual(payload["error_category"], "source_file")
+            self.assertIn("'Missing' was not found", payload["detail"])
+            self.assertIn("Sheet, Extra", payload["detail"])
+
+    def test_xlsx_upload_rejects_merged_cells_with_clear_error(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, scenario = self.make_client_and_scenario(input_source_root)
+            workbook_bytes = make_xlsx_bytes(
+                [
+                    ["period_start", "hours", "buy"],
+                    ["2026-01-01T00:00:00", 1.0, 55.0],
+                ],
+                merge_cells="A1:B1",
+            )
+
+            response = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                files={
+                    "source_file": (
+                        "source.xlsx",
+                        workbook_bytes,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+                },
+            )
+
+            self.assertEqual(response.status_code, 400)
+            payload = response.json()
+            self.assertEqual(payload["error_category"], "source_file")
+            self.assertIn("merged cells", payload["detail"])
+            self.assertIn("not supported", payload["detail"])
+
+    def test_xlsx_upload_rejects_excel_tables_with_clear_error(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, scenario = self.make_client_and_scenario(input_source_root)
+            workbook_bytes = make_xlsx_bytes(
+                [
+                    ["period_start", "hours", "buy"],
+                    ["2026-01-01T00:00:00", 1.0, 55.0],
+                ],
+                table_ref="A1:C2",
+            )
+
+            response = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                files={
+                    "source_file": (
+                        "source.xlsx",
+                        workbook_bytes,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+                },
+            )
+
+            self.assertEqual(response.status_code, 400)
+            payload = response.json()
+            self.assertEqual(payload["error_category"], "source_file")
+            self.assertIn("Excel tables", payload["detail"])
+            self.assertIn("not supported", payload["detail"])
 
     def test_xlsx_upload_rejects_unsupported_formulas_with_clear_error(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -770,12 +857,23 @@ class NoopRunQueue:
         pass
 
 
-def make_xlsx_bytes(rows, *, extra_sheet_name="Extra", extra_sheet_rows=None):
+def make_xlsx_bytes(
+    rows,
+    *,
+    extra_sheet_name="Extra",
+    extra_sheet_rows=None,
+    merge_cells=None,
+    table_ref=None,
+):
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Sheet"
     for row in rows:
         sheet.append(row)
+    if merge_cells:
+        sheet.merge_cells(merge_cells)
+    if table_ref:
+        sheet.add_table(Table(displayName="SourceTable", ref=table_ref))
     if extra_sheet_rows:
         extra = workbook.create_sheet(extra_sheet_name)
         for row in extra_sheet_rows:
