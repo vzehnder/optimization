@@ -5,6 +5,7 @@ import {
   KeyboardEvent,
   PointerEvent,
   ReactNode,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -25,6 +26,7 @@ import {
   createScenario,
   createScenarioVersionFromJson,
   deleteScenarioVersion,
+  editTimeSeriesSetValues,
   getHydraulicDiagram,
   getProjectTimeSeriesSet,
   getPublicationPreview,
@@ -40,6 +42,7 @@ import {
   listScenarioRuns,
   listScenarios,
   listScenarioVersions,
+  listTimeSeriesSetRevisions,
   promoteHydraulicDiagram,
   publishPublication,
   saveHydraulicDiagram,
@@ -74,6 +77,7 @@ import {
   type Project,
   type ProjectCreatePayload,
   type ProjectTimeSeriesSet,
+  type ProjectTimeSeriesSetRevision,
   type ProjectTimeSeriesSetSignal,
   type ProjectTimeSeriesSetSummary,
   type RunArtifact,
@@ -102,6 +106,10 @@ const timeSeriesCatalogQueryKey = (projectId: number) =>
   ["project-time-series-sets", projectId] as const;
 const timeSeriesSetQueryKey = (projectId: number, timeSeriesSetId: number) =>
   ["project-time-series-set", projectId, timeSeriesSetId] as const;
+const timeSeriesSetRevisionsQueryKey = (
+  projectId: number,
+  timeSeriesSetId: number,
+) => ["project-time-series-set-revisions", projectId, timeSeriesSetId] as const;
 const scenarioQueryKey = (scenarioId: number) =>
   ["scenario", scenarioId] as const;
 const scenarioVersionsQueryKey = (scenarioId: number) =>
@@ -910,6 +918,191 @@ function TimeSeriesSetSourceSummary({
   );
 }
 
+function timeSeriesValueCellKey(periodIndex: number, signalKey: string): string {
+  return `${periodIndex}:${signalKey}`;
+}
+
+function parseTimeSeriesValueCellKey(key: string): {
+  periodIndex: number;
+  signalKey: string;
+} {
+  const separatorIndex = key.indexOf(":");
+  return {
+    periodIndex: Number(key.slice(0, separatorIndex)),
+    signalKey: key.slice(separatorIndex + 1),
+  };
+}
+
+function TimeSeriesSetValuesEditor({
+  projectId,
+  timeSeriesSet,
+}: {
+  projectId: number;
+  timeSeriesSet: ProjectTimeSeriesSet;
+}) {
+  const queryClient = useQueryClient();
+  const [valueEdits, setValueEdits] = useState<Record<string, string>>({});
+  const [changeSummary, setChangeSummary] = useState("");
+  const [error, setError] = useState("");
+
+  const baseValueByKey = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const value of timeSeriesSet.values) {
+      map.set(
+        timeSeriesValueCellKey(value.period_index, value.signal_key),
+        value.value_numeric,
+      );
+    }
+    return map;
+  }, [timeSeriesSet.values]);
+
+  function cellValue(periodIndex: number, signalKey: string): string {
+    const key = timeSeriesValueCellKey(periodIndex, signalKey);
+    if (Object.prototype.hasOwnProperty.call(valueEdits, key)) {
+      return valueEdits[key];
+    }
+    const original = baseValueByKey.get(key);
+    return original === undefined ? "" : String(original);
+  }
+
+  function updateCell(periodIndex: number, signalKey: string, text: string) {
+    setValueEdits((current) => ({
+      ...current,
+      [timeSeriesValueCellKey(periodIndex, signalKey)]: text,
+    }));
+    setError("");
+  }
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      editTimeSeriesSetValues(projectId, timeSeriesSet.id, {
+        edits: Object.entries(valueEdits).map(([key, value]) => {
+          const { periodIndex, signalKey } = parseTimeSeriesValueCellKey(key);
+          return { period_index: periodIndex, signal_key: signalKey, value };
+        }),
+        change_summary: changeSummary.trim() || undefined,
+      }),
+    onSuccess: (updatedSet) => {
+      setError("");
+      setValueEdits({});
+      setChangeSummary("");
+      queryClient.setQueryData(
+        timeSeriesSetQueryKey(projectId, timeSeriesSet.id),
+        updatedSet,
+      );
+      void queryClient.invalidateQueries({
+        queryKey: timeSeriesSetRevisionsQueryKey(projectId, timeSeriesSet.id),
+      });
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError)),
+  });
+
+  const hasEdits = Object.keys(valueEdits).length > 0;
+
+  return (
+    <section className="workspace-section" aria-labelledby="set-values">
+      <h2 id="set-values">Valores</h2>
+      {error ? <p role="alert">{error}</p> : null}
+      {timeSeriesSet.periods.length && timeSeriesSet.signals.length ? (
+        <div className="time-series-table-scroll editable-table-scroll">
+          <table aria-label="Valores editables del set">
+            <thead>
+              <tr>
+                <th scope="col">Periodo</th>
+                {timeSeriesSet.signals.map((signal) => (
+                  <th key={signal.signal_key} scope="col">
+                    {signal.signal_key} ({signal.unit})
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {timeSeriesSet.periods.map((period) => (
+                <tr key={period.period_index}>
+                  <th scope="row">{period.timestamp_start}</th>
+                  {timeSeriesSet.signals.map((signal) => (
+                    <td key={signal.signal_key}>
+                      <input
+                        aria-label={`Periodo ${period.timestamp_start} ${signal.signal_key}`}
+                        value={cellValue(period.period_index, signal.signal_key)}
+                        onChange={(event) =>
+                          updateCell(
+                            period.period_index,
+                            signal.signal_key,
+                            event.target.value,
+                          )
+                        }
+                        disabled={mutation.isPending}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <EmptyState>Este set no tiene valores.</EmptyState>
+      )}
+      <div className="version-actions">
+        <label htmlFor="value-edit-change-summary">
+          Resumen del cambio (opcional)
+        </label>
+        <input
+          id="value-edit-change-summary"
+          value={changeSummary}
+          onChange={(event) => setChangeSummary(event.target.value)}
+          disabled={mutation.isPending}
+        />
+        <button
+          type="button"
+          onClick={() => mutation.mutate()}
+          disabled={!hasEdits || mutation.isPending}
+        >
+          {mutation.isPending ? "Guardando correcciones" : "Guardar correcciones"}
+        </button>
+        <button
+          type="button"
+          className="secondary-action"
+          onClick={() => {
+            setValueEdits({});
+            setError("");
+          }}
+          disabled={!hasEdits || mutation.isPending}
+        >
+          Descartar cambios
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function TimeSeriesSetRevisionHistory({
+  revisions,
+}: {
+  revisions: ProjectTimeSeriesSetRevision[];
+}) {
+  if (revisions.length === 0) {
+    return <EmptyState>Aun no hay revisiones registradas.</EmptyState>;
+  }
+  return (
+    <ul className="resource-list">
+      {revisions.map((revision) => (
+        <li key={revision.revision_number}>
+          <strong>Revision {revision.revision_number}</strong>
+          <p>
+            {revision.created_by} | {revision.created_at}
+          </p>
+          <p>{revision.change_summary}</p>
+          <p>
+            <code>{revision.content_hash}</code>
+          </p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function TimeSeriesSetDetailView() {
   const projectId = useNumericParam("projectId");
   const timeSeriesSetId = useNumericParam("timeSeriesSetId");
@@ -917,6 +1110,13 @@ export function TimeSeriesSetDetailView() {
     queryKey: timeSeriesSetQueryKey(projectId || 0, timeSeriesSetId || 0),
     queryFn: ({ signal }) =>
       getProjectTimeSeriesSet(projectId || 0, timeSeriesSetId || 0, signal),
+    enabled: projectId !== null && timeSeriesSetId !== null,
+    retry: false,
+  });
+  const timeSeriesSetRevisions = useQuery({
+    queryKey: timeSeriesSetRevisionsQueryKey(projectId || 0, timeSeriesSetId || 0),
+    queryFn: ({ signal }) =>
+      listTimeSeriesSetRevisions(projectId || 0, timeSeriesSetId || 0, signal),
     enabled: projectId !== null && timeSeriesSetId !== null,
     retry: false,
   });
@@ -979,6 +1179,23 @@ export function TimeSeriesSetDetailView() {
         <section className="workspace-section" aria-labelledby="set-source">
           <h2 id="set-source">Origen</h2>
           <TimeSeriesSetSourceSummary source={set.source} />
+        </section>
+        <TimeSeriesSetValuesEditor projectId={projectId} timeSeriesSet={set} />
+        <section
+          className="workspace-section"
+          aria-labelledby="set-revision-history"
+        >
+          <h2 id="set-revision-history">Historial de revisiones</h2>
+          {timeSeriesSetRevisions.isPending ? (
+            <p>Cargando historial de revisiones.</p>
+          ) : timeSeriesSetRevisions.isError ? (
+            <RequestErrorView
+              error={timeSeriesSetRevisions.error}
+              retry={() => void timeSeriesSetRevisions.refetch()}
+            />
+          ) : (
+            <TimeSeriesSetRevisionHistory revisions={timeSeriesSetRevisions.data} />
+          )}
         </section>
       </div>
     </section>

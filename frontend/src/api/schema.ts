@@ -384,6 +384,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/time-series-sets/{time_series_set_id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Project Time Series Set Revisions */
+        get: operations["list_project_time_series_set_revisions_api_projects__project_id__time_series_sets__time_series_set_id__revisions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/time-series-sets/{time_series_set_id}/values": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Edit Project Time Series Set Values */
+        put: operations["edit_project_time_series_set_values_api_projects__project_id__time_series_sets__time_series_set_id__values_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/publications/{publication_id}": {
         parameters: {
             query?: never;
@@ -1343,6 +1377,22 @@ export interface components {
                 [key: string]: unknown;
             }[];
         };
+        /** TimeSeriesSetValueEditRequest */
+        TimeSeriesSetValueEditRequest: {
+            /** Period Index */
+            period_index: number;
+            /** Signal Key */
+            signal_key: string;
+            /** Value */
+            value: string;
+        };
+        /** TimeSeriesSetValuesEditRequest */
+        TimeSeriesSetValuesEditRequest: {
+            /** Change Summary */
+            change_summary?: string | null;
+            /** Edits */
+            edits?: components["schemas"]["TimeSeriesSetValueEditRequest"][];
+        };
         /** UserCreateRequest */
         UserCreateRequest: {
             /**
@@ -2177,6 +2227,74 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_project_time_series_set_revisions_api_projects__project_id__time_series_sets__time_series_set_id__revisions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                time_series_set_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_project_time_series_set_values_api_projects__project_id__time_series_sets__time_series_set_id__values_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                time_series_set_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TimeSeriesSetValuesEditRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

@@ -125,6 +125,20 @@ class CatalogValue:
 
 
 @dataclass(frozen=True)
+class CatalogValueEdit:
+    period_index: int
+    signal_key: str
+    value_text: str
+
+
+@dataclass(frozen=True)
+class PreparedCatalogValueEdit:
+    period_index: int
+    signal_key: str
+    value_numeric: float
+
+
+@dataclass(frozen=True)
 class PreparedTimeSeriesCatalogImport:
     set_name: str
     version_label: str
@@ -295,16 +309,14 @@ def prepare_time_series_catalog_import(
             for signal in signals
         ],
     }
-    content_hash = catalog_content_hash(
-        {
-            "set_name": request.set_name,
-            "version_label": request.version_label,
-            "data_kind": request.data_kind,
-            "timezone": request.timezone,
-            "signals": [signal.__dict__ for signal in signals],
-            "periods": [period.__dict__ for period in periods],
-            "values": [value.__dict__ for value in values],
-        }
+    content_hash = compute_catalog_content_hash(
+        set_name=request.set_name,
+        version_label=request.version_label,
+        data_kind=request.data_kind,
+        timezone=request.timezone,
+        signals=[signal.__dict__ for signal in signals],
+        periods=[period.__dict__ for period in periods],
+        values=[value.__dict__ for value in values],
     )
     return PreparedTimeSeriesCatalogImport(
         set_name=request.set_name,
@@ -395,3 +407,75 @@ def parse_catalog_float(value: str, row_number: int, column_name: str) -> float:
 def catalog_content_hash(value: Any) -> str:
     canonical = json.dumps(value, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def compute_catalog_content_hash(
+    *,
+    set_name: str,
+    version_label: str,
+    data_kind: str,
+    timezone: str,
+    signals: list[dict[str, Any]],
+    periods: list[dict[str, Any]],
+    values: list[dict[str, Any]],
+) -> str:
+    return catalog_content_hash(
+        {
+            "set_name": set_name,
+            "version_label": version_label,
+            "data_kind": data_kind,
+            "timezone": timezone,
+            "signals": signals,
+            "periods": periods,
+            "values": values,
+        }
+    )
+
+
+def validate_catalog_value_edits(
+    *,
+    edits: list[CatalogValueEdit],
+    signal_definitions: dict[str, TimeSeriesSignalDefinition],
+    known_period_indexes: set[int],
+) -> list[PreparedCatalogValueEdit]:
+    if not edits:
+        raise TimeSeriesCatalogError("at least one edit is required")
+
+    prepared: list[PreparedCatalogValueEdit] = []
+    for edit_number, edit in enumerate(edits, start=1):
+        if edit.period_index not in known_period_indexes:
+            raise TimeSeriesCatalogError(
+                f"edit {edit_number}: period {edit.period_index} is not part of "
+                "this time-series set"
+            )
+        definition = signal_definitions.get(edit.signal_key)
+        if definition is None:
+            raise TimeSeriesCatalogError(
+                f"edit {edit_number}: signal_key {edit.signal_key!r} is not part of "
+                "this time-series set"
+            )
+        try:
+            value_numeric = float(edit.value_text)
+        except ValueError as error:
+            raise TimeSeriesCatalogError(
+                f"edit {edit_number}: {edit.signal_key} at period {edit.period_index} "
+                "must be numeric"
+            ) from error
+        if not math.isfinite(value_numeric):
+            raise TimeSeriesCatalogError(
+                f"edit {edit_number}: {edit.signal_key} at period {edit.period_index} "
+                "must be finite"
+            )
+        if definition.nonnegative and value_numeric < 0:
+            raise TimeSeriesCatalogError(
+                f"edit {edit_number}: {edit.signal_key} at period {edit.period_index} "
+                "must be nonnegative"
+            )
+        prepared.append(
+            PreparedCatalogValueEdit(
+                period_index=edit.period_index,
+                signal_key=edit.signal_key,
+                value_numeric=value_numeric,
+            )
+        )
+    return prepared

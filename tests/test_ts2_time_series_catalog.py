@@ -12,8 +12,12 @@ from app.persistence import AnalystStore
 from app.time_series_catalog import (
     CatalogImportRequest,
     CatalogSignalMappingRequest,
+    CatalogValueEdit,
+    TimeSeriesCatalogError,
     prepare_time_series_catalog_import,
+    validate_catalog_value_edits,
 )
+from app.time_series_catalog import TimeSeriesSignalDefinition
 from app.validation import ValidationResult
 
 
@@ -909,3 +913,405 @@ class TimeSeriesCatalogImportTests(unittest.TestCase):
                     "end": "2026-01-01T02:00:00-03:00",
                 },
             )
+
+
+class ValidateCatalogValueEditsTests(unittest.TestCase):
+    price_definitions = {
+        "price_usd_per_mwh": TimeSeriesSignalDefinition(
+            signal_key="price_usd_per_mwh", unit="USD/MWh"
+        ),
+        "load_demand_mw": TimeSeriesSignalDefinition(
+            signal_key="load_demand_mw",
+            unit="MW",
+            entity_type="component:load",
+            nonnegative=True,
+        ),
+    }
+
+    def test_accepts_numeric_edits_for_known_signals_and_periods(self):
+        prepared = validate_catalog_value_edits(
+            edits=[
+                CatalogValueEdit(
+                    period_index=0, signal_key="price_usd_per_mwh", value_text="57.5"
+                ),
+                CatalogValueEdit(
+                    period_index=1, signal_key="load_demand_mw", value_text="12.0"
+                ),
+            ],
+            signal_definitions=self.price_definitions,
+            known_period_indexes={0, 1},
+        )
+
+        self.assertEqual(
+            [(edit.period_index, edit.signal_key, edit.value_numeric) for edit in prepared],
+            [(0, "price_usd_per_mwh", 57.5), (1, "load_demand_mw", 12.0)],
+        )
+
+    def test_rejects_empty_edit_list(self):
+        with self.assertRaisesRegex(TimeSeriesCatalogError, "at least one edit is required"):
+            validate_catalog_value_edits(
+                edits=[],
+                signal_definitions=self.price_definitions,
+                known_period_indexes={0},
+            )
+
+    def test_rejects_nonnumeric_edit_value(self):
+        with self.assertRaisesRegex(
+            TimeSeriesCatalogError,
+            r"edit 1: price_usd_per_mwh at period 0 must be numeric",
+        ):
+            validate_catalog_value_edits(
+                edits=[
+                    CatalogValueEdit(
+                        period_index=0,
+                        signal_key="price_usd_per_mwh",
+                        value_text="not-a-number",
+                    )
+                ],
+                signal_definitions=self.price_definitions,
+                known_period_indexes={0},
+            )
+
+    def test_rejects_negative_value_for_nonnegative_signal(self):
+        with self.assertRaisesRegex(
+            TimeSeriesCatalogError,
+            r"edit 1: load_demand_mw at period 0 must be nonnegative",
+        ):
+            validate_catalog_value_edits(
+                edits=[
+                    CatalogValueEdit(
+                        period_index=0, signal_key="load_demand_mw", value_text="-1.0"
+                    )
+                ],
+                signal_definitions=self.price_definitions,
+                known_period_indexes={0},
+            )
+
+    def test_rejects_unknown_signal_key(self):
+        with self.assertRaisesRegex(
+            TimeSeriesCatalogError, "signal_key 'unknown_signal' is not part of this time-series set"
+        ):
+            validate_catalog_value_edits(
+                edits=[
+                    CatalogValueEdit(
+                        period_index=0, signal_key="unknown_signal", value_text="1.0"
+                    )
+                ],
+                signal_definitions=self.price_definitions,
+                known_period_indexes={0},
+            )
+
+    def test_rejects_unknown_period_index(self):
+        with self.assertRaisesRegex(
+            TimeSeriesCatalogError, "period 99 is not part of this time-series set"
+        ):
+            validate_catalog_value_edits(
+                edits=[
+                    CatalogValueEdit(
+                        period_index=99, signal_key="price_usd_per_mwh", value_text="1.0"
+                    )
+                ],
+                signal_definitions=self.price_definitions,
+                known_period_indexes={0},
+            )
+
+
+class ManualValueEditTests(unittest.TestCase):
+    def make_client_and_context(self, input_source_root: Path):
+        client = TestClient(
+            create_app(
+                validation_service=StubValidationService(),
+                database_url="sqlite:///:memory:",
+                input_source_root=input_source_root,
+            )
+        )
+        project = client.post(
+            "/api/projects",
+            json={"name": "TS-2 Manual Edit Project"},
+        ).json()
+        scenario = client.post(
+            f"/api/projects/{project['id']}/scenarios",
+            json={"name": "Catalog import"},
+        ).json()
+        client.post(
+            f"/api/scenarios/{scenario['id']}/draft",
+            json={
+                "document": {
+                    "schema_version": "bess_editor_draft.v1",
+                    "case": {"name": "ts2_manual_edit_case"},
+                    "pcc": {"id": "bus_1", "type": "bus"},
+                    "grid": {"id": "grid_1"},
+                    "assets": [],
+                    "time_series": {"sources": []},
+                    "solver": {"name": "HiGHS", "options": {}},
+                }
+            },
+        )
+        return client, project, scenario
+
+    def import_dual_signal_set(self, client, scenario):
+        csv_text = (
+            "period_start,hours,spot_price,demand\n"
+            "2026-01-01T00:00:00,1.0,55.0,12.0\n"
+            "2026-01-01T01:00:00,1.0,60.0,14.0\n"
+        )
+        upload_response = client.post(
+            f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+            files={"source_file": ("price.csv", csv_text, "text/csv")},
+        )
+        source = upload_response.json()["source"]
+        import_response = client.post(
+            f"/api/scenarios/{scenario['id']}/draft/time-series-sources/{source['id']}/catalog-import",
+            json={
+                "set_name": "Price and demand Jan 2026",
+                "version_label": "v1",
+                "data_kind": "real",
+                "timezone": "America/Santiago",
+                "timestamp_column": "period_start",
+                "duration_hours_column": "hours",
+                "signal_mappings": [
+                    {"source_column": "spot_price", "signal_key": "price_usd_per_mwh"},
+                    {"source_column": "demand", "signal_key": "load_demand_mw"},
+                ],
+            },
+        )
+        self.assertEqual(import_response.status_code, 201)
+        return import_response.json()["time_series_set"]
+
+    def test_manual_edit_creates_new_revision_and_recalculates_hash(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, project, scenario = self.make_client_and_context(input_source_root)
+            created_set = self.import_dual_signal_set(client, scenario)
+            original_hash = created_set["content_hash"]
+
+            edit_response = client.put(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}/values",
+                json={
+                    "edits": [
+                        {
+                            "period_index": 0,
+                            "signal_key": "price_usd_per_mwh",
+                            "value": "57.5",
+                        }
+                    ],
+                    "change_summary": "Corrected spike on Jan 1st",
+                },
+            )
+
+            self.assertEqual(edit_response.status_code, 200)
+            updated_set = edit_response.json()["time_series_set"]
+            self.assertEqual(updated_set["revision_number"], 2)
+            self.assertNotEqual(updated_set["content_hash"], original_hash)
+            edited_value = next(
+                value
+                for value in updated_set["values"]
+                if value["period_index"] == 0 and value["signal_key"] == "price_usd_per_mwh"
+            )
+            self.assertEqual(edited_value["value_numeric"], 57.5)
+            unedited_value = next(
+                value
+                for value in updated_set["values"]
+                if value["period_index"] == 1 and value["signal_key"] == "price_usd_per_mwh"
+            )
+            self.assertEqual(unedited_value["value_numeric"], 60.0)
+
+    def test_prior_revisions_remain_queryable_after_edit(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, project, scenario = self.make_client_and_context(input_source_root)
+            created_set = self.import_dual_signal_set(client, scenario)
+            original_hash = created_set["content_hash"]
+
+            client.put(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}/values",
+                json={
+                    "edits": [
+                        {
+                            "period_index": 0,
+                            "signal_key": "price_usd_per_mwh",
+                            "value": "57.5",
+                        }
+                    ]
+                },
+            )
+
+            revisions = client.get(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}/revisions"
+            ).json()["time_series_set_revisions"]
+
+            self.assertEqual([revision["revision_number"] for revision in revisions], [2, 1])
+            self.assertEqual(revisions[1]["content_hash"], original_hash)
+            self.assertNotEqual(revisions[0]["content_hash"], original_hash)
+
+    def test_invalid_manual_edit_rejected_without_creating_revision_or_changing_values(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, project, scenario = self.make_client_and_context(input_source_root)
+            created_set = self.import_dual_signal_set(client, scenario)
+
+            edit_response = client.put(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}/values",
+                json={
+                    "edits": [
+                        {
+                            "period_index": 0,
+                            "signal_key": "price_usd_per_mwh",
+                            "value": "not-a-number",
+                        }
+                    ]
+                },
+            )
+
+            self.assertEqual(edit_response.status_code, 400)
+            self.assertIn("must be numeric", edit_response.json()["detail"])
+
+            detail = client.get(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}"
+            ).json()["time_series_set"]
+            self.assertEqual(detail["revision_number"], 1)
+            self.assertEqual(detail["content_hash"], created_set["content_hash"])
+            unchanged_value = next(
+                value
+                for value in detail["values"]
+                if value["period_index"] == 0 and value["signal_key"] == "price_usd_per_mwh"
+            )
+            self.assertEqual(unchanged_value["value_numeric"], 55.0)
+
+    def test_manual_edit_rejects_negative_value_for_nonnegative_signal(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, project, scenario = self.make_client_and_context(input_source_root)
+            created_set = self.import_dual_signal_set(client, scenario)
+
+            edit_response = client.put(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}/values",
+                json={
+                    "edits": [
+                        {"period_index": 0, "signal_key": "load_demand_mw", "value": "-2.0"}
+                    ]
+                },
+            )
+
+            self.assertEqual(edit_response.status_code, 400)
+            self.assertIn("must be nonnegative", edit_response.json()["detail"])
+
+    def test_manual_edit_rejects_unknown_signal_and_period(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, project, scenario = self.make_client_and_context(input_source_root)
+            created_set = self.import_dual_signal_set(client, scenario)
+
+            unknown_signal = client.put(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}/values",
+                json={
+                    "edits": [
+                        {
+                            "period_index": 0,
+                            "signal_key": "hydro_inflow_m3s",
+                            "value": "1.0",
+                        }
+                    ]
+                },
+            )
+            self.assertEqual(unknown_signal.status_code, 400)
+            self.assertIn("is not part of this time-series set", unknown_signal.json()["detail"])
+
+            unknown_period = client.put(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}/values",
+                json={
+                    "edits": [
+                        {
+                            "period_index": 99,
+                            "signal_key": "price_usd_per_mwh",
+                            "value": "1.0",
+                        }
+                    ]
+                },
+            )
+            self.assertEqual(unknown_period.status_code, 400)
+            self.assertIn("is not part of this time-series set", unknown_period.json()["detail"])
+
+    def test_manual_edit_requires_at_least_one_edit(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, project, scenario = self.make_client_and_context(input_source_root)
+            created_set = self.import_dual_signal_set(client, scenario)
+
+            response = client.put(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}/values",
+                json={"edits": []},
+            )
+
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("at least one edit is required", response.json()["detail"])
+
+    def test_manual_edit_404_for_unknown_set(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, project, _scenario = self.make_client_and_context(input_source_root)
+
+            response = client.put(
+                f"/api/projects/{project['id']}/time-series-sets/999999/values",
+                json={
+                    "edits": [
+                        {"period_index": 0, "signal_key": "price_usd_per_mwh", "value": "1.0"}
+                    ]
+                },
+            )
+
+            self.assertEqual(response.status_code, 404)
+
+    def test_persistence_edit_reuses_validation_and_updates_hash_directly(self):
+        store = AnalystStore("sqlite:///:memory:")
+        project = store.create_project(name="TS-2 direct edit project")
+        scenario = store.create_scenario(project_id=project["id"], name="Catalog import")
+        prepared = prepare_time_series_catalog_import(
+            rows=[
+                {
+                    "period_start": "2026-01-01T00:00:00",
+                    "hours": "1.0",
+                    "spot_price": "55.0",
+                },
+            ],
+            request=spot_price_import_request(),
+        )
+        source = {
+            "id": "csv_source_1",
+            "original_filename": "price.csv",
+            "media_type": "text/csv",
+            "checksum": "sha256:test",
+        }
+        created_set = store.import_time_series_catalog_set(
+            scenario_id=scenario["id"],
+            source=source,
+            prepared_import=prepared,
+        )
+
+        with self.assertRaisesRegex(TimeSeriesCatalogError, "must be numeric"):
+            store.edit_time_series_set_values(
+                project_id=project["id"],
+                time_series_set_id=created_set["id"],
+                edits=[
+                    CatalogValueEdit(
+                        period_index=0,
+                        signal_key="price_usd_per_mwh",
+                        value_text="bad",
+                    )
+                ],
+            )
+
+        updated_set = store.edit_time_series_set_values(
+            project_id=project["id"],
+            time_series_set_id=created_set["id"],
+            edits=[
+                CatalogValueEdit(
+                    period_index=0, signal_key="price_usd_per_mwh", value_text="99.0"
+                )
+            ],
+            created_by="ada@example.local",
+        )
+
+        self.assertEqual(updated_set["revision_number"], 2)
+        self.assertEqual(updated_set["values"][0]["value_numeric"], 99.0)
+        self.assertNotEqual(updated_set["content_hash"], created_set["content_hash"])

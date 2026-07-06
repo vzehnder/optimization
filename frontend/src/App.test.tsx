@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -6340,6 +6346,22 @@ describe("application shell", () => {
             { headers: { "Content-Type": "application/json" } },
           );
         }
+        if (path === "/api/projects/1/time-series-sets/501/revisions") {
+          return new Response(
+            JSON.stringify({
+              time_series_set_revisions: [
+                {
+                  revision_number: 1,
+                  content_hash: "sha256:abc123",
+                  change_summary: "Initial CSV/XLSX catalog import",
+                  created_at: "2026-07-04T12:00:00Z",
+                  created_by: "internal_analyst",
+                },
+              ],
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
         return new Response(
           JSON.stringify({ detail: `unhandled ${method} ${path}` }),
           {
@@ -6394,5 +6416,228 @@ describe("application shell", () => {
       ),
     ).toBeVisible();
     expect(screen.getByText(/price\.csv \(text\/csv\)/)).toBeVisible();
+    const revisionHistorySection = await screen.findByRole("region", {
+      name: "Historial de revisiones",
+    });
+    expect(within(revisionHistorySection).getByText("Revision 1")).toBeVisible();
+  });
+
+  it("edits a time-series set value and creates a new auditable revision", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/react/projects/1/time-series-sets/501",
+    );
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-06-23T12:00:00Z",
+    };
+    const baseSetDetail = {
+      id: 501,
+      project_id: 1,
+      name: "Spot price Jan 2026",
+      version_number: 1,
+      version_label: "v1",
+      revision_number: 1,
+      data_kind: "real",
+      timezone: "America/Santiago",
+      status: "validated",
+      content_hash: "sha256:abc123",
+      source_checksum: "sha256:def456",
+      signal_count: 1,
+      period_count: 1,
+      revision_metadata: {},
+      source: {
+        original_filename: "price.csv",
+        media_type: "text/csv",
+        checksum: "sha256:def456",
+        selected_sheet: null,
+      },
+      horizon: {
+        period_count: 1,
+        start: "2026-01-01T00:00:00-03:00",
+        end: "2026-01-01T01:00:00-03:00",
+      },
+      signals: [
+        {
+          signal_key: "price_usd_per_mwh",
+          unit: "USD/MWh",
+          source_column: "spot_price",
+          source_unit: "USD/MWh",
+          entity_type: null,
+          entity_key: null,
+        },
+      ],
+      periods: [
+        {
+          period_index: 0,
+          timestamp_start: "2026-01-01T00:00:00-03:00",
+          timestamp_end: "2026-01-01T01:00:00-03:00",
+          duration_hours: 1.0,
+        },
+      ],
+      values: [
+        {
+          period_index: 0,
+          signal_key: "price_usd_per_mwh",
+          value_numeric: 55.0,
+        },
+      ],
+    };
+    const editedSetDetail = {
+      ...baseSetDetail,
+      revision_number: 2,
+      content_hash: "sha256:def789",
+      values: [
+        {
+          period_index: 0,
+          signal_key: "price_usd_per_mwh",
+          value_numeric: 57.5,
+        },
+      ],
+    };
+    let editApplied = false;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/time-series-sets/501" && method === "GET") {
+          return new Response(
+            JSON.stringify({
+              time_series_set: editApplied ? editedSetDetail : baseSetDetail,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (
+          path === "/api/projects/1/time-series-sets/501/values" &&
+          method === "PUT"
+        ) {
+          const body = JSON.parse(String(init?.body));
+          expect(body).toEqual({
+            edits: [
+              {
+                period_index: 0,
+                signal_key: "price_usd_per_mwh",
+                value: "57.5",
+              },
+            ],
+            change_summary: "Corrected spike",
+          });
+          editApplied = true;
+          return new Response(
+            JSON.stringify({ time_series_set: editedSetDetail }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/projects/1/time-series-sets/501/revisions") {
+          return new Response(
+            JSON.stringify({
+              time_series_set_revisions: editApplied
+                ? [
+                    {
+                      revision_number: 2,
+                      content_hash: "sha256:def789",
+                      change_summary: "Corrected spike",
+                      created_at: "2026-07-06T12:00:00Z",
+                      created_by: "ada@example.local",
+                    },
+                    {
+                      revision_number: 1,
+                      content_hash: "sha256:abc123",
+                      change_summary: "Initial CSV/XLSX catalog import",
+                      created_at: "2026-07-04T12:00:00Z",
+                      created_by: "internal_analyst",
+                    },
+                  ]
+                : [
+                    {
+                      revision_number: 1,
+                      content_hash: "sha256:abc123",
+                      change_summary: "Initial CSV/XLSX catalog import",
+                      created_at: "2026-07-04T12:00:00Z",
+                      created_by: "internal_analyst",
+                    },
+                  ],
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Spot price Jan 2026 (v1)" }),
+    ).toBeVisible();
+    const revisionSection = screen.getByRole("region", { name: "Revision" });
+    expect(within(revisionSection).getByText("Revision 1")).toBeVisible();
+
+    const valueInput = screen.getByLabelText(
+      "Periodo 2026-01-01T00:00:00-03:00 price_usd_per_mwh",
+    );
+    await user.clear(valueInput);
+    await user.type(valueInput, "57.5");
+    await user.type(
+      screen.getByLabelText("Resumen del cambio (opcional)"),
+      "Corrected spike",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Guardar correcciones" }),
+    );
+
+    await waitFor(() =>
+      expect(within(revisionSection).getByText("Revision 2")).toBeVisible(),
+    );
+    expect(within(revisionSection).getByText("sha256:def789")).toBeVisible();
+
+    const revisionHistorySection = await screen.findByRole("region", {
+      name: "Historial de revisiones",
+    });
+    await waitFor(() =>
+      expect(
+        within(revisionHistorySection).getByText("Revision 2"),
+      ).toBeVisible(),
+    );
+    expect(
+      within(revisionHistorySection).getByText("Revision 1"),
+    ).toBeVisible();
   });
 });

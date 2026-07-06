@@ -1,6 +1,6 @@
 # BESS-TS2-006: Edit Set Values Manually With Auditable Revisions
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter2/prd.md`
@@ -26,13 +26,13 @@ for corrections, not a full spreadsheet inside the browser.
 
 ## Acceptance criteria
 
-- [ ] Values of a set can be edited in a bounded table in React.
-- [ ] Saving manual edits creates a new revision with user and timestamp.
-- [ ] The set content hash is recalculated on each revision.
-- [ ] Prior revisions and their hashes remain queryable for audit.
-- [ ] Manual edits are validated with the same centralized rules as imports.
-- [ ] An invalid edit is rejected without creating a revision or changing values.
-- [ ] Backend tests prove revision creation, hash updates and validation reuse.
+- [x] Values of a set can be edited in a bounded table in React.
+- [x] Saving manual edits creates a new revision with user and timestamp.
+- [x] The set content hash is recalculated on each revision.
+- [x] Prior revisions and their hashes remain queryable for audit.
+- [x] Manual edits are validated with the same centralized rules as imports.
+- [x] An invalid edit is rejected without creating a revision or changing values.
+- [x] Backend tests prove revision creation, hash updates and validation reuse.
 
 ## Blocked by
 

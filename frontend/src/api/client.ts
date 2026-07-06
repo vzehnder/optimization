@@ -341,6 +341,25 @@ export interface ProjectTimeSeriesSet {
   values: ProjectTimeSeriesSetValue[];
 }
 
+export interface ProjectTimeSeriesSetRevision {
+  revision_number: number;
+  content_hash: string;
+  change_summary: string;
+  created_at: string;
+  created_by: string;
+}
+
+export interface TimeSeriesSetValueEdit {
+  period_index: number;
+  signal_key: string;
+  value: string;
+}
+
+export interface TimeSeriesSetValuesEditPayload {
+  edits: TimeSeriesSetValueEdit[];
+  change_summary?: string;
+}
+
 export interface ProjectTimeSeriesSetSummary {
   id: number;
   project_id: number;
@@ -1473,6 +1492,40 @@ export async function getProjectTimeSeriesSet(
   const response = await requestJson<{ time_series_set: ProjectTimeSeriesSet }>(
     `/api/projects/${projectId}/time-series-sets/${timeSeriesSetId}`,
     { signal },
+  );
+  return response.time_series_set;
+}
+
+export async function listTimeSeriesSetRevisions(
+  projectId: number,
+  timeSeriesSetId: number,
+  signal?: AbortSignal,
+): Promise<ProjectTimeSeriesSetRevision[]> {
+  const response = await requestJson<{
+    time_series_set_revisions: ProjectTimeSeriesSetRevision[];
+  }>(
+    `/api/projects/${projectId}/time-series-sets/${timeSeriesSetId}/revisions`,
+    { signal },
+  );
+  return response.time_series_set_revisions;
+}
+
+export async function editTimeSeriesSetValues(
+  projectId: number,
+  timeSeriesSetId: number,
+  payload: TimeSeriesSetValuesEditPayload,
+): Promise<ProjectTimeSeriesSet> {
+  const csrfToken = await getCsrfToken();
+  const response = await requestJson<{ time_series_set: ProjectTimeSeriesSet }>(
+    `/api/projects/${projectId}/time-series-sets/${timeSeriesSetId}/values`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrfToken,
+      },
+      body: JSON.stringify(payload),
+    },
   );
   return response.time_series_set;
 }

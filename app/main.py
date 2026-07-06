@@ -42,6 +42,7 @@ from app.results import ResultReadError, apply_dashboard_template, read_run_resu
 from app.time_series_catalog import (
     CatalogImportRequest as PreparedCatalogImportRequest,
     CatalogSignalMappingRequest as PreparedCatalogSignalMappingRequest,
+    CatalogValueEdit,
     TimeSeriesCatalogError,
     prepare_time_series_catalog_import,
 )
@@ -272,6 +273,17 @@ class TimeSeriesCatalogImportRequest(BaseModel):
     signal_key: str | None = None
     source_unit: str | None = None
     signal_mappings: list[TimeSeriesCatalogSignalMappingRequest] = Field(default_factory=list)
+
+
+class TimeSeriesSetValueEditRequest(BaseModel):
+    period_index: int
+    signal_key: str = Field(min_length=1)
+    value: str = Field(min_length=1)
+
+
+class TimeSeriesSetValuesEditRequest(BaseModel):
+    edits: list[TimeSeriesSetValueEditRequest] = Field(default_factory=list)
+    change_summary: str | None = None
 
 
 class DraftPromotionError(ValueError):
@@ -1537,6 +1549,51 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"time_series_set": time_series_set}
+
+    @app.get("/api/projects/{project_id}/time-series-sets/{time_series_set_id}/revisions")
+    async def list_project_time_series_set_revisions(
+        project_id: int, time_series_set_id: int
+    ):
+        try:
+            revisions = analyst_store.list_time_series_set_revisions(
+                project_id, time_series_set_id
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"time_series_set_revisions": revisions}
+
+    @app.put("/api/projects/{project_id}/time-series-sets/{time_series_set_id}/values")
+    async def edit_project_time_series_set_values(
+        project_id: int,
+        time_series_set_id: int,
+        payload: TimeSeriesSetValuesEditRequest,
+        request: Request,
+    ):
+        try:
+            updated_set = analyst_store.edit_time_series_set_values(
+                project_id=project_id,
+                time_series_set_id=time_series_set_id,
+                edits=[
+                    CatalogValueEdit(
+                        period_index=item.period_index,
+                        signal_key=item.signal_key,
+                        value_text=item.value,
+                    )
+                    for item in payload.edits
+                ],
+                change_summary=payload.change_summary,
+                created_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except (TimeSeriesCatalogError, ValueError) as error:
+            return JSONResponse(
+                error_response_body(
+                    "time_series_set_values", str(error), phase="python_validation"
+                ),
+                status_code=400,
+            )
+        return {"time_series_set": updated_set}
 
     @app.put("/api/scenarios/{scenario_id}/draft")
     async def update_scenario_draft(scenario_id: int, payload: ScenarioDraftWriteRequest):
