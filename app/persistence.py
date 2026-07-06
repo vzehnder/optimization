@@ -567,6 +567,7 @@ class AnalystStore:
                 time_series_set_id INTEGER NOT NULL,
                 revision_number INTEGER NOT NULL,
                 time_series_source_id INTEGER,
+                superseded_revision_number INTEGER,
                 content_hash TEXT NOT NULL,
                 change_summary TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
@@ -748,6 +749,7 @@ class AnalystStore:
         self._ensure_column("scenario_versions", "generation_metadata_json", "TEXT NOT NULL DEFAULT '{}'")
         self._ensure_column("time_series_signals", "source_column", "TEXT")
         self._ensure_column("time_series_signals", "source_unit", "TEXT")
+        self._ensure_column("time_series_set_revisions", "superseded_revision_number", "INTEGER")
         self._ensure_hydraulic_diagram_items_support_reaches()
         self._ensure_hydraulic_diagram_items_entity_types_postgres()
         self._ensure_column("case_hydraulic_plants", "non_modeled", "INTEGER NOT NULL DEFAULT 0")
@@ -1746,13 +1748,14 @@ class AnalystStore:
                 time_series_set_id,
                 revision_number,
                 time_series_source_id,
+                superseded_revision_number,
                 content_hash,
                 change_summary,
                 created_at,
                 created_by,
                 metadata_json
             )
-            VALUES (?, 1, ?, ?, ?, ?, ?, ?)
+            VALUES (?, 1, ?, NULL, ?, ?, ?, ?, ?)
             """,
             (
                 time_series_set_id,
@@ -1839,28 +1842,51 @@ class AnalystStore:
             )
             period_ids_by_index[period.period_index] = int(period_cursor.lastrowid)
 
-        for value in prepared_import.values:
-            self.connection.execute(
-                """
-                INSERT INTO time_series_values (
-                    time_series_set_id,
-                    time_series_signal_id,
-                    time_series_period_id,
-                    value_numeric,
-                    source_row_number,
-                    created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
+        self._bulk_insert_time_series_values(
+            time_series_set_id=time_series_set_id,
+            values=[
                 (
-                    time_series_set_id,
                     signal_ids_by_key[value.signal_key],
                     period_ids_by_index[value.period_index],
                     value.value_numeric,
                     value.source_row_number,
-                    now,
-                ),
+                )
+                for value in prepared_import.values
+            ],
+            now=now,
+        )
+
+    def _bulk_insert_time_series_values(
+        self,
+        *,
+        time_series_set_id: int,
+        values: list[tuple[int, int, float, int | None]],
+        now: str,
+    ) -> None:
+        self.connection.executemany(
+            """
+            INSERT INTO time_series_values (
+                time_series_set_id,
+                time_series_signal_id,
+                time_series_period_id,
+                value_numeric,
+                source_row_number,
+                created_at
             )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    time_series_set_id,
+                    signal_id,
+                    period_id,
+                    value_numeric,
+                    source_row_number,
+                    now,
+                )
+                for signal_id, period_id, value_numeric, source_row_number in values
+            ],
+        )
 
     def replace_time_series_set_source(
         self,
@@ -1934,15 +1960,18 @@ class AnalystStore:
                 ).fetchall()
             ]
 
-            revision_row = self.connection.execute(
+            latest_revision_row = self.connection.execute(
                 """
-                SELECT COALESCE(MAX(revision_number), 0) AS max_revision
+                SELECT revision_number
                 FROM time_series_set_revisions
                 WHERE time_series_set_id = ?
+                ORDER BY revision_number DESC
+                LIMIT 1
                 """,
                 (time_series_set_id,),
             ).fetchone()
-            next_revision_number = int(revision_row["max_revision"]) + 1
+            latest_revision_number = int(latest_revision_row["revision_number"]) if latest_revision_row else 0
+            next_revision_number = latest_revision_number + 1
 
             try:
                 self.connection.execute(
@@ -1964,18 +1993,20 @@ class AnalystStore:
                         time_series_set_id,
                         revision_number,
                         time_series_source_id,
+                        superseded_revision_number,
                         content_hash,
                         change_summary,
                         created_at,
                         created_by,
                         metadata_json
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         time_series_set_id,
                         next_revision_number,
                         int(source_record["id"]),
+                        latest_revision_number or None,
                         prepared_import.content_hash,
                         change_summary or "Replaced via new file upload",
                         now,
@@ -2097,28 +2128,19 @@ class AnalystStore:
             )
             period_ids_by_index[int(period["period_index"])] = int(period_cursor.lastrowid)
 
-        for value in values:
-            self.connection.execute(
-                """
-                INSERT INTO time_series_values (
-                    time_series_set_id,
-                    time_series_signal_id,
-                    time_series_period_id,
-                    value_numeric,
-                    source_row_number,
-                    created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
+        self._bulk_insert_time_series_values(
+            time_series_set_id=time_series_set_id,
+            values=[
                 (
-                    time_series_set_id,
                     signal_ids_by_key[str(value["signal_key"])],
                     period_ids_by_index[int(value["period_index"])],
-                    value["value_numeric"],
-                    value["source_row_number"],
-                    now,
-                ),
-            )
+                    float(value["value_numeric"]),
+                    int(value["source_row_number"]) if value["source_row_number"] is not None else None,
+                )
+                for value in values
+            ],
+            now=now,
+        )
 
     def list_time_series_sets(self, project_id: int) -> list[dict[str, Any]]:
         self.get_project(project_id)
@@ -2210,9 +2232,11 @@ class AnalystStore:
                 id,
                 revision_number,
                 time_series_source_id,
+                superseded_revision_number,
                 content_hash,
                 change_summary,
                 created_at,
+                created_by,
                 metadata_json
             FROM time_series_set_revisions
             WHERE time_series_set_id = ?
@@ -2275,33 +2299,11 @@ class AnalystStore:
             if isinstance(parsed_metadata, dict):
                 revision_metadata = parsed_metadata
 
-        source = None
-        if revision_row["time_series_source_id"] is not None:
-            source_row = self.connection.execute(
-                """
-                SELECT
-                    source_key,
-                    kind,
-                    original_filename,
-                    media_type,
-                    checksum,
-                    selected_sheet,
-                    created_at
-                FROM time_series_sources
-                WHERE id = ?
-                """,
-                (int(revision_row["time_series_source_id"]),),
-            ).fetchone()
-            if source_row is not None:
-                source = {
-                    "source_key": source_row["source_key"],
-                    "kind": source_row["kind"],
-                    "original_filename": source_row["original_filename"],
-                    "media_type": source_row["media_type"],
-                    "checksum": source_row["checksum"],
-                    "selected_sheet": source_row["selected_sheet"],
-                    "created_at": source_row["created_at"],
-                }
+        source = self._get_time_series_source_by_id(
+            int(revision_row["time_series_source_id"])
+            if revision_row["time_series_source_id"] is not None
+            else None
+        )
 
         return {
             "id": int(row["id"]),
@@ -2369,23 +2371,41 @@ class AnalystStore:
 
         rows = self.connection.execute(
             """
-            SELECT revision_number, content_hash, change_summary, created_at, created_by
+            SELECT
+                revision_number,
+                time_series_source_id,
+                superseded_revision_number,
+                content_hash,
+                change_summary,
+                created_at,
+                created_by
             FROM time_series_set_revisions
             WHERE time_series_set_id = ?
             ORDER BY revision_number DESC
             """,
             (time_series_set_id,),
         ).fetchall()
-        return [
-            {
-                "revision_number": int(row["revision_number"]),
-                "content_hash": str(row["content_hash"]),
-                "change_summary": str(row["change_summary"]),
-                "created_at": row["created_at"],
-                "created_by": row["created_by"],
-            }
-            for row in rows
-        ]
+        revisions: list[dict[str, Any]] = []
+        for row in rows:
+            source = self._get_time_series_source_by_id(
+                int(row["time_series_source_id"]) if row["time_series_source_id"] is not None else None
+            )
+            revisions.append(
+                {
+                    "revision_number": int(row["revision_number"]),
+                    "superseded_revision_number": (
+                        int(row["superseded_revision_number"])
+                        if row["superseded_revision_number"] is not None
+                        else None
+                    ),
+                    "content_hash": str(row["content_hash"]),
+                    "change_summary": str(row["change_summary"]),
+                    "created_at": row["created_at"],
+                    "created_by": row["created_by"],
+                    "source": source,
+                }
+            )
+        return revisions
 
     def edit_time_series_set_values(
         self,
@@ -2491,15 +2511,23 @@ class AnalystStore:
                     "value_numeric": prepared_edit.value_numeric,
                 }
 
-            revision_row = self.connection.execute(
+            latest_revision_row = self.connection.execute(
                 """
-                SELECT COALESCE(MAX(revision_number), 0) AS max_revision
+                SELECT revision_number, time_series_source_id
                 FROM time_series_set_revisions
                 WHERE time_series_set_id = ?
+                ORDER BY revision_number DESC
+                LIMIT 1
                 """,
                 (time_series_set_id,),
             ).fetchone()
-            next_revision_number = int(revision_row["max_revision"]) + 1
+            latest_revision_number = int(latest_revision_row["revision_number"]) if latest_revision_row else 0
+            latest_time_series_source_id = (
+                int(latest_revision_row["time_series_source_id"])
+                if latest_revision_row and latest_revision_row["time_series_source_id"] is not None
+                else None
+            )
+            next_revision_number = latest_revision_number + 1
 
             content_hash = compute_catalog_content_hash(
                 set_name=str(set_row["name"]),
@@ -2547,17 +2575,20 @@ class AnalystStore:
                         time_series_set_id,
                         revision_number,
                         time_series_source_id,
+                        superseded_revision_number,
                         content_hash,
                         change_summary,
                         created_at,
                         created_by,
                         metadata_json
                     )
-                    VALUES (?, ?, NULL, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         time_series_set_id,
                         next_revision_number,
+                        latest_time_series_source_id,
+                        latest_revision_number or None,
                         content_hash,
                         change_summary or "Manual value correction",
                         now,
@@ -2648,6 +2679,39 @@ class AnalystStore:
             ),
         )
         return {"id": int(cursor.lastrowid), "checksum": str(source.get("checksum") or "")}
+
+    def _time_series_source_public_dict(self, source_row: Mapping[str, Any] | None) -> dict[str, Any] | None:
+        if source_row is None:
+            return None
+        return {
+            "source_key": source_row["source_key"],
+            "kind": source_row["kind"],
+            "original_filename": source_row["original_filename"],
+            "media_type": source_row["media_type"],
+            "checksum": source_row["checksum"],
+            "selected_sheet": source_row["selected_sheet"],
+            "created_at": source_row["created_at"],
+        }
+
+    def _get_time_series_source_by_id(self, time_series_source_id: int | None) -> dict[str, Any] | None:
+        if time_series_source_id is None:
+            return None
+        source_row = self.connection.execute(
+            """
+            SELECT
+                source_key,
+                kind,
+                original_filename,
+                media_type,
+                checksum,
+                selected_sheet,
+                created_at
+            FROM time_series_sources
+            WHERE id = ?
+            """,
+            (int(time_series_source_id),),
+        ).fetchone()
+        return self._time_series_source_public_dict(source_row)
 
     def get_or_create_hydraulic_diagram(self, scenario_id: int) -> dict[str, Any]:
         with self._lock:

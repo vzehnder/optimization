@@ -1553,7 +1553,11 @@ def create_app(
             return JSONResponse(error_response_body("source_file", str(error)), status_code=400)
         except (TimeSeriesCatalogError, ValueError) as error:
             return JSONResponse(
-                error_response_body("catalog_import", str(error), phase="python_validation"),
+                error_response_body(
+                    "catalog_import",
+                    time_series_source_error_detail(source, str(error)),
+                    phase="python_validation",
+                ),
                 status_code=400,
             )
         return {"time_series_set": created_set}
@@ -1695,7 +1699,11 @@ def create_app(
             return JSONResponse(error_response_body("source_file", str(error)), status_code=400)
         except (TimeSeriesCatalogError, ValueError) as error:
             return JSONResponse(
-                error_response_body("catalog_import", str(error), phase="python_validation"),
+                error_response_body(
+                    "catalog_import",
+                    time_series_source_error_detail(source, str(error)),
+                    phase="python_validation",
+                ),
                 status_code=400,
             )
         return {"time_series_set": updated_set}
@@ -2005,6 +2013,17 @@ def error_response_body(error_category: str, detail: str, *, phase: str | None =
         "error_category": error_category,
         "detail": detail,
     }
+
+
+def time_series_source_error_detail(source: dict[str, Any] | None, detail: str) -> str:
+    if not isinstance(source, dict):
+        return detail
+    original_filename = str(source.get("original_filename") or "").strip()
+    selected_sheet = str(source.get("selected_sheet") or "").strip()
+    source_context = f"source {original_filename!r}" if original_filename else "source"
+    if selected_sheet:
+        source_context = f"{source_context}, sheet {selected_sheet!r}"
+    return f"{source_context}: {detail}"
 
 
 def draft_error_category(document: dict[str, Any], error: Exception) -> str:

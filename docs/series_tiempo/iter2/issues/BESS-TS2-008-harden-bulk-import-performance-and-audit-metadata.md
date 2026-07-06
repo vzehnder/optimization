@@ -1,11 +1,13 @@
 # BESS-TS2-008: Harden Bulk Import Performance And Audit Metadata
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter2/prd.md`
 Fecha de inicio planificada: 2026-07-27
 Fecha de termino planificada: 2026-07-28
+Fecha de inicio real: 2026-07-06
+Fecha de termino real: 2026-07-06
 
 ## User stories covered
 
@@ -28,12 +30,12 @@ the acceptance suite.
 
 ## Acceptance criteria
 
-- [ ] Value persistence uses bulk insert behavior suitable for realistic file sizes.
-- [ ] A realistic-size import (a year of hourly periods, several signals) completes without row-by-row inserts.
-- [ ] Validation errors consistently report source, sheet, column and row across CSV and XLSX paths.
-- [ ] Every revision records author, date, originating source and superseded revision.
-- [ ] Audit metadata survives file replacement and manual edits.
-- [ ] Backend tests cover these behaviors at API/domain boundaries, not table implementation details.
+- [x] Value persistence uses bulk insert behavior suitable for realistic file sizes.
+- [x] A realistic-size import (a year of hourly periods, several signals) completes without row-by-row inserts.
+- [x] Validation errors consistently report source, sheet, column and row across CSV and XLSX paths.
+- [x] Every revision records author, date, originating source and superseded revision.
+- [x] Audit metadata survives file replacement and manual edits.
+- [x] Backend tests cover these behaviors at API/domain boundaries, not table implementation details.
 
 ## Blocked by
 

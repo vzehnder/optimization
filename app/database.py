@@ -113,6 +113,16 @@ class PostgresConnection:
                 lastrowid = int(row["id"])
         return PostgresCursor(cursor, lastrowid=lastrowid)
 
+    def executemany(
+        self,
+        sql: str,
+        seq_of_parameters: list[tuple[Any, ...]] | tuple[tuple[Any, ...], ...],
+    ) -> PostgresCursor:
+        translated_sql, _inserted_table = translate_postgresql_sql(sql)
+        cursor = self._connection.cursor()
+        cursor.executemany(translated_sql, seq_of_parameters)
+        return PostgresCursor(cursor)
+
     def executescript(self, script: str) -> None:
         self._connection.execute(script)
 

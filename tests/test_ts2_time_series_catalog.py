@@ -1,6 +1,7 @@
 import dataclasses
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 
@@ -34,6 +35,45 @@ def make_xlsx_bytes(rows, *, extra_sheet_name=None, extra_sheet_rows=None):
     buffer = BytesIO()
     workbook.save(buffer)
     return buffer.getvalue()
+
+
+class StatementCountingConnection:
+    def __init__(self, wrapped):
+        self._wrapped = wrapped
+        self.execute_counts: dict[str, int] = {}
+        self.executemany_counts: dict[str, int] = {}
+        self.executemany_rows: dict[str, int] = {}
+
+    def execute(self, sql, parameters=()):
+        statement = normalize_statement_key(sql)
+        self.execute_counts[statement] = self.execute_counts.get(statement, 0) + 1
+        return self._wrapped.execute(sql, parameters)
+
+    def executemany(self, sql, seq_of_parameters):
+        statement = normalize_statement_key(sql)
+        rows = list(seq_of_parameters)
+        self.executemany_counts[statement] = self.executemany_counts.get(statement, 0) + 1
+        self.executemany_rows[statement] = self.executemany_rows.get(statement, 0) + len(rows)
+        return self._wrapped.executemany(sql, rows)
+
+    def executescript(self, script):
+        return self._wrapped.executescript(script)
+
+    def commit(self):
+        return self._wrapped.commit()
+
+    def rollback(self):
+        return self._wrapped.rollback()
+
+    def close(self):
+        return self._wrapped.close()
+
+    def __getattr__(self, name):
+        return getattr(self._wrapped, name)
+
+
+def normalize_statement_key(sql: str) -> str:
+    return " ".join(str(sql).split())
 
 
 class StubValidationService:
@@ -510,6 +550,85 @@ class TimeSeriesCatalogImportTests(unittest.TestCase):
         self.assertEqual(created_set["version_label"], "v1")
         self.assertEqual(created_set["period_count"], 1)
 
+    def test_realistic_size_import_bulk_inserts_values(self):
+        store = AnalystStore("sqlite:///:memory:")
+        project = store.create_project(name="TS-2 bulk import project")
+        scenario = store.create_scenario(project_id=project["id"], name="Catalog import")
+        start = datetime(2026, 1, 1, 0, 0, 0)
+        rows = []
+        for hour in range(24 * 365):
+            instant = start + timedelta(hours=hour)
+            rows.append(
+                {
+                    "period_start": instant.isoformat(timespec="seconds"),
+                    "hours": "1.0",
+                    "buy_price": str(50.0 + (hour % 24)),
+                    "sell_price": str(40.0 + (hour % 24)),
+                    "demand": str(100.0 + (hour % 12)),
+                }
+            )
+        prepared = prepare_time_series_catalog_import(
+            rows=rows,
+            request=CatalogImportRequest(
+                set_name="Yearly price and demand 2026",
+                version_label="v1",
+                data_kind="real",
+                timezone="UTC",
+                timestamp_column="period_start",
+                duration_hours_column="hours",
+                signal_mappings=[
+                    CatalogSignalMappingRequest(
+                        source_column="buy_price",
+                        signal_key="import_price_usd_per_mwh",
+                    ),
+                    CatalogSignalMappingRequest(
+                        source_column="sell_price",
+                        signal_key="export_price_usd_per_mwh",
+                    ),
+                    CatalogSignalMappingRequest(
+                        source_column="demand",
+                        signal_key="load_demand_mw",
+                    ),
+                ],
+            ),
+        )
+        source = {
+            "id": "csv_source_bulk",
+            "original_filename": "yearly_prices.csv",
+            "media_type": "text/csv",
+            "checksum": "sha256:bulk",
+        }
+        counting_connection = StatementCountingConnection(store.connection)
+        store.connection = counting_connection
+
+        created_set = store.import_time_series_catalog_set(
+            scenario_id=scenario["id"],
+            source=source,
+            prepared_import=prepared,
+        )
+
+        value_insert_statement = normalize_statement_key(
+            """
+            INSERT INTO time_series_values (
+                time_series_set_id,
+                time_series_signal_id,
+                time_series_period_id,
+                value_numeric,
+                source_row_number,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """
+        )
+        self.assertEqual(created_set["signal_count"], 3)
+        self.assertEqual(created_set["period_count"], 24 * 365)
+        self.assertEqual(counting_connection.execute_counts.get(value_insert_statement, 0), 0)
+        self.assertEqual(counting_connection.executemany_counts.get(value_insert_statement, 0), 1)
+        self.assertEqual(
+            counting_connection.executemany_rows.get(value_insert_statement, 0),
+            (24 * 365) * 3,
+        )
+
     def test_csv_source_imports_a_project_time_series_set_and_reads_it_back(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             input_source_root = Path(temp_dir) / "input-sources"
@@ -770,6 +889,43 @@ class TimeSeriesCatalogImportTests(unittest.TestCase):
                 "row 3: duplicate timestamp '2026-01-01T00:00:00' (already used by row 2)",
                 import_response.json()["detail"],
             )
+
+    def test_csv_import_validation_error_includes_source_context(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, _project, scenario = self.make_client_and_context(input_source_root)
+            csv_text = (
+                "period_start,hours,spot_price\n"
+                "2026-01-01T00:00:00,1.0,55.0\n"
+                "2026-01-01T01:00:00,1.0,not-a-number\n"
+            )
+
+            upload_response = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+                files={"source_file": ("price_bad.csv", csv_text, "text/csv")},
+            )
+            source = upload_response.json()["source"]
+
+            import_response = client.post(
+                f"/api/scenarios/{scenario['id']}/draft/time-series-sources/{source['id']}/catalog-import",
+                json={
+                    "set_name": "Spot price Jan 2026",
+                    "version_label": "v1",
+                    "data_kind": "real",
+                    "timezone": "America/Santiago",
+                    "timestamp_column": "period_start",
+                    "duration_hours_column": "hours",
+                    "signal_mappings": [
+                        {"source_column": "spot_price", "signal_key": "price_usd_per_mwh"}
+                    ],
+                },
+            )
+
+            self.assertEqual(import_response.status_code, 400)
+            detail = import_response.json()["detail"]
+            self.assertIn("price_bad.csv", detail)
+            self.assertIn("row 3", detail)
+            self.assertIn("spot_price", detail)
 
     def import_csv_set(
         self,
@@ -1619,6 +1775,117 @@ class ReplaceTimeSeriesSetSourceApiTests(unittest.TestCase):
             ).json()["time_series_set"]
             self.assertEqual(detail["revision_number"], 1)
             self.assertEqual(detail["content_hash"], created_set["content_hash"])
+
+    def test_xlsx_replace_validation_error_includes_source_sheet_and_row_context(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, project, scenario = self.make_client_and_context(input_source_root)
+            created_set = self.import_price_set(client, scenario)
+
+            workbook_bytes = make_xlsx_bytes(
+                [["ignored"]],
+                extra_sheet_name="Prices",
+                extra_sheet_rows=[
+                    ["period_start", "hours", "spot_price"],
+                    ["2026-01-01T00:00:00", 1.0, 57.5],
+                    ["2026-01-01T01:00:00", 1.0, "not-a-number"],
+                ],
+            )
+            upload_response = client.post(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}/replace/upload",
+                data={"sheet_name": "Prices"},
+                files={
+                    "source_file": (
+                        "prices_bad.xlsx",
+                        workbook_bytes,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+                },
+            )
+            replacement_source = upload_response.json()["source"]
+
+            replace_response = client.post(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}/replace",
+                json={
+                    "source": replacement_source,
+                    "data_kind": "real",
+                    "timezone": "America/Santiago",
+                    "timestamp_column": "period_start",
+                    "duration_hours_column": "hours",
+                    "signal_mappings": [
+                        {"source_column": "spot_price", "signal_key": "price_usd_per_mwh"}
+                    ],
+                },
+            )
+
+            self.assertEqual(replace_response.status_code, 400)
+            detail = replace_response.json()["detail"]
+            self.assertIn("prices_bad.xlsx", detail)
+            self.assertIn("Prices", detail)
+            self.assertIn("row 3", detail)
+            self.assertIn("spot_price", detail)
+
+    def test_edit_and_replace_preserve_revision_audit_lineage(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, project, scenario = self.make_client_and_context(input_source_root)
+            created_set = self.import_price_set(client, scenario)
+
+            edit_response = client.put(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}/values",
+                json={
+                    "edits": [
+                        {
+                            "period_index": 0,
+                            "signal_key": "price_usd_per_mwh",
+                            "value": "56.0",
+                        }
+                    ],
+                    "change_summary": "Manual fix before replacement",
+                },
+            )
+            self.assertEqual(edit_response.status_code, 200)
+
+            replacement_csv_text = (
+                "period_start,hours,spot_price\n"
+                "2026-01-01T00:00:00,1.0,57.5\n"
+                "2026-01-01T01:00:00,1.0,61.0\n"
+            )
+            upload_response = client.post(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}/replace/upload",
+                files={"source_file": ("price_corrected.csv", replacement_csv_text, "text/csv")},
+            )
+            replacement_source = upload_response.json()["source"]
+
+            replace_response = client.post(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}/replace",
+                json={
+                    "source": replacement_source,
+                    "data_kind": "real",
+                    "timezone": "America/Santiago",
+                    "timestamp_column": "period_start",
+                    "duration_hours_column": "hours",
+                    "signal_mappings": [
+                        {"source_column": "spot_price", "signal_key": "price_usd_per_mwh"}
+                    ],
+                    "change_summary": "File-corrected series",
+                },
+            )
+            self.assertEqual(replace_response.status_code, 200)
+
+            revisions = client.get(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}/revisions"
+            ).json()["time_series_set_revisions"]
+
+            self.assertEqual([revision["revision_number"] for revision in revisions], [3, 2, 1])
+            self.assertTrue(revisions[0]["created_at"])
+            self.assertTrue(revisions[0]["created_by"])
+            self.assertEqual(revisions[0]["superseded_revision_number"], 2)
+            self.assertEqual(revisions[0]["source"]["original_filename"], "price_corrected.csv")
+            self.assertEqual(revisions[1]["superseded_revision_number"], 1)
+            self.assertEqual(revisions[1]["source"]["original_filename"], "price.csv")
+            self.assertIsNone(revisions[2]["superseded_revision_number"])
+            self.assertEqual(revisions[2]["source"]["original_filename"], "price.csv")
 
     def test_replace_accepts_xlsx_upload_with_chosen_sheet(self):
         with tempfile.TemporaryDirectory() as temp_dir:
