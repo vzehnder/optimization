@@ -45,9 +45,11 @@ import {
   listTimeSeriesSetRevisions,
   promoteHydraulicDiagram,
   publishPublication,
+  replaceTimeSeriesSetSource,
   saveHydraulicDiagram,
   unpublishPublication,
   uploadScenarioVersion,
+  uploadTimeSeriesSetReplacementSource,
   updateDashboardTemplate,
   updatePublicationDraft,
   validateHydraulicDiagram,
@@ -86,6 +88,8 @@ import {
   type ScenarioRun,
   type ScenarioVersion,
   type ScenarioVersionDetail,
+  type TimeSeriesSetReplacePayload,
+  type TimeSeriesSource,
 } from "./api/client";
 import {
   InflowImportError,
@@ -97,6 +101,14 @@ import {
   RunArtifactsSection,
   RunResultsSection,
 } from "./RunResults";
+import {
+  catalogSignalUnit,
+  findSuggestedCatalogColumn,
+  suggestedCatalogMappings,
+  timeSeriesCatalogDataKindOptions,
+  timeSeriesCatalogSignalOptions,
+  type CatalogSignalMappingDraft,
+} from "./timeSeriesCatalogMapping";
 
 const projectsQueryKey = ["projects"] as const;
 const projectQueryKey = (projectId: number) => ["project", projectId] as const;
@@ -1077,6 +1089,429 @@ function TimeSeriesSetValuesEditor({
   );
 }
 
+type TimeSeriesSetReplaceFormState = {
+  data_kind: string;
+  timezone: string;
+  timestamp_column: string;
+  duration_hours_column: string;
+  signal_mappings: CatalogSignalMappingDraft[];
+  change_summary: string;
+};
+
+function defaultTimeSeriesSetReplaceFormState(
+  source: TimeSeriesSource,
+  timeSeriesSet: ProjectTimeSeriesSet,
+): TimeSeriesSetReplaceFormState {
+  const columns = Array.isArray(source.columns) ? source.columns : [];
+  const signalMappings = suggestedCatalogMappings(source);
+  return {
+    data_kind: timeSeriesSet.data_kind,
+    timezone: timeSeriesSet.timezone,
+    timestamp_column: findSuggestedCatalogColumn(columns, [
+      "timestamp",
+      "period_start",
+      "datetime",
+      "time",
+    ]),
+    duration_hours_column: findSuggestedCatalogColumn(columns, [
+      "duration_hours",
+      "hours",
+      "duration",
+    ]),
+    signal_mappings:
+      signalMappings.length > 0
+        ? signalMappings
+        : [{ source_column: "", signal_key: "", source_unit: "" }],
+    change_summary: "",
+  };
+}
+
+function TimeSeriesSetReplacePanel({
+  projectId,
+  timeSeriesSet,
+}: {
+  projectId: number;
+  timeSeriesSet: ProjectTimeSeriesSet;
+}) {
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [uploadedSource, setUploadedSource] = useState<TimeSeriesSource | null>(
+    null,
+  );
+  const [form, setForm] = useState<TimeSeriesSetReplaceFormState | null>(null);
+  const [uploadError, setUploadError] = useState("");
+  const [replaceError, setReplaceError] = useState("");
+
+  const uploadMutation = useMutation({
+    mutationFn: ({ file, sheet }: { file: File; sheet: string }) =>
+      uploadTimeSeriesSetReplacementSource(
+        projectId,
+        timeSeriesSet.id,
+        file,
+        sheet,
+      ),
+    onSuccess: (source) => {
+      setUploadError("");
+      setUploadedSource(source);
+      setForm(defaultTimeSeriesSetReplaceFormState(source, timeSeriesSet));
+      setReplaceError("");
+    },
+    onError: (mutationError) => setUploadError(errorMessage(mutationError)),
+  });
+
+  const replaceMutation = useMutation({
+    mutationFn: () => {
+      if (!uploadedSource || !form) {
+        throw new Error("Upload a replacement file first.");
+      }
+      const payload: TimeSeriesSetReplacePayload = {
+        source: {
+          id: uploadedSource.id,
+          kind: String(uploadedSource.kind || "csv"),
+          original_filename: String(uploadedSource.original_filename || ""),
+          media_type: String(uploadedSource.media_type || ""),
+          checksum: String(uploadedSource.checksum || ""),
+          stored_path: String(uploadedSource.stored_path || ""),
+          selected_sheet: uploadedSource.selected_sheet || null,
+        },
+        data_kind: form.data_kind,
+        timezone: form.timezone,
+        timestamp_column: form.timestamp_column,
+        duration_hours_column: form.duration_hours_column,
+        signal_mappings: form.signal_mappings.map((mapping) => ({
+          source_column: mapping.source_column,
+          signal_key: mapping.signal_key,
+          source_unit: mapping.source_unit || null,
+        })),
+        change_summary: form.change_summary.trim() || null,
+      };
+      return replaceTimeSeriesSetSource(projectId, timeSeriesSet.id, payload);
+    },
+    onSuccess: (updatedSet) => {
+      setReplaceError("");
+      setUploadedSource(null);
+      setForm(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      queryClient.setQueryData(
+        timeSeriesSetQueryKey(projectId, timeSeriesSet.id),
+        updatedSet,
+      );
+      void queryClient.invalidateQueries({
+        queryKey: timeSeriesSetRevisionsQueryKey(projectId, timeSeriesSet.id),
+      });
+    },
+    onError: (mutationError) => setReplaceError(errorMessage(mutationError)),
+  });
+
+  function uploadFile(sheet = "") {
+    const file = fileInputRef.current?.files?.[0];
+    if (!file) {
+      setUploadError("Selecciona un archivo CSV o XLSX.");
+      return;
+    }
+    setUploadError("");
+    uploadMutation.mutate({ file, sheet });
+  }
+
+  function updateForm(patch: Partial<TimeSeriesSetReplaceFormState>) {
+    setForm((current) => (current ? { ...current, ...patch } : current));
+  }
+
+  function updateSignalMapping(
+    index: number,
+    patch: Partial<CatalogSignalMappingDraft>,
+  ) {
+    setForm((current) => {
+      if (!current) return current;
+      const nextMappings = [...current.signal_mappings];
+      const existing = nextMappings[index] || {
+        source_column: "",
+        signal_key: "",
+        source_unit: "",
+      };
+      const nextMapping = { ...existing, ...patch };
+      if (
+        patch.signal_key !== undefined &&
+        !patch.source_unit &&
+        !String(existing.source_unit || "").trim()
+      ) {
+        nextMapping.source_unit = catalogSignalUnit(patch.signal_key);
+      }
+      nextMappings[index] = nextMapping;
+      return { ...current, signal_mappings: nextMappings };
+    });
+  }
+
+  function addSignalMapping() {
+    setForm((current) =>
+      current
+        ? {
+            ...current,
+            signal_mappings: [
+              ...current.signal_mappings,
+              { source_column: "", signal_key: "", source_unit: "" },
+            ],
+          }
+        : current,
+    );
+  }
+
+  function removeSignalMapping(index: number) {
+    setForm((current) =>
+      current
+        ? {
+            ...current,
+            signal_mappings: current.signal_mappings.filter(
+              (_mapping, mappingIndex) => mappingIndex !== index,
+            ),
+          }
+        : current,
+    );
+  }
+
+  const controlsDisabled = uploadMutation.isPending || replaceMutation.isPending;
+  const columnOptions = [
+    { value: "", label: "Selecciona columna" },
+    ...((uploadedSource?.columns || []).map((column) => ({
+      value: String(column),
+      label: String(column),
+    })) as Array<{ value: string; label: string }>),
+  ];
+  const signalMappings = form?.signal_mappings || [];
+  const completeSignalMappings = signalMappings.filter(
+    (mapping) =>
+      Boolean(mapping.source_column.trim()) && Boolean(mapping.signal_key.trim()),
+  );
+  const canReplace =
+    Boolean(form) &&
+    Boolean(form?.timezone.trim()) &&
+    Boolean(form?.timestamp_column) &&
+    Boolean(form?.duration_hours_column) &&
+    completeSignalMappings.length > 0 &&
+    completeSignalMappings.length === signalMappings.length;
+
+  return (
+    <section className="workspace-section" aria-labelledby="set-replace">
+      <h2 id="set-replace">Reemplazar con nuevo archivo</h2>
+      <p>
+        Sube un CSV o XLSX corregido para crear una nueva revision. El nombre y
+        la etiqueta de version del set no cambian.
+      </p>
+      <div className="source-upload">
+        <label className="field-row" htmlFor="time_series_replace_file">
+          <span>Archivo de reemplazo</span>
+          <input
+            id="time_series_replace_file"
+            ref={fileInputRef}
+            type="file"
+            accept="text/csv,.csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            disabled={controlsDisabled}
+          />
+        </label>
+        <button type="button" onClick={() => uploadFile()} disabled={controlsDisabled}>
+          {uploadMutation.isPending ? "Subiendo archivo" : "Subir archivo de reemplazo"}
+        </button>
+      </div>
+      {uploadError ? <p role="alert">{uploadError}</p> : null}
+      {uploadedSource?.kind === "xlsx" &&
+      (uploadedSource.available_sheets?.length ?? 0) > 1 ? (
+        <label className="field-row" htmlFor="time_series_replace_sheet">
+          <span>Hoja</span>
+          <select
+            id="time_series_replace_sheet"
+            value={uploadedSource.selected_sheet || ""}
+            onChange={(event) => uploadFile(event.target.value)}
+            disabled={controlsDisabled}
+          >
+            {uploadedSource.available_sheets?.map((sheet) => (
+              <option key={sheet} value={sheet}>
+                {sheet}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      {uploadedSource ? <p>{uploadedSource.original_filename}</p> : null}
+      {uploadedSource && form ? (
+        <>
+          <div className="draft-field-grid">
+            <label className="field-row" htmlFor="time_series_replace_data_kind">
+              <span>Tipo de dato</span>
+              <select
+                id="time_series_replace_data_kind"
+                value={form.data_kind}
+                onChange={(event) => updateForm({ data_kind: event.target.value })}
+                disabled={replaceMutation.isPending}
+              >
+                {timeSeriesCatalogDataKindOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field-row" htmlFor="time_series_replace_timezone">
+              <span>Zona horaria</span>
+              <input
+                id="time_series_replace_timezone"
+                value={form.timezone}
+                onChange={(event) => updateForm({ timezone: event.target.value })}
+                disabled={replaceMutation.isPending}
+              />
+            </label>
+            <label
+              className="field-row"
+              htmlFor="time_series_replace_timestamp_column"
+            >
+              <span>Columna de marca de tiempo</span>
+              <select
+                id="time_series_replace_timestamp_column"
+                value={form.timestamp_column}
+                onChange={(event) =>
+                  updateForm({ timestamp_column: event.target.value })
+                }
+                disabled={replaceMutation.isPending}
+              >
+                {columnOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label
+              className="field-row"
+              htmlFor="time_series_replace_duration_column"
+            >
+              <span>Columna de duracion (horas)</span>
+              <select
+                id="time_series_replace_duration_column"
+                value={form.duration_hours_column}
+                onChange={(event) =>
+                  updateForm({ duration_hours_column: event.target.value })
+                }
+                disabled={replaceMutation.isPending}
+              >
+                {columnOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="source-mapping">
+            <h3>Mapeo de senales</h3>
+            {signalMappings.map((mapping, mappingIndex) => (
+              <div
+                className="draft-field-grid"
+                key={`replace-signal-${mappingIndex}`}
+              >
+                <label
+                  className="field-row"
+                  htmlFor={`time_series_replace_signal_source_${mappingIndex}`}
+                >
+                  <span>{`Columna de origen ${mappingIndex + 1}`}</span>
+                  <select
+                    id={`time_series_replace_signal_source_${mappingIndex}`}
+                    value={mapping.source_column}
+                    onChange={(event) =>
+                      updateSignalMapping(mappingIndex, {
+                        source_column: event.target.value,
+                      })
+                    }
+                    disabled={replaceMutation.isPending}
+                  >
+                    {columnOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label
+                  className="field-row"
+                  htmlFor={`time_series_replace_signal_key_${mappingIndex}`}
+                >
+                  <span>{`Senal canonica ${mappingIndex + 1}`}</span>
+                  <select
+                    id={`time_series_replace_signal_key_${mappingIndex}`}
+                    value={mapping.signal_key}
+                    onChange={(event) =>
+                      updateSignalMapping(mappingIndex, {
+                        signal_key: event.target.value,
+                      })
+                    }
+                    disabled={replaceMutation.isPending}
+                  >
+                    <option value="">Selecciona senal</option>
+                    {timeSeriesCatalogSignalOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label
+                  className="field-row"
+                  htmlFor={`time_series_replace_signal_unit_${mappingIndex}`}
+                >
+                  <span>{`Unidad de origen ${mappingIndex + 1}`}</span>
+                  <input
+                    id={`time_series_replace_signal_unit_${mappingIndex}`}
+                    value={mapping.source_unit}
+                    onChange={(event) =>
+                      updateSignalMapping(mappingIndex, {
+                        source_unit: event.target.value,
+                      })
+                    }
+                    disabled={replaceMutation.isPending}
+                  />
+                </label>
+                {signalMappings.length > 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => removeSignalMapping(mappingIndex)}
+                    disabled={replaceMutation.isPending}
+                  >
+                    {`Quitar mapeo ${mappingIndex + 1}`}
+                  </button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={addSignalMapping}
+            disabled={replaceMutation.isPending}
+          >
+            Agregar mapeo de senal
+          </button>
+          <div className="version-actions">
+            <label htmlFor="time_series_replace_change_summary">
+              Resumen del reemplazo (opcional)
+            </label>
+            <input
+              id="time_series_replace_change_summary"
+              value={form.change_summary}
+              onChange={(event) => updateForm({ change_summary: event.target.value })}
+              disabled={replaceMutation.isPending}
+            />
+            <button
+              type="button"
+              onClick={() => replaceMutation.mutate()}
+              disabled={!canReplace || replaceMutation.isPending}
+            >
+              {replaceMutation.isPending ? "Reemplazando set" : "Reemplazar set"}
+            </button>
+          </div>
+          {replaceError ? <p role="alert">{replaceError}</p> : null}
+        </>
+      ) : null}
+    </section>
+  );
+}
+
 function TimeSeriesSetRevisionHistory({
   revisions,
 }: {
@@ -1181,6 +1616,7 @@ export function TimeSeriesSetDetailView() {
           <TimeSeriesSetSourceSummary source={set.source} />
         </section>
         <TimeSeriesSetValuesEditor projectId={projectId} timeSeriesSet={set} />
+        <TimeSeriesSetReplacePanel projectId={projectId} timeSeriesSet={set} />
         <section
           className="workspace-section"
           aria-labelledby="set-revision-history"

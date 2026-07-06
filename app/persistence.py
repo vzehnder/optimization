@@ -1771,6 +1771,19 @@ class AnalystStore:
             ),
         )
 
+        self._insert_time_series_signals_periods_values(
+            time_series_set_id=time_series_set_id,
+            prepared_import=prepared_import,
+            now=now,
+        )
+
+    def _insert_time_series_signals_periods_values(
+        self,
+        *,
+        time_series_set_id: int,
+        prepared_import: PreparedTimeSeriesCatalogImport,
+        now: str,
+    ) -> None:
         signal_ids_by_key: dict[str, int] = {}
         for signal in prepared_import.signals:
             signal_cursor = self.connection.execute(
@@ -1845,6 +1858,264 @@ class AnalystStore:
                     period_ids_by_index[value.period_index],
                     value.value_numeric,
                     value.source_row_number,
+                    now,
+                ),
+            )
+
+    def replace_time_series_set_source(
+        self,
+        *,
+        project_id: int,
+        time_series_set_id: int,
+        source: dict[str, Any],
+        prepared_import: PreparedTimeSeriesCatalogImport,
+        created_by: str = "internal_analyst",
+        change_summary: str | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            self.get_project(project_id)
+            set_row = self.connection.execute(
+                "SELECT id FROM time_series_sets WHERE project_id = ? AND id = ?",
+                (project_id, time_series_set_id),
+            ).fetchone()
+            if set_row is None:
+                raise KeyError(f"time-series set {time_series_set_id} not found")
+
+            now = utc_now_iso()
+            source_record = self._get_or_create_time_series_source_record(
+                project_id=project_id,
+                source=source,
+                created_by=created_by,
+                now=now,
+            )
+
+            snapshot_signals = [
+                row_to_dict(row)
+                for row in self.connection.execute(
+                    """
+                    SELECT signal_key, unit, source_column, source_unit, entity_type,
+                           entity_key, signal_role, aggregation
+                    FROM time_series_signals
+                    WHERE time_series_set_id = ?
+                    ORDER BY id
+                    """,
+                    (time_series_set_id,),
+                ).fetchall()
+            ]
+            snapshot_periods = [
+                row_to_dict(row)
+                for row in self.connection.execute(
+                    """
+                    SELECT period_index, timestamp_start, timestamp_end, duration_hours
+                    FROM time_series_periods
+                    WHERE time_series_set_id = ?
+                    ORDER BY period_index
+                    """,
+                    (time_series_set_id,),
+                ).fetchall()
+            ]
+            snapshot_values = [
+                row_to_dict(row)
+                for row in self.connection.execute(
+                    """
+                    SELECT
+                        time_series_signals.signal_key AS signal_key,
+                        time_series_periods.period_index AS period_index,
+                        time_series_values.value_numeric AS value_numeric,
+                        time_series_values.source_row_number AS source_row_number
+                    FROM time_series_values
+                    JOIN time_series_signals
+                      ON time_series_signals.id = time_series_values.time_series_signal_id
+                    JOIN time_series_periods
+                      ON time_series_periods.id = time_series_values.time_series_period_id
+                    WHERE time_series_values.time_series_set_id = ?
+                    """,
+                    (time_series_set_id,),
+                ).fetchall()
+            ]
+
+            revision_row = self.connection.execute(
+                """
+                SELECT COALESCE(MAX(revision_number), 0) AS max_revision
+                FROM time_series_set_revisions
+                WHERE time_series_set_id = ?
+                """,
+                (time_series_set_id,),
+            ).fetchone()
+            next_revision_number = int(revision_row["max_revision"]) + 1
+
+            try:
+                self.connection.execute(
+                    "DELETE FROM time_series_signals WHERE time_series_set_id = ?",
+                    (time_series_set_id,),
+                )
+                self.connection.execute(
+                    "DELETE FROM time_series_periods WHERE time_series_set_id = ?",
+                    (time_series_set_id,),
+                )
+                self._insert_time_series_signals_periods_values(
+                    time_series_set_id=time_series_set_id,
+                    prepared_import=prepared_import,
+                    now=now,
+                )
+                self.connection.execute(
+                    """
+                    INSERT INTO time_series_set_revisions (
+                        time_series_set_id,
+                        revision_number,
+                        time_series_source_id,
+                        content_hash,
+                        change_summary,
+                        created_at,
+                        created_by,
+                        metadata_json
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        time_series_set_id,
+                        next_revision_number,
+                        int(source_record["id"]),
+                        prepared_import.content_hash,
+                        change_summary or "Replaced via new file upload",
+                        now,
+                        created_by,
+                        json.dumps(
+                            {
+                                "mapping": prepared_import.mapping_summary,
+                                "source_key": source.get("id"),
+                            },
+                            sort_keys=True,
+                        ),
+                    ),
+                )
+                self.connection.execute(
+                    """
+                    UPDATE time_series_sets
+                    SET content_hash = ?, updated_at = ?, updated_by = ?
+                    WHERE id = ?
+                    """,
+                    (prepared_import.content_hash, now, created_by, time_series_set_id),
+                )
+            except Exception:
+                # PostgreSQL runs autocommit, so a mid-replace failure must undo
+                # the destructive delete by restoring the captured snapshot
+                # instead of relying on rollback.
+                self.connection.rollback()
+                self.connection.execute(
+                    """
+                    DELETE FROM time_series_set_revisions
+                    WHERE time_series_set_id = ? AND revision_number = ?
+                    """,
+                    (time_series_set_id, next_revision_number),
+                )
+                self.connection.execute(
+                    "DELETE FROM time_series_signals WHERE time_series_set_id = ?",
+                    (time_series_set_id,),
+                )
+                self.connection.execute(
+                    "DELETE FROM time_series_periods WHERE time_series_set_id = ?",
+                    (time_series_set_id,),
+                )
+                self._restore_time_series_catalog_snapshot(
+                    time_series_set_id=time_series_set_id,
+                    signals=snapshot_signals,
+                    periods=snapshot_periods,
+                    values=snapshot_values,
+                    now=now,
+                )
+                self.connection.commit()
+                raise
+
+            self.connection.commit()
+            return self.get_time_series_set(project_id, time_series_set_id)
+
+    def _restore_time_series_catalog_snapshot(
+        self,
+        *,
+        time_series_set_id: int,
+        signals: list[dict[str, Any]],
+        periods: list[dict[str, Any]],
+        values: list[dict[str, Any]],
+        now: str,
+    ) -> None:
+        signal_ids_by_key: dict[str, int] = {}
+        for signal in signals:
+            signal_cursor = self.connection.execute(
+                """
+                INSERT INTO time_series_signals (
+                    time_series_set_id,
+                    signal_key,
+                    unit,
+                    source_column,
+                    source_unit,
+                    entity_type,
+                    entity_key,
+                    signal_role,
+                    aggregation,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    time_series_set_id,
+                    signal["signal_key"],
+                    signal["unit"],
+                    signal["source_column"],
+                    signal["source_unit"],
+                    signal["entity_type"],
+                    signal["entity_key"],
+                    signal["signal_role"],
+                    signal["aggregation"],
+                    now,
+                ),
+            )
+            signal_ids_by_key[str(signal["signal_key"])] = int(signal_cursor.lastrowid)
+
+        period_ids_by_index: dict[int, int] = {}
+        for period in periods:
+            period_cursor = self.connection.execute(
+                """
+                INSERT INTO time_series_periods (
+                    time_series_set_id,
+                    period_index,
+                    timestamp_start,
+                    timestamp_end,
+                    duration_hours,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    time_series_set_id,
+                    period["period_index"],
+                    period["timestamp_start"],
+                    period["timestamp_end"],
+                    period["duration_hours"],
+                    now,
+                ),
+            )
+            period_ids_by_index[int(period["period_index"])] = int(period_cursor.lastrowid)
+
+        for value in values:
+            self.connection.execute(
+                """
+                INSERT INTO time_series_values (
+                    time_series_set_id,
+                    time_series_signal_id,
+                    time_series_period_id,
+                    value_numeric,
+                    source_row_number,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    time_series_set_id,
+                    signal_ids_by_key[str(value["signal_key"])],
+                    period_ids_by_index[int(value["period_index"])],
+                    value["value_numeric"],
+                    value["source_row_number"],
                     now,
                 ),
             )

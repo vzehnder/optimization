@@ -57,6 +57,31 @@
         "title": "Body_upload_scenario_version_api_scenarios__scenario_id__versions_upload_post",
         "type": "object"
       },
+      "Body_upload_time_series_set_replacement_source_api_projects__project_id__time_series_sets__time_series_set_id__replace_upload_post": {
+        "properties": {
+          "sheet_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sheet Name"
+          },
+          "source_file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "Source File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_file"
+        ],
+        "title": "Body_upload_time_series_set_replacement_source_api_projects__project_id__time_series_sets__time_series_set_id__replace_upload_post",
+        "type": "object"
+      },
       "BootstrapAdminRequest": {
         "properties": {
           "display_name": {
@@ -1159,6 +1184,148 @@
         "title": "TimeSeriesRowsRequest",
         "type": "object"
       },
+      "TimeSeriesSetReplaceRequest": {
+        "properties": {
+          "change_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Summary"
+          },
+          "data_kind": {
+            "minLength": 1,
+            "title": "Data Kind",
+            "type": "string"
+          },
+          "duration_hours_column": {
+            "minLength": 1,
+            "title": "Duration Hours Column",
+            "type": "string"
+          },
+          "signal_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal Key"
+          },
+          "signal_mappings": {
+            "items": {
+              "$ref": "#/components/schemas/TimeSeriesCatalogSignalMappingRequest"
+            },
+            "title": "Signal Mappings",
+            "type": "array"
+          },
+          "source": {
+            "$ref": "#/components/schemas/TimeSeriesSetReplacementSourceRequest"
+          },
+          "source_unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Unit"
+          },
+          "timestamp_column": {
+            "minLength": 1,
+            "title": "Timestamp Column",
+            "type": "string"
+          },
+          "timezone": {
+            "minLength": 1,
+            "title": "Timezone",
+            "type": "string"
+          },
+          "value_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Column"
+          }
+        },
+        "required": [
+          "source",
+          "data_kind",
+          "timezone",
+          "timestamp_column",
+          "duration_hours_column"
+        ],
+        "title": "TimeSeriesSetReplaceRequest",
+        "type": "object"
+      },
+      "TimeSeriesSetReplacementSourceRequest": {
+        "properties": {
+          "checksum": {
+            "minLength": 1,
+            "title": "Checksum",
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "media_type": {
+            "minLength": 1,
+            "title": "Media Type",
+            "type": "string"
+          },
+          "original_filename": {
+            "minLength": 1,
+            "title": "Original Filename",
+            "type": "string"
+          },
+          "selected_sheet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Sheet"
+          },
+          "stored_path": {
+            "minLength": 1,
+            "title": "Stored Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "original_filename",
+          "media_type",
+          "checksum",
+          "stored_path"
+        ],
+        "title": "TimeSeriesSetReplacementSourceRequest",
+        "type": "object"
+      },
       "TimeSeriesSetValueEditRequest": {
         "properties": {
           "period_index": {
@@ -2255,6 +2422,118 @@
           }
         },
         "summary": "Get Project Time Series Set"
+      }
+    },
+    "/api/projects/{project_id}/time-series-sets/{time_series_set_id}/replace": {
+      "post": {
+        "operationId": "replace_project_time_series_set_api_projects__project_id__time_series_sets__time_series_set_id__replace_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "time_series_set_id",
+            "required": true,
+            "schema": {
+              "title": "Time Series Set Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TimeSeriesSetReplaceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Replace Project Time Series Set"
+      }
+    },
+    "/api/projects/{project_id}/time-series-sets/{time_series_set_id}/replace/upload": {
+      "post": {
+        "operationId": "upload_time_series_set_replacement_source_api_projects__project_id__time_series_sets__time_series_set_id__replace_upload_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "time_series_set_id",
+            "required": true,
+            "schema": {
+              "title": "Time Series Set Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_time_series_set_replacement_source_api_projects__project_id__time_series_sets__time_series_set_id__replace_upload_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Time Series Set Replacement Source"
       }
     },
     "/api/projects/{project_id}/time-series-sets/{time_series_set_id}/revisions": {

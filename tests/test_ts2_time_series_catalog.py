@@ -1315,3 +1315,377 @@ class ManualValueEditTests(unittest.TestCase):
         self.assertEqual(updated_set["revision_number"], 2)
         self.assertEqual(updated_set["values"][0]["value_numeric"], 99.0)
         self.assertNotEqual(updated_set["content_hash"], created_set["content_hash"])
+
+
+class ReplaceTimeSeriesSetSourceTests(unittest.TestCase):
+    def test_replace_creates_new_revision_linked_to_new_source_and_keeps_identity(self):
+        store = AnalystStore("sqlite:///:memory:")
+        project = store.create_project(name="TS-2 replace project")
+        scenario = store.create_scenario(project_id=project["id"], name="Catalog import")
+        original_request = spot_price_import_request()
+        original_import = prepare_time_series_catalog_import(
+            rows=[
+                {"period_start": "2026-01-01T00:00:00", "hours": "1.0", "spot_price": "55.0"},
+                {"period_start": "2026-01-01T01:00:00", "hours": "1.0", "spot_price": "60.0"},
+            ],
+            request=original_request,
+        )
+        original_source = {
+            "id": "csv_source_1",
+            "original_filename": "price.csv",
+            "media_type": "text/csv",
+            "checksum": "sha256:original",
+        }
+        created_set = store.import_time_series_catalog_set(
+            scenario_id=scenario["id"],
+            source=original_source,
+            prepared_import=original_import,
+        )
+
+        replacement_request = dataclasses.replace(
+            original_request,
+            set_name=created_set["name"],
+            version_label=created_set["version_label"],
+        )
+        replacement_import = prepare_time_series_catalog_import(
+            rows=[
+                {"period_start": "2026-01-01T00:00:00", "hours": "1.0", "spot_price": "57.5"},
+                {"period_start": "2026-01-01T01:00:00", "hours": "1.0", "spot_price": "61.0"},
+            ],
+            request=replacement_request,
+        )
+        replacement_source = {
+            "id": "csv_source_2",
+            "original_filename": "price_corrected.csv",
+            "media_type": "text/csv",
+            "checksum": "sha256:corrected",
+        }
+
+        updated_set = store.replace_time_series_set_source(
+            project_id=project["id"],
+            time_series_set_id=created_set["id"],
+            source=replacement_source,
+            prepared_import=replacement_import,
+            created_by="ada@example.local",
+            change_summary="Corrected spot price file",
+        )
+
+        self.assertEqual(updated_set["id"], created_set["id"])
+        self.assertEqual(updated_set["name"], created_set["name"])
+        self.assertEqual(updated_set["version_label"], created_set["version_label"])
+        self.assertEqual(updated_set["version_number"], created_set["version_number"])
+        self.assertEqual(updated_set["revision_number"], 2)
+        self.assertNotEqual(updated_set["content_hash"], created_set["content_hash"])
+        self.assertEqual(updated_set["source"]["checksum"], "sha256:corrected")
+        updated_value = next(
+            value
+            for value in updated_set["values"]
+            if value["period_index"] == 0 and value["signal_key"] == "price_usd_per_mwh"
+        )
+        self.assertEqual(updated_value["value_numeric"], 57.5)
+
+        revisions = store.list_time_series_set_revisions(project["id"], created_set["id"])
+        self.assertEqual([revision["revision_number"] for revision in revisions], [2, 1])
+        self.assertEqual(revisions[1]["content_hash"], created_set["content_hash"])
+        self.assertEqual(revisions[0]["change_summary"], "Corrected spot price file")
+        self.assertNotEqual(revisions[0]["content_hash"], revisions[1]["content_hash"])
+
+    def test_failed_replace_leaves_current_revision_untouched(self):
+        store = AnalystStore("sqlite:///:memory:")
+        project = store.create_project(name="TS-2 replace failure project")
+        scenario = store.create_scenario(project_id=project["id"], name="Catalog import")
+        original_request = spot_price_import_request()
+        original_import = prepare_time_series_catalog_import(
+            rows=[
+                {"period_start": "2026-01-01T00:00:00", "hours": "1.0", "spot_price": "55.0"},
+            ],
+            request=original_request,
+        )
+        original_source = {
+            "id": "csv_source_1",
+            "original_filename": "price.csv",
+            "media_type": "text/csv",
+            "checksum": "sha256:original",
+        }
+        created_set = store.import_time_series_catalog_set(
+            scenario_id=scenario["id"],
+            source=original_source,
+            prepared_import=original_import,
+        )
+
+        replacement_request = dataclasses.replace(
+            original_request,
+            set_name=created_set["name"],
+            version_label=created_set["version_label"],
+        )
+        valid_replacement_import = prepare_time_series_catalog_import(
+            rows=[
+                {"period_start": "2026-01-01T00:00:00", "hours": "1.0", "spot_price": "99.0"},
+            ],
+            request=replacement_request,
+        )
+        poisoned_replacement_import = dataclasses.replace(
+            valid_replacement_import,
+            values=[
+                dataclasses.replace(value, signal_key="unknown_signal_key")
+                for value in valid_replacement_import.values
+            ],
+        )
+        replacement_source = {
+            "id": "csv_source_2",
+            "original_filename": "price_bad.csv",
+            "media_type": "text/csv",
+            "checksum": "sha256:bad",
+        }
+
+        with self.assertRaises(Exception):
+            store.replace_time_series_set_source(
+                project_id=project["id"],
+                time_series_set_id=created_set["id"],
+                source=replacement_source,
+                prepared_import=poisoned_replacement_import,
+            )
+
+        unchanged_set = store.get_time_series_set(project["id"], created_set["id"])
+        self.assertEqual(unchanged_set["revision_number"], 1)
+        self.assertEqual(unchanged_set["content_hash"], created_set["content_hash"])
+        self.assertEqual(unchanged_set["source"]["checksum"], "sha256:original")
+        self.assertEqual(unchanged_set["values"][0]["value_numeric"], 55.0)
+
+        recovered_set = store.replace_time_series_set_source(
+            project_id=project["id"],
+            time_series_set_id=created_set["id"],
+            source=replacement_source,
+            prepared_import=valid_replacement_import,
+        )
+        self.assertEqual(recovered_set["revision_number"], 2)
+        self.assertEqual(recovered_set["values"][0]["value_numeric"], 99.0)
+
+
+class ReplaceTimeSeriesSetSourceApiTests(unittest.TestCase):
+    def make_client_and_context(self, input_source_root: Path):
+        client = TestClient(
+            create_app(
+                validation_service=StubValidationService(),
+                database_url="sqlite:///:memory:",
+                input_source_root=input_source_root,
+            )
+        )
+        project = client.post(
+            "/api/projects",
+            json={"name": "TS-2 Replace Project"},
+        ).json()
+        scenario = client.post(
+            f"/api/projects/{project['id']}/scenarios",
+            json={"name": "Catalog import"},
+        ).json()
+        client.post(
+            f"/api/scenarios/{scenario['id']}/draft",
+            json={
+                "document": {
+                    "schema_version": "bess_editor_draft.v1",
+                    "case": {"name": "ts2_replace_case"},
+                    "pcc": {"id": "bus_1", "type": "bus"},
+                    "grid": {"id": "grid_1"},
+                    "assets": [],
+                    "time_series": {"sources": []},
+                    "solver": {"name": "HiGHS", "options": {}},
+                }
+            },
+        )
+        return client, project, scenario
+
+    def import_price_set(self, client, scenario):
+        csv_text = (
+            "period_start,hours,spot_price\n"
+            "2026-01-01T00:00:00,1.0,55.0\n"
+            "2026-01-01T01:00:00,1.0,60.0\n"
+        )
+        upload_response = client.post(
+            f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+            files={"source_file": ("price.csv", csv_text, "text/csv")},
+        )
+        source = upload_response.json()["source"]
+        import_response = client.post(
+            f"/api/scenarios/{scenario['id']}/draft/time-series-sources/{source['id']}/catalog-import",
+            json={
+                "set_name": "Spot price Jan 2026",
+                "version_label": "v1",
+                "data_kind": "real",
+                "timezone": "America/Santiago",
+                "timestamp_column": "period_start",
+                "duration_hours_column": "hours",
+                "signal_mappings": [
+                    {"source_column": "spot_price", "signal_key": "price_usd_per_mwh"}
+                ],
+            },
+        )
+        self.assertEqual(import_response.status_code, 201)
+        return import_response.json()["time_series_set"]
+
+    def test_replace_flow_creates_new_revision_and_keeps_identity_stable(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, project, scenario = self.make_client_and_context(input_source_root)
+            created_set = self.import_price_set(client, scenario)
+
+            replacement_csv_text = (
+                "period_start,hours,spot_price\n"
+                "2026-01-01T00:00:00,1.0,57.5\n"
+                "2026-01-01T01:00:00,1.0,61.0\n"
+            )
+            upload_response = client.post(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}/replace/upload",
+                files={"source_file": ("price_corrected.csv", replacement_csv_text, "text/csv")},
+            )
+            self.assertEqual(upload_response.status_code, 201)
+            replacement_source = upload_response.json()["source"]
+            self.assertIn("spot_price", replacement_source["columns"])
+
+            replace_response = client.post(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}/replace",
+                json={
+                    "source": replacement_source,
+                    "data_kind": "real",
+                    "timezone": "America/Santiago",
+                    "timestamp_column": "period_start",
+                    "duration_hours_column": "hours",
+                    "signal_mappings": [
+                        {"source_column": "spot_price", "signal_key": "price_usd_per_mwh"}
+                    ],
+                    "change_summary": "Corrected Jan 1st spike",
+                },
+            )
+            self.assertEqual(replace_response.status_code, 200)
+            updated_set = replace_response.json()["time_series_set"]
+            self.assertEqual(updated_set["name"], created_set["name"])
+            self.assertEqual(updated_set["version_label"], created_set["version_label"])
+            self.assertEqual(updated_set["revision_number"], 2)
+            self.assertNotEqual(updated_set["content_hash"], created_set["content_hash"])
+            updated_value = next(
+                value
+                for value in updated_set["values"]
+                if value["period_index"] == 0 and value["signal_key"] == "price_usd_per_mwh"
+            )
+            self.assertEqual(updated_value["value_numeric"], 57.5)
+
+            detail_response = client.get(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}"
+            )
+            self.assertEqual(detail_response.json()["time_series_set"]["revision_number"], 2)
+
+            revisions = client.get(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}/revisions"
+            ).json()["time_series_set_revisions"]
+            self.assertEqual([revision["revision_number"] for revision in revisions], [2, 1])
+            self.assertEqual(revisions[0]["change_summary"], "Corrected Jan 1st spike")
+            self.assertEqual(revisions[1]["content_hash"], created_set["content_hash"])
+
+    def test_replace_rejects_duplicate_timestamp_and_leaves_set_unchanged(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, project, scenario = self.make_client_and_context(input_source_root)
+            created_set = self.import_price_set(client, scenario)
+
+            duplicate_csv_text = (
+                "period_start,hours,spot_price\n"
+                "2026-01-01T00:00:00,1.0,57.5\n"
+                "2026-01-01T00:00:00,1.0,61.0\n"
+            )
+            upload_response = client.post(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}/replace/upload",
+                files={"source_file": ("price_dupe.csv", duplicate_csv_text, "text/csv")},
+            )
+            replacement_source = upload_response.json()["source"]
+
+            replace_response = client.post(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}/replace",
+                json={
+                    "source": replacement_source,
+                    "data_kind": "real",
+                    "timezone": "America/Santiago",
+                    "timestamp_column": "period_start",
+                    "duration_hours_column": "hours",
+                    "signal_mappings": [
+                        {"source_column": "spot_price", "signal_key": "price_usd_per_mwh"}
+                    ],
+                },
+            )
+            self.assertEqual(replace_response.status_code, 400)
+            self.assertIn("duplicate timestamp", replace_response.json()["detail"])
+
+            detail = client.get(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}"
+            ).json()["time_series_set"]
+            self.assertEqual(detail["revision_number"], 1)
+            self.assertEqual(detail["content_hash"], created_set["content_hash"])
+
+    def test_replace_accepts_xlsx_upload_with_chosen_sheet(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, project, scenario = self.make_client_and_context(input_source_root)
+            created_set = self.import_price_set(client, scenario)
+
+            workbook_bytes = make_xlsx_bytes(
+                [["ignored"]],
+                extra_sheet_name="Prices",
+                extra_sheet_rows=[
+                    ["period_start", "hours", "spot_price"],
+                    ["2026-01-01T00:00:00", 1.0, 57.5],
+                    ["2026-01-01T01:00:00", 1.0, 61.0],
+                ],
+            )
+            upload_response = client.post(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}/replace/upload",
+                data={"sheet_name": "Prices"},
+                files={
+                    "source_file": (
+                        "prices.xlsx",
+                        workbook_bytes,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+                },
+            )
+            self.assertEqual(upload_response.status_code, 201)
+            replacement_source = upload_response.json()["source"]
+            self.assertEqual(replacement_source["kind"], "xlsx")
+            self.assertEqual(replacement_source["selected_sheet"], "Prices")
+            self.assertEqual(replacement_source["available_sheets"], ["Sheet", "Prices"])
+
+            replace_response = client.post(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}/replace",
+                json={
+                    "source": replacement_source,
+                    "data_kind": "real",
+                    "timezone": "America/Santiago",
+                    "timestamp_column": "period_start",
+                    "duration_hours_column": "hours",
+                    "signal_mappings": [
+                        {"source_column": "spot_price", "signal_key": "price_usd_per_mwh"}
+                    ],
+                },
+            )
+            self.assertEqual(replace_response.status_code, 200)
+            updated_set = replace_response.json()["time_series_set"]
+            self.assertEqual(updated_set["name"], created_set["name"])
+            self.assertEqual(updated_set["version_label"], created_set["version_label"])
+            self.assertEqual(updated_set["revision_number"], 2)
+            self.assertEqual(updated_set["source"]["original_filename"], "prices.xlsx")
+            self.assertEqual(updated_set["source"]["selected_sheet"], "Prices")
+            updated_value = next(
+                value
+                for value in updated_set["values"]
+                if value["period_index"] == 0 and value["signal_key"] == "price_usd_per_mwh"
+            )
+            self.assertEqual(updated_value["value_numeric"], 57.5)
+
+    def test_replace_404_for_unknown_set(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, project, _scenario = self.make_client_and_context(input_source_root)
+
+            response = client.post(
+                f"/api/projects/{project['id']}/time-series-sets/999999/replace/upload",
+                files={"source_file": ("price.csv", "period_start,hours,spot_price\n", "text/csv")},
+            )
+            self.assertEqual(response.status_code, 404)

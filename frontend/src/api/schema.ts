@@ -384,6 +384,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/time-series-sets/{time_series_set_id}/replace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Replace Project Time Series Set */
+        post: operations["replace_project_time_series_set_api_projects__project_id__time_series_sets__time_series_set_id__replace_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/time-series-sets/{time_series_set_id}/replace/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload Time Series Set Replacement Source */
+        post: operations["upload_time_series_set_replacement_source_api_projects__project_id__time_series_sets__time_series_set_id__replace_upload_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/time-series-sets/{time_series_set_id}/revisions": {
         parameters: {
             query?: never;
@@ -958,6 +992,13 @@ export interface components {
             /** System Case File */
             system_case_file: string;
         };
+        /** Body_upload_time_series_set_replacement_source_api_projects__project_id__time_series_sets__time_series_set_id__replace_upload_post */
+        Body_upload_time_series_set_replacement_source_api_projects__project_id__time_series_sets__time_series_set_id__replace_upload_post: {
+            /** Sheet Name */
+            sheet_name?: string | null;
+            /** Source File */
+            source_file: string;
+        };
         /** BootstrapAdminRequest */
         BootstrapAdminRequest: {
             /**
@@ -1376,6 +1417,45 @@ export interface components {
             rows: {
                 [key: string]: unknown;
             }[];
+        };
+        /** TimeSeriesSetReplaceRequest */
+        TimeSeriesSetReplaceRequest: {
+            /** Change Summary */
+            change_summary?: string | null;
+            /** Data Kind */
+            data_kind: string;
+            /** Duration Hours Column */
+            duration_hours_column: string;
+            /** Signal Key */
+            signal_key?: string | null;
+            /** Signal Mappings */
+            signal_mappings?: components["schemas"]["TimeSeriesCatalogSignalMappingRequest"][];
+            source: components["schemas"]["TimeSeriesSetReplacementSourceRequest"];
+            /** Source Unit */
+            source_unit?: string | null;
+            /** Timestamp Column */
+            timestamp_column: string;
+            /** Timezone */
+            timezone: string;
+            /** Value Column */
+            value_column?: string | null;
+        };
+        /** TimeSeriesSetReplacementSourceRequest */
+        TimeSeriesSetReplacementSourceRequest: {
+            /** Checksum */
+            checksum: string;
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Media Type */
+            media_type: string;
+            /** Original Filename */
+            original_filename: string;
+            /** Selected Sheet */
+            selected_sheet?: string | null;
+            /** Stored Path */
+            stored_path: string;
         };
         /** TimeSeriesSetValueEditRequest */
         TimeSeriesSetValueEditRequest: {
@@ -2230,6 +2310,78 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replace_project_time_series_set_api_projects__project_id__time_series_sets__time_series_set_id__replace_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                time_series_set_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TimeSeriesSetReplaceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_time_series_set_replacement_source_api_projects__project_id__time_series_sets__time_series_set_id__replace_upload_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                time_series_set_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_time_series_set_replacement_source_api_projects__project_id__time_series_sets__time_series_set_id__replace_upload_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };

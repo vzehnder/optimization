@@ -360,6 +360,29 @@ export interface TimeSeriesSetValuesEditPayload {
   change_summary?: string;
 }
 
+export interface TimeSeriesSetReplacementSource {
+  id: string;
+  kind: string;
+  original_filename: string;
+  media_type: string;
+  checksum: string;
+  stored_path: string;
+  selected_sheet?: string | null;
+}
+
+export interface TimeSeriesSetReplacePayload {
+  source: TimeSeriesSetReplacementSource;
+  data_kind: string;
+  timezone: string;
+  timestamp_column: string;
+  duration_hours_column: string;
+  signal_mappings: TimeSeriesCatalogSignalMappingPayload[];
+  value_column?: string | null;
+  signal_key?: string | null;
+  source_unit?: string | null;
+  change_summary?: string | null;
+}
+
 export interface ProjectTimeSeriesSetSummary {
   id: number;
   project_id: number;
@@ -1520,6 +1543,47 @@ export async function editTimeSeriesSetValues(
     `/api/projects/${projectId}/time-series-sets/${timeSeriesSetId}/values`,
     {
       method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrfToken,
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+  return response.time_series_set;
+}
+
+export async function uploadTimeSeriesSetReplacementSource(
+  projectId: number,
+  timeSeriesSetId: number,
+  file: File,
+  sheetName = "",
+): Promise<TimeSeriesSource> {
+  const csrfToken = await getCsrfToken();
+  const body = new FormData();
+  body.append("source_file", file);
+  if (sheetName.trim()) body.append("sheet_name", sheetName.trim());
+  const response = await requestJson<{ source: TimeSeriesSource }>(
+    `/api/projects/${projectId}/time-series-sets/${timeSeriesSetId}/replace/upload`,
+    {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken },
+      body,
+    },
+  );
+  return response.source;
+}
+
+export async function replaceTimeSeriesSetSource(
+  projectId: number,
+  timeSeriesSetId: number,
+  payload: TimeSeriesSetReplacePayload,
+): Promise<ProjectTimeSeriesSet> {
+  const csrfToken = await getCsrfToken();
+  const response = await requestJson<{ time_series_set: ProjectTimeSeriesSet }>(
+    `/api/projects/${projectId}/time-series-sets/${timeSeriesSetId}/replace`,
+    {
+      method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-CSRF-Token": csrfToken,

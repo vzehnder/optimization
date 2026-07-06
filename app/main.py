@@ -53,6 +53,7 @@ from app.time_series_ingestion import (
     apply_time_series_mapping,
     get_time_series_source_rows,
     ingest_time_series_source,
+    read_time_series_source_rows,
     update_time_series_source_rows,
 )
 from app.validation import JuliaValidationService, ValidationResult
@@ -283,6 +284,29 @@ class TimeSeriesSetValueEditRequest(BaseModel):
 
 class TimeSeriesSetValuesEditRequest(BaseModel):
     edits: list[TimeSeriesSetValueEditRequest] = Field(default_factory=list)
+    change_summary: str | None = None
+
+
+class TimeSeriesSetReplacementSourceRequest(BaseModel):
+    id: str = Field(min_length=1)
+    kind: str = Field(min_length=1)
+    original_filename: str = Field(min_length=1)
+    media_type: str = Field(min_length=1)
+    checksum: str = Field(min_length=1)
+    stored_path: str = Field(min_length=1)
+    selected_sheet: str | None = None
+
+
+class TimeSeriesSetReplaceRequest(BaseModel):
+    source: TimeSeriesSetReplacementSourceRequest
+    data_kind: str = Field(min_length=1)
+    timezone: str = Field(min_length=1)
+    timestamp_column: str = Field(min_length=1)
+    duration_hours_column: str = Field(min_length=1)
+    value_column: str | None = None
+    signal_key: str | None = None
+    source_unit: str | None = None
+    signal_mappings: list[TimeSeriesCatalogSignalMappingRequest] = Field(default_factory=list)
     change_summary: str | None = None
 
 
@@ -1591,6 +1615,87 @@ def create_app(
                 error_response_body(
                     "time_series_set_values", str(error), phase="python_validation"
                 ),
+                status_code=400,
+            )
+        return {"time_series_set": updated_set}
+
+    @app.post(
+        "/api/projects/{project_id}/time-series-sets/{time_series_set_id}/replace/upload",
+        status_code=201,
+    )
+    async def upload_time_series_set_replacement_source(
+        project_id: int,
+        time_series_set_id: int,
+        source_file: UploadFile = File(...),
+        sheet_name: str | None = Form(None),
+    ):
+        try:
+            analyst_store.get_time_series_set(project_id, time_series_set_id)
+            content = await source_file.read()
+            source = ingest_time_series_source(
+                draft_document={},
+                original_filename=source_file.filename or "source.csv",
+                content_type=source_file.content_type,
+                content=content,
+                input_source_root=configured_input_source_root,
+                sheet_name=sheet_name,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except TimeSeriesIngestionError as error:
+            return JSONResponse(error_response_body("source_file", str(error)), status_code=400)
+        finally:
+            await source_file.close()
+        return {"source": source}
+
+    @app.post("/api/projects/{project_id}/time-series-sets/{time_series_set_id}/replace")
+    async def replace_project_time_series_set(
+        project_id: int,
+        time_series_set_id: int,
+        payload: TimeSeriesSetReplaceRequest,
+        request: Request,
+    ):
+        try:
+            existing_set = analyst_store.get_time_series_set(project_id, time_series_set_id)
+            source = payload.source.model_dump()
+            _columns, rows = read_time_series_source_rows(source, configured_input_source_root)
+            prepared_import = prepare_time_series_catalog_import(
+                rows=rows,
+                request=PreparedCatalogImportRequest(
+                    set_name=existing_set["name"],
+                    version_label=existing_set["version_label"],
+                    data_kind=payload.data_kind,
+                    timezone=payload.timezone,
+                    timestamp_column=payload.timestamp_column,
+                    duration_hours_column=payload.duration_hours_column,
+                    value_column=payload.value_column,
+                    signal_key=payload.signal_key,
+                    source_unit=payload.source_unit,
+                    signal_mappings=[
+                        PreparedCatalogSignalMappingRequest(
+                            source_column=item.source_column,
+                            signal_key=item.signal_key,
+                            source_unit=item.source_unit,
+                        )
+                        for item in payload.signal_mappings
+                    ],
+                ),
+            )
+            updated_set = analyst_store.replace_time_series_set_source(
+                project_id=project_id,
+                time_series_set_id=time_series_set_id,
+                source=source,
+                prepared_import=prepared_import,
+                created_by=current_user_email(request),
+                change_summary=payload.change_summary,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except TimeSeriesIngestionError as error:
+            return JSONResponse(error_response_body("source_file", str(error)), status_code=400)
+        except (TimeSeriesCatalogError, ValueError) as error:
+            return JSONResponse(
+                error_response_body("catalog_import", str(error), phase="python_validation"),
                 status_code=400,
             )
         return {"time_series_set": updated_set}
