@@ -776,6 +776,230 @@ describe("application shell", () => {
     expect(screen.getByLabelText("Hydro asset ID")).toHaveValue("hydro_north");
   });
 
+  it("binds a price series to the default input variant and runs it from the scenario page", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Initial modeling branch",
+      created_at: "2026-06-23T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-06-23T12:00:00Z",
+    };
+    const priceSet = {
+      id: 5,
+      project_id: 1,
+      name: "Spot price",
+      version_number: 1,
+      version_label: "v1",
+      revision_number: 1,
+      data_kind: "real",
+      timezone: "America/Santiago",
+      status: "validated",
+      content_hash: "hash-5",
+      signal_count: 1,
+      period_count: 3,
+    };
+    const priceSetDetail = {
+      ...priceSet,
+      source_checksum: null,
+      revision_metadata: {},
+      source: null,
+      horizon: {
+        period_count: 3,
+        start: "2026-01-01T00:00:00-03:00",
+        end: "2026-01-01T03:00:00-03:00",
+      },
+      signals: [
+        {
+          signal_key: "price_usd_per_mwh",
+          unit: "USD/MWh",
+          entity_type: null,
+          entity_key: null,
+        },
+      ],
+      periods: [],
+      values: [],
+    };
+    const run = {
+      id: 77,
+      scenario_version_id: 55,
+      status: "queued",
+      created_at: "2026-07-06T12:15:00Z",
+      started_at: null,
+      finished_at: null,
+      duration_seconds: null,
+      exit_code: null,
+      error_message: "",
+      stdout: "",
+      stderr: "",
+    };
+    let bindCalls = 0;
+    let runCalls = 0;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/case/default-variant") {
+          return new Response(
+            JSON.stringify({
+              case: {
+                id: 1,
+                scenario_id: 10,
+                case_key: "scenario_10_case",
+                display_name: "Base case",
+                updated_at: "2026-07-06T12:00:00Z",
+              },
+              variant: {
+                id: 3,
+                case_id: 1,
+                variant_key: "default",
+                display_name: "Default",
+                is_default: true,
+                created_at: "2026-07-06T12:00:00Z",
+                updated_at: "2026-07-06T12:00:00Z",
+              },
+              bindings: [],
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/projects/1/time-series-sets") {
+          return new Response(JSON.stringify({ time_series_sets: [priceSet] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/time-series-sets/5") {
+          return new Response(
+            JSON.stringify({ time_series_set: priceSetDetail }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (
+          path === "/api/scenarios/10/case/variants/3/bindings" &&
+          method === "POST"
+        ) {
+          bindCalls += 1;
+          const body = JSON.parse(String(init?.body));
+          expect(body).toEqual({
+            signal_key: "price_usd_per_mwh",
+            time_series_set_id: 5,
+          });
+          return new Response(
+            JSON.stringify({
+              id: 9,
+              case_input_variant_id: 3,
+              signal_key: "price_usd_per_mwh",
+              time_series_set_id: 5,
+              required: true,
+              created_at: "2026-07-06T12:16:00Z",
+              updated_at: "2026-07-06T12:16:00Z",
+            }),
+            { status: 201, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (
+          path === "/api/scenarios/10/case/variants/3/run" &&
+          method === "POST"
+        ) {
+          runCalls += 1;
+          const body = JSON.parse(String(init?.body));
+          expect(body).toEqual({
+            range_start: "2026-01-01T00:00:00-03:00",
+            range_end: "2026-01-01T03:00:00-03:00",
+          });
+          return new Response(JSON.stringify(run), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/runs/77") {
+          return new Response(JSON.stringify({ run }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByText("Aun no hay una serie de precio vinculada."),
+    ).toBeVisible();
+    await user.selectOptions(
+      screen.getByLabelText("Serie de precio (price_usd_per_mwh)"),
+      "5",
+    );
+    expect(await screen.findByLabelText("Inicio de rango")).toHaveValue(
+      "2026-01-01T00:00:00-03:00",
+    );
+    expect(screen.getByLabelText("Fin de rango")).toHaveValue(
+      "2026-01-01T03:00:00-03:00",
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Vincular y correr variante" }),
+    );
+
+    await waitFor(() => expect(bindCalls).toBe(1));
+    await waitFor(() => expect(runCalls).toBe(1));
+    expect(await screen.findByRole("heading", { name: "Run 77" })).toBeVisible();
+  });
+
   it("saves the draft and opens the hydraulic diagram when editing a hydro component", async () => {
     window.history.replaceState({}, "", "/react/scenarios/10/draft");
     const scenario = {

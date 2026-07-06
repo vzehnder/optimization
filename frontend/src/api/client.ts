@@ -1101,6 +1101,80 @@ export async function createManualRun(
   );
 }
 
+export interface CaseInputVariant {
+  id: number;
+  case_id: number;
+  variant_key: string;
+  display_name: string;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CaseTimeSeriesBinding {
+  id: number;
+  case_input_variant_id: number;
+  signal_key: string;
+  time_series_set_id: number;
+  required: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DefaultInputVariantResponse {
+  case: {
+    id: number;
+    scenario_id: number;
+    case_key: string;
+    display_name: string;
+    updated_at: string;
+  };
+  variant: CaseInputVariant;
+  bindings: CaseTimeSeriesBinding[];
+}
+
+export interface CaseTimeSeriesBindingPayload {
+  signal_key: string;
+  time_series_set_id: number;
+}
+
+export interface CaseInputVariantRunPayload {
+  range_start: string;
+  range_end: string;
+}
+
+export async function getDefaultInputVariant(
+  scenarioId: number,
+  signal?: AbortSignal,
+): Promise<DefaultInputVariantResponse> {
+  return requestJson<DefaultInputVariantResponse>(
+    `/api/scenarios/${scenarioId}/case/default-variant`,
+    { signal },
+  );
+}
+
+export async function bindCaseTimeSeries(
+  scenarioId: number,
+  variantId: number,
+  payload: CaseTimeSeriesBindingPayload,
+): Promise<CaseTimeSeriesBinding> {
+  return postJsonWithCsrf<CaseTimeSeriesBinding>(
+    `/api/scenarios/${scenarioId}/case/variants/${variantId}/bindings`,
+    payload,
+  );
+}
+
+export async function runCaseInputVariant(
+  scenarioId: number,
+  variantId: number,
+  payload: CaseInputVariantRunPayload,
+): Promise<ScenarioRun> {
+  return postJsonWithCsrf<ScenarioRun>(
+    `/api/scenarios/${scenarioId}/case/variants/${variantId}/run`,
+    payload,
+  );
+}
+
 export async function getRun(
   runId: number,
   signal?: AbortSignal,

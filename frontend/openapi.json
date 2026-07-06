@@ -107,6 +107,45 @@
         "title": "BootstrapAdminRequest",
         "type": "object"
       },
+      "CaseInputVariantRunRequest": {
+        "properties": {
+          "range_end": {
+            "minLength": 1,
+            "title": "Range End",
+            "type": "string"
+          },
+          "range_start": {
+            "minLength": 1,
+            "title": "Range Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "range_start",
+          "range_end"
+        ],
+        "title": "CaseInputVariantRunRequest",
+        "type": "object"
+      },
+      "CaseTimeSeriesBindingRequest": {
+        "properties": {
+          "signal_key": {
+            "minLength": 1,
+            "title": "Signal Key",
+            "type": "string"
+          },
+          "time_series_set_id": {
+            "title": "Time Series Set Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "signal_key",
+          "time_series_set_id"
+        ],
+        "title": "CaseTimeSeriesBindingRequest",
+        "type": "object"
+      },
       "CsrfTokenResponse": {
         "properties": {
           "csrf_token": {
@@ -3207,6 +3246,155 @@
           }
         },
         "summary": "Get Scenario"
+      }
+    },
+    "/api/scenarios/{scenario_id}/case/default-variant": {
+      "get": {
+        "operationId": "get_default_input_variant_api_scenarios__scenario_id__case_default_variant_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Default Input Variant"
+      }
+    },
+    "/api/scenarios/{scenario_id}/case/variants/{variant_id}/bindings": {
+      "post": {
+        "operationId": "bind_case_time_series_api_scenarios__scenario_id__case_variants__variant_id__bindings_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "variant_id",
+            "required": true,
+            "schema": {
+              "title": "Variant Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaseTimeSeriesBindingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Bind Case Time Series"
+      }
+    },
+    "/api/scenarios/{scenario_id}/case/variants/{variant_id}/run": {
+      "post": {
+        "operationId": "run_case_input_variant_api_scenarios__scenario_id__case_variants__variant_id__run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "variant_id",
+            "required": true,
+            "schema": {
+              "title": "Variant Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaseInputVariantRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Case Input Variant"
       }
     },
     "/api/scenarios/{scenario_id}/draft": {

@@ -30,8 +30,8 @@ really begins and ends.
 
 | ID | Title | Type | Triage | Status | Fecha de inicio planificada | Fecha de termino planificada | Blocked by | Issue file |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| BESS-TS3-000 | Review TS-3 PRD And Input Variant Semantics | HITL | ready-for-agent | Todo | 2026-07-07 | 2026-07-07 | None | [BESS-TS3-000-review-ts3-prd-and-input-variant-semantics.md](BESS-TS3-000-review-ts3-prd-and-input-variant-semantics.md) |
-| BESS-TS3-001 | Run A Case From Its Default Variant End-To-End | AFK | ready-for-agent | Todo | 2026-07-08 | 2026-07-09 | BESS-TS3-000 | [BESS-TS3-001-run-a-case-from-its-default-variant-end-to-end.md](BESS-TS3-001-run-a-case-from-its-default-variant-end-to-end.md) |
+| BESS-TS3-000 | Review TS-3 PRD And Input Variant Semantics | HITL | ready-for-agent | Done | 2026-07-07 | 2026-07-07 | None | [BESS-TS3-000-review-ts3-prd-and-input-variant-semantics.md](BESS-TS3-000-review-ts3-prd-and-input-variant-semantics.md) |
+| BESS-TS3-001 | Run A Case From Its Default Variant End-To-End | AFK | ready-for-agent | Done | 2026-07-08 | 2026-07-09 | BESS-TS3-000 | [BESS-TS3-001-run-a-case-from-its-default-variant-end-to-end.md](BESS-TS3-001-run-a-case-from-its-default-variant-end-to-end.md) |
 | BESS-TS3-002 | Discover Required Signals And Surface Missing Bindings | AFK | ready-for-agent | Todo | 2026-07-10 | 2026-07-13 | BESS-TS3-001 | [BESS-TS3-002-discover-required-signals-and-surface-missing-bindings.md](BESS-TS3-002-discover-required-signals-and-surface-missing-bindings.md) |
 | BESS-TS3-003 | Enforce Range Coverage And Horizon Compatibility Validation | AFK | ready-for-agent | Todo | 2026-07-14 | 2026-07-15 | BESS-TS3-002 | [BESS-TS3-003-enforce-range-coverage-and-horizon-compatibility-validation.md](BESS-TS3-003-enforce-range-coverage-and-horizon-compatibility-validation.md) |
 | BESS-TS3-004 | Clone Variants And Switch Them From The Case Dropdown | AFK | ready-for-agent | Todo | 2026-07-16 | 2026-07-17 | BESS-TS3-001 | [BESS-TS3-004-clone-variants-and-switch-them-from-the-case-dropdown.md](BESS-TS3-004-clone-variants-and-switch-them-from-the-case-dropdown.md) |
@@ -59,6 +59,8 @@ really begins and ends.
 | Date | Issue | Status change | Notes |
 | --- | --- | --- | --- |
 | 2026-07-06 | All | Created | Initial local issue set generated from the TS-3 PRD (`docs/series_tiempo/iter3/prd.md`) and the series hierarchy roadmap. |
+| 2026-07-06 | BESS-TS3-000 | Todo -> Done | Accepted TS-3 input variant semantics in `docs/series_tiempo/iter3/decision_record_ts3_variant_semantics.md`. No PRD corrections needed; clarified that TopologyVersion/ParameterVersion are the existing TS-1 derived hashes and that new generic bindings must not touch the legacy hydraulic binding path. |
+| 2026-07-06 | BESS-TS3-001 | Todo -> Done | Default input variant, one price binding (`price_usd_per_mwh`), date-range run and materialization deep module (`app/input_variants.py`) implemented TDD-first. Chrome + real Postgres + real Julia verification found and fixed two real bugs: an unvalidated legacy draft time-series source blocking generation, and TS-2's offset-qualified instants being rejected by Julia's naive-timestamp parser. Run reached `succeeded` end to end. |
 
 ## Final TS-3 Verification
 

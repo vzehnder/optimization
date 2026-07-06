@@ -29,6 +29,7 @@ from app.draft_editor import (
     generate_system_case_from_draft,
     structured_draft_document_from_system_case,
 )
+from app.input_variants import InputVariantRangeError
 from app.persistence import (
     AnalystStore,
     DEFAULT_PUBLICATION_ARTIFACT_TYPES,
@@ -36,6 +37,7 @@ from app.persistence import (
     derive_case_hierarchy_provenance,
     hierarchy_stale_state,
     hierarchy_stale_summary,
+    optimization_case_public_dict,
     utc_now_iso,
 )
 from app.results import ResultReadError, apply_dashboard_template, read_run_results
@@ -146,6 +148,16 @@ class ScenarioVersionCreateRequest(BaseModel):
 class ScenarioDraftWriteRequest(BaseModel):
     document: dict[str, Any] | None = None
     source_version_id: int | None = None
+
+
+class CaseTimeSeriesBindingRequest(BaseModel):
+    signal_key: str = Field(min_length=1)
+    time_series_set_id: int
+
+
+class CaseInputVariantRunRequest(BaseModel):
+    range_start: str = Field(min_length=1)
+    range_end: str = Field(min_length=1)
 
 
 class HydraulicDiagramViewportRequest(BaseModel):
@@ -1720,6 +1732,65 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         return draft
+
+    @app.get("/api/scenarios/{scenario_id}/case/default-variant")
+    async def get_default_input_variant(scenario_id: int):
+        try:
+            case = analyst_store.get_or_create_case_for_scenario(scenario_id)
+            variant = analyst_store.get_or_create_default_input_variant(case["id"])
+            bindings = analyst_store.list_case_time_series_bindings(variant["id"])
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"case": optimization_case_public_dict(case), "variant": variant, "bindings": bindings}
+
+    @app.post("/api/scenarios/{scenario_id}/case/variants/{variant_id}/bindings", status_code=201)
+    async def bind_case_time_series(
+        scenario_id: int, variant_id: int, payload: CaseTimeSeriesBindingRequest, request: Request
+    ):
+        try:
+            analyst_store.get_scenario(scenario_id)
+            binding = analyst_store.upsert_case_time_series_binding(
+                case_input_variant_id=variant_id,
+                signal_key=payload.signal_key,
+                time_series_set_id=payload.time_series_set_id,
+                created_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return binding
+
+    @app.post("/api/scenarios/{scenario_id}/case/variants/{variant_id}/run", status_code=201)
+    async def run_case_input_variant(scenario_id: int, variant_id: int, payload: CaseInputVariantRunRequest):
+        try:
+            materialized = analyst_store.materialize_system_case_for_variant(
+                scenario_id=scenario_id,
+                case_input_variant_id=variant_id,
+                range_start=payload.range_start,
+                range_end=payload.range_end,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except (DraftGenerationError, InputVariantRangeError) as error:
+            return JSONResponse(
+                error_response_body("input_variant", str(error), phase="python_validation"),
+                status_code=400,
+            )
+
+        generation_metadata = {
+            "kind": "case_input_variant",
+            "input_variant": {"id": variant_id},
+            "date_range": {"start": payload.range_start, "end": payload.range_end},
+            "series_bindings": materialized["series_bindings"],
+        }
+        scenario_version, error = save_validated_scenario_version(
+            scenario_id,
+            json.dumps(materialized["system_case"], sort_keys=True),
+            generation_metadata,
+        )
+        if error is not None:
+            return JSONResponse(validation_response_body(error), status_code=400)
+        run = create_and_enqueue_run(scenario_version["id"])
+        return run
 
     @app.post("/api/scenarios/{scenario_id}/versions", status_code=201)
     async def create_scenario_version(scenario_id: int, payload: ScenarioVersionCreateRequest):

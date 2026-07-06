@@ -11,6 +11,8 @@ from typing import Any, Mapping
 
 from app.auth import VALID_USER_ROLES
 from app.database import connect_database, database_url_from_env, postgres_schema_from_sqlite
+from app.draft_editor import generate_system_case_from_draft
+from app.input_variants import materialize_variant_time_series, resolve_bound_signal_series
 from app.time_series_catalog import (
     TIME_SERIES_SIGNAL_CATALOG,
     CatalogValueEdit,
@@ -617,6 +619,39 @@ class AnalystStore:
                 FOREIGN KEY (time_series_signal_id) REFERENCES time_series_signals(id) ON DELETE CASCADE,
                 FOREIGN KEY (time_series_period_id) REFERENCES time_series_periods(id) ON DELETE CASCADE,
                 UNIQUE (time_series_signal_id, time_series_period_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS case_input_variants (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id INTEGER NOT NULL,
+                variant_key TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                is_default INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (case_id) REFERENCES optimization_cases(id) ON DELETE CASCADE,
+                UNIQUE (case_id, variant_key)
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS case_input_variants_default_unique
+                ON case_input_variants (case_id)
+                WHERE is_default = 1;
+
+            CREATE TABLE IF NOT EXISTS case_time_series_bindings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_input_variant_id INTEGER NOT NULL,
+                signal_key TEXT NOT NULL,
+                time_series_set_id INTEGER NOT NULL,
+                required INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (case_input_variant_id) REFERENCES case_input_variants(id) ON DELETE CASCADE,
+                FOREIGN KEY (time_series_set_id) REFERENCES time_series_sets(id) ON DELETE CASCADE,
+                UNIQUE (case_input_variant_id, signal_key)
             );
 
             CREATE TABLE IF NOT EXISTS runs (
@@ -4006,6 +4041,174 @@ class AnalystStore:
             raise KeyError(f"run artifact {artifact_id} not found")
         return row_to_dict(row)
 
+    def get_or_create_case_for_scenario(self, scenario_id: int) -> dict[str, Any]:
+        scenario = self.get_scenario(scenario_id)
+        return self._get_or_create_optimization_case(scenario)
+
+    def get_or_create_default_input_variant(self, case_id: int) -> dict[str, Any]:
+        row = self.connection.execute(
+            """
+            SELECT id, case_id, variant_key, display_name, is_default,
+                   created_at, updated_at, created_by, updated_by
+            FROM case_input_variants
+            WHERE case_id = ? AND is_default = 1
+            """,
+            (case_id,),
+        ).fetchone()
+        if row is not None:
+            return case_input_variant_row_to_dict(row)
+
+        now = utc_now_iso()
+        cursor = self.connection.execute(
+            """
+            INSERT INTO case_input_variants (
+                case_id,
+                variant_key,
+                display_name,
+                is_default,
+                created_at,
+                updated_at,
+                created_by,
+                updated_by
+            )
+            VALUES (?, 'default', 'Default', 1, ?, ?, ?, ?)
+            """,
+            (case_id, now, now, "internal_analyst", "internal_analyst"),
+        )
+        self.connection.commit()
+        return case_input_variant_row_to_dict(
+            self.connection.execute(
+                """
+                SELECT id, case_id, variant_key, display_name, is_default,
+                       created_at, updated_at, created_by, updated_by
+                FROM case_input_variants
+                WHERE id = ?
+                """,
+                (cursor.lastrowid,),
+            ).fetchone()
+        )
+
+    def upsert_case_time_series_binding(
+        self,
+        *,
+        case_input_variant_id: int,
+        signal_key: str,
+        time_series_set_id: int,
+        created_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        now = utc_now_iso()
+        existing = self.connection.execute(
+            """
+            SELECT id
+            FROM case_time_series_bindings
+            WHERE case_input_variant_id = ? AND signal_key = ?
+            """,
+            (case_input_variant_id, signal_key),
+        ).fetchone()
+        if existing is not None:
+            self.connection.execute(
+                """
+                UPDATE case_time_series_bindings
+                SET time_series_set_id = ?, updated_at = ?, updated_by = ?
+                WHERE id = ?
+                """,
+                (time_series_set_id, now, created_by, int(existing["id"])),
+            )
+            self.connection.commit()
+            return self._get_case_time_series_binding(int(existing["id"]))
+
+        cursor = self.connection.execute(
+            """
+            INSERT INTO case_time_series_bindings (
+                case_input_variant_id,
+                signal_key,
+                time_series_set_id,
+                required,
+                created_at,
+                updated_at,
+                created_by,
+                updated_by
+            )
+            VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+            """,
+            (case_input_variant_id, signal_key, time_series_set_id, now, now, created_by, created_by),
+        )
+        self.connection.commit()
+        return self._get_case_time_series_binding(int(cursor.lastrowid))
+
+    def _get_case_time_series_binding(self, binding_id: int) -> dict[str, Any]:
+        row = self.connection.execute(
+            """
+            SELECT id, case_input_variant_id, signal_key, time_series_set_id, required,
+                   created_at, updated_at, created_by, updated_by
+            FROM case_time_series_bindings
+            WHERE id = ?
+            """,
+            (binding_id,),
+        ).fetchone()
+        value = row_to_dict(row)
+        value["required"] = bool(value["required"])
+        return value
+
+    def list_case_time_series_bindings(self, case_input_variant_id: int) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            """
+            SELECT id, case_input_variant_id, signal_key, time_series_set_id, required,
+                   created_at, updated_at, created_by, updated_by
+            FROM case_time_series_bindings
+            WHERE case_input_variant_id = ?
+            ORDER BY signal_key
+            """,
+            (case_input_variant_id,),
+        ).fetchall()
+        results = []
+        for row in rows:
+            value = row_to_dict(row)
+            value["required"] = bool(value["required"])
+            results.append(value)
+        return results
+
+    def materialize_system_case_for_variant(
+        self,
+        *,
+        scenario_id: int,
+        case_input_variant_id: int,
+        range_start: str,
+        range_end: str,
+    ) -> dict[str, Any]:
+        scenario = self.get_scenario(scenario_id)
+        draft = self.get_scenario_draft(scenario_id)
+        # The draft's own (legacy) time_series/sources are irrelevant here: TS-3
+        # supplies time_series from variant bindings below, so any unvalidated
+        # source left attached to the draft must not block generation.
+        draft_document = dict(draft["document"])
+        draft_document["time_series"] = {"periods": []}
+        base_system_case = generate_system_case_from_draft(draft_document)
+
+        bound_signal_series: dict[str, list[dict[str, Any]]] = {}
+        series_bindings: list[dict[str, Any]] = []
+        for binding in self.list_case_time_series_bindings(case_input_variant_id):
+            time_series_set = self.get_time_series_set(
+                int(scenario["project_id"]), int(binding["time_series_set_id"])
+            )
+            bound_signal_series[binding["signal_key"]] = resolve_bound_signal_series(
+                time_series_set, binding["signal_key"], range_start, range_end
+            )
+            series_bindings.append(
+                {
+                    "signal_key": binding["signal_key"],
+                    "time_series_set_id": time_series_set["id"],
+                    "version_number": time_series_set["version_number"],
+                    "version_label": time_series_set["version_label"],
+                    "revision_number": time_series_set["revision_number"],
+                    "content_hash": time_series_set["content_hash"],
+                }
+            )
+
+        system_case = dict(base_system_case)
+        system_case["time_series"] = materialize_variant_time_series(bound_signal_series)
+        return {"system_case": system_case, "series_bindings": series_bindings}
+
     def _get_or_create_optimization_case(self, scenario: dict[str, Any]) -> dict[str, Any]:
         row = self.connection.execute(
             """
@@ -6239,6 +6442,12 @@ def row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
 def user_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
     value = row_to_dict(row)
     value["is_active"] = bool(value["is_active"])
+    return value
+
+
+def case_input_variant_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
+    value = row_to_dict(row)
+    value["is_default"] = bool(value["is_default"])
     return value
 
 

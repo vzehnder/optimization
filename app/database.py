@@ -34,6 +34,8 @@ ID_TABLES = {
     "case_hydraulic_systems",
     "case_hydraulic_time_series_bindings",
     "case_hydraulic_units",
+    "case_input_variants",
+    "case_time_series_bindings",
     "dashboard_templates",
     "hydraulic_curve_points",
     "hydraulic_curve_sets",

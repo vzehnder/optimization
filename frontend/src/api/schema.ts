@@ -675,6 +675,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scenarios/{scenario_id}/case/default-variant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Default Input Variant */
+        get: operations["get_default_input_variant_api_scenarios__scenario_id__case_default_variant_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/case/variants/{variant_id}/bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bind Case Time Series */
+        post: operations["bind_case_time_series_api_scenarios__scenario_id__case_variants__variant_id__bindings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/case/variants/{variant_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Case Input Variant */
+        post: operations["run_case_input_variant_api_scenarios__scenario_id__case_variants__variant_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scenarios/{scenario_id}/draft": {
         parameters: {
             query?: never;
@@ -1010,6 +1061,20 @@ export interface components {
             email: string;
             /** Password */
             password: string;
+        };
+        /** CaseInputVariantRunRequest */
+        CaseInputVariantRunRequest: {
+            /** Range End */
+            range_end: string;
+            /** Range Start */
+            range_start: string;
+        };
+        /** CaseTimeSeriesBindingRequest */
+        CaseTimeSeriesBindingRequest: {
+            /** Signal Key */
+            signal_key: string;
+            /** Time Series Set Id */
+            time_series_set_id: number;
         };
         /** CsrfTokenResponse */
         CsrfTokenResponse: {
@@ -2923,6 +2988,109 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_default_input_variant_api_scenarios__scenario_id__case_default_variant_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bind_case_time_series_api_scenarios__scenario_id__case_variants__variant_id__bindings_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+                variant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CaseTimeSeriesBindingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_case_input_variant_api_scenarios__scenario_id__case_variants__variant_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+                variant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CaseInputVariantRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };

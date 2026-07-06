@@ -18,6 +18,7 @@ import {
 } from "./CaseHierarchyProvenance";
 import {
   ApiError,
+  bindCaseTimeSeries,
   createManualRun,
   createDashboardTemplate,
   createHydraulicDiagram,
@@ -27,6 +28,7 @@ import {
   createScenarioVersionFromJson,
   deleteScenarioVersion,
   editTimeSeriesSetValues,
+  getDefaultInputVariant,
   getHydraulicDiagram,
   getProjectTimeSeriesSet,
   getPublicationPreview,
@@ -34,6 +36,7 @@ import {
   getProject,
   getScenario,
   getScenarioVersion,
+  runCaseInputVariant,
   listDashboardTemplates,
   listProjectTimeSeriesSets,
   listProjects,
@@ -77,6 +80,8 @@ import {
   type Publication,
   type PublicationPayload,
   type Project,
+  type CaseTimeSeriesBinding,
+  type DefaultInputVariantResponse,
   type ProjectCreatePayload,
   type ProjectTimeSeriesSet,
   type ProjectTimeSeriesSetRevision,
@@ -128,6 +133,8 @@ const scenarioVersionsQueryKey = (scenarioId: number) =>
   ["scenario-versions", scenarioId] as const;
 const scenarioRunsQueryKey = (scenarioId: number) =>
   ["scenario-runs", scenarioId] as const;
+const defaultInputVariantQueryKey = (scenarioId: number) =>
+  ["case-default-variant", scenarioId] as const;
 const hydraulicDiagramQueryKey = (scenarioId: number) =>
   ["hydraulic-diagram", scenarioId] as const;
 const runQueryKey = (runId: number) => ["run", runId] as const;
@@ -4742,6 +4749,174 @@ export function HydraulicDiagramEditorView() {
   );
 }
 
+const INPUT_VARIANT_PRICE_SIGNAL_KEY = "price_usd_per_mwh";
+
+function CaseInputVariantPanel({
+  scenarioId,
+  projectId,
+}: {
+  scenarioId: number;
+  projectId: number;
+}) {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [error, setError] = useState("");
+  const [selectedSetId, setSelectedSetId] = useState<number | "">("");
+  const [rangeStart, setRangeStart] = useState("");
+  const [rangeEnd, setRangeEnd] = useState("");
+
+  const variantQuery = useQuery({
+    queryKey: defaultInputVariantQueryKey(scenarioId),
+    queryFn: ({ signal }) => getDefaultInputVariant(scenarioId, signal),
+    retry: false,
+  });
+  const timeSeriesSetsQuery = useQuery({
+    queryKey: timeSeriesCatalogQueryKey(projectId),
+    queryFn: ({ signal }) => listProjectTimeSeriesSets(projectId, signal),
+    retry: false,
+  });
+  const selectedSetDetail = useQuery({
+    queryKey: timeSeriesSetQueryKey(projectId, selectedSetId || 0),
+    queryFn: ({ signal }) =>
+      getProjectTimeSeriesSet(projectId, selectedSetId as number, signal),
+    enabled: typeof selectedSetId === "number",
+    retry: false,
+  });
+
+  if (
+    selectedSetDetail.data &&
+    selectedSetDetail.data.id === selectedSetId &&
+    rangeStart === "" &&
+    rangeEnd === ""
+  ) {
+    setRangeStart(selectedSetDetail.data.horizon.start || "");
+    setRangeEnd(selectedSetDetail.data.horizon.end || "");
+  }
+
+  const priceBinding = variantQuery.data?.bindings.find(
+    (binding: CaseTimeSeriesBinding) =>
+      binding.signal_key === INPUT_VARIANT_PRICE_SIGNAL_KEY,
+  );
+
+  const runMutation = useMutation({
+    mutationFn: async () => {
+      const variant = variantQuery.data as DefaultInputVariantResponse;
+      await bindCaseTimeSeries(scenarioId, variant.variant.id, {
+        signal_key: INPUT_VARIANT_PRICE_SIGNAL_KEY,
+        time_series_set_id: selectedSetId as number,
+      });
+      return runCaseInputVariant(scenarioId, variant.variant.id, {
+        range_start: rangeStart,
+        range_end: rangeEnd,
+      });
+    },
+    onSuccess: (run) => {
+      setError("");
+      void queryClient.invalidateQueries({
+        queryKey: defaultInputVariantQueryKey(scenarioId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: scenarioRunsQueryKey(scenarioId),
+      });
+      navigate(`/runs/${run.id}`);
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError)),
+  });
+
+  if (variantQuery.isPending || timeSeriesSetsQuery.isPending) {
+    return <LoadingView label="Cargando variante default" />;
+  }
+  if (variantQuery.isError) {
+    return (
+      <RequestErrorView
+        error={variantQuery.error}
+        retry={() => void variantQuery.refetch()}
+      />
+    );
+  }
+  if (timeSeriesSetsQuery.isError) {
+    return (
+      <RequestErrorView
+        error={timeSeriesSetsQuery.error}
+        retry={() => void timeSeriesSetsQuery.refetch()}
+      />
+    );
+  }
+
+  const canRun =
+    selectedSetId !== "" && rangeStart.trim() !== "" && rangeEnd.trim() !== "";
+
+  return (
+    <section
+      className="workspace-section"
+      aria-labelledby="input-variant-panel"
+    >
+      <h2 id="input-variant-panel">Variante de entrada (default)</h2>
+      {error ? <p role="alert">{error}</p> : null}
+      <p className="source-note">
+        {priceBinding
+          ? `Precio vinculado: set #${priceBinding.time_series_set_id}.`
+          : "Aun no hay una serie de precio vinculada."}
+      </p>
+      <div className="field-row">
+        <label htmlFor="input_variant_price_set">
+          Serie de precio (price_usd_per_mwh)
+        </label>
+        <select
+          id="input_variant_price_set"
+          value={selectedSetId}
+          onChange={(event) => {
+            const value = event.target.value;
+            setRangeStart("");
+            setRangeEnd("");
+            setSelectedSetId(value === "" ? "" : Number(value));
+          }}
+        >
+          <option value="">Selecciona una serie</option>
+          {(timeSeriesSetsQuery.data || []).map(
+            (set: ProjectTimeSeriesSetSummary) => (
+              <option key={set.id} value={set.id}>
+                {set.name} - {set.version_label}
+              </option>
+            ),
+          )}
+        </select>
+      </div>
+      <div className="field-row">
+        <label htmlFor="input_variant_range_start">Inicio de rango</label>
+        <input
+          id="input_variant_range_start"
+          type="text"
+          value={rangeStart}
+          onChange={(event) => setRangeStart(event.target.value)}
+          placeholder="2026-01-01T00:00:00-03:00"
+        />
+      </div>
+      <div className="field-row">
+        <label htmlFor="input_variant_range_end">Fin de rango</label>
+        <input
+          id="input_variant_range_end"
+          type="text"
+          value={rangeEnd}
+          onChange={(event) => setRangeEnd(event.target.value)}
+          placeholder="2026-01-02T00:00:00-03:00"
+        />
+      </div>
+      <button
+        type="button"
+        disabled={!canRun || runMutation.isPending}
+        onClick={() => {
+          if (canRun && !runMutation.isPending) runMutation.mutate();
+        }}
+      >
+        {runMutation.isPending
+          ? "Corriendo variante"
+          : "Vincular y correr variante"}
+      </button>
+    </section>
+  );
+}
+
 export function ScenarioDetailView() {
   const scenarioId = useNumericParam("scenarioId");
   const scenario = useQuery({
@@ -4821,6 +4996,10 @@ export function ScenarioDetailView() {
         </div>
       </header>
       <div className="workspace-stack">
+        <CaseInputVariantPanel
+          scenarioId={scenario.data.id}
+          projectId={scenario.data.project_id}
+        />
         <section className="workspace-section" aria-labelledby="version-list">
           <h2 id="version-list">Versiones inmutables</h2>
           <VersionList scenarioId={scenario.data.id} versions={versions.data} />
