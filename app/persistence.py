@@ -1842,6 +1842,66 @@ class AnalystStore:
                 ),
             )
 
+    def list_time_series_sets(self, project_id: int) -> list[dict[str, Any]]:
+        self.get_project(project_id)
+        rows = self.connection.execute(
+            """
+            SELECT
+                time_series_sets.id AS id,
+                time_series_sets.name AS name,
+                time_series_sets.version_number AS version_number,
+                time_series_sets.version_label AS version_label,
+                time_series_sets.data_kind AS data_kind,
+                time_series_sets.timezone AS timezone,
+                time_series_sets.status AS status,
+                time_series_sets.created_at AS created_at,
+                time_series_sets.updated_at AS updated_at,
+                latest_revision.revision_number AS revision_number,
+                latest_revision.content_hash AS content_hash,
+                (
+                    SELECT COUNT(*) FROM time_series_signals
+                    WHERE time_series_signals.time_series_set_id = time_series_sets.id
+                ) AS signal_count,
+                (
+                    SELECT COUNT(*) FROM time_series_periods
+                    WHERE time_series_periods.time_series_set_id = time_series_sets.id
+                ) AS period_count
+            FROM time_series_sets
+            JOIN (
+                SELECT r1.time_series_set_id, r1.revision_number, r1.content_hash
+                FROM time_series_set_revisions AS r1
+                WHERE r1.revision_number = (
+                    SELECT MAX(r2.revision_number)
+                    FROM time_series_set_revisions AS r2
+                    WHERE r2.time_series_set_id = r1.time_series_set_id
+                )
+            ) AS latest_revision
+              ON latest_revision.time_series_set_id = time_series_sets.id
+            WHERE time_series_sets.project_id = ?
+            ORDER BY time_series_sets.name, time_series_sets.version_number
+            """,
+            (project_id,),
+        ).fetchall()
+        return [
+            {
+                "id": int(row["id"]),
+                "project_id": project_id,
+                "name": str(row["name"]),
+                "version_number": int(row["version_number"]),
+                "version_label": str(row["version_label"]),
+                "data_kind": str(row["data_kind"]),
+                "timezone": str(row["timezone"]),
+                "status": str(row["status"]),
+                "revision_number": int(row["revision_number"]),
+                "content_hash": str(row["content_hash"]),
+                "signal_count": int(row["signal_count"]),
+                "period_count": int(row["period_count"]),
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+
     def get_time_series_set(self, project_id: int, time_series_set_id: int) -> dict[str, Any]:
         self.get_project(project_id)
         row = self.connection.execute(
@@ -1982,6 +2042,11 @@ class AnalystStore:
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
             "source": source,
+            "horizon": {
+                "period_count": len(period_rows),
+                "start": str(period_rows[0]["timestamp_start"]) if period_rows else None,
+                "end": str(period_rows[-1]["timestamp_end"]) if period_rows else None,
+            },
             "revision_metadata": revision_metadata,
             "signals": [
                 {

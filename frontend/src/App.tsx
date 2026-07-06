@@ -45,6 +45,8 @@ import {
   RunDetailView,
   ScenarioDetailView,
   ScenarioVersionDetailView,
+  TimeSeriesCatalogView,
+  TimeSeriesSetDetailView,
 } from "./Workspace";
 
 const identityQueryKey = ["current-user"];
@@ -280,6 +282,16 @@ function AuthenticatedRoutes({ user }: { user: CurrentUser }) {
                   canManageClientAccess={user.role === "admin"}
                 />
               )
+            }
+          />
+          <Route
+            path="projects/:projectId/time-series-sets"
+            element={isClient ? <ForbiddenView /> : <TimeSeriesCatalogView />}
+          />
+          <Route
+            path="projects/:projectId/time-series-sets/:timeSeriesSetId"
+            element={
+              isClient ? <ForbiddenView /> : <TimeSeriesSetDetailView />
             }
           />
           <Route

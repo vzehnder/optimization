@@ -766,3 +766,146 @@ class TimeSeriesCatalogImportTests(unittest.TestCase):
                 "row 3: duplicate timestamp '2026-01-01T00:00:00' (already used by row 2)",
                 import_response.json()["detail"],
             )
+
+    def import_csv_set(
+        self,
+        client,
+        scenario,
+        *,
+        set_name,
+        version_label,
+        signal_key="price_usd_per_mwh",
+        source_column="spot_price",
+    ):
+        csv_text = (
+            f"period_start,hours,{source_column}\n"
+            "2026-01-01T00:00:00,1.0,55.0\n"
+            "2026-01-01T01:00:00,1.0,60.0\n"
+        )
+        upload_response = client.post(
+            f"/api/scenarios/{scenario['id']}/draft/time-series-sources/upload",
+            files={"source_file": (f"{set_name}.csv", csv_text, "text/csv")},
+        )
+        source = upload_response.json()["source"]
+        import_response = client.post(
+            f"/api/scenarios/{scenario['id']}/draft/time-series-sources/{source['id']}/catalog-import",
+            json={
+                "set_name": set_name,
+                "version_label": version_label,
+                "data_kind": "real",
+                "timezone": "America/Santiago",
+                "timestamp_column": "period_start",
+                "duration_hours_column": "hours",
+                "signal_mappings": [
+                    {"source_column": source_column, "signal_key": signal_key}
+                ],
+            },
+        )
+        self.assertEqual(import_response.status_code, 201)
+        return import_response.json()["time_series_set"]
+
+    def test_project_catalog_lists_sets_with_summary_fields_ordered_by_name(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, project, scenario = self.make_client_and_context(input_source_root)
+            self.import_csv_set(
+                client, scenario, set_name="Spot price Jan 2026", version_label="v1"
+            )
+            self.import_csv_set(
+                client, scenario, set_name="Demand Jan 2026", version_label="v1",
+                signal_key="load_demand_mw", source_column="demand",
+            )
+
+            catalog_response = client.get(
+                f"/api/projects/{project['id']}/time-series-sets"
+            )
+
+            self.assertEqual(catalog_response.status_code, 200)
+            catalog = catalog_response.json()["time_series_sets"]
+            self.assertEqual(
+                [item["name"] for item in catalog],
+                ["Demand Jan 2026", "Spot price Jan 2026"],
+            )
+            first = catalog[0]
+            self.assertEqual(first["version_label"], "v1")
+            self.assertEqual(first["data_kind"], "real")
+            self.assertEqual(first["status"], "validated")
+            self.assertEqual(first["timezone"], "America/Santiago")
+            self.assertEqual(first["revision_number"], 1)
+            self.assertTrue(first["content_hash"].startswith("sha256:"))
+            self.assertEqual(first["signal_count"], 1)
+            self.assertEqual(first["period_count"], 2)
+
+    def test_project_catalog_only_lists_sets_for_that_project(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, project_a, scenario_a = self.make_client_and_context(
+                input_source_root
+            )
+            self.import_csv_set(
+                client, scenario_a, set_name="Project A Prices", version_label="v1"
+            )
+            project_b = client.post(
+                "/api/projects", json={"name": "TS-2 Catalog Project B"}
+            ).json()
+            scenario_b = client.post(
+                f"/api/projects/{project_b['id']}/scenarios",
+                json={"name": "Catalog import B"},
+            ).json()
+            client.post(
+                f"/api/scenarios/{scenario_b['id']}/draft",
+                json={
+                    "document": {
+                        "schema_version": "bess_editor_draft.v1",
+                        "case": {"name": "ts2_catalog_case_b"},
+                        "pcc": {"id": "bus_1", "type": "bus"},
+                        "grid": {"id": "grid_1"},
+                        "assets": [],
+                        "time_series": {"sources": []},
+                        "solver": {"name": "HiGHS", "options": {}},
+                    }
+                },
+            )
+            self.import_csv_set(
+                client, scenario_b, set_name="Project B Prices", version_label="v1"
+            )
+
+            catalog_a = client.get(
+                f"/api/projects/{project_a['id']}/time-series-sets"
+            ).json()["time_series_sets"]
+            catalog_b = client.get(
+                f"/api/projects/{project_b['id']}/time-series-sets"
+            ).json()["time_series_sets"]
+
+            self.assertEqual([item["name"] for item in catalog_a], ["Project A Prices"])
+            self.assertEqual([item["name"] for item in catalog_b], ["Project B Prices"])
+
+    def test_project_catalog_404_for_unknown_project(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, _project, _scenario = self.make_client_and_context(input_source_root)
+
+            response = client.get("/api/projects/999999/time-series-sets")
+
+            self.assertEqual(response.status_code, 404)
+
+    def test_time_series_set_detail_includes_horizon_summary(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_source_root = Path(temp_dir) / "input-sources"
+            client, project, scenario = self.make_client_and_context(input_source_root)
+            created_set = self.import_csv_set(
+                client, scenario, set_name="Spot price Jan 2026", version_label="v1"
+            )
+
+            detail = client.get(
+                f"/api/projects/{project['id']}/time-series-sets/{created_set['id']}"
+            ).json()["time_series_set"]
+
+            self.assertEqual(
+                detail["horizon"],
+                {
+                    "period_count": 2,
+                    "start": "2026-01-01T00:00:00-03:00",
+                    "end": "2026-01-01T02:00:00-03:00",
+                },
+            )

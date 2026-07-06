@@ -311,6 +311,12 @@ export interface ProjectTimeSeriesSetSource {
   selected_sheet?: string | null;
 }
 
+export interface ProjectTimeSeriesSetHorizon {
+  period_count: number;
+  start: string | null;
+  end: string | null;
+}
+
 export interface ProjectTimeSeriesSet {
   id: number;
   project_id: number;
@@ -329,9 +335,27 @@ export interface ProjectTimeSeriesSet {
   updated_at?: string;
   revision_metadata?: Record<string, unknown>;
   source: ProjectTimeSeriesSetSource | null;
+  horizon: ProjectTimeSeriesSetHorizon;
   signals: ProjectTimeSeriesSetSignal[];
   periods: ProjectTimeSeriesSetPeriod[];
   values: ProjectTimeSeriesSetValue[];
+}
+
+export interface ProjectTimeSeriesSetSummary {
+  id: number;
+  project_id: number;
+  name: string;
+  version_number: number;
+  version_label: string;
+  revision_number: number;
+  data_kind: string;
+  timezone: string;
+  status: string;
+  content_hash: string;
+  signal_count: number;
+  period_count: number;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface GeneratedCaseValidation {
@@ -1427,6 +1451,28 @@ export async function importTimeSeriesSourceToCatalog(
       },
       body: JSON.stringify(payload),
     },
+  );
+  return response.time_series_set;
+}
+
+export async function listProjectTimeSeriesSets(
+  projectId: number,
+  signal?: AbortSignal,
+): Promise<ProjectTimeSeriesSetSummary[]> {
+  const response = await requestJson<{
+    time_series_sets: ProjectTimeSeriesSetSummary[];
+  }>(`/api/projects/${projectId}/time-series-sets`, { signal });
+  return response.time_series_sets;
+}
+
+export async function getProjectTimeSeriesSet(
+  projectId: number,
+  timeSeriesSetId: number,
+  signal?: AbortSignal,
+): Promise<ProjectTimeSeriesSet> {
+  const response = await requestJson<{ time_series_set: ProjectTimeSeriesSet }>(
+    `/api/projects/${projectId}/time-series-sets/${timeSeriesSetId}`,
+    { signal },
   );
   return response.time_series_set;
 }

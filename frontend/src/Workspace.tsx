@@ -26,12 +26,14 @@ import {
   createScenarioVersionFromJson,
   deleteScenarioVersion,
   getHydraulicDiagram,
+  getProjectTimeSeriesSet,
   getPublicationPreview,
   getRun,
   getProject,
   getScenario,
   getScenarioVersion,
   listDashboardTemplates,
+  listProjectTimeSeriesSets,
   listProjects,
   listRunArtifacts,
   listRunPublications,
@@ -71,6 +73,9 @@ import {
   type PublicationPayload,
   type Project,
   type ProjectCreatePayload,
+  type ProjectTimeSeriesSet,
+  type ProjectTimeSeriesSetSignal,
+  type ProjectTimeSeriesSetSummary,
   type RunArtifact,
   type Scenario,
   type ScenarioCreatePayload,
@@ -93,6 +98,10 @@ const projectsQueryKey = ["projects"] as const;
 const projectQueryKey = (projectId: number) => ["project", projectId] as const;
 const scenariosQueryKey = (projectId: number) =>
   ["project-scenarios", projectId] as const;
+const timeSeriesCatalogQueryKey = (projectId: number) =>
+  ["project-time-series-sets", projectId] as const;
+const timeSeriesSetQueryKey = (projectId: number, timeSeriesSetId: number) =>
+  ["project-time-series-set", projectId, timeSeriesSetId] as const;
 const scenarioQueryKey = (scenarioId: number) =>
   ["scenario", scenarioId] as const;
 const scenarioVersionsQueryKey = (scenarioId: number) =>
@@ -737,6 +746,15 @@ export function ProjectDetailView({
           </section>
           <CreateScenarioForm projectId={projectId} />
         </div>
+        <section
+          className="workspace-section"
+          aria-labelledby="project-time-series-catalog"
+        >
+          <h2 id="project-time-series-catalog">Series de tiempo</h2>
+          <Link to={`/projects/${projectId}/time-series-sets`}>
+            Ver catalogo de series de tiempo
+          </Link>
+        </section>
         {canManageClientAccess ? (
           <ProjectClientAccessSection
             projectId={projectId}
@@ -744,6 +762,224 @@ export function ProjectDetailView({
           />
         ) : null}
         <DashboardTemplatesSection projectId={projectId} />
+      </div>
+    </section>
+  );
+}
+
+function TimeSeriesCatalogList({
+  projectId,
+  sets,
+}: {
+  projectId: number;
+  sets: ProjectTimeSeriesSetSummary[];
+}) {
+  if (sets.length === 0) {
+    return <EmptyState>Aun no hay series de tiempo importadas.</EmptyState>;
+  }
+  return (
+    <ul className="resource-list">
+      {sets.map((set) => (
+        <li key={set.id}>
+          <Link to={`/projects/${projectId}/time-series-sets/${set.id}`}>
+            {set.name} ({set.version_label})
+          </Link>
+          <p>
+            {set.data_kind} | {set.status} | {set.timezone} | revision{" "}
+            {set.revision_number} | {set.signal_count} senales |{" "}
+            {set.period_count} periodos
+          </p>
+          <p>
+            <code>{set.content_hash}</code>
+          </p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function TimeSeriesCatalogView() {
+  const projectId = useNumericParam("projectId");
+  const project = useQuery({
+    queryKey: projectQueryKey(projectId || 0),
+    queryFn: ({ signal }) => getProject(projectId || 0, signal),
+    enabled: projectId !== null,
+    retry: false,
+  });
+  const timeSeriesSets = useQuery({
+    queryKey: timeSeriesCatalogQueryKey(projectId || 0),
+    queryFn: ({ signal }) => listProjectTimeSeriesSets(projectId || 0, signal),
+    enabled: projectId !== null,
+    retry: false,
+  });
+
+  if (projectId === null) {
+    return <NotFoundView>El proyecto solicitado no existe.</NotFoundView>;
+  }
+  if (project.isPending || timeSeriesSets.isPending) {
+    return <LoadingView label="Cargando catalogo de series" />;
+  }
+  if (project.isError) {
+    return (
+      <RequestErrorView
+        error={project.error}
+        retry={() => void project.refetch()}
+      />
+    );
+  }
+  if (timeSeriesSets.isError) {
+    return (
+      <RequestErrorView
+        error={timeSeriesSets.error}
+        retry={() => void timeSeriesSets.refetch()}
+      />
+    );
+  }
+
+  return (
+    <section className="workspace-view">
+      <Breadcrumbs>
+        <Link to="/projects">Proyectos</Link>
+        <span aria-hidden="true">/</span>
+        <Link to={`/projects/${projectId}`}>{project.data.name}</Link>
+        <span aria-hidden="true">/</span>
+        <span>Catalogo de series</span>
+      </Breadcrumbs>
+      <header className="workspace-heading">
+        <h1>Catalogo de series de tiempo</h1>
+        <p>Sets versionados importados a BBDD para {project.data.name}.</p>
+      </header>
+      <section
+        className="workspace-section"
+        aria-labelledby="time-series-catalog"
+      >
+        <h2 id="time-series-catalog">Sets</h2>
+        <TimeSeriesCatalogList
+          projectId={projectId}
+          sets={timeSeriesSets.data}
+        />
+      </section>
+    </section>
+  );
+}
+
+function timeSeriesSignalEntityLabel(
+  signal: ProjectTimeSeriesSetSignal,
+): string {
+  if (!signal.entity_type) return "Global";
+  return signal.entity_key
+    ? `${signal.entity_type}:${signal.entity_key}`
+    : signal.entity_type;
+}
+
+function TimeSeriesSetSignalList({
+  signals,
+}: {
+  signals: ProjectTimeSeriesSetSignal[];
+}) {
+  if (signals.length === 0) {
+    return <EmptyState>Este set no tiene senales.</EmptyState>;
+  }
+  return (
+    <ul className="resource-list">
+      {signals.map((signal) => (
+        <li key={signal.signal_key}>
+          <strong>{signal.signal_key}</strong>
+          <p>
+            {signal.unit} | {timeSeriesSignalEntityLabel(signal)}
+          </p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function TimeSeriesSetSourceSummary({
+  source,
+}: {
+  source: ProjectTimeSeriesSet["source"];
+}) {
+  if (!source) {
+    return <EmptyState>Sin fuente registrada.</EmptyState>;
+  }
+  return (
+    <p>
+      {source.original_filename} ({source.media_type})
+      {source.selected_sheet ? ` | hoja ${source.selected_sheet}` : ""}
+    </p>
+  );
+}
+
+export function TimeSeriesSetDetailView() {
+  const projectId = useNumericParam("projectId");
+  const timeSeriesSetId = useNumericParam("timeSeriesSetId");
+  const timeSeriesSet = useQuery({
+    queryKey: timeSeriesSetQueryKey(projectId || 0, timeSeriesSetId || 0),
+    queryFn: ({ signal }) =>
+      getProjectTimeSeriesSet(projectId || 0, timeSeriesSetId || 0, signal),
+    enabled: projectId !== null && timeSeriesSetId !== null,
+    retry: false,
+  });
+
+  if (projectId === null || timeSeriesSetId === null) {
+    return <NotFoundView>El set de series solicitado no existe.</NotFoundView>;
+  }
+  if (timeSeriesSet.isPending) {
+    return <LoadingView label="Cargando set de series" />;
+  }
+  if (timeSeriesSet.isError) {
+    return (
+      <RequestErrorView
+        error={timeSeriesSet.error}
+        retry={() => void timeSeriesSet.refetch()}
+      />
+    );
+  }
+
+  const set = timeSeriesSet.data;
+  return (
+    <section className="workspace-view">
+      <Breadcrumbs>
+        <Link to="/projects">Proyectos</Link>
+        <span aria-hidden="true">/</span>
+        <Link to={`/projects/${projectId}/time-series-sets`}>
+          Catalogo de series
+        </Link>
+        <span aria-hidden="true">/</span>
+        <span>{set.name}</span>
+      </Breadcrumbs>
+      <header className="workspace-heading">
+        <h1>
+          {set.name} ({set.version_label})
+        </h1>
+        <p>
+          {set.data_kind} | {set.status} | {set.timezone}
+        </p>
+      </header>
+      <div className="workspace-stack">
+        <section className="workspace-section" aria-labelledby="set-revision">
+          <h2 id="set-revision">Revision</h2>
+          <p>Revision {set.revision_number}</p>
+          <p>
+            <code>{set.content_hash}</code>
+          </p>
+        </section>
+        <section className="workspace-section" aria-labelledby="set-horizon">
+          <h2 id="set-horizon">Horizonte</h2>
+          <p>{set.horizon.period_count} periodos</p>
+          <p>
+            {set.horizon.start || "Sin datos"} -{" "}
+            {set.horizon.end || "Sin datos"}
+          </p>
+        </section>
+        <section className="workspace-section" aria-labelledby="set-signals">
+          <h2 id="set-signals">Senales</h2>
+          <TimeSeriesSetSignalList signals={set.signals} />
+        </section>
+        <section className="workspace-section" aria-labelledby="set-source">
+          <h2 id="set-source">Origen</h2>
+          <TimeSeriesSetSourceSummary source={set.source} />
+        </section>
       </div>
     </section>
   );

@@ -6241,4 +6241,158 @@ describe("application shell", () => {
     expect(window.location.pathname).toBe("/react/system");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it("browses the project time-series catalog and opens a set's detail", async () => {
+    window.history.replaceState({}, "", "/react/projects/1");
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-06-23T12:00:00Z",
+    };
+    const catalogSet = {
+      id: 501,
+      project_id: 1,
+      name: "Spot price Jan 2026",
+      version_number: 1,
+      version_label: "v1",
+      revision_number: 1,
+      data_kind: "real",
+      timezone: "America/Santiago",
+      status: "validated",
+      content_hash: "sha256:abc123",
+      signal_count: 1,
+      period_count: 2,
+      created_at: "2026-07-04T12:00:00Z",
+      updated_at: "2026-07-04T12:00:00Z",
+    };
+    const setDetail = {
+      ...catalogSet,
+      source_checksum: "sha256:def456",
+      revision_metadata: {},
+      source: {
+        original_filename: "price.csv",
+        media_type: "text/csv",
+        checksum: "sha256:def456",
+        selected_sheet: null,
+      },
+      horizon: {
+        period_count: 2,
+        start: "2026-01-01T00:00:00-03:00",
+        end: "2026-01-01T02:00:00-03:00",
+      },
+      signals: [
+        {
+          signal_key: "price_usd_per_mwh",
+          unit: "USD/MWh",
+          source_column: "spot_price",
+          source_unit: "USD/MWh",
+          entity_type: null,
+          entity_key: null,
+        },
+      ],
+      periods: [],
+      values: [],
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/scenarios") {
+          return new Response(JSON.stringify({ scenarios: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/dashboard-templates") {
+          return new Response(JSON.stringify({ dashboard_templates: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/time-series-sets" && method === "GET") {
+          return new Response(
+            JSON.stringify({ time_series_sets: [catalogSet] }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/projects/1/time-series-sets/501") {
+          return new Response(
+            JSON.stringify({ time_series_set: setDetail }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Hybrid PMGD" }),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("link", { name: "Ver catalogo de series de tiempo" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Catalogo de series de tiempo",
+      }),
+    ).toBeVisible();
+    expect(window.location.pathname).toBe(
+      "/react/projects/1/time-series-sets",
+    );
+    expect(
+      screen.getByRole("link", { name: "Spot price Jan 2026 (v1)" }),
+    ).toBeVisible();
+    expect(screen.getByText(/real \| validated \| America\/Santiago/)).toBeVisible();
+    expect(screen.getByText("sha256:abc123")).toBeVisible();
+
+    await user.click(
+      screen.getByRole("link", { name: "Spot price Jan 2026 (v1)" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Spot price Jan 2026 (v1)" }),
+    ).toBeVisible();
+    expect(window.location.pathname).toBe(
+      "/react/projects/1/time-series-sets/501",
+    );
+    expect(screen.getByText("price_usd_per_mwh")).toBeVisible();
+    expect(screen.getByText(/USD\/MWh \| Global/)).toBeVisible();
+    expect(screen.getByText("2 periodos")).toBeVisible();
+    expect(
+      screen.getByText(
+        "2026-01-01T00:00:00-03:00 - 2026-01-01T02:00:00-03:00",
+      ),
+    ).toBeVisible();
+    expect(screen.getByText(/price\.csv \(text\/csv\)/)).toBeVisible();
+  });
 });
