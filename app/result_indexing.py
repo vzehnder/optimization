@@ -18,6 +18,45 @@ CORE_DISPATCH_BASE_COLUMNS = {
 }
 SINGLE_PRICE_COLUMNS = {"price_usd_per_mwh"}
 SEPARATE_PRICE_COLUMNS = {"import_price_usd_per_mwh", "export_price_usd_per_mwh"}
+HYDRO_BASE_COLUMNS = {
+    "total_hydro_power_mw",
+    "total_hydro_turbine_flow_m3s",
+    "total_hydro_spill_flow_m3s",
+    "total_hydro_storage_hm3",
+}
+
+# Maps raw dispatch.csv column spelling to a canonical signal key so
+# downstream read, comparison and publication surfaces do not depend on
+# artifact column naming. A missing raw column is simply absent from the
+# result, never fabricated.
+DISPATCH_SIGNAL_KEY_CATALOG: dict[str, str] = {
+    "grid_import_mw": "grid_import_power_mw",
+    "grid_export_mw": "grid_export_power_mw",
+    "price_usd_per_mwh": "energy_price_usd_per_mwh",
+    "import_price_usd_per_mwh": "grid_import_price_usd_per_mwh",
+    "export_price_usd_per_mwh": "grid_export_price_usd_per_mwh",
+    "market_value_usd": "market_value_usd",
+    "battery_charge_mw": "bess_charge_power_mw",
+    "battery_discharge_mw": "bess_discharge_power_mw",
+    "battery_energy_mwh": "bess_stored_energy_mwh",
+    "load_demand_mw": "load_demand_power_mw",
+    "renewable_used_mw": "renewable_used_power_mw",
+    "renewable_curtailed_mw": "renewable_curtailed_power_mw",
+    "total_hydro_power_mw": "hydro_generation_power_mw",
+    "total_hydro_inflow_m3s": "hydro_inflow_flow_m3s",
+    "total_hydro_turbine_flow_m3s": "hydro_turbine_flow_m3s",
+    "total_hydro_spill_flow_m3s": "hydro_spill_flow_m3s",
+    "total_hydro_storage_hm3": "hydro_storage_volume_hm3",
+    "total_hydro_reservoir_elevation_masl": "hydro_reservoir_elevation_masl",
+    "total_hydro_terminal_water_value_usd": "hydro_terminal_water_value_usd",
+    "total_hydro_spill_penalty_usd": "hydro_spill_cost_usd",
+    "period_profit_usd": "period_profit_usd",
+    "battery_degradation_cost_usd": "bess_degradation_cost_usd",
+    "curtailment_penalty_usd": "renewable_curtailment_cost_usd",
+    "import_cost_usd": "grid_import_cost_usd",
+    "export_revenue_usd": "grid_export_revenue_usd",
+    "net_market_value_usd": "net_market_value_usd",
+}
 
 
 class ResultIndexingError(ValueError):
@@ -48,7 +87,7 @@ def index_run_dispatch_results(
             columns = list(reader.fieldnames or [])
             if not columns:
                 raise ResultIndexingError("dispatch.csv is missing a header row")
-            if not supports_core_dispatch_index(columns):
+            if not supports_dispatch_index(columns):
                 return None
             rows = [dict(row) for row in reader]
     except OSError as error:
@@ -59,7 +98,20 @@ def index_run_dispatch_results(
         scenario_version_id=int(run["scenario_version_id"]),
         columns=columns,
         rows=rows,
+        signal_keys=dispatch_signal_keys(columns),
     )
+
+
+def dispatch_signal_keys(columns: list[str]) -> dict[str, str]:
+    return {
+        column: DISPATCH_SIGNAL_KEY_CATALOG[column]
+        for column in columns
+        if column in DISPATCH_SIGNAL_KEY_CATALOG
+    }
+
+
+def supports_dispatch_index(columns: list[str]) -> bool:
+    return supports_core_dispatch_index(columns) or supports_hydro_only_dispatch_index(columns)
 
 
 def supports_core_dispatch_index(columns: list[str]) -> bool:
@@ -67,6 +119,10 @@ def supports_core_dispatch_index(columns: list[str]) -> bool:
     if not CORE_DISPATCH_BASE_COLUMNS.issubset(column_set):
         return False
     return bool(SINGLE_PRICE_COLUMNS.issubset(column_set) or SEPARATE_PRICE_COLUMNS.issubset(column_set))
+
+
+def supports_hydro_only_dispatch_index(columns: list[str]) -> bool:
+    return HYDRO_BASE_COLUMNS.issubset(set(columns))
 
 
 def resolve_artifact_path(path_text: str, artifact_root: Path | str) -> Path:

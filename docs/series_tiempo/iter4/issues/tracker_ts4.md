@@ -32,7 +32,7 @@ really begins and ends.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | BESS-TS4-000 | Review TS-4 PRD And Result Series Semantics | HITL | ready-for-agent | Done | 2026-07-08 | 2026-07-08 | None | [BESS-TS4-000-review-ts4-prd-and-result-series-semantics.md](BESS-TS4-000-review-ts4-prd-and-result-series-semantics.md) |
 | BESS-TS4-001 | Index Core Dispatch Result Series From A Successful Run | AFK | ready-for-agent | Done | 2026-07-09 | 2026-07-10 | BESS-TS4-000 | [BESS-TS4-001-index-core-dispatch-result-series-from-a-successful-run.md](BESS-TS4-001-index-core-dispatch-result-series-from-a-successful-run.md) |
-| BESS-TS4-002 | Extend Result Indexing To All Dispatch Signal Families | AFK | ready-for-agent | Todo | 2026-07-13 | 2026-07-14 | BESS-TS4-001 | [BESS-TS4-002-extend-result-indexing-to-all-dispatch-signal-families.md](BESS-TS4-002-extend-result-indexing-to-all-dispatch-signal-families.md) |
+| BESS-TS4-002 | Extend Result Indexing To All Dispatch Signal Families | AFK | ready-for-agent | Done | 2026-07-13 | 2026-07-14 | BESS-TS4-001 | [BESS-TS4-002-extend-result-indexing-to-all-dispatch-signal-families.md](BESS-TS4-002-extend-result-indexing-to-all-dispatch-signal-families.md) |
 | BESS-TS4-003 | Index Asset-Level Dispatch Rows | AFK | ready-for-agent | Todo | 2026-07-15 | 2026-07-15 | BESS-TS4-001 | [BESS-TS4-003-index-asset-level-dispatch-rows.md](BESS-TS4-003-index-asset-level-dispatch-rows.md) |
 | BESS-TS4-004 | Index Summary KPIs Linked To Result Series | AFK | ready-for-agent | Todo | 2026-07-16 | 2026-07-16 | BESS-TS4-001 | [BESS-TS4-004-index-summary-kpis-linked-to-result-series.md](BESS-TS4-004-index-summary-kpis-linked-to-result-series.md) |
 | BESS-TS4-005 | Record Full Result Lineage With Drift-Proof Constraints | AFK | ready-for-agent | Todo | 2026-07-17 | 2026-07-20 | BESS-TS4-001 | [BESS-TS4-005-record-full-result-lineage-with-drift-proof-constraints.md](BESS-TS4-005-record-full-result-lineage-with-drift-proof-constraints.md) |
@@ -63,6 +63,7 @@ really begins and ends.
 | 2026-07-07 | All | Created | Initial local issue set generated from the TS-4 PRD (`docs/series_tiempo/iter4/prd.md`) and the series hierarchy roadmap. |
 | 2026-07-07 | BESS-TS4-000 | Done | Accepted the dedicated run-result storage model in `docs/series_tiempo/iter4/decision_record_ts4_result_semantics.md` and corrected the TS-4 PRD before implementation. |
 | 2026-07-07 | BESS-TS4-001 | Done | Added post-run core `dispatch.csv` indexing, BBDD-first results-table reads with artifact fallback, focused backend/frontend coverage, and live verification with run `21` indexed and run `8` falling back to artifacts. |
+| 2026-07-07 | BESS-TS4-002 | Done | Extended the indexing gate to also accept hydraulic-diagram-only `dispatch.csv` (no grid/battery/price columns), added a canonical `signal_keys` catalog/mapping for demand, renewable, hydro and economics families stored in a new `signal_keys_json` column, and verified against real Postgres by indexing production run `19` (`hybrid_system`). |
 
 ## Final TS-4 Verification
 

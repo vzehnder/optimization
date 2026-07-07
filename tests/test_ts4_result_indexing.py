@@ -108,6 +108,81 @@ class DispatchResultIndexingTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_indexes_hydro_only_diagram_dispatch_csv_without_grid_or_battery_columns(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_hydro_only_dispatch_artifacts(store, artifact_root)
+
+                indexed = index_run_dispatch_results(
+                    store=store,
+                    run=run,
+                    artifacts=store.list_run_artifacts(run["id"]),
+                    artifact_root=artifact_root,
+                )
+
+                self.assertIsNotNone(indexed)
+                self.assertIn("total_hydro_power_mw", indexed["columns"])
+                self.assertEqual(indexed["rows"][0]["total_hydro_storage_hm3"], "3.0")
+            finally:
+                store.close()
+
+    def test_indexes_demand_renewable_and_economics_signal_keys_for_a_hybrid_run(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_full_hybrid_dispatch_artifacts(store, artifact_root)
+
+                indexed = index_run_dispatch_results(
+                    store=store,
+                    run=run,
+                    artifacts=store.list_run_artifacts(run["id"]),
+                    artifact_root=artifact_root,
+                )
+
+                self.assertIsNotNone(indexed)
+                signal_keys = indexed["signal_keys"]
+                self.assertEqual(signal_keys["load_demand_mw"], "load_demand_power_mw")
+                self.assertEqual(signal_keys["renewable_used_mw"], "renewable_used_power_mw")
+                self.assertEqual(signal_keys["renewable_curtailed_mw"], "renewable_curtailed_power_mw")
+                self.assertEqual(signal_keys["period_profit_usd"], "period_profit_usd")
+                self.assertEqual(signal_keys["battery_degradation_cost_usd"], "bess_degradation_cost_usd")
+                self.assertEqual(signal_keys["export_revenue_usd"], "grid_export_revenue_usd")
+            finally:
+                store.close()
+
+    def test_missing_signal_families_are_absent_from_signal_keys_without_errors(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                core_run = create_completed_run_with_core_dispatch_artifacts(store, artifact_root)
+                core_indexed = index_run_dispatch_results(
+                    store=store,
+                    run=core_run,
+                    artifacts=store.list_run_artifacts(core_run["id"]),
+                    artifact_root=artifact_root,
+                )
+                self.assertNotIn("total_hydro_power_mw", core_indexed["signal_keys"])
+                self.assertNotIn("load_demand_mw", core_indexed["signal_keys"])
+
+                hydro_run = create_completed_run_with_hydro_only_dispatch_artifacts(
+                    store, artifact_root / "hydro"
+                )
+                hydro_indexed = index_run_dispatch_results(
+                    store=store,
+                    run=hydro_run,
+                    artifacts=store.list_run_artifacts(hydro_run["id"]),
+                    artifact_root=artifact_root / "hydro",
+                )
+                self.assertNotIn("battery_charge_mw", hydro_indexed["signal_keys"])
+                self.assertNotIn("renewable_used_mw", hydro_indexed["signal_keys"])
+                self.assertEqual(hydro_indexed["signal_keys"]["total_hydro_power_mw"], "hydro_generation_power_mw")
+            finally:
+                store.close()
+
     def test_indexer_accepts_relative_dispatch_artifact_paths(self):
         temp_root = Path.cwd() / ".tmp"
         temp_root.mkdir(parents=True, exist_ok=True)
@@ -178,6 +253,155 @@ def create_completed_run_with_core_dispatch_artifacts(store: AnalystStore, artif
         system_case_json={
             "schema_version": "bess_system_dispatch.v1",
             "case_name": "hybrid_system",
+            "nodes": [],
+            "time_series": [],
+        },
+        validation_payload={"status": "ok"},
+    )
+    run = store.create_run(scenario_version_id=scenario_version["id"])
+    store.mark_run_running(
+        run["id"],
+        workspace_path=str(artifact_root / "runs" / str(run["id"])),
+        input_snapshot_path=str(artifact_root / "runs" / str(run["id"]) / "input" / "system_case.json"),
+    )
+    run = store.mark_run_succeeded(
+        run["id"],
+        exit_code=0,
+        stdout="{}",
+        stderr="",
+        success_payload={"termination_status": "OPTIMAL"},
+        output_dir=str(output_dir),
+        summary_path=str(summary_path),
+    )
+    for artifact_type, path, display_name, media_type in [
+        ("summary_json", summary_path, "summary.json", "application/json"),
+        ("dispatch_csv", dispatch_path, "dispatch.csv", "text/csv"),
+        ("asset_dispatch_csv", asset_dispatch_path, "asset_dispatch.csv", "text/csv"),
+    ]:
+        store.register_run_artifact(
+            run_id=run["id"],
+            artifact_type=artifact_type,
+            path=str(path),
+            display_name=display_name,
+            media_type=media_type,
+        )
+    return run
+
+
+def create_completed_run_with_hydro_only_dispatch_artifacts(store: AnalystStore, artifact_root: Path) -> dict:
+    output_dir = artifact_root / "runs" / "1" / "outputs"
+    output_dir.mkdir(parents=True)
+    summary_path = output_dir / "summary.json"
+    dispatch_path = output_dir / "dispatch.csv"
+    asset_dispatch_path = output_dir / "asset_dispatch.csv"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "case_name": "hydraulic_diagram_system",
+                "solver_status": "OPTIMAL",
+                "termination_status": "OPTIMAL",
+                "objective_value_usd": 900.0,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    dispatch_path.write_text(
+        "timestamp,duration_hours,total_hydro_power_mw,total_hydro_inflow_m3s,"
+        "total_hydro_turbine_flow_m3s,total_hydro_spill_flow_m3s,total_hydro_storage_hm3,"
+        "total_hydro_reservoir_elevation_masl,total_hydro_terminal_water_value_usd\n"
+        "2026-01-01T00:00:00,1.0,2.0,25.0,25.0,0.0,3.0,710.0,0.0\n",
+        encoding="utf-8",
+    )
+    asset_dispatch_path.write_text(
+        "timestamp,asset_id,asset_type\n2026-01-01T00:00:00,hydro_1,hydraulic_unit\n",
+        encoding="utf-8",
+    )
+
+    project = store.create_project(name="TS4 Hydro Diagram Project")
+    scenario = store.create_scenario(project_id=project["id"], name="Hydro diagram case")
+    scenario_version = store.create_scenario_version(
+        scenario_id=scenario["id"],
+        system_case_json={
+            "schema_version": "bess_system_dispatch.v1",
+            "case_name": "hydraulic_diagram_system",
+            "nodes": [],
+            "time_series": [],
+        },
+        validation_payload={"status": "ok"},
+    )
+    run = store.create_run(scenario_version_id=scenario_version["id"])
+    store.mark_run_running(
+        run["id"],
+        workspace_path=str(artifact_root / "runs" / str(run["id"])),
+        input_snapshot_path=str(artifact_root / "runs" / str(run["id"]) / "input" / "system_case.json"),
+    )
+    run = store.mark_run_succeeded(
+        run["id"],
+        exit_code=0,
+        stdout="{}",
+        stderr="",
+        success_payload={"termination_status": "OPTIMAL"},
+        output_dir=str(output_dir),
+        summary_path=str(summary_path),
+    )
+    for artifact_type, path, display_name, media_type in [
+        ("summary_json", summary_path, "summary.json", "application/json"),
+        ("dispatch_csv", dispatch_path, "dispatch.csv", "text/csv"),
+        ("asset_dispatch_csv", asset_dispatch_path, "asset_dispatch.csv", "text/csv"),
+    ]:
+        store.register_run_artifact(
+            run_id=run["id"],
+            artifact_type=artifact_type,
+            path=str(path),
+            display_name=display_name,
+            media_type=media_type,
+        )
+    return run
+
+
+def create_completed_run_with_full_hybrid_dispatch_artifacts(store: AnalystStore, artifact_root: Path) -> dict:
+    output_dir = artifact_root / "runs" / "1" / "outputs"
+    output_dir.mkdir(parents=True)
+    summary_path = output_dir / "summary.json"
+    dispatch_path = output_dir / "dispatch.csv"
+    asset_dispatch_path = output_dir / "asset_dispatch.csv"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "case_name": "separate_price_hybrid_system",
+                "solver_status": "OPTIMAL",
+                "termination_status": "OPTIMAL",
+                "objective_value_usd": 500.0,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    dispatch_path.write_text(
+        "timestamp,duration_hours,import_price_usd_per_mwh,export_price_usd_per_mwh,"
+        "grid_import_mw,grid_export_mw,renewable_used_mw,renewable_curtailed_mw,load_demand_mw,"
+        "battery_charge_mw,battery_discharge_mw,battery_energy_mwh,import_cost_usd,"
+        "export_revenue_usd,net_market_value_usd,market_value_usd,"
+        "battery_degradation_cost_usd,curtailment_penalty_usd,period_profit_usd\n"
+        "2026-01-01T00:00:00,1.0,10.0,100.0,5.0,0.0,3.0,1.0,8.0,0.0,5.0,20.0,0.0,"
+        "-50.0,-50.0,-50.0,0.5,0.1,-50.6\n",
+        encoding="utf-8",
+    )
+    asset_dispatch_path.write_text(
+        "timestamp,asset_id,asset_type\n2026-01-01T00:00:00,grid_1,grid\n",
+        encoding="utf-8",
+    )
+
+    project = store.create_project(name="TS4 Hybrid Project")
+    scenario = store.create_scenario(project_id=project["id"], name="Separate price hybrid case")
+    scenario_version = store.create_scenario_version(
+        scenario_id=scenario["id"],
+        system_case_json={
+            "schema_version": "bess_system_dispatch.v1",
+            "case_name": "separate_price_hybrid_system",
             "nodes": [],
             "time_series": [],
         },

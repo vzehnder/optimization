@@ -724,6 +724,7 @@ class AnalystStore:
                 run_id INTEGER PRIMARY KEY,
                 scenario_version_id INTEGER NOT NULL,
                 dispatch_columns_json TEXT NOT NULL,
+                signal_keys_json TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
                 FOREIGN KEY (scenario_version_id) REFERENCES scenario_versions(id) ON DELETE CASCADE
@@ -857,6 +858,7 @@ class AnalystStore:
             "generation_mode",
             "TEXT NOT NULL DEFAULT 'flow_power_curve'",
         )
+        self._ensure_column("run_dispatch_result_indexes", "signal_keys_json", "TEXT NOT NULL DEFAULT '{}'")
         self.connection.commit()
 
     def _ensure_column(self, table_name: str, column_name: str, definition: str) -> None:
@@ -4233,6 +4235,7 @@ class AnalystStore:
         scenario_version_id: int,
         columns: list[str],
         rows: list[dict[str, Any]],
+        signal_keys: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             run = self.get_run(run_id)
@@ -4246,18 +4249,21 @@ class AnalystStore:
                     run_id,
                     scenario_version_id,
                     dispatch_columns_json,
+                    signal_keys_json,
                     created_at
                 )
-                VALUES (?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT (run_id) DO UPDATE SET
                     scenario_version_id = excluded.scenario_version_id,
                     dispatch_columns_json = excluded.dispatch_columns_json,
+                    signal_keys_json = excluded.signal_keys_json,
                     created_at = excluded.created_at
                 """,
                 (
                     run_id,
                     scenario_version_id,
                     json.dumps(columns),
+                    json.dumps(signal_keys or {}),
                     now,
                 ),
             )
@@ -4314,7 +4320,7 @@ class AnalystStore:
         self.get_run(run_id)
         index_row = self.connection.execute(
             """
-            SELECT run_id, scenario_version_id, dispatch_columns_json, created_at
+            SELECT run_id, scenario_version_id, dispatch_columns_json, signal_keys_json, created_at
             FROM run_dispatch_result_indexes
             WHERE run_id = ?
             """,
@@ -4336,6 +4342,7 @@ class AnalystStore:
             "run_id": int(index_row["run_id"]),
             "scenario_version_id": int(index_row["scenario_version_id"]),
             "columns": json.loads(index_row["dispatch_columns_json"]),
+            "signal_keys": json.loads(index_row["signal_keys_json"] or "{}"),
             "rows": [json.loads(str(row["row_json"])) for row in row_records],
             "created_at": str(index_row["created_at"]),
         }
