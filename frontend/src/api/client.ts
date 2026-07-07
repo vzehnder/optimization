@@ -876,6 +876,18 @@ async function postJsonWithCsrf<T>(path: string, body?: unknown): Promise<T> {
   });
 }
 
+async function patchJsonWithCsrf<T>(path: string, body?: unknown): Promise<T> {
+  const csrfToken = await getCsrfToken();
+  return requestJson<T>(path, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrfToken,
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
 export async function bootstrapAdmin(
   payload: BootstrapAdminPayload,
 ): Promise<AuthSessionResponse> {
@@ -1143,9 +1155,31 @@ export interface DefaultInputVariantResponse {
   required_signals: RequiredSignalStatus[];
 }
 
+export interface CaseInputVariantDetail {
+  variant: CaseInputVariant;
+  bindings: CaseTimeSeriesBinding[];
+  required_signals: RequiredSignalStatus[];
+}
+
+export interface CaseInputVariantListResponse {
+  case: {
+    id: number;
+    scenario_id: number;
+    case_key: string;
+    display_name: string;
+    updated_at: string;
+  };
+  default_variant_id: number;
+  variants: CaseInputVariantDetail[];
+}
+
 export interface CaseTimeSeriesBindingPayload {
   signal_key: string;
   time_series_set_id: number;
+}
+
+export interface CaseInputVariantWritePayload {
+  display_name: string;
 }
 
 export interface CaseInputVariantRunPayload {
@@ -1160,6 +1194,48 @@ export async function getDefaultInputVariant(
   return requestJson<DefaultInputVariantResponse>(
     `/api/scenarios/${scenarioId}/case/default-variant`,
     { signal },
+  );
+}
+
+export async function listCaseInputVariants(
+  scenarioId: number,
+  signal?: AbortSignal,
+): Promise<CaseInputVariantListResponse> {
+  return requestJson<CaseInputVariantListResponse>(
+    `/api/scenarios/${scenarioId}/case/variants`,
+    { signal },
+  );
+}
+
+export async function createCaseInputVariant(
+  scenarioId: number,
+  payload: CaseInputVariantWritePayload,
+): Promise<CaseInputVariant> {
+  return postJsonWithCsrf<CaseInputVariant>(
+    `/api/scenarios/${scenarioId}/case/variants`,
+    payload,
+  );
+}
+
+export async function cloneCaseInputVariant(
+  scenarioId: number,
+  variantId: number,
+  payload: CaseInputVariantWritePayload,
+): Promise<CaseInputVariant> {
+  return postJsonWithCsrf<CaseInputVariant>(
+    `/api/scenarios/${scenarioId}/case/variants/${variantId}/clone`,
+    payload,
+  );
+}
+
+export async function updateCaseInputVariant(
+  scenarioId: number,
+  variantId: number,
+  payload: CaseInputVariantWritePayload,
+): Promise<CaseInputVariant> {
+  return patchJsonWithCsrf<CaseInputVariant>(
+    `/api/scenarios/${scenarioId}/case/variants/${variantId}`,
+    payload,
   );
 }
 

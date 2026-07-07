@@ -4094,6 +4094,151 @@ class AnalystStore:
             ).fetchone()
         )
 
+    def get_case_input_variant(self, variant_id: int) -> dict[str, Any]:
+        row = self.connection.execute(
+            """
+            SELECT id, case_id, variant_key, display_name, is_default,
+                   created_at, updated_at, created_by, updated_by
+            FROM case_input_variants
+            WHERE id = ?
+            """,
+            (variant_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"case input variant {variant_id} not found")
+        return case_input_variant_row_to_dict(row)
+
+    def get_case_input_variant_for_case(self, case_id: int, variant_id: int) -> dict[str, Any]:
+        row = self.connection.execute(
+            """
+            SELECT id, case_id, variant_key, display_name, is_default,
+                   created_at, updated_at, created_by, updated_by
+            FROM case_input_variants
+            WHERE case_id = ? AND id = ?
+            """,
+            (case_id, variant_id),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"case input variant {variant_id} not found for case {case_id}")
+        return case_input_variant_row_to_dict(row)
+
+    def list_case_input_variants(self, case_id: int) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            """
+            SELECT id, case_id, variant_key, display_name, is_default,
+                   created_at, updated_at, created_by, updated_by
+            FROM case_input_variants
+            WHERE case_id = ?
+            ORDER BY is_default DESC, id ASC
+            """,
+            (case_id,),
+        ).fetchall()
+        return [case_input_variant_row_to_dict(row) for row in rows]
+
+    def _next_case_input_variant_key(self, case_id: int, display_name: str) -> str:
+        base_key = normalize_variant_key(display_name)
+        candidate = base_key
+        suffix = 2
+        while (
+            self.connection.execute(
+                """
+                SELECT 1
+                FROM case_input_variants
+                WHERE case_id = ? AND variant_key = ?
+                """,
+                (case_id, candidate),
+            ).fetchone()
+            is not None
+        ):
+            candidate = f"{base_key}_{suffix}"
+            suffix += 1
+        return candidate
+
+    def create_case_input_variant(
+        self,
+        *,
+        case_id: int,
+        display_name: str,
+        created_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        clean_name = display_name.strip()
+        if clean_name == "":
+            raise ValueError("variant display name is required")
+        now = utc_now_iso()
+        cursor = self.connection.execute(
+            """
+            INSERT INTO case_input_variants (
+                case_id,
+                variant_key,
+                display_name,
+                is_default,
+                created_at,
+                updated_at,
+                created_by,
+                updated_by
+            )
+            VALUES (?, ?, ?, 0, ?, ?, ?, ?)
+            """,
+            (
+                case_id,
+                self._next_case_input_variant_key(case_id, clean_name),
+                clean_name,
+                now,
+                now,
+                created_by,
+                created_by,
+            ),
+        )
+        self.connection.commit()
+        return self.get_case_input_variant(int(cursor.lastrowid))
+
+    def update_case_input_variant(
+        self,
+        *,
+        case_id: int,
+        variant_id: int,
+        display_name: str,
+        updated_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        self.get_case_input_variant_for_case(case_id, variant_id)
+        clean_name = display_name.strip()
+        if clean_name == "":
+            raise ValueError("variant display name is required")
+        now = utc_now_iso()
+        self.connection.execute(
+            """
+            UPDATE case_input_variants
+            SET display_name = ?, updated_at = ?, updated_by = ?
+            WHERE case_id = ? AND id = ?
+            """,
+            (clean_name, now, updated_by, case_id, variant_id),
+        )
+        self.connection.commit()
+        return self.get_case_input_variant_for_case(case_id, variant_id)
+
+    def clone_case_input_variant(
+        self,
+        *,
+        case_id: int,
+        source_variant_id: int,
+        display_name: str,
+        created_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        source_variant = self.get_case_input_variant_for_case(case_id, source_variant_id)
+        clone = self.create_case_input_variant(
+            case_id=case_id,
+            display_name=display_name,
+            created_by=created_by,
+        )
+        for binding in self.list_case_time_series_bindings(source_variant["id"]):
+            self.upsert_case_time_series_binding(
+                case_input_variant_id=clone["id"],
+                signal_key=str(binding["signal_key"]),
+                time_series_set_id=int(binding["time_series_set_id"]),
+                created_by=created_by,
+            )
+        return clone
+
     def upsert_case_time_series_binding(
         self,
         *,
@@ -6473,6 +6618,21 @@ def user_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
     value = row_to_dict(row)
     value["is_active"] = bool(value["is_active"])
     return value
+
+
+def normalize_variant_key(display_name: str) -> str:
+    characters: list[str] = []
+    previous_was_separator = False
+    for character in display_name.strip().lower():
+        if character.isalnum():
+            characters.append(character)
+            previous_was_separator = False
+            continue
+        if not previous_was_separator:
+            characters.append("_")
+            previous_was_separator = True
+    normalized = "".join(characters).strip("_")
+    return normalized or "variant"
 
 
 def case_input_variant_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:

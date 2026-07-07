@@ -904,7 +904,7 @@ describe("application shell", () => {
             headers: { "Content-Type": "application/json" },
           });
         }
-        if (path === "/api/scenarios/10/case/default-variant") {
+        if (path === "/api/scenarios/10/case/variants") {
           return new Response(
             JSON.stringify({
               case: {
@@ -914,24 +914,29 @@ describe("application shell", () => {
                 display_name: "Base case",
                 updated_at: "2026-07-06T12:00:00Z",
               },
-              variant: {
-                id: 3,
-                case_id: 1,
-                variant_key: "default",
-                display_name: "Default",
-                is_default: true,
-                created_at: "2026-07-06T12:00:00Z",
-                updated_at: "2026-07-06T12:00:00Z",
-              },
-              bindings: [],
-              required_signals: [
+              default_variant_id: 3,
+              variants: [
                 {
-                  entity_type: "grid",
-                  entity_id: "grid_1",
-                  signal_key: "price_usd_per_mwh",
-                  bound: false,
-                  bound_signal_key: null,
-                  time_series_set_id: null,
+                  variant: {
+                    id: 3,
+                    case_id: 1,
+                    variant_key: "default",
+                    display_name: "Default",
+                    is_default: true,
+                    created_at: "2026-07-06T12:00:00Z",
+                    updated_at: "2026-07-06T12:00:00Z",
+                  },
+                  bindings: [],
+                  required_signals: [
+                    {
+                      entity_type: "grid",
+                      entity_id: "grid_1",
+                      signal_key: "price_usd_per_mwh",
+                      bound: false,
+                      bound_signal_key: null,
+                      time_series_set_id: null,
+                    },
+                  ],
                 },
               ],
             }),
@@ -939,9 +944,12 @@ describe("application shell", () => {
           );
         }
         if (path === "/api/projects/1/time-series-sets") {
-          return new Response(JSON.stringify({ time_series_sets: [priceSet] }), {
-            headers: { "Content-Type": "application/json" },
-          });
+          return new Response(
+            JSON.stringify({ time_series_sets: [priceSet] }),
+            {
+              headers: { "Content-Type": "application/json" },
+            },
+          );
         }
         if (path === "/api/projects/1/time-series-sets/5") {
           return new Response(
@@ -1016,8 +1024,10 @@ describe("application shell", () => {
       screen.getByLabelText("Serie de precio (price_usd_per_mwh)"),
       "5",
     );
-    expect(await screen.findByLabelText("Inicio de rango")).toHaveValue(
-      "2026-01-01T00:00:00-03:00",
+    await waitFor(() =>
+      expect(screen.getByLabelText("Inicio de rango")).toHaveValue(
+        "2026-01-01T00:00:00-03:00",
+      ),
     );
     expect(screen.getByLabelText("Fin de rango")).toHaveValue(
       "2026-01-01T03:00:00-03:00",
@@ -1030,7 +1040,381 @@ describe("application shell", () => {
 
     await waitFor(() => expect(bindCalls).toBe(1));
     await waitFor(() => expect(runCalls).toBe(1));
-    expect(await screen.findByRole("heading", { name: "Run 77" })).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: "Run 77" }),
+    ).toBeVisible();
+  });
+
+  it("clones variants, switches them from dropdown, and persists active selection", async () => {
+    window.localStorage.clear();
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Initial modeling branch",
+      created_at: "2026-06-23T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-06-23T12:00:00Z",
+    };
+    const caseRecord = {
+      id: 1,
+      scenario_id: 10,
+      case_key: "scenario_10_case",
+      display_name: "Base case",
+      updated_at: "2026-07-06T12:00:00Z",
+    };
+    const requiredSignals = [
+      {
+        entity_type: "grid",
+        entity_id: "grid_1",
+        signal_key: "price_usd_per_mwh",
+        bound: true,
+        bound_signal_key: "price_usd_per_mwh",
+        time_series_set_id: 5,
+      },
+    ];
+    const priceSet = {
+      id: 5,
+      project_id: 1,
+      name: "Spot price",
+      version_number: 1,
+      version_label: "v1",
+      revision_number: 1,
+      data_kind: "real",
+      timezone: "America/Santiago",
+      status: "validated",
+      content_hash: "hash-5",
+      signal_count: 1,
+      period_count: 3,
+    };
+    const stressSet = {
+      id: 6,
+      project_id: 1,
+      name: "Stress price",
+      version_number: 1,
+      version_label: "dry-year",
+      revision_number: 1,
+      data_kind: "real",
+      timezone: "America/Santiago",
+      status: "validated",
+      content_hash: "hash-6",
+      signal_count: 1,
+      period_count: 3,
+    };
+    const buildSetDetail = (set: typeof priceSet) => ({
+      ...set,
+      source_checksum: null,
+      revision_metadata: {},
+      source: null,
+      horizon: {
+        period_count: 3,
+        start: "2026-01-01T00:00:00-03:00",
+        end: "2026-01-01T03:00:00-03:00",
+      },
+      signals: [
+        {
+          signal_key: "price_usd_per_mwh",
+          unit: "USD/MWh",
+          entity_type: null,
+          entity_key: null,
+        },
+      ],
+      periods: [
+        {
+          period_index: 0,
+          timestamp_start: "2026-01-01T00:00:00-03:00",
+          timestamp_end: "2026-01-01T01:00:00-03:00",
+          duration_hours: 1,
+        },
+        {
+          period_index: 1,
+          timestamp_start: "2026-01-01T01:00:00-03:00",
+          timestamp_end: "2026-01-01T02:00:00-03:00",
+          duration_hours: 1,
+        },
+        {
+          period_index: 2,
+          timestamp_start: "2026-01-01T02:00:00-03:00",
+          timestamp_end: "2026-01-01T03:00:00-03:00",
+          duration_hours: 1,
+        },
+      ],
+      values: [],
+    });
+    const run = {
+      id: 88,
+      scenario_version_id: 56,
+      status: "queued",
+      created_at: "2026-07-06T12:20:00Z",
+      started_at: null,
+      finished_at: null,
+      duration_seconds: null,
+      exit_code: null,
+      error_message: "",
+      stdout: "",
+      stderr: "",
+    };
+    let nextVariantId = 4;
+    let bindCalls = 0;
+    let runCalls = 0;
+    const variantEntries = [
+      {
+        variant: {
+          id: 3,
+          case_id: 1,
+          variant_key: "default",
+          display_name: "Default",
+          is_default: true,
+          created_at: "2026-07-06T12:00:00Z",
+          updated_at: "2026-07-06T12:00:00Z",
+        },
+        bindings: [
+          {
+            id: 9,
+            case_input_variant_id: 3,
+            signal_key: "price_usd_per_mwh",
+            time_series_set_id: 5,
+            required: true,
+            created_at: "2026-07-06T12:16:00Z",
+            updated_at: "2026-07-06T12:16:00Z",
+          },
+        ],
+        required_signals: requiredSignals,
+      },
+    ];
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/case/variants" && method === "GET") {
+          return new Response(
+            JSON.stringify({
+              case: caseRecord,
+              default_variant_id: 3,
+              variants: variantEntries,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/projects/1/time-series-sets") {
+          return new Response(
+            JSON.stringify({ time_series_sets: [priceSet, stressSet] }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/projects/1/time-series-sets/5") {
+          return new Response(
+            JSON.stringify({ time_series_set: buildSetDetail(priceSet) }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/projects/1/time-series-sets/6") {
+          return new Response(
+            JSON.stringify({ time_series_set: buildSetDetail(stressSet) }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (
+          path === "/api/scenarios/10/case/variants/3/clone" &&
+          method === "POST"
+        ) {
+          const body = JSON.parse(String(init?.body));
+          expect(body).toEqual({ display_name: "Stress prices" });
+          const source = variantEntries[0];
+          const clonedVariant = {
+            variant: {
+              ...source.variant,
+              id: nextVariantId,
+              variant_key: "stress_prices",
+              display_name: "Stress prices",
+              is_default: false,
+            },
+            bindings: source.bindings.map((binding) => ({
+              ...binding,
+              id: binding.id + 100,
+              case_input_variant_id: nextVariantId,
+            })),
+            required_signals: source.required_signals.map((signal) => ({
+              ...signal,
+            })),
+          };
+          variantEntries.push(clonedVariant);
+          nextVariantId += 1;
+          return new Response(JSON.stringify(clonedVariant.variant), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/case/variants/4/bindings" &&
+          method === "POST"
+        ) {
+          bindCalls += 1;
+          const body = JSON.parse(String(init?.body));
+          expect(body).toEqual({
+            signal_key: "price_usd_per_mwh",
+            time_series_set_id: 6,
+          });
+          const entry = variantEntries.find(
+            (variant) => variant.variant.id === 4,
+          );
+          if (!entry) throw new Error("cloned variant missing");
+          entry.bindings = [
+            {
+              id: 111,
+              case_input_variant_id: 4,
+              signal_key: "price_usd_per_mwh",
+              time_series_set_id: 6,
+              required: true,
+              created_at: "2026-07-06T12:25:00Z",
+              updated_at: "2026-07-06T12:25:00Z",
+            },
+          ];
+          entry.required_signals = [
+            {
+              ...requiredSignals[0],
+              time_series_set_id: 6,
+            },
+          ];
+          return new Response(JSON.stringify(entry.bindings[0]), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (
+          path === "/api/scenarios/10/case/variants/4/run" &&
+          method === "POST"
+        ) {
+          runCalls += 1;
+          const body = JSON.parse(String(init?.body));
+          expect(body).toEqual({
+            range_start: "2026-01-01T00:00:00-03:00",
+            range_end: "2026-01-01T03:00:00-03:00",
+          });
+          return new Response(JSON.stringify(run), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/runs/88") {
+          return new Response(JSON.stringify({ run }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    const firstRender = render(<App />);
+
+    expect(await screen.findByText("Precio vinculado: set #5.")).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByLabelText("Inicio de rango")).toHaveValue(
+        "2026-01-01T00:00:00-03:00",
+      ),
+    );
+    expect(screen.getByLabelText("Fin de rango")).toHaveValue(
+      "2026-01-01T03:00:00-03:00",
+    );
+
+    await user.type(
+      screen.getByLabelText("Nombre nueva variante"),
+      "Stress prices",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Clonar variante activa" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", {
+          name: "Variante de entrada: Stress prices",
+        }),
+      ).toBeVisible(),
+    );
+    expect(screen.getByLabelText("Variante activa")).toHaveValue("4");
+    expect(screen.getByText("Precio vinculado: set #5.")).toBeVisible();
+
+    await user.selectOptions(
+      screen.getByLabelText("Serie de precio (price_usd_per_mwh)"),
+      "6",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Vincular y correr variante" }),
+    );
+
+    await waitFor(() => expect(bindCalls).toBe(1));
+    await waitFor(() => expect(runCalls).toBe(1));
+    expect(
+      await screen.findByRole("heading", { name: "Run 88" }),
+    ).toBeVisible();
+
+    firstRender.unmount();
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    render(<App />);
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Variante activa")).toHaveValue("4"),
+    );
+    expect(
+      screen.getByRole("heading", {
+        name: "Variante de entrada: Stress prices",
+      }),
+    ).toBeVisible();
+    expect(screen.getByText("Precio vinculado: set #6.")).toBeVisible();
   });
 
   it("surfaces input variant coverage errors before launching", async () => {
@@ -1148,7 +1532,7 @@ describe("application shell", () => {
             headers: { "Content-Type": "application/json" },
           });
         }
-        if (path === "/api/scenarios/10/case/default-variant") {
+        if (path === "/api/scenarios/10/case/variants") {
           return new Response(
             JSON.stringify({
               case: {
@@ -1158,25 +1542,33 @@ describe("application shell", () => {
                 display_name: "Base case",
                 updated_at: "2026-07-06T12:00:00Z",
               },
-              variant: {
-                id: 3,
-                case_id: 1,
-                variant_key: "default",
-                display_name: "Default",
-                is_default: true,
-                created_at: "2026-07-06T12:00:00Z",
-                updated_at: "2026-07-06T12:00:00Z",
-              },
-              bindings: [],
-              required_signals: [],
+              default_variant_id: 3,
+              variants: [
+                {
+                  variant: {
+                    id: 3,
+                    case_id: 1,
+                    variant_key: "default",
+                    display_name: "Default",
+                    is_default: true,
+                    created_at: "2026-07-06T12:00:00Z",
+                    updated_at: "2026-07-06T12:00:00Z",
+                  },
+                  bindings: [],
+                  required_signals: [],
+                },
+              ],
             }),
             { headers: { "Content-Type": "application/json" } },
           );
         }
         if (path === "/api/projects/1/time-series-sets") {
-          return new Response(JSON.stringify({ time_series_sets: [priceSet] }), {
-            headers: { "Content-Type": "application/json" },
-          });
+          return new Response(
+            JSON.stringify({ time_series_sets: [priceSet] }),
+            {
+              headers: { "Content-Type": "application/json" },
+            },
+          );
         }
         if (path === "/api/projects/1/time-series-sets/5") {
           return new Response(
@@ -1187,10 +1579,13 @@ describe("application shell", () => {
         if (path === "/api/scenarios/10/case/variants/3/run") {
           runCalls += 1;
         }
-        return new Response(JSON.stringify({ detail: `unhandled ${method} ${path}` }), {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
       }),
     );
     const user = userEvent.setup();
@@ -1327,7 +1722,7 @@ describe("application shell", () => {
             headers: { "Content-Type": "application/json" },
           });
         }
-        if (path === "/api/scenarios/10/case/default-variant") {
+        if (path === "/api/scenarios/10/case/variants") {
           return new Response(
             JSON.stringify({
               case: {
@@ -1337,25 +1732,33 @@ describe("application shell", () => {
                 display_name: "Base case",
                 updated_at: "2026-07-06T12:00:00Z",
               },
-              variant: {
-                id: 3,
-                case_id: 1,
-                variant_key: "default",
-                display_name: "Default",
-                is_default: true,
-                created_at: "2026-07-06T12:00:00Z",
-                updated_at: "2026-07-06T12:00:00Z",
-              },
-              bindings: [],
-              required_signals: [],
+              default_variant_id: 3,
+              variants: [
+                {
+                  variant: {
+                    id: 3,
+                    case_id: 1,
+                    variant_key: "default",
+                    display_name: "Default",
+                    is_default: true,
+                    created_at: "2026-07-06T12:00:00Z",
+                    updated_at: "2026-07-06T12:00:00Z",
+                  },
+                  bindings: [],
+                  required_signals: [],
+                },
+              ],
             }),
             { headers: { "Content-Type": "application/json" } },
           );
         }
         if (path === "/api/projects/1/time-series-sets") {
-          return new Response(JSON.stringify({ time_series_sets: [priceSet] }), {
-            headers: { "Content-Type": "application/json" },
-          });
+          return new Response(
+            JSON.stringify({ time_series_sets: [priceSet] }),
+            {
+              headers: { "Content-Type": "application/json" },
+            },
+          );
         }
         if (path === "/api/projects/1/time-series-sets/5") {
           return new Response(
@@ -4680,7 +5083,9 @@ describe("application shell", () => {
     );
     await user.clear(screen.getByLabelText("Source unit 1"));
     await user.type(screen.getByLabelText("Source unit 1"), "USD/MWh");
-    await user.click(screen.getByRole("button", { name: "Add signal mapping" }));
+    await user.click(
+      screen.getByRole("button", { name: "Add signal mapping" }),
+    );
     await user.selectOptions(
       screen.getByLabelText("Mapped source column 2"),
       "sell_price",
@@ -4769,7 +5174,11 @@ describe("application shell", () => {
       available_sheets: ["Sheet1", "Sheet2"],
       columns: ["period_start", "hours", "spot_price"],
       preview_rows: [
-        { period_start: "2026-01-01T00:00:00", hours: "1.0", spot_price: "55.0" },
+        {
+          period_start: "2026-01-01T00:00:00",
+          hours: "1.0",
+          spot_price: "55.0",
+        },
       ],
     };
     const sheet2Source = {
@@ -4869,8 +5278,7 @@ describe("application shell", () => {
     await user.upload(
       screen.getByLabelText("Source file"),
       new File(["xlsx-bytes"], "prices.xlsx", {
-        type:
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       }),
     );
     await user.click(screen.getByRole("button", { name: "Upload source" }));
@@ -6954,10 +7362,9 @@ describe("application shell", () => {
           );
         }
         if (path === "/api/projects/1/time-series-sets/501") {
-          return new Response(
-            JSON.stringify({ time_series_set: setDetail }),
-            { headers: { "Content-Type": "application/json" } },
-          );
+          return new Response(JSON.stringify({ time_series_set: setDetail }), {
+            headers: { "Content-Type": "application/json" },
+          });
         }
         if (path === "/api/projects/1/time-series-sets/501/revisions") {
           return new Response(
@@ -7001,13 +7408,13 @@ describe("application shell", () => {
         name: "Catalogo de series de tiempo",
       }),
     ).toBeVisible();
-    expect(window.location.pathname).toBe(
-      "/react/projects/1/time-series-sets",
-    );
+    expect(window.location.pathname).toBe("/react/projects/1/time-series-sets");
     expect(
       screen.getByRole("link", { name: "Spot price Jan 2026 (v1)" }),
     ).toBeVisible();
-    expect(screen.getByText(/real \| validated \| America\/Santiago/)).toBeVisible();
+    expect(
+      screen.getByText(/real \| validated \| America\/Santiago/),
+    ).toBeVisible();
     expect(screen.getByText("sha256:abc123")).toBeVisible();
 
     await user.click(
@@ -7024,15 +7431,15 @@ describe("application shell", () => {
     expect(screen.getByText(/USD\/MWh \| Global/)).toBeVisible();
     expect(screen.getByText("2 periodos")).toBeVisible();
     expect(
-      screen.getByText(
-        "2026-01-01T00:00:00-03:00 - 2026-01-01T02:00:00-03:00",
-      ),
+      screen.getByText("2026-01-01T00:00:00-03:00 - 2026-01-01T02:00:00-03:00"),
     ).toBeVisible();
     expect(screen.getByText(/price\.csv \(text\/csv\)/)).toBeVisible();
     const revisionHistorySection = await screen.findByRole("region", {
       name: "Historial de revisiones",
     });
-    expect(within(revisionHistorySection).getByText("Revision 1")).toBeVisible();
+    expect(
+      within(revisionHistorySection).getByText("Revision 1"),
+    ).toBeVisible();
   });
 
   it("edits a time-series set value and creates a new auditable revision", async () => {
@@ -7141,7 +7548,10 @@ describe("application shell", () => {
             headers: { "Content-Type": "application/json" },
           });
         }
-        if (path === "/api/projects/1/time-series-sets/501" && method === "GET") {
+        if (
+          path === "/api/projects/1/time-series-sets/501" &&
+          method === "GET"
+        ) {
           return new Response(
             JSON.stringify({
               time_series_set: editApplied ? editedSetDetail : baseSetDetail,
@@ -7327,7 +7737,11 @@ describe("application shell", () => {
       stored_path: "/tmp/csv_replace_1_price_corrected.csv",
       columns: ["period_start", "hours", "spot_price"],
       preview_rows: [
-        { period_start: "2026-01-01T00:00:00", hours: "1.0", spot_price: "57.5" },
+        {
+          period_start: "2026-01-01T00:00:00",
+          hours: "1.0",
+          spot_price: "57.5",
+        },
       ],
     };
     const replacedSetDetail = {
@@ -7379,10 +7793,15 @@ describe("application shell", () => {
             headers: { "Content-Type": "application/json" },
           });
         }
-        if (path === "/api/projects/1/time-series-sets/501" && method === "GET") {
+        if (
+          path === "/api/projects/1/time-series-sets/501" &&
+          method === "GET"
+        ) {
           return new Response(
             JSON.stringify({
-              time_series_set: replaceApplied ? replacedSetDetail : baseSetDetail,
+              time_series_set: replaceApplied
+                ? replacedSetDetail
+                : baseSetDetail,
             }),
             { headers: { "Content-Type": "application/json" } },
           );
@@ -7391,10 +7810,10 @@ describe("application shell", () => {
           path === "/api/projects/1/time-series-sets/501/replace/upload" &&
           method === "POST"
         ) {
-          return new Response(
-            JSON.stringify({ source: replacementSource }),
-            { status: 201, headers: { "Content-Type": "application/json" } },
-          );
+          return new Response(JSON.stringify({ source: replacementSource }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
         }
         if (
           path === "/api/projects/1/time-series-sets/501/replace" &&

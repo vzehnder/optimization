@@ -19,6 +19,7 @@ import {
 import {
   ApiError,
   bindCaseTimeSeries,
+  cloneCaseInputVariant,
   createManualRun,
   createDashboardTemplate,
   createHydraulicDiagram,
@@ -28,7 +29,6 @@ import {
   createScenarioVersionFromJson,
   deleteScenarioVersion,
   editTimeSeriesSetValues,
-  getDefaultInputVariant,
   getHydraulicDiagram,
   getProjectTimeSeriesSet,
   getPublicationPreview,
@@ -36,6 +36,7 @@ import {
   getProject,
   getScenario,
   getScenarioVersion,
+  listCaseInputVariants,
   runCaseInputVariant,
   listDashboardTemplates,
   listProjectTimeSeriesSets,
@@ -80,8 +81,8 @@ import {
   type Publication,
   type PublicationPayload,
   type Project,
+  type CaseInputVariantDetail,
   type CaseTimeSeriesBinding,
-  type DefaultInputVariantResponse,
   type RequiredSignalStatus,
   type ProjectCreatePayload,
   type ProjectTimeSeriesSet,
@@ -134,8 +135,8 @@ const scenarioVersionsQueryKey = (scenarioId: number) =>
   ["scenario-versions", scenarioId] as const;
 const scenarioRunsQueryKey = (scenarioId: number) =>
   ["scenario-runs", scenarioId] as const;
-const defaultInputVariantQueryKey = (scenarioId: number) =>
-  ["case-default-variant", scenarioId] as const;
+const caseInputVariantsQueryKey = (scenarioId: number) =>
+  ["case-input-variants", scenarioId] as const;
 const hydraulicDiagramQueryKey = (scenarioId: number) =>
   ["hydraulic-diagram", scenarioId] as const;
 const runQueryKey = (runId: number) => ["run", runId] as const;
@@ -938,7 +939,10 @@ function TimeSeriesSetSourceSummary({
   );
 }
 
-function timeSeriesValueCellKey(periodIndex: number, signalKey: string): string {
+function timeSeriesValueCellKey(
+  periodIndex: number,
+  signalKey: string,
+): string {
   return `${periodIndex}:${signalKey}`;
 }
 
@@ -1044,7 +1048,10 @@ function TimeSeriesSetValuesEditor({
                     <td key={signal.signal_key}>
                       <input
                         aria-label={`Periodo ${period.timestamp_start} ${signal.signal_key}`}
-                        value={cellValue(period.period_index, signal.signal_key)}
+                        value={cellValue(
+                          period.period_index,
+                          signal.signal_key,
+                        )}
                         onChange={(event) =>
                           updateCell(
                             period.period_index,
@@ -1079,7 +1086,9 @@ function TimeSeriesSetValuesEditor({
           onClick={() => mutation.mutate()}
           disabled={!hasEdits || mutation.isPending}
         >
-          {mutation.isPending ? "Guardando correcciones" : "Guardar correcciones"}
+          {mutation.isPending
+            ? "Guardando correcciones"
+            : "Guardar correcciones"}
         </button>
         <button
           type="button"
@@ -1277,7 +1286,8 @@ function TimeSeriesSetReplacePanel({
     );
   }
 
-  const controlsDisabled = uploadMutation.isPending || replaceMutation.isPending;
+  const controlsDisabled =
+    uploadMutation.isPending || replaceMutation.isPending;
   const columnOptions = [
     { value: "", label: "Selecciona columna" },
     ...((uploadedSource?.columns || []).map((column) => ({
@@ -1288,7 +1298,8 @@ function TimeSeriesSetReplacePanel({
   const signalMappings = form?.signal_mappings || [];
   const completeSignalMappings = signalMappings.filter(
     (mapping) =>
-      Boolean(mapping.source_column.trim()) && Boolean(mapping.signal_key.trim()),
+      Boolean(mapping.source_column.trim()) &&
+      Boolean(mapping.signal_key.trim()),
   );
   const canReplace =
     Boolean(form) &&
@@ -1316,8 +1327,14 @@ function TimeSeriesSetReplacePanel({
             disabled={controlsDisabled}
           />
         </label>
-        <button type="button" onClick={() => uploadFile()} disabled={controlsDisabled}>
-          {uploadMutation.isPending ? "Subiendo archivo" : "Subir archivo de reemplazo"}
+        <button
+          type="button"
+          onClick={() => uploadFile()}
+          disabled={controlsDisabled}
+        >
+          {uploadMutation.isPending
+            ? "Subiendo archivo"
+            : "Subir archivo de reemplazo"}
         </button>
       </div>
       {uploadError ? <p role="alert">{uploadError}</p> : null}
@@ -1343,12 +1360,17 @@ function TimeSeriesSetReplacePanel({
       {uploadedSource && form ? (
         <>
           <div className="draft-field-grid">
-            <label className="field-row" htmlFor="time_series_replace_data_kind">
+            <label
+              className="field-row"
+              htmlFor="time_series_replace_data_kind"
+            >
               <span>Tipo de dato</span>
               <select
                 id="time_series_replace_data_kind"
                 value={form.data_kind}
-                onChange={(event) => updateForm({ data_kind: event.target.value })}
+                onChange={(event) =>
+                  updateForm({ data_kind: event.target.value })
+                }
                 disabled={replaceMutation.isPending}
               >
                 {timeSeriesCatalogDataKindOptions.map((option) => (
@@ -1363,7 +1385,9 @@ function TimeSeriesSetReplacePanel({
               <input
                 id="time_series_replace_timezone"
                 value={form.timezone}
-                onChange={(event) => updateForm({ timezone: event.target.value })}
+                onChange={(event) =>
+                  updateForm({ timezone: event.target.value })
+                }
                 disabled={replaceMutation.isPending}
               />
             </label>
@@ -1502,7 +1526,9 @@ function TimeSeriesSetReplacePanel({
             <input
               id="time_series_replace_change_summary"
               value={form.change_summary}
-              onChange={(event) => updateForm({ change_summary: event.target.value })}
+              onChange={(event) =>
+                updateForm({ change_summary: event.target.value })
+              }
               disabled={replaceMutation.isPending}
             />
             <button
@@ -1510,7 +1536,9 @@ function TimeSeriesSetReplacePanel({
               onClick={() => replaceMutation.mutate()}
               disabled={!canReplace || replaceMutation.isPending}
             >
-              {replaceMutation.isPending ? "Reemplazando set" : "Reemplazar set"}
+              {replaceMutation.isPending
+                ? "Reemplazando set"
+                : "Reemplazar set"}
             </button>
           </div>
           {replaceError ? <p role="alert">{replaceError}</p> : null}
@@ -1557,7 +1585,10 @@ export function TimeSeriesSetDetailView() {
     retry: false,
   });
   const timeSeriesSetRevisions = useQuery({
-    queryKey: timeSeriesSetRevisionsQueryKey(projectId || 0, timeSeriesSetId || 0),
+    queryKey: timeSeriesSetRevisionsQueryKey(
+      projectId || 0,
+      timeSeriesSetId || 0,
+    ),
     queryFn: ({ signal }) =>
       listTimeSeriesSetRevisions(projectId || 0, timeSeriesSetId || 0, signal),
     enabled: projectId !== null && timeSeriesSetId !== null,
@@ -1638,7 +1669,9 @@ export function TimeSeriesSetDetailView() {
               retry={() => void timeSeriesSetRevisions.refetch()}
             />
           ) : (
-            <TimeSeriesSetRevisionHistory revisions={timeSeriesSetRevisions.data} />
+            <TimeSeriesSetRevisionHistory
+              revisions={timeSeriesSetRevisions.data}
+            />
           )}
         </section>
       </div>
@@ -4751,6 +4784,53 @@ export function HydraulicDiagramEditorView() {
 }
 
 const INPUT_VARIANT_PRICE_SIGNAL_KEY = "price_usd_per_mwh";
+const INPUT_VARIANT_SELECTION_STORAGE_KEY = "case-input-variant-selection";
+
+function inputVariantSelectionStorageKey(scenarioId: number): string {
+  return `${INPUT_VARIANT_SELECTION_STORAGE_KEY}:${scenarioId}`;
+}
+
+function readStoredInputVariantId(scenarioId: number): number | null {
+  const rawValue = window.localStorage.getItem(
+    inputVariantSelectionStorageKey(scenarioId),
+  );
+  if (!rawValue) return null;
+  const parsed = Number(rawValue);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function persistInputVariantId(scenarioId: number, variantId: number): void {
+  window.localStorage.setItem(
+    inputVariantSelectionStorageKey(scenarioId),
+    String(variantId),
+  );
+}
+
+function resolveSelectedInputVariantId(
+  scenarioId: number,
+  preferredVariantId: number | null,
+  variants: CaseInputVariantDetail[],
+  defaultVariantId: number | null,
+): number | null {
+  if (variants.length === 0) return preferredVariantId;
+  const availableVariantIds = new Set(
+    variants.map((entry) => entry.variant.id),
+  );
+  if (
+    preferredVariantId !== null &&
+    availableVariantIds.has(preferredVariantId)
+  ) {
+    return preferredVariantId;
+  }
+  const storedVariantId = readStoredInputVariantId(scenarioId);
+  if (storedVariantId !== null && availableVariantIds.has(storedVariantId)) {
+    return storedVariantId;
+  }
+  if (defaultVariantId !== null && availableVariantIds.has(defaultVariantId)) {
+    return defaultVariantId;
+  }
+  return variants[0].variant.id;
+}
 
 type InputVariantRangeValidation = {
   kind: "idle" | "valid" | "incomplete_coverage" | "horizon_mismatch";
@@ -4827,30 +4907,30 @@ function validateInputVariantRange(
   return { kind: "valid", message: "Rango valido para correr." };
 }
 
-function CaseInputVariantPanel({
+function CaseInputVariantBindingEditor({
   scenarioId,
   projectId,
+  variantDetail,
+  timeSeriesSets,
 }: {
   scenarioId: number;
   projectId: number;
+  variantDetail: CaseInputVariantDetail;
+  timeSeriesSets: ProjectTimeSeriesSetSummary[];
 }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [error, setError] = useState("");
-  const [selectedSetId, setSelectedSetId] = useState<number | "">("");
-  const [rangeStart, setRangeStart] = useState("");
-  const [rangeEnd, setRangeEnd] = useState("");
+  const priceBinding = variantDetail.bindings.find(
+    (binding: CaseTimeSeriesBinding) =>
+      binding.signal_key === INPUT_VARIANT_PRICE_SIGNAL_KEY,
+  );
+  const [selectedSetId, setSelectedSetId] = useState<number | "">(
+    priceBinding?.time_series_set_id ?? "",
+  );
+  const [rangeStartDraft, setRangeStartDraft] = useState<string | null>(null);
+  const [rangeEndDraft, setRangeEndDraft] = useState<string | null>(null);
 
-  const variantQuery = useQuery({
-    queryKey: defaultInputVariantQueryKey(scenarioId),
-    queryFn: ({ signal }) => getDefaultInputVariant(scenarioId, signal),
-    retry: false,
-  });
-  const timeSeriesSetsQuery = useQuery({
-    queryKey: timeSeriesCatalogQueryKey(projectId),
-    queryFn: ({ signal }) => listProjectTimeSeriesSets(projectId, signal),
-    retry: false,
-  });
   const selectedSetDetail = useQuery({
     queryKey: timeSeriesSetQueryKey(projectId, selectedSetId || 0),
     queryFn: ({ signal }) =>
@@ -4859,34 +4939,27 @@ function CaseInputVariantPanel({
     retry: false,
   });
 
-  if (
-    selectedSetDetail.data &&
-    selectedSetDetail.data.id === selectedSetId &&
-    rangeStart === "" &&
-    rangeEnd === ""
-  ) {
-    setRangeStart(selectedSetDetail.data.horizon.start || "");
-    setRangeEnd(selectedSetDetail.data.horizon.end || "");
-  }
-
-  const priceBinding = variantQuery.data?.bindings.find(
-    (binding: CaseTimeSeriesBinding) =>
-      binding.signal_key === INPUT_VARIANT_PRICE_SIGNAL_KEY,
-  );
+  const rangeStart =
+    rangeStartDraft ?? selectedSetDetail.data?.horizon.start ?? "";
+  const rangeEnd = rangeEndDraft ?? selectedSetDetail.data?.horizon.end ?? "";
   const rangeValidation = validateInputVariantRange(
     selectedSetDetail.data,
     rangeStart,
     rangeEnd,
   );
+  const canRun =
+    selectedSetId !== "" &&
+    rangeStart.trim() !== "" &&
+    rangeEnd.trim() !== "" &&
+    rangeValidation.kind === "valid";
 
   const runMutation = useMutation({
     mutationFn: async () => {
-      const variant = variantQuery.data as DefaultInputVariantResponse;
-      await bindCaseTimeSeries(scenarioId, variant.variant.id, {
+      await bindCaseTimeSeries(scenarioId, variantDetail.variant.id, {
         signal_key: INPUT_VARIANT_PRICE_SIGNAL_KEY,
         time_series_set_id: selectedSetId as number,
       });
-      return runCaseInputVariant(scenarioId, variant.variant.id, {
+      return runCaseInputVariant(scenarioId, variantDetail.variant.id, {
         range_start: rangeStart,
         range_end: rangeEnd,
       });
@@ -4894,7 +4967,7 @@ function CaseInputVariantPanel({
     onSuccess: (run) => {
       setError("");
       void queryClient.invalidateQueries({
-        queryKey: defaultInputVariantQueryKey(scenarioId),
+        queryKey: caseInputVariantsQueryKey(scenarioId),
       });
       void queryClient.invalidateQueries({
         queryKey: scenarioRunsQueryKey(scenarioId),
@@ -4904,38 +4977,8 @@ function CaseInputVariantPanel({
     onError: (mutationError) => setError(errorMessage(mutationError)),
   });
 
-  if (variantQuery.isPending || timeSeriesSetsQuery.isPending) {
-    return <LoadingView label="Cargando variante default" />;
-  }
-  if (variantQuery.isError) {
-    return (
-      <RequestErrorView
-        error={variantQuery.error}
-        retry={() => void variantQuery.refetch()}
-      />
-    );
-  }
-  if (timeSeriesSetsQuery.isError) {
-    return (
-      <RequestErrorView
-        error={timeSeriesSetsQuery.error}
-        retry={() => void timeSeriesSetsQuery.refetch()}
-      />
-    );
-  }
-
-  const canRun =
-    selectedSetId !== "" &&
-    rangeStart.trim() !== "" &&
-    rangeEnd.trim() !== "" &&
-    rangeValidation.kind === "valid";
-
   return (
-    <section
-      className="workspace-section"
-      aria-labelledby="input-variant-panel"
-    >
-      <h2 id="input-variant-panel">Variante de entrada (default)</h2>
+    <>
       {error ? <p role="alert">{error}</p> : null}
       <p className="source-note">
         {priceBinding
@@ -4943,9 +4986,11 @@ function CaseInputVariantPanel({
           : "Aun no hay una serie de precio vinculada."}
       </p>
       <ul aria-label="Senales requeridas">
-        {(variantQuery.data?.required_signals || []).map(
+        {(variantDetail.required_signals || []).map(
           (signal: RequiredSignalStatus) => (
-            <li key={`${signal.entity_type}:${signal.entity_id}:${signal.signal_key}`}>
+            <li
+              key={`${signal.entity_type}:${signal.entity_id}:${signal.signal_key}`}
+            >
               {signal.bound
                 ? `${signal.signal_key} (${signal.entity_id}): vinculada (set #${signal.time_series_set_id})`
                 : `${signal.signal_key} (${signal.entity_id}): falta vincular`}
@@ -4962,19 +5007,18 @@ function CaseInputVariantPanel({
           value={selectedSetId}
           onChange={(event) => {
             const value = event.target.value;
-            setRangeStart("");
-            setRangeEnd("");
+            setError("");
+            setRangeStartDraft(null);
+            setRangeEndDraft(null);
             setSelectedSetId(value === "" ? "" : Number(value));
           }}
         >
           <option value="">Selecciona una serie</option>
-          {(timeSeriesSetsQuery.data || []).map(
-            (set: ProjectTimeSeriesSetSummary) => (
-              <option key={set.id} value={set.id}>
-                {set.name} - {set.version_label}
-              </option>
-            ),
-          )}
+          {timeSeriesSets.map((set: ProjectTimeSeriesSetSummary) => (
+            <option key={set.id} value={set.id}>
+              {set.name} - {set.version_label}
+            </option>
+          ))}
         </select>
       </div>
       <div className="field-row">
@@ -4983,7 +5027,7 @@ function CaseInputVariantPanel({
           id="input_variant_range_start"
           type="text"
           value={rangeStart}
-          onChange={(event) => setRangeStart(event.target.value)}
+          onChange={(event) => setRangeStartDraft(event.target.value)}
           placeholder="2026-01-01T00:00:00-03:00"
         />
       </div>
@@ -4993,7 +5037,7 @@ function CaseInputVariantPanel({
           id="input_variant_range_end"
           type="text"
           value={rangeEnd}
-          onChange={(event) => setRangeEnd(event.target.value)}
+          onChange={(event) => setRangeEndDraft(event.target.value)}
           placeholder="2026-01-02T00:00:00-03:00"
         />
       </div>
@@ -5013,6 +5057,159 @@ function CaseInputVariantPanel({
           ? "Corriendo variante"
           : "Vincular y correr variante"}
       </button>
+    </>
+  );
+}
+
+function CaseInputVariantPanel({
+  scenarioId,
+  projectId,
+}: {
+  scenarioId: number;
+  projectId: number;
+}) {
+  const queryClient = useQueryClient();
+  const [cloneError, setCloneError] = useState("");
+  const [selectedVariantPreference, setSelectedVariantPreference] = useState<
+    number | null
+  >(() => readStoredInputVariantId(scenarioId));
+  const [cloneName, setCloneName] = useState("");
+
+  const variantQuery = useQuery({
+    queryKey: caseInputVariantsQueryKey(scenarioId),
+    queryFn: ({ signal }) => listCaseInputVariants(scenarioId, signal),
+    retry: false,
+  });
+  const timeSeriesSetsQuery = useQuery({
+    queryKey: timeSeriesCatalogQueryKey(projectId),
+    queryFn: ({ signal }) => listProjectTimeSeriesSets(projectId, signal),
+    retry: false,
+  });
+
+  const selectedVariantId = resolveSelectedInputVariantId(
+    scenarioId,
+    selectedVariantPreference,
+    variantQuery.data?.variants ?? [],
+    variantQuery.data?.default_variant_id ?? null,
+  );
+  const activeVariantDetail =
+    variantQuery.data?.variants.find(
+      (entry: CaseInputVariantDetail) => entry.variant.id === selectedVariantId,
+    ) ?? variantQuery.data?.variants[0];
+  const activeVariant = activeVariantDetail?.variant;
+
+  const cloneMutation = useMutation({
+    mutationFn: async () => {
+      if (!activeVariant) throw new Error("No hay una variante activa.");
+      return cloneCaseInputVariant(scenarioId, activeVariant.id, {
+        display_name: cloneName.trim(),
+      });
+    },
+    onSuccess: (variant) => {
+      setCloneName("");
+      setCloneError("");
+      setSelectedVariantPreference(variant.id);
+      persistInputVariantId(scenarioId, variant.id);
+      void queryClient.invalidateQueries({
+        queryKey: caseInputVariantsQueryKey(scenarioId),
+      });
+    },
+    onError: (mutationError) => setCloneError(errorMessage(mutationError)),
+  });
+
+  if (variantQuery.isPending || timeSeriesSetsQuery.isPending) {
+    return <LoadingView label="Cargando variantes de entrada" />;
+  }
+  if (variantQuery.isError) {
+    return (
+      <RequestErrorView
+        error={variantQuery.error}
+        retry={() => void variantQuery.refetch()}
+      />
+    );
+  }
+  if (timeSeriesSetsQuery.isError) {
+    return (
+      <RequestErrorView
+        error={timeSeriesSetsQuery.error}
+        retry={() => void timeSeriesSetsQuery.refetch()}
+      />
+    );
+  }
+  if (!activeVariant || !activeVariantDetail) {
+    return (
+      <section
+        className="workspace-section"
+        aria-labelledby="input-variant-panel"
+      >
+        <h2 id="input-variant-panel">Variantes de entrada</h2>
+        <p className="empty-state">Aun no hay variantes para este caso.</p>
+      </section>
+    );
+  }
+
+  const canClone =
+    cloneName.trim() !== "" &&
+    activeVariant !== undefined &&
+    !cloneMutation.isPending;
+
+  return (
+    <section
+      className="workspace-section"
+      aria-labelledby="input-variant-panel"
+    >
+      <h2 id="input-variant-panel">
+        Variante de entrada: {activeVariant.display_name}
+      </h2>
+      {cloneError ? <p role="alert">{cloneError}</p> : null}
+      <div className="field-row">
+        <label htmlFor="input_variant_active">Variante activa</label>
+        <select
+          id="input_variant_active"
+          value={selectedVariantId ?? ""}
+          onChange={(event) => {
+            const nextVariantId = Number(event.target.value);
+            setSelectedVariantPreference(nextVariantId);
+            persistInputVariantId(scenarioId, nextVariantId);
+          }}
+        >
+          {variantQuery.data.variants.map((entry: CaseInputVariantDetail) => (
+            <option key={entry.variant.id} value={entry.variant.id}>
+              {entry.variant.is_default
+                ? `${entry.variant.display_name} (default)`
+                : entry.variant.display_name}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="field-row">
+        <label htmlFor="input_variant_clone_name">Nombre nueva variante</label>
+        <input
+          id="input_variant_clone_name"
+          type="text"
+          value={cloneName}
+          onChange={(event) => setCloneName(event.target.value)}
+          placeholder="Stress prices"
+        />
+        <button
+          type="button"
+          disabled={!canClone}
+          onClick={() => {
+            if (canClone) cloneMutation.mutate();
+          }}
+        >
+          {cloneMutation.isPending
+            ? "Clonando variante"
+            : "Clonar variante activa"}
+        </button>
+      </div>
+      <CaseInputVariantBindingEditor
+        key={activeVariant.id}
+        scenarioId={scenarioId}
+        projectId={projectId}
+        variantDetail={activeVariantDetail}
+        timeSeriesSets={timeSeriesSetsQuery.data || []}
+      />
     </section>
   );
 }

@@ -127,6 +127,20 @@
         "title": "CaseInputVariantRunRequest",
         "type": "object"
       },
+      "CaseInputVariantWriteRequest": {
+        "properties": {
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "display_name"
+        ],
+        "title": "CaseInputVariantWriteRequest",
+        "type": "object"
+      },
       "CaseTimeSeriesBindingRequest": {
         "properties": {
           "signal_key": {
@@ -3285,6 +3299,144 @@
         "summary": "Get Default Input Variant"
       }
     },
+    "/api/scenarios/{scenario_id}/case/variants": {
+      "get": {
+        "operationId": "list_case_input_variants_api_scenarios__scenario_id__case_variants_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Case Input Variants"
+      },
+      "post": {
+        "operationId": "create_case_input_variant_api_scenarios__scenario_id__case_variants_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaseInputVariantWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Case Input Variant"
+      }
+    },
+    "/api/scenarios/{scenario_id}/case/variants/{variant_id}": {
+      "patch": {
+        "operationId": "update_case_input_variant_api_scenarios__scenario_id__case_variants__variant_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "variant_id",
+            "required": true,
+            "schema": {
+              "title": "Variant Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaseInputVariantWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Case Input Variant"
+      }
+    },
     "/api/scenarios/{scenario_id}/case/variants/{variant_id}/bindings": {
       "post": {
         "operationId": "bind_case_time_series_api_scenarios__scenario_id__case_variants__variant_id__bindings_post",
@@ -3339,6 +3491,62 @@
           }
         },
         "summary": "Bind Case Time Series"
+      }
+    },
+    "/api/scenarios/{scenario_id}/case/variants/{variant_id}/clone": {
+      "post": {
+        "operationId": "clone_case_input_variant_api_scenarios__scenario_id__case_variants__variant_id__clone_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "variant_id",
+            "required": true,
+            "schema": {
+              "title": "Variant Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaseInputVariantWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clone Case Input Variant"
       }
     },
     "/api/scenarios/{scenario_id}/case/variants/{variant_id}/run": {

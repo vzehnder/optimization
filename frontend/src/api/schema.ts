@@ -692,6 +692,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scenarios/{scenario_id}/case/variants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Case Input Variants */
+        get: operations["list_case_input_variants_api_scenarios__scenario_id__case_variants_get"];
+        put?: never;
+        /** Create Case Input Variant */
+        post: operations["create_case_input_variant_api_scenarios__scenario_id__case_variants_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/case/variants/{variant_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Case Input Variant */
+        patch: operations["update_case_input_variant_api_scenarios__scenario_id__case_variants__variant_id__patch"];
+        trace?: never;
+    };
     "/api/scenarios/{scenario_id}/case/variants/{variant_id}/bindings": {
         parameters: {
             query?: never;
@@ -703,6 +738,23 @@ export interface paths {
         put?: never;
         /** Bind Case Time Series */
         post: operations["bind_case_time_series_api_scenarios__scenario_id__case_variants__variant_id__bindings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/case/variants/{variant_id}/clone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Clone Case Input Variant */
+        post: operations["clone_case_input_variant_api_scenarios__scenario_id__case_variants__variant_id__clone_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1068,6 +1120,11 @@ export interface components {
             range_end: string;
             /** Range Start */
             range_start: string;
+        };
+        /** CaseInputVariantWriteRequest */
+        CaseInputVariantWriteRequest: {
+            /** Display Name */
+            display_name: string;
         };
         /** CaseTimeSeriesBindingRequest */
         CaseTimeSeriesBindingRequest: {
@@ -3037,6 +3094,108 @@ export interface operations {
             };
         };
     };
+    list_case_input_variants_api_scenarios__scenario_id__case_variants_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_case_input_variant_api_scenarios__scenario_id__case_variants_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CaseInputVariantWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_case_input_variant_api_scenarios__scenario_id__case_variants__variant_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+                variant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CaseInputVariantWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     bind_case_time_series_api_scenarios__scenario_id__case_variants__variant_id__bindings_post: {
         parameters: {
             query?: never;
@@ -3050,6 +3209,42 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["CaseTimeSeriesBindingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clone_case_input_variant_api_scenarios__scenario_id__case_variants__variant_id__clone_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+                variant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CaseInputVariantWriteRequest"];
             };
         };
         responses: {

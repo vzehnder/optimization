@@ -142,6 +142,97 @@ class CaseTimeSeriesBindingTests(unittest.TestCase):
         self.assertEqual(len(bindings), 1)
 
 
+class CaseInputVariantLifecycleTests(unittest.TestCase):
+    def setUp(self):
+        self.store = AnalystStore("sqlite:///:memory:")
+        self.project = self.store.create_project(name="TS-3 project")
+        self.scenario = self.store.create_scenario(
+            project_id=self.project["id"], name="TS-3 scenario"
+        )
+        self.case = self.store.get_or_create_case_for_scenario(self.scenario["id"])
+        self.default_variant = self.store.get_or_create_default_input_variant(self.case["id"])
+        prepared = prepare_time_series_catalog_import(
+            rows=price_rows(datetime(2026, 1, 1), 3),
+            request=price_import_request(),
+        )
+        self.default_price_set = self.store.import_time_series_catalog_set(
+            scenario_id=self.scenario["id"],
+            source={
+                "id": "csv_source_1",
+                "original_filename": "price.csv",
+                "media_type": "text/csv",
+                "checksum": "sha256:test",
+            },
+            prepared_import=prepared,
+        )
+        other_prepared = prepare_time_series_catalog_import(
+            rows=price_rows(datetime(2026, 1, 1), 3, value=90.0),
+            request=price_import_request(version_label="v2"),
+        )
+        self.alternate_price_set = self.store.import_time_series_catalog_set(
+            scenario_id=self.scenario["id"],
+            source={
+                "id": "csv_source_2",
+                "original_filename": "price_v2.csv",
+                "media_type": "text/csv",
+                "checksum": "sha256:test2",
+            },
+            prepared_import=other_prepared,
+        )
+        self.store.upsert_case_time_series_binding(
+            case_input_variant_id=self.default_variant["id"],
+            signal_key="import_price_usd_per_mwh",
+            time_series_set_id=self.default_price_set["id"],
+        )
+
+    def test_clone_copies_bindings_but_rebinding_clone_keeps_default_intact(self):
+        clone = self.store.clone_case_input_variant(
+            case_id=self.case["id"],
+            source_variant_id=self.default_variant["id"],
+            display_name="Stress prices",
+        )
+
+        self.assertFalse(clone["is_default"])
+        self.assertEqual(clone["display_name"], "Stress prices")
+        self.assertNotEqual(clone["id"], self.default_variant["id"])
+
+        clone_bindings = self.store.list_case_time_series_bindings(clone["id"])
+        self.assertEqual(
+            [binding["time_series_set_id"] for binding in clone_bindings],
+            [self.default_price_set["id"]],
+        )
+
+        self.store.upsert_case_time_series_binding(
+            case_input_variant_id=clone["id"],
+            signal_key="import_price_usd_per_mwh",
+            time_series_set_id=self.alternate_price_set["id"],
+        )
+
+        default_bindings = self.store.list_case_time_series_bindings(self.default_variant["id"])
+        clone_bindings = self.store.list_case_time_series_bindings(clone["id"])
+        self.assertEqual(
+            [binding["time_series_set_id"] for binding in default_bindings],
+            [self.default_price_set["id"]],
+        )
+        self.assertEqual(
+            [binding["time_series_set_id"] for binding in clone_bindings],
+            [self.alternate_price_set["id"]],
+        )
+
+    def test_create_variants_generate_distinct_keys_for_same_display_name(self):
+        first = self.store.create_case_input_variant(
+            case_id=self.case["id"],
+            display_name="Stress prices",
+        )
+        second = self.store.create_case_input_variant(
+            case_id=self.case["id"],
+            display_name="Stress prices",
+        )
+
+        self.assertEqual(first["variant_key"], "stress_prices")
+        self.assertEqual(second["variant_key"], "stress_prices_2")
+
+
 def grid_battery_draft_document():
     return {
         "schema_version": "bess_editor_draft.v1",

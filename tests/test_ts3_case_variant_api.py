@@ -234,6 +234,49 @@ class CaseInputVariantApiTests(unittest.TestCase):
 
         self.assertEqual(run_response.status_code, 400)
 
+    def test_list_variants_clone_variant_and_rename_it(self):
+        default_variant_id = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/case/default-variant"
+        ).json()["variant"]["id"]
+        self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/case/variants/{default_variant_id}/bindings",
+            json={"signal_key": "import_price_usd_per_mwh", "time_series_set_id": self.price_set["id"]},
+        )
+
+        create_response = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/case/variants",
+            json={"display_name": "Dry year"},
+        )
+        self.assertEqual(create_response.status_code, 201)
+        self.assertFalse(create_response.json()["is_default"])
+
+        clone_response = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/case/variants/{default_variant_id}/clone",
+            json={"display_name": "Stress prices"},
+        )
+        self.assertEqual(clone_response.status_code, 201)
+        cloned_variant = clone_response.json()
+
+        rename_response = self.client.patch(
+            f"/api/scenarios/{self.scenario['id']}/case/variants/{cloned_variant['id']}",
+            json={"display_name": "Stress prices renamed"},
+        )
+        self.assertEqual(rename_response.status_code, 200)
+        self.assertEqual(rename_response.json()["display_name"], "Stress prices renamed")
+
+        list_response = self.client.get(f"/api/scenarios/{self.scenario['id']}/case/variants")
+
+        self.assertEqual(list_response.status_code, 200)
+        body = list_response.json()
+        self.assertEqual(body["default_variant_id"], default_variant_id)
+        self.assertEqual([entry["variant"]["display_name"] for entry in body["variants"]], [
+            "Default",
+            "Dry year",
+            "Stress prices renamed",
+        ])
+        self.assertEqual(body["variants"][0]["bindings"][0]["time_series_set_id"], self.price_set["id"])
+        self.assertEqual(body["variants"][2]["bindings"][0]["time_series_set_id"], self.price_set["id"])
+
 
 class DefaultVariantWithoutADraftYetTests(unittest.TestCase):
     """A scenario's editor draft is only created when someone opens it; the

@@ -161,6 +161,10 @@ class CaseInputVariantRunRequest(BaseModel):
     range_end: str = Field(min_length=1)
 
 
+class CaseInputVariantWriteRequest(BaseModel):
+    display_name: str = Field(min_length=1)
+
+
 class HydraulicDiagramViewportRequest(BaseModel):
     x: float = 0.0
     y: float = 0.0
@@ -1734,30 +1738,108 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         return draft
 
+    def build_case_input_variant_detail(scenario_id: int, variant: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "variant": variant,
+            "bindings": analyst_store.list_case_time_series_bindings(variant["id"]),
+            "required_signals": analyst_store.evaluate_case_input_variant_required_signals(
+                scenario_id=scenario_id, case_input_variant_id=variant["id"]
+            ),
+        }
+
+    def get_case_and_variant_for_scenario(scenario_id: int, variant_id: int) -> tuple[dict[str, Any], dict[str, Any]]:
+        case = analyst_store.get_or_create_case_for_scenario(scenario_id)
+        variant = analyst_store.get_case_input_variant_for_case(case["id"], variant_id)
+        return case, variant
+
     @app.get("/api/scenarios/{scenario_id}/case/default-variant")
     async def get_default_input_variant(scenario_id: int):
         try:
             case = analyst_store.get_or_create_case_for_scenario(scenario_id)
             variant = analyst_store.get_or_create_default_input_variant(case["id"])
-            bindings = analyst_store.list_case_time_series_bindings(variant["id"])
-            required_signals = analyst_store.evaluate_case_input_variant_required_signals(
-                scenario_id=scenario_id, case_input_variant_id=variant["id"]
-            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"case": optimization_case_public_dict(case), **build_case_input_variant_detail(scenario_id, variant)}
+
+    @app.get("/api/scenarios/{scenario_id}/case/variants")
+    async def list_case_input_variants(scenario_id: int):
+        try:
+            case = analyst_store.get_or_create_case_for_scenario(scenario_id)
+            default_variant = analyst_store.get_or_create_default_input_variant(case["id"])
+            variants = analyst_store.list_case_input_variants(case["id"])
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {
             "case": optimization_case_public_dict(case),
-            "variant": variant,
-            "bindings": bindings,
-            "required_signals": required_signals,
+            "default_variant_id": default_variant["id"],
+            "variants": [build_case_input_variant_detail(scenario_id, variant) for variant in variants],
         }
+
+    @app.post("/api/scenarios/{scenario_id}/case/variants", status_code=201)
+    async def create_case_input_variant(
+        scenario_id: int, payload: CaseInputVariantWriteRequest, request: Request
+    ):
+        try:
+            case = analyst_store.get_or_create_case_for_scenario(scenario_id)
+            variant = analyst_store.create_case_input_variant(
+                case_id=case["id"],
+                display_name=payload.display_name,
+                created_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return variant
+
+    @app.post("/api/scenarios/{scenario_id}/case/variants/{variant_id}/clone", status_code=201)
+    async def clone_case_input_variant(
+        scenario_id: int,
+        variant_id: int,
+        payload: CaseInputVariantWriteRequest,
+        request: Request,
+    ):
+        try:
+            case, _ = get_case_and_variant_for_scenario(scenario_id, variant_id)
+            clone = analyst_store.clone_case_input_variant(
+                case_id=case["id"],
+                source_variant_id=variant_id,
+                display_name=payload.display_name,
+                created_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return clone
+
+    @app.patch("/api/scenarios/{scenario_id}/case/variants/{variant_id}")
+    async def update_case_input_variant(
+        scenario_id: int,
+        variant_id: int,
+        payload: CaseInputVariantWriteRequest,
+        request: Request,
+    ):
+        try:
+            case, _ = get_case_and_variant_for_scenario(scenario_id, variant_id)
+            variant = analyst_store.update_case_input_variant(
+                case_id=case["id"],
+                variant_id=variant_id,
+                display_name=payload.display_name,
+                updated_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return variant
 
     @app.post("/api/scenarios/{scenario_id}/case/variants/{variant_id}/bindings", status_code=201)
     async def bind_case_time_series(
         scenario_id: int, variant_id: int, payload: CaseTimeSeriesBindingRequest, request: Request
     ):
         try:
-            analyst_store.get_scenario(scenario_id)
+            case, _ = get_case_and_variant_for_scenario(scenario_id, variant_id)
             binding = analyst_store.upsert_case_time_series_binding(
                 case_input_variant_id=variant_id,
                 signal_key=payload.signal_key,
@@ -1771,6 +1853,7 @@ def create_app(
     @app.post("/api/scenarios/{scenario_id}/case/variants/{variant_id}/run", status_code=201)
     async def run_case_input_variant(scenario_id: int, variant_id: int, payload: CaseInputVariantRunRequest):
         try:
+            case, _ = get_case_and_variant_for_scenario(scenario_id, variant_id)
             materialized = analyst_store.materialize_system_case_for_variant(
                 scenario_id=scenario_id,
                 case_input_variant_id=variant_id,
