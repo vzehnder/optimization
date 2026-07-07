@@ -23,7 +23,13 @@ class ResultReadError(ValueError):
         self.status_code = status_code
 
 
-def read_run_results(run: dict[str, Any], artifacts: list[dict[str, Any]], artifact_root: Path | str) -> dict[str, Any]:
+def read_run_results(
+    run: dict[str, Any],
+    artifacts: list[dict[str, Any]],
+    artifact_root: Path | str,
+    *,
+    store: Any | None = None,
+) -> dict[str, Any]:
     if run["status"] != "succeeded":
         raise ResultReadError("run results are available only for succeeded runs", status_code=409)
 
@@ -34,12 +40,21 @@ def read_run_results(run: dict[str, Any], artifacts: list[dict[str, Any]], artif
         artifact_root,
         display_name="summary.json",
     )
-    dispatch_table = read_csv_artifact(
-        artifacts_by_type,
-        "dispatch_csv",
-        artifact_root,
-        display_name="dispatch.csv",
-    )
+    dispatch_table = None
+    if store is not None:
+        indexed_dispatch = store.get_run_dispatch_result_index(int(run["id"]))
+        if indexed_dispatch is not None:
+            dispatch_table = {
+                "columns": list(indexed_dispatch["columns"]),
+                "rows": [dict(row) for row in indexed_dispatch["rows"]],
+            }
+    if dispatch_table is None:
+        dispatch_table = read_csv_artifact(
+            artifacts_by_type,
+            "dispatch_csv",
+            artifact_root,
+            display_name="dispatch.csv",
+        )
     asset_dispatch_table = read_csv_artifact(
         artifacts_by_type,
         "asset_dispatch_csv",

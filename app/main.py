@@ -681,7 +681,7 @@ def create_app(
                 ),
             )
             results = apply_dashboard_template(
-                read_run_results(run, artifacts, configured_artifact_root),
+                read_run_results(run, artifacts, configured_artifact_root, store=analyst_store),
                 template,
             )
             results_error = ""
@@ -1095,7 +1095,7 @@ def create_app(
                 raise KeyError(f"run {run_id} not found for dashboard template {template_id}")
             run = analyst_store.get_run(run_id)
             artifacts = analyst_store.list_run_artifacts(run_id)
-            results = read_run_results(run, artifacts, configured_artifact_root)
+            results = read_run_results(run, artifacts, configured_artifact_root, store=analyst_store)
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         except ResultReadError as error:
@@ -2010,7 +2010,7 @@ def create_app(
         try:
             run = analyst_store.get_run(run_id)
             artifacts = analyst_store.list_run_artifacts(run_id)
-            results = read_run_results(run, artifacts, configured_artifact_root)
+            results = read_run_results(run, artifacts, configured_artifact_root, store=analyst_store)
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         except ResultReadError as error:
@@ -2049,7 +2049,7 @@ def create_app(
                 lambda artifact: f"/api/run-artifacts/{artifact['id']}/download",
             )
             results = apply_dashboard_template(
-                read_run_results(run, artifacts, configured_artifact_root),
+                read_run_results(run, artifacts, configured_artifact_root, store=analyst_store),
                 template,
             )
             results_error = ""

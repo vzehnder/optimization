@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 
 from app.persistence import AnalystStore
+from app.result_indexing import ResultIndexingError, index_run_dispatch_results
 from app.validation import JuliaValidationService, ValidationResult, resolve_julia_executable
 
 
@@ -211,6 +212,7 @@ class JuliaRunExecutor:
                     stderr_log_path=stderr_log_path,
                     output_dir=output_dir,
                 )
+                self._index_succeeded_run_results(succeeded)
                 return succeeded
 
             failed = self.store.mark_run_failed(
@@ -365,6 +367,19 @@ class JuliaRunExecutor:
             resolved_path.relative_to(root)
         except ValueError as error:
             raise ValueError(f"artifact path is outside artifact root: {path}") from error
+
+    def _index_succeeded_run_results(self, run: dict[str, Any]) -> None:
+        try:
+            index_run_dispatch_results(
+                store=self.store,
+                run=run,
+                artifacts=self.store.list_run_artifacts(int(run["id"])),
+                artifact_root=self.artifact_root,
+            )
+        except ResultIndexingError:
+            return
+        except OSError:
+            return
 
 
 def parse_json_payload(text: str) -> dict[str, Any]:

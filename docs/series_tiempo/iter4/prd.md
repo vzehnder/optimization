@@ -88,12 +88,12 @@ a artifacts para compatibilidad.
 ## Implementation Decisions
 
 - Artifacts remain the durable audit record.
-- BBDD result series are an indexed representation for UI, comparison and publication.
+- BBDD result series live in a dedicated run-result layer rooted at the run, not in the editable TS-2 `time_series_sets` catalog.
 - Result indexing occurs after run success and artifact registration.
 - Result indexing must be idempotent.
-- The first indexed scope covers core dispatch, asset dispatch and summary KPIs used by existing UI.
-- Run result endpoints prefer BBDD when indexed data exists and fall back to artifacts otherwise.
-- Result records store lineage to run, execution snapshot, case, topology, parameters, input variant, date range and input series hashes.
+- The tracer-bullet indexed scope is core `dispatch.csv` only for the run results table; `asset_dispatch.csv`, `summary.json` and broader signal families land in downstream TS-4 slices.
+- Run result endpoints prefer BBDD when indexed data exists for that surface and fall back to artifacts otherwise.
+- Result records store lineage to run, execution snapshot, case, topology, parameters, input variant, date range and input series hashes, copied from the frozen run snapshot rather than live mutable state.
 - A rebuild path can populate result series for historical successful runs.
 - A basic comparison surface compares two runs from the same case.
 - Deep modules should cover artifact parsing, result normalization, lineage construction, idempotent write and comparison.

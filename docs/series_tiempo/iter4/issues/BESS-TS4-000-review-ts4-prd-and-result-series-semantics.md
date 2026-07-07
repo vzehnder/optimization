@@ -1,11 +1,13 @@
 # BESS-TS4-000: Review TS-4 PRD And Result Series Semantics
 
-Status: Todo
+Status: Done
 Type: HITL
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter4/prd.md`
 Fecha de inicio planificada: 2026-07-08
 Fecha de termino planificada: 2026-07-08
+Fecha de inicio real: 2026-07-07
+Fecha de termino real: 2026-07-07
 
 ## User stories covered
 
@@ -36,15 +38,57 @@ indexing timing or comparison scope needs adjustment.
 
 ## Acceptance criteria
 
-- [ ] The storage model decision (reuse `time_series_sets` with `data_kind = simulated` versus a dedicated result-series layer) is made and recorded with its rationale.
-- [ ] The initial indexed scope (which `dispatch.csv`, `asset_dispatch.csv` and `summary.json` columns feed existing UI tables and charts) is agreed.
-- [ ] The exact lineage fields (run, execution snapshot, case, topology hash, parameter hash, input variant, date range, input series hashes) are agreed.
-- [ ] The write timing (after run success and after artifact registration, with artifacts as the rebuild source when indexing fails) is accepted.
-- [ ] The idempotency requirement for result indexing is accepted.
-- [ ] The read policy (prefer BBDD when indexed data exists, fall back to artifacts otherwise) is accepted.
-- [ ] The comparison scope (two runs of the same case, KPI diffs plus period-level diffs for selected series) is accepted.
-- [ ] The out-of-scope list (no artifact removal, no full BI or multi-run analytics, no transformations or resampling, no reuse of outputs as inputs yet) is confirmed.
-- [ ] Any PRD correction is committed before downstream TS-4 implementation issues begin.
+- [x] The storage model decision (reuse `time_series_sets` with `data_kind = simulated` versus a dedicated result-series layer) is made and recorded with its rationale.
+- [x] The initial indexed scope (which `dispatch.csv`, `asset_dispatch.csv` and `summary.json` columns feed existing UI tables and charts) is agreed.
+- [x] The exact lineage fields (run, execution snapshot, case, topology hash, parameter hash, input variant, date range, input series hashes) are agreed.
+- [x] The write timing (after run success and after artifact registration, with artifacts as the rebuild source when indexing fails) is accepted.
+- [x] The idempotency requirement for result indexing is accepted.
+- [x] The read policy (prefer BBDD when indexed data exists, fall back to artifacts otherwise) is accepted.
+- [x] The comparison scope (two runs of the same case, KPI diffs plus period-level diffs for selected series) is accepted.
+- [x] The out-of-scope list (no artifact removal, no full BI or multi-run analytics, no transformations or resampling, no reuse of outputs as inputs yet) is confirmed.
+- [x] Any PRD correction is committed before downstream TS-4 implementation issues begin.
+
+## Resolution
+
+Accepted the TS-4 result semantics in
+`docs/series_tiempo/iter4/decision_record_ts4_result_semantics.md`.
+
+The review confirms:
+
+1. TS-4 result indexing should use a dedicated run-result layer rooted at the
+   run, not reuse the editable TS-2 `time_series_sets` catalog.
+2. The tracer bullet is intentionally narrow: only the run results dispatch
+   table reads indexed core `dispatch.csv` rows at first; asset dispatch,
+   summary KPIs, broader signal families, rebuild and comparison remain
+   downstream issues.
+3. Indexing happens only after a run succeeds and its artifacts are already
+   registered; artifacts remain the durable audit record and rebuild source.
+4. The accepted read policy is BBDD-first per surface with artifact fallback,
+   not an all-or-nothing migration.
+5. Full TS-4 lineage will come from the frozen run snapshot
+   (`scenario_version` plus its topology/parameter/variant/range/series
+   provenance), never from mutable live case state; TS4-005 hardens that full
+   contract.
+6. Re-indexing must converge without duplicates; TS4-001 establishes the
+   replace-on-write pattern and TS4-006 hardens failure recovery.
+7. Comparison scope is limited to two runs of the same case, with KPI diffs
+   and period-level diffs for selected series.
+8. The out-of-scope list is confirmed as written.
+
+The PRD was corrected accordingly: the accepted storage model is now the
+dedicated run-result layer, and the first indexed slice is core dispatch only
+for the run results table.
+
+## Verification
+
+- Added `docs/series_tiempo/iter4/decision_record_ts4_result_semantics.md`
+  capturing the accepted storage model, scope, lineage, read policy and
+  downstream boundaries.
+- Updated `docs/series_tiempo/iter4/prd.md` so its implementation decisions
+  match the accepted semantics before downstream implementation proceeds.
+- Re-checked `app/results.py`, `app/main.py`, `app/runner.py` and
+  `app/persistence.py` to ground the accepted decisions in the real artifact
+  registration, result reading and run lineage flow already present in code.
 
 ## Blocked by
 
