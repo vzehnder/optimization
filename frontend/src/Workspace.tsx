@@ -4752,6 +4752,81 @@ export function HydraulicDiagramEditorView() {
 
 const INPUT_VARIANT_PRICE_SIGNAL_KEY = "price_usd_per_mwh";
 
+type InputVariantRangeValidation = {
+  kind: "idle" | "valid" | "incomplete_coverage" | "horizon_mismatch";
+  message: string;
+};
+
+function validateInputVariantRange(
+  set: ProjectTimeSeriesSet | undefined,
+  rangeStart: string,
+  rangeEnd: string,
+): InputVariantRangeValidation {
+  if (!set || rangeStart.trim() === "" || rangeEnd.trim() === "") {
+    return { kind: "idle", message: "" };
+  }
+
+  const periods = set.periods
+    .filter(
+      (period) =>
+        period.timestamp_start < rangeEnd && period.timestamp_end > rangeStart,
+    )
+    .sort((left, right) => left.period_index - right.period_index);
+  if (periods.length === 0) {
+    return {
+      kind: "incomplete_coverage",
+      message: `Cobertura incompleta: set #${set.id} no tiene periodos en el rango seleccionado.`,
+    };
+  }
+
+  const first = periods[0];
+  if (first.timestamp_start !== rangeStart) {
+    if (first.timestamp_start > rangeStart) {
+      return {
+        kind: "incomplete_coverage",
+        message: `Cobertura incompleta: falta ${rangeStart} a ${first.timestamp_start}.`,
+      };
+    }
+    return {
+      kind: "horizon_mismatch",
+      message: `Horizonte incompatible: el rango debe comenzar en limite de periodo (${first.timestamp_start}).`,
+    };
+  }
+
+  const last = periods[periods.length - 1];
+  if (last.timestamp_end !== rangeEnd) {
+    if (last.timestamp_end < rangeEnd) {
+      return {
+        kind: "incomplete_coverage",
+        message: `Cobertura incompleta: falta ${last.timestamp_end} a ${rangeEnd}.`,
+      };
+    }
+    return {
+      kind: "horizon_mismatch",
+      message: `Horizonte incompatible: el rango debe terminar en limite de periodo (${last.timestamp_end}).`,
+    };
+  }
+
+  for (let index = 1; index < periods.length; index += 1) {
+    const previous = periods[index - 1];
+    const current = periods[index];
+    if (previous.timestamp_end !== current.timestamp_start) {
+      if (previous.timestamp_end < current.timestamp_start) {
+        return {
+          kind: "incomplete_coverage",
+          message: `Cobertura incompleta: falta ${previous.timestamp_end} a ${current.timestamp_start}.`,
+        };
+      }
+      return {
+        kind: "horizon_mismatch",
+        message: `Horizonte incompatible: periodos solapados cerca de ${current.timestamp_start}.`,
+      };
+    }
+  }
+
+  return { kind: "valid", message: "Rango valido para correr." };
+}
+
 function CaseInputVariantPanel({
   scenarioId,
   projectId,
@@ -4797,6 +4872,11 @@ function CaseInputVariantPanel({
   const priceBinding = variantQuery.data?.bindings.find(
     (binding: CaseTimeSeriesBinding) =>
       binding.signal_key === INPUT_VARIANT_PRICE_SIGNAL_KEY,
+  );
+  const rangeValidation = validateInputVariantRange(
+    selectedSetDetail.data,
+    rangeStart,
+    rangeEnd,
   );
 
   const runMutation = useMutation({
@@ -4845,7 +4925,10 @@ function CaseInputVariantPanel({
   }
 
   const canRun =
-    selectedSetId !== "" && rangeStart.trim() !== "" && rangeEnd.trim() !== "";
+    selectedSetId !== "" &&
+    rangeStart.trim() !== "" &&
+    rangeEnd.trim() !== "" &&
+    rangeValidation.kind === "valid";
 
   return (
     <section
@@ -4914,6 +4997,11 @@ function CaseInputVariantPanel({
           placeholder="2026-01-02T00:00:00-03:00"
         />
       </div>
+      {rangeValidation.message ? (
+        <p role={rangeValidation.kind === "valid" ? "status" : "alert"}>
+          {rangeValidation.message}
+        </p>
+      ) : null}
       <button
         type="button"
         disabled={!canRun || runMutation.isPending}

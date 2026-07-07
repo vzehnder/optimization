@@ -823,7 +823,26 @@ describe("application shell", () => {
           entity_key: null,
         },
       ],
-      periods: [],
+      periods: [
+        {
+          period_index: 0,
+          timestamp_start: "2026-01-01T00:00:00-03:00",
+          timestamp_end: "2026-01-01T01:00:00-03:00",
+          duration_hours: 1,
+        },
+        {
+          period_index: 1,
+          timestamp_start: "2026-01-01T01:00:00-03:00",
+          timestamp_end: "2026-01-01T02:00:00-03:00",
+          duration_hours: 1,
+        },
+        {
+          period_index: 2,
+          timestamp_start: "2026-01-01T02:00:00-03:00",
+          timestamp_end: "2026-01-01T03:00:00-03:00",
+          duration_hours: 1,
+        },
+      ],
       values: [],
     };
     const run = {
@@ -1003,6 +1022,7 @@ describe("application shell", () => {
     expect(screen.getByLabelText("Fin de rango")).toHaveValue(
       "2026-01-01T03:00:00-03:00",
     );
+    expect(screen.getByText("Rango valido para correr.")).toBeVisible();
 
     await user.click(
       screen.getByRole("button", { name: "Vincular y correr variante" }),
@@ -1011,6 +1031,362 @@ describe("application shell", () => {
     await waitFor(() => expect(bindCalls).toBe(1));
     await waitFor(() => expect(runCalls).toBe(1));
     expect(await screen.findByRole("heading", { name: "Run 77" })).toBeVisible();
+  });
+
+  it("surfaces input variant coverage errors before launching", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Initial modeling branch",
+      created_at: "2026-06-23T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-06-23T12:00:00Z",
+    };
+    const priceSet = {
+      id: 5,
+      project_id: 1,
+      name: "Spot price",
+      version_number: 1,
+      version_label: "v1",
+      revision_number: 1,
+      data_kind: "real",
+      timezone: "America/Santiago",
+      status: "validated",
+      content_hash: "hash-5",
+      signal_count: 1,
+      period_count: 3,
+    };
+    const priceSetDetail = {
+      ...priceSet,
+      source_checksum: null,
+      revision_metadata: {},
+      source: null,
+      horizon: {
+        period_count: 3,
+        start: "2026-01-01T00:00:00-03:00",
+        end: "2026-01-01T03:00:00-03:00",
+      },
+      signals: [
+        {
+          signal_key: "price_usd_per_mwh",
+          unit: "USD/MWh",
+          entity_type: null,
+          entity_key: null,
+        },
+      ],
+      periods: [
+        {
+          period_index: 0,
+          timestamp_start: "2026-01-01T00:00:00-03:00",
+          timestamp_end: "2026-01-01T01:00:00-03:00",
+          duration_hours: 1,
+        },
+        {
+          period_index: 1,
+          timestamp_start: "2026-01-01T01:00:00-03:00",
+          timestamp_end: "2026-01-01T02:00:00-03:00",
+          duration_hours: 1,
+        },
+        {
+          period_index: 2,
+          timestamp_start: "2026-01-01T02:00:00-03:00",
+          timestamp_end: "2026-01-01T03:00:00-03:00",
+          duration_hours: 1,
+        },
+      ],
+      values: [],
+    };
+    let runCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/case/default-variant") {
+          return new Response(
+            JSON.stringify({
+              case: {
+                id: 1,
+                scenario_id: 10,
+                case_key: "scenario_10_case",
+                display_name: "Base case",
+                updated_at: "2026-07-06T12:00:00Z",
+              },
+              variant: {
+                id: 3,
+                case_id: 1,
+                variant_key: "default",
+                display_name: "Default",
+                is_default: true,
+                created_at: "2026-07-06T12:00:00Z",
+                updated_at: "2026-07-06T12:00:00Z",
+              },
+              bindings: [],
+              required_signals: [],
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/projects/1/time-series-sets") {
+          return new Response(JSON.stringify({ time_series_sets: [priceSet] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/time-series-sets/5") {
+          return new Response(
+            JSON.stringify({ time_series_set: priceSetDetail }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/scenarios/10/case/variants/3/run") {
+          runCalls += 1;
+        }
+        return new Response(JSON.stringify({ detail: `unhandled ${method} ${path}` }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.selectOptions(
+      await screen.findByLabelText("Serie de precio (price_usd_per_mwh)"),
+      "5",
+    );
+    await user.clear(screen.getByLabelText("Fin de rango"));
+    await user.type(
+      screen.getByLabelText("Fin de rango"),
+      "2026-01-01T04:00:00-03:00",
+    );
+
+    expect(screen.getByText(/Cobertura incompleta/)).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Vincular y correr variante" }),
+    ).toBeDisabled();
+    expect(runCalls).toBe(0);
+  });
+
+  it("surfaces input variant horizon mismatches before launching", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Initial modeling branch",
+      created_at: "2026-06-23T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-06-23T12:00:00Z",
+    };
+    const priceSet = {
+      id: 5,
+      project_id: 1,
+      name: "Spot price",
+      version_number: 1,
+      version_label: "v1",
+      revision_number: 1,
+      data_kind: "real",
+      timezone: "America/Santiago",
+      status: "validated",
+      content_hash: "hash-5",
+      signal_count: 1,
+      period_count: 3,
+    };
+    const priceSetDetail = {
+      ...priceSet,
+      source_checksum: null,
+      revision_metadata: {},
+      source: null,
+      horizon: {
+        period_count: 3,
+        start: "2026-01-01T00:00:00-03:00",
+        end: "2026-01-01T03:00:00-03:00",
+      },
+      signals: [
+        {
+          signal_key: "price_usd_per_mwh",
+          unit: "USD/MWh",
+          entity_type: null,
+          entity_key: null,
+        },
+      ],
+      periods: [
+        {
+          period_index: 0,
+          timestamp_start: "2026-01-01T00:00:00-03:00",
+          timestamp_end: "2026-01-01T01:00:00-03:00",
+          duration_hours: 1,
+        },
+        {
+          period_index: 1,
+          timestamp_start: "2026-01-01T01:00:00-03:00",
+          timestamp_end: "2026-01-01T02:00:00-03:00",
+          duration_hours: 1,
+        },
+        {
+          period_index: 2,
+          timestamp_start: "2026-01-01T02:00:00-03:00",
+          timestamp_end: "2026-01-01T03:00:00-03:00",
+          duration_hours: 1,
+        },
+      ],
+      values: [],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/case/default-variant") {
+          return new Response(
+            JSON.stringify({
+              case: {
+                id: 1,
+                scenario_id: 10,
+                case_key: "scenario_10_case",
+                display_name: "Base case",
+                updated_at: "2026-07-06T12:00:00Z",
+              },
+              variant: {
+                id: 3,
+                case_id: 1,
+                variant_key: "default",
+                display_name: "Default",
+                is_default: true,
+                created_at: "2026-07-06T12:00:00Z",
+                updated_at: "2026-07-06T12:00:00Z",
+              },
+              bindings: [],
+              required_signals: [],
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/projects/1/time-series-sets") {
+          return new Response(JSON.stringify({ time_series_sets: [priceSet] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/time-series-sets/5") {
+          return new Response(
+            JSON.stringify({ time_series_set: priceSetDetail }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify({ detail: `unhandled ${path}` }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.selectOptions(
+      await screen.findByLabelText("Serie de precio (price_usd_per_mwh)"),
+      "5",
+    );
+    await user.clear(screen.getByLabelText("Inicio de rango"));
+    await user.type(
+      screen.getByLabelText("Inicio de rango"),
+      "2026-01-01T00:30:00-03:00",
+    );
+
+    expect(screen.getByText(/Horizonte incompatible/)).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Vincular y correr variante" }),
+    ).toBeDisabled();
   });
 
   it("saves the draft and opens the hydraulic diagram when editing a hydro component", async () => {

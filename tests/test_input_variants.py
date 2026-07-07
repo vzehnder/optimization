@@ -65,7 +65,7 @@ class ResolveBoundSignalSeriesTests(unittest.TestCase):
 
         self.assertEqual([row["timestamp"] for row in rows], ["2026-01-01T01:00:00", "2026-01-01T02:00:00"])
 
-    def test_gap_in_range_raises(self):
+    def test_gap_in_range_names_binding_and_missing_span(self):
         periods = [
             {
                 "period_index": 0,
@@ -86,7 +86,29 @@ class ResolveBoundSignalSeriesTests(unittest.TestCase):
         ]
         time_series_set = price_set(periods, values)
 
-        with self.assertRaises(InputVariantRangeError):
+        with self.assertRaisesRegex(
+            InputVariantRangeError,
+            "binding 'import_price_usd_per_mwh'.*time-series set 1.*missing coverage.*2026-01-01T01:00:00.*2026-01-01T02:00:00",
+        ):
+            resolve_bound_signal_series(
+                time_series_set,
+                "import_price_usd_per_mwh",
+                "2026-01-01T00:00:00",
+                "2026-01-01T03:00:00",
+            )
+
+    def test_range_start_gap_names_binding_and_missing_span(self):
+        periods = hourly_periods(1, 2)
+        values = [
+            {"period_index": index, "signal_key": "import_price_usd_per_mwh", "value_numeric": float(index)}
+            for index in range(2)
+        ]
+        time_series_set = price_set(periods, values)
+
+        with self.assertRaisesRegex(
+            InputVariantRangeError,
+            "binding 'import_price_usd_per_mwh'.*time-series set 1.*missing coverage.*2026-01-01T00:00:00.*2026-01-01T01:00:00",
+        ):
             resolve_bound_signal_series(
                 time_series_set,
                 "import_price_usd_per_mwh",
@@ -200,6 +222,22 @@ class MaterializeVariantTimeSeriesTests(unittest.TestCase):
         ]
 
         with self.assertRaises(InputVariantRangeError):
+            materialize_variant_time_series(
+                {"import_price_usd_per_mwh": price_rows, "load_demand_mw": demand_rows}
+            )
+
+    def test_mismatched_duration_between_signals_raises(self):
+        price_rows = [
+            {"timestamp": "2026-01-01T00:00:00", "duration_hours": 1.0, "import_price_usd_per_mwh": 50.0},
+        ]
+        demand_rows = [
+            {"timestamp": "2026-01-01T00:00:00", "duration_hours": 2.0, "load_demand_mw": 12.0},
+        ]
+
+        with self.assertRaisesRegex(
+            InputVariantRangeError,
+            "horizon incompatible.*load_demand_mw.*duration.*import_price_usd_per_mwh",
+        ):
             materialize_variant_time_series(
                 {"import_price_usd_per_mwh": price_rows, "load_demand_mw": demand_rows}
             )

@@ -33,6 +33,21 @@ def price_rows(start, count, *, value=50.0):
     return rows
 
 
+def timed_rows(start, durations, *, value=50.0, value_column="spot_price"):
+    rows = []
+    cursor = start
+    for index, duration in enumerate(durations):
+        rows.append(
+            {
+                "period_start": cursor.isoformat(),
+                "hours": str(duration),
+                value_column: str(value + index),
+            }
+        )
+        cursor += timedelta(hours=duration)
+    return rows
+
+
 class DefaultInputVariantTests(unittest.TestCase):
     def setUp(self):
         self.store = AnalystStore("sqlite:///:memory:")
@@ -210,6 +225,32 @@ class MaterializeSystemCaseForVariantTests(unittest.TestCase):
         )
         self.assertEqual(result["series_bindings"][0]["time_series_set_id"], self.price_set["id"])
 
+    def test_success_records_validated_revision_and_content_hash_for_binding(self):
+        result = self.store.materialize_system_case_for_variant(
+            scenario_id=self.scenario["id"],
+            case_input_variant_id=self.variant["id"],
+            range_start=self.price_set["horizon"]["start"],
+            range_end=self.price_set["horizon"]["end"],
+        )
+
+        self.assertEqual(
+            result["series_bindings"],
+            [
+                {
+                    "signal_key": "import_price_usd_per_mwh",
+                    "time_series_set_id": self.price_set["id"],
+                    "version_number": self.price_set["version_number"],
+                    "version_label": self.price_set["version_label"],
+                    "revision_number": self.price_set["revision_number"],
+                    "content_hash": self.price_set["content_hash"],
+                    "validated_range": {
+                        "start": self.price_set["horizon"]["start"],
+                        "end": self.price_set["horizon"]["end"],
+                    },
+                }
+            ],
+        )
+
     def test_range_not_covered_by_binding_raises(self):
         from app.input_variants import InputVariantRangeError
 
@@ -347,3 +388,63 @@ class MaterializeVariantRequiredSignalsTests(unittest.TestCase):
             sorted(row["signal_key"] for row in result["series_bindings"]),
             ["import_price_usd_per_mwh", "load_demand_mw"],
         )
+
+    def test_mismatched_periods_between_bound_sets_raise_explicit_error(self):
+        from app.input_variants import InputVariantRangeError
+
+        long_price_prepared = prepare_time_series_catalog_import(
+            rows=price_rows(datetime(2026, 1, 1), 4),
+            request=price_import_request(version_label="v2"),
+        )
+        long_price_set = self.store.import_time_series_catalog_set(
+            scenario_id=self.scenario["id"],
+            source={
+                "id": "csv_source_3",
+                "original_filename": "price_4h.csv",
+                "media_type": "text/csv",
+                "checksum": "sha256:test3",
+            },
+            prepared_import=long_price_prepared,
+        )
+        load_prepared = prepare_time_series_catalog_import(
+            rows=timed_rows(datetime(2026, 1, 1), [2.0, 2.0], value=1.0),
+            request=CatalogImportRequest(
+                set_name="Load",
+                version_label="v1",
+                data_kind="real",
+                timezone="America/Santiago",
+                timestamp_column="period_start",
+                duration_hours_column="hours",
+                signal_mappings=[
+                    CatalogSignalMappingRequest(source_column="spot_price", signal_key="load_demand_mw"),
+                ],
+            ),
+        )
+        load_set = self.store.import_time_series_catalog_set(
+            scenario_id=self.scenario["id"],
+            source={
+                "id": "csv_source_4",
+                "original_filename": "load_2h.csv",
+                "media_type": "text/csv",
+                "checksum": "sha256:test4",
+            },
+            prepared_import=load_prepared,
+        )
+        self.store.upsert_case_time_series_binding(
+            case_input_variant_id=self.variant["id"],
+            signal_key="import_price_usd_per_mwh",
+            time_series_set_id=long_price_set["id"],
+        )
+        self.store.upsert_case_time_series_binding(
+            case_input_variant_id=self.variant["id"],
+            signal_key="load_demand_mw",
+            time_series_set_id=load_set["id"],
+        )
+
+        with self.assertRaisesRegex(InputVariantRangeError, "horizon incompatible.*load_demand_mw"):
+            self.store.materialize_system_case_for_variant(
+                scenario_id=self.scenario["id"],
+                case_input_variant_id=self.variant["id"],
+                range_start=long_price_set["horizon"]["start"],
+                range_end=long_price_set["horizon"]["end"],
+            )

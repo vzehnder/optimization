@@ -4231,6 +4231,7 @@ class AnalystStore:
                     "version_label": time_series_set["version_label"],
                     "revision_number": time_series_set["revision_number"],
                     "content_hash": time_series_set["content_hash"],
+                    "validated_range": {"start": range_start, "end": range_end},
                 }
             )
 

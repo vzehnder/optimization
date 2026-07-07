@@ -8,6 +8,22 @@ class InputVariantRangeError(ValueError):
     pass
 
 
+def _binding_label(signal_key: str, set_id: Any) -> str:
+    return f"binding {signal_key!r} on time-series set {set_id}"
+
+
+def _missing_coverage_error(signal_key: str, set_id: Any, start: str, end: str) -> InputVariantRangeError:
+    return InputVariantRangeError(
+        f"{_binding_label(signal_key, set_id)} missing coverage for [{start}, {end})"
+    )
+
+
+def _horizon_incompatible_error(signal_key: str, set_id: Any, reason: str) -> InputVariantRangeError:
+    return InputVariantRangeError(
+        f"horizon incompatible for {_binding_label(signal_key, set_id)}: {reason}; no implicit resampling"
+    )
+
+
 def _naive_iso_timestamp(value: str) -> str:
     """Drop the UTC offset ``time_series_periods`` timestamps carry.
 
@@ -40,22 +56,35 @@ def resolve_bound_signal_series(
     periods = [period for period in periods if period["timestamp_end"] > range_start]
 
     if not periods:
-        raise InputVariantRangeError(
-            f"time-series set {set_id} has no periods in range [{range_start}, {range_end})"
-        )
+        raise _missing_coverage_error(signal_key, set_id, range_start, range_end)
     if periods[0]["timestamp_start"] != range_start:
-        raise InputVariantRangeError(
-            f"time-series set {set_id} does not cover range start {range_start}"
+        actual_start = periods[0]["timestamp_start"]
+        if actual_start > range_start:
+            raise _missing_coverage_error(signal_key, set_id, range_start, actual_start)
+        raise _horizon_incompatible_error(
+            signal_key,
+            set_id,
+            f"first period starts at {actual_start}, before requested range start {range_start}",
         )
     if periods[-1]["timestamp_end"] != range_end:
-        raise InputVariantRangeError(
-            f"time-series set {set_id} does not cover range end {range_end}"
+        actual_end = periods[-1]["timestamp_end"]
+        if actual_end < range_end:
+            raise _missing_coverage_error(signal_key, set_id, actual_end, range_end)
+        raise _horizon_incompatible_error(
+            signal_key,
+            set_id,
+            f"last period ends at {actual_end}, after requested range end {range_end}",
         )
     for previous, current in zip(periods, periods[1:]):
         if previous["timestamp_end"] != current["timestamp_start"]:
-            raise InputVariantRangeError(
-                f"time-series set {set_id} has a gap between "
-                f"{previous['timestamp_end']} and {current['timestamp_start']}"
+            if previous["timestamp_end"] < current["timestamp_start"]:
+                raise _missing_coverage_error(
+                    signal_key, set_id, previous["timestamp_end"], current["timestamp_start"]
+                )
+            raise _horizon_incompatible_error(
+                signal_key,
+                set_id,
+                f"period ending {previous['timestamp_end']} overlaps next period start {current['timestamp_start']}",
             )
 
     values_by_period = {
@@ -67,8 +96,8 @@ def resolve_bound_signal_series(
     for period in periods:
         if period["period_index"] not in values_by_period:
             raise InputVariantRangeError(
-                f"time-series set {set_id} is missing {signal_key!r} for period "
-                f"{period['period_index']}"
+                f"{_binding_label(signal_key, set_id)} missing value for period "
+                f"{period['period_index']} [{period['timestamp_start']}, {period['timestamp_end']})"
             )
         rows.append(
             {
@@ -102,13 +131,21 @@ def materialize_variant_time_series(
         for signal_key, rows in bound_signal_series.items():
             if len(rows) != len(reference_rows):
                 raise InputVariantRangeError(
-                    f"bound signal {signal_key!r} horizon length does not match {reference_signal!r}"
+                    f"horizon incompatible: bound signal {signal_key!r} has {len(rows)} periods, "
+                    f"but {reference_signal!r} has {len(reference_rows)} periods; no implicit resampling"
                 )
             other_row = rows[index]
             if other_row["timestamp"] != row["timestamp"]:
                 raise InputVariantRangeError(
-                    f"bound signal {signal_key!r} timestamp does not match "
-                    f"{reference_signal!r} at index {index}"
+                    f"horizon incompatible: bound signal {signal_key!r} timestamp "
+                    f"{other_row['timestamp']} does not match {reference_signal!r} timestamp "
+                    f"{row['timestamp']} at index {index}; no implicit resampling"
+                )
+            if other_row["duration_hours"] != row["duration_hours"]:
+                raise InputVariantRangeError(
+                    f"horizon incompatible: bound signal {signal_key!r} duration "
+                    f"{other_row['duration_hours']} does not match {reference_signal!r} duration "
+                    f"{row['duration_hours']} at timestamp {row['timestamp']}; no implicit resampling"
                 )
             row[signal_key] = other_row[signal_key]
         merged.append(row)
