@@ -18,6 +18,7 @@ CORE_DISPATCH_BASE_COLUMNS = {
 }
 SINGLE_PRICE_COLUMNS = {"price_usd_per_mwh"}
 SEPARATE_PRICE_COLUMNS = {"import_price_usd_per_mwh", "export_price_usd_per_mwh"}
+ASSET_DISPATCH_BASE_COLUMNS = {"timestamp", "asset_id", "asset_type"}
 HYDRO_BASE_COLUMNS = {
     "total_hydro_power_mw",
     "total_hydro_turbine_flow_m3s",
@@ -100,6 +101,48 @@ def index_run_dispatch_results(
         rows=rows,
         signal_keys=dispatch_signal_keys(columns),
     )
+
+
+def index_run_asset_dispatch_results(
+    *,
+    store: AnalystStore,
+    run: dict[str, Any],
+    artifacts: list[dict[str, Any]],
+    artifact_root: Path | str,
+) -> dict[str, Any] | None:
+    if run["status"] != "succeeded":
+        raise ResultIndexingError("run asset dispatch results can only be indexed for succeeded runs")
+
+    asset_dispatch_artifact = next(
+        (artifact for artifact in artifacts if artifact["artifact_type"] == "asset_dispatch_csv"),
+        None,
+    )
+    if asset_dispatch_artifact is None:
+        raise ResultIndexingError("asset_dispatch.csv artifact is not registered")
+
+    asset_dispatch_path = resolve_artifact_path(asset_dispatch_artifact["path"], artifact_root)
+    try:
+        with asset_dispatch_path.open(newline="", encoding="utf-8") as file:
+            reader = csv.DictReader(file)
+            columns = list(reader.fieldnames or [])
+            if not columns:
+                raise ResultIndexingError("asset_dispatch.csv is missing a header row")
+            if not supports_asset_dispatch_index(columns):
+                return None
+            rows = [dict(row) for row in reader]
+    except OSError as error:
+        raise ResultIndexingError(f"asset_dispatch.csv could not be read: {error}") from error
+
+    return store.replace_run_asset_dispatch_result_index(
+        run_id=int(run["id"]),
+        scenario_version_id=int(run["scenario_version_id"]),
+        columns=columns,
+        rows=rows,
+    )
+
+
+def supports_asset_dispatch_index(columns: list[str]) -> bool:
+    return ASSET_DISPATCH_BASE_COLUMNS.issubset(set(columns))
 
 
 def dispatch_signal_keys(columns: list[str]) -> dict[str, str]:

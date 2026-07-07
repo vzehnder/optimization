@@ -50,6 +50,7 @@ ID_TABLES = {
     "projects",
     "publications",
     "run_artifacts",
+    "run_asset_dispatch_result_rows",
     "run_dispatch_result_rows",
     "runs",
     "scenario_drafts",

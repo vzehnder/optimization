@@ -752,6 +752,28 @@ class AnalystStore:
                 UNIQUE (run_id, timestamp)
             );
 
+            CREATE TABLE IF NOT EXISTS run_asset_dispatch_result_indexes (
+                run_id INTEGER PRIMARY KEY,
+                scenario_version_id INTEGER NOT NULL,
+                asset_dispatch_columns_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
+                FOREIGN KEY (scenario_version_id) REFERENCES scenario_versions(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS run_asset_dispatch_result_rows (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id INTEGER NOT NULL,
+                period_index INTEGER NOT NULL,
+                asset_id TEXT NOT NULL,
+                asset_type TEXT NOT NULL,
+                row_json TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
+                UNIQUE (run_id, period_index)
+            );
+
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 email TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -4343,6 +4365,99 @@ class AnalystStore:
             "scenario_version_id": int(index_row["scenario_version_id"]),
             "columns": json.loads(index_row["dispatch_columns_json"]),
             "signal_keys": json.loads(index_row["signal_keys_json"] or "{}"),
+            "rows": [json.loads(str(row["row_json"])) for row in row_records],
+            "created_at": str(index_row["created_at"]),
+        }
+
+    def replace_run_asset_dispatch_result_index(
+        self,
+        *,
+        run_id: int,
+        scenario_version_id: int,
+        columns: list[str],
+        rows: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        with self._lock:
+            run = self.get_run(run_id)
+            if int(run["scenario_version_id"]) != scenario_version_id:
+                raise ValueError("run_asset_dispatch_result_index scenario_version_id does not match the run")
+            self.get_scenario_version(scenario_version_id, include_document=False)
+            now = utc_now_iso()
+            self.connection.execute(
+                """
+                INSERT INTO run_asset_dispatch_result_indexes (
+                    run_id,
+                    scenario_version_id,
+                    asset_dispatch_columns_json,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (run_id) DO UPDATE SET
+                    scenario_version_id = excluded.scenario_version_id,
+                    asset_dispatch_columns_json = excluded.asset_dispatch_columns_json,
+                    created_at = excluded.created_at
+                """,
+                (run_id, scenario_version_id, json.dumps(columns), now),
+            )
+            self.connection.execute(
+                "DELETE FROM run_asset_dispatch_result_rows WHERE run_id = ?",
+                (run_id,),
+            )
+            self.connection.executemany(
+                """
+                INSERT INTO run_asset_dispatch_result_rows (
+                    run_id,
+                    period_index,
+                    asset_id,
+                    asset_type,
+                    row_json,
+                    timestamp,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        run_id,
+                        period_index,
+                        str(row.get("asset_id") or ""),
+                        str(row.get("asset_type") or ""),
+                        json.dumps(row, ensure_ascii=True),
+                        str(row.get("timestamp") or ""),
+                        now,
+                    )
+                    for period_index, row in enumerate(rows)
+                ],
+            )
+            self.connection.commit()
+            return self.get_run_asset_dispatch_result_index(run_id)
+
+    def get_run_asset_dispatch_result_index(self, run_id: int) -> dict[str, Any] | None:
+        self.get_run(run_id)
+        index_row = self.connection.execute(
+            """
+            SELECT run_id, scenario_version_id, asset_dispatch_columns_json, created_at
+            FROM run_asset_dispatch_result_indexes
+            WHERE run_id = ?
+            """,
+            (run_id,),
+        ).fetchone()
+        if index_row is None:
+            return None
+
+        row_records = self.connection.execute(
+            """
+            SELECT row_json
+            FROM run_asset_dispatch_result_rows
+            WHERE run_id = ?
+            ORDER BY period_index
+            """,
+            (run_id,),
+        ).fetchall()
+        return {
+            "run_id": int(index_row["run_id"]),
+            "scenario_version_id": int(index_row["scenario_version_id"]),
+            "columns": json.loads(index_row["asset_dispatch_columns_json"]),
             "rows": [json.loads(str(row["row_json"])) for row in row_records],
             "created_at": str(index_row["created_at"]),
         }

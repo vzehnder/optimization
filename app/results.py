@@ -55,12 +55,21 @@ def read_run_results(
             artifact_root,
             display_name="dispatch.csv",
         )
-    asset_dispatch_table = read_csv_artifact(
-        artifacts_by_type,
-        "asset_dispatch_csv",
-        artifact_root,
-        display_name="asset_dispatch.csv",
-    )
+    asset_dispatch_table = None
+    if store is not None:
+        indexed_asset_dispatch = store.get_run_asset_dispatch_result_index(int(run["id"]))
+        if indexed_asset_dispatch is not None:
+            asset_dispatch_table = {
+                "columns": list(indexed_asset_dispatch["columns"]),
+                "rows": [dict(row) for row in indexed_asset_dispatch["rows"]],
+            }
+    if asset_dispatch_table is None:
+        asset_dispatch_table = read_csv_artifact(
+            artifacts_by_type,
+            "asset_dispatch_csv",
+            artifact_root,
+            display_name="asset_dispatch.csv",
+        )
     return {
         "summary": summary,
         "dispatch_table": dispatch_table,
