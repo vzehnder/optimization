@@ -905,6 +905,16 @@ describe("application shell", () => {
                 updated_at: "2026-07-06T12:00:00Z",
               },
               bindings: [],
+              required_signals: [
+                {
+                  entity_type: "grid",
+                  entity_id: "grid_1",
+                  signal_key: "price_usd_per_mwh",
+                  bound: false,
+                  bound_signal_key: null,
+                  time_series_set_id: null,
+                },
+              ],
             }),
             { headers: { "Content-Type": "application/json" } },
           );
@@ -979,6 +989,9 @@ describe("application shell", () => {
 
     expect(
       await screen.findByText("Aun no hay una serie de precio vinculada."),
+    ).toBeVisible();
+    expect(
+      screen.getByText("price_usd_per_mwh (grid_1): falta vincular"),
     ).toBeVisible();
     await user.selectOptions(
       screen.getByLabelText("Serie de precio (price_usd_per_mwh)"),

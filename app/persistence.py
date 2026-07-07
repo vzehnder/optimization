@@ -11,8 +11,14 @@ from typing import Any, Mapping
 
 from app.auth import VALID_USER_ROLES
 from app.database import connect_database, database_url_from_env, postgres_schema_from_sqlite
-from app.draft_editor import generate_system_case_from_draft
+from app.draft_editor import DraftGenerationError, generate_system_case_from_draft
 from app.input_variants import materialize_variant_time_series, resolve_bound_signal_series
+from app.required_signals import (
+    MissingRequiredSignalsError,
+    discover_required_signals,
+    evaluate_variant_completeness,
+    required_signal_status_to_dict,
+)
 from app.time_series_catalog import (
     TIME_SERIES_SIGNAL_CATALOG,
     CatalogValueEdit,
@@ -4168,6 +4174,29 @@ class AnalystStore:
             results.append(value)
         return results
 
+    def _generate_base_system_case_from_draft(self, scenario_id: int) -> dict[str, Any]:
+        draft = self.get_scenario_draft(scenario_id)
+        # The draft's own (legacy) time_series/sources are irrelevant here: TS-3
+        # supplies time_series from variant bindings below, so any unvalidated
+        # source left attached to the draft must not block generation.
+        draft_document = dict(draft["document"])
+        draft_document["time_series"] = {"periods": []}
+        return generate_system_case_from_draft(draft_document)
+
+    def evaluate_case_input_variant_required_signals(
+        self, *, scenario_id: int, case_input_variant_id: int
+    ) -> list[dict[str, Any]]:
+        try:
+            base_system_case = self._generate_base_system_case_from_draft(scenario_id)
+        except (KeyError, DraftGenerationError):
+            # No editor draft yet (not opened, or a hydraulic-diagram case that
+            # never has one): nothing to discover required signals from.
+            return []
+        required = discover_required_signals(base_system_case)
+        bindings = self.list_case_time_series_bindings(case_input_variant_id)
+        statuses = evaluate_variant_completeness(required, bindings)
+        return [required_signal_status_to_dict(status) for status in statuses]
+
     def materialize_system_case_for_variant(
         self,
         *,
@@ -4177,17 +4206,17 @@ class AnalystStore:
         range_end: str,
     ) -> dict[str, Any]:
         scenario = self.get_scenario(scenario_id)
-        draft = self.get_scenario_draft(scenario_id)
-        # The draft's own (legacy) time_series/sources are irrelevant here: TS-3
-        # supplies time_series from variant bindings below, so any unvalidated
-        # source left attached to the draft must not block generation.
-        draft_document = dict(draft["document"])
-        draft_document["time_series"] = {"periods": []}
-        base_system_case = generate_system_case_from_draft(draft_document)
+        base_system_case = self._generate_base_system_case_from_draft(scenario_id)
+        bindings = self.list_case_time_series_bindings(case_input_variant_id)
+
+        required = discover_required_signals(base_system_case)
+        missing = [status for status in evaluate_variant_completeness(required, bindings) if not status.bound]
+        if missing:
+            raise MissingRequiredSignalsError(missing)
 
         bound_signal_series: dict[str, list[dict[str, Any]]] = {}
         series_bindings: list[dict[str, Any]] = []
-        for binding in self.list_case_time_series_bindings(case_input_variant_id):
+        for binding in bindings:
             time_series_set = self.get_time_series_set(
                 int(scenario["project_id"]), int(binding["time_series_set_id"])
             )

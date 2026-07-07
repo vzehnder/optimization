@@ -24,6 +24,19 @@ representative cases (hybrid one-bus and hydraulic-diagram cases), and a run
 from a variant with multi-family bindings must materialize and execute end to
 end.
 
+BESS-TS3-002's Chrome verification already found the concrete blocker: once a
+variant binds an entity-scoped signal (`load_demand_mw`,
+`renewable_available_power_mw`, `hydro_inflow_m3s`) alongside price and runs,
+Julia rejects it with `ArgumentError: <signal> for asset <id> is required at
+time_series[i]`. `resolve_bound_signal_series`/`materialize_variant_time_series`
+(`app/input_variants.py`, TS3-001) write every bound signal as a flat scalar
+column, but `generate_system_case_from_draft`'s legacy contract expects
+entity-scoped signals as a `{asset_id: value}` map per period (see
+`draft_editor._period_from_validated_row`). This slice needs to make bindings
+entity-scoped (so `case_time_series_bindings` records which asset a binding
+applies to) and fix materialization to emit the map shape for those signal
+families.
+
 ## Acceptance criteria
 
 - [ ] Load demand signals can be bound per load asset.

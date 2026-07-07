@@ -30,6 +30,7 @@ from app.draft_editor import (
     structured_draft_document_from_system_case,
 )
 from app.input_variants import InputVariantRangeError
+from app.required_signals import MissingRequiredSignalsError
 from app.persistence import (
     AnalystStore,
     DEFAULT_PUBLICATION_ARTIFACT_TYPES,
@@ -1739,9 +1740,17 @@ def create_app(
             case = analyst_store.get_or_create_case_for_scenario(scenario_id)
             variant = analyst_store.get_or_create_default_input_variant(case["id"])
             bindings = analyst_store.list_case_time_series_bindings(variant["id"])
+            required_signals = analyst_store.evaluate_case_input_variant_required_signals(
+                scenario_id=scenario_id, case_input_variant_id=variant["id"]
+            )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        return {"case": optimization_case_public_dict(case), "variant": variant, "bindings": bindings}
+        return {
+            "case": optimization_case_public_dict(case),
+            "variant": variant,
+            "bindings": bindings,
+            "required_signals": required_signals,
+        }
 
     @app.post("/api/scenarios/{scenario_id}/case/variants/{variant_id}/bindings", status_code=201)
     async def bind_case_time_series(
@@ -1770,7 +1779,7 @@ def create_app(
             )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        except (DraftGenerationError, InputVariantRangeError) as error:
+        except (DraftGenerationError, InputVariantRangeError, MissingRequiredSignalsError) as error:
             return JSONResponse(
                 error_response_body("input_variant", str(error), phase="python_validation"),
                 status_code=400,

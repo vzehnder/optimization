@@ -245,3 +245,105 @@ class MaterializeSystemCaseForVariantTests(unittest.TestCase):
         )
 
         self.assertEqual(len(result["system_case"]["time_series"]), 3)
+
+
+def grid_battery_load_draft_document():
+    document = grid_battery_draft_document()
+    document["assets"].append({"id": "load_1", "type": "load"})
+    return document
+
+
+class MaterializeVariantRequiredSignalsTests(unittest.TestCase):
+    def setUp(self):
+        self.store = AnalystStore("sqlite:///:memory:")
+        self.project = self.store.create_project(name="TS-3 project")
+        self.scenario = self.store.create_scenario(
+            project_id=self.project["id"], name="TS-3 scenario"
+        )
+        self.store.create_or_replace_scenario_draft(
+            scenario_id=self.scenario["id"], document=grid_battery_load_draft_document()
+        )
+        self.case = self.store.get_or_create_case_for_scenario(self.scenario["id"])
+        self.variant = self.store.get_or_create_default_input_variant(self.case["id"])
+        prepared = prepare_time_series_catalog_import(
+            rows=price_rows(datetime(2026, 1, 1), 3),
+            request=price_import_request(),
+        )
+        self.price_set = self.store.import_time_series_catalog_set(
+            scenario_id=self.scenario["id"],
+            source={
+                "id": "csv_source_1",
+                "original_filename": "price.csv",
+                "media_type": "text/csv",
+                "checksum": "sha256:test",
+            },
+            prepared_import=prepared,
+        )
+
+    def test_run_with_missing_load_binding_raises_naming_the_missing_signal(self):
+        from app.required_signals import MissingRequiredSignalsError
+
+        self.store.upsert_case_time_series_binding(
+            case_input_variant_id=self.variant["id"],
+            signal_key="import_price_usd_per_mwh",
+            time_series_set_id=self.price_set["id"],
+        )
+
+        with self.assertRaises(MissingRequiredSignalsError) as raised:
+            self.store.materialize_system_case_for_variant(
+                scenario_id=self.scenario["id"],
+                case_input_variant_id=self.variant["id"],
+                range_start=self.price_set["horizon"]["start"],
+                range_end=self.price_set["horizon"]["end"],
+            )
+
+        self.assertIn("load_demand_mw", str(raised.exception))
+
+    def test_run_with_every_required_signal_bound_succeeds(self):
+        self.store.upsert_case_time_series_binding(
+            case_input_variant_id=self.variant["id"],
+            signal_key="import_price_usd_per_mwh",
+            time_series_set_id=self.price_set["id"],
+        )
+        load_prepared = prepare_time_series_catalog_import(
+            rows=price_rows(datetime(2026, 1, 1), 3, value=1.0),
+            request=CatalogImportRequest(
+                set_name="Load",
+                version_label="v1",
+                data_kind="real",
+                timezone="America/Santiago",
+                timestamp_column="period_start",
+                duration_hours_column="hours",
+                signal_mappings=[
+                    CatalogSignalMappingRequest(source_column="spot_price", signal_key="load_demand_mw"),
+                ],
+            ),
+        )
+        load_set = self.store.import_time_series_catalog_set(
+            scenario_id=self.scenario["id"],
+            source={
+                "id": "csv_source_2",
+                "original_filename": "load.csv",
+                "media_type": "text/csv",
+                "checksum": "sha256:test2",
+            },
+            prepared_import=load_prepared,
+        )
+        self.store.upsert_case_time_series_binding(
+            case_input_variant_id=self.variant["id"],
+            signal_key="load_demand_mw",
+            time_series_set_id=load_set["id"],
+        )
+
+        result = self.store.materialize_system_case_for_variant(
+            scenario_id=self.scenario["id"],
+            case_input_variant_id=self.variant["id"],
+            range_start=self.price_set["horizon"]["start"],
+            range_end=self.price_set["horizon"]["end"],
+        )
+
+        self.assertEqual(len(result["system_case"]["time_series"]), 3)
+        self.assertEqual(
+            sorted(row["signal_key"] for row in result["series_bindings"]),
+            ["import_price_usd_per_mwh", "load_demand_mw"],
+        )

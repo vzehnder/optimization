@@ -82,6 +82,7 @@ import {
   type Project,
   type CaseTimeSeriesBinding,
   type DefaultInputVariantResponse,
+  type RequiredSignalStatus,
   type ProjectCreatePayload,
   type ProjectTimeSeriesSet,
   type ProjectTimeSeriesSetRevision,
@@ -4858,6 +4859,17 @@ function CaseInputVariantPanel({
           ? `Precio vinculado: set #${priceBinding.time_series_set_id}.`
           : "Aun no hay una serie de precio vinculada."}
       </p>
+      <ul aria-label="Senales requeridas">
+        {(variantQuery.data?.required_signals || []).map(
+          (signal: RequiredSignalStatus) => (
+            <li key={`${signal.entity_type}:${signal.entity_id}:${signal.signal_key}`}>
+              {signal.bound
+                ? `${signal.signal_key} (${signal.entity_id}): vinculada (set #${signal.time_series_set_id})`
+                : `${signal.signal_key} (${signal.entity_id}): falta vincular`}
+            </li>
+          ),
+        )}
+      </ul>
       <div className="field-row">
         <label htmlFor="input_variant_price_set">
           Serie de precio (price_usd_per_mwh)

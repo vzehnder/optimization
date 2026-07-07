@@ -125,6 +125,74 @@ class CaseInputVariantApiTests(unittest.TestCase):
         body = response.json()
         self.assertTrue(body["variant"]["is_default"])
         self.assertEqual(body["bindings"], [])
+        self.assertEqual(
+            body["required_signals"],
+            [
+                {
+                    "entity_type": "grid",
+                    "entity_id": "grid_1",
+                    "signal_key": "price_usd_per_mwh",
+                    "bound": False,
+                    "bound_signal_key": None,
+                    "time_series_set_id": None,
+                }
+            ],
+        )
+
+    def test_required_signals_reflect_a_bound_price(self):
+        variant_id = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/case/default-variant"
+        ).json()["variant"]["id"]
+
+        self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/case/variants/{variant_id}/bindings",
+            json={"signal_key": "import_price_usd_per_mwh", "time_series_set_id": self.price_set["id"]},
+        )
+
+        body = self.client.get(f"/api/scenarios/{self.scenario['id']}/case/default-variant").json()
+
+        self.assertEqual(
+            body["required_signals"],
+            [
+                {
+                    "entity_type": "grid",
+                    "entity_id": "grid_1",
+                    "signal_key": "price_usd_per_mwh",
+                    "bound": True,
+                    "bound_signal_key": "import_price_usd_per_mwh",
+                    "time_series_set_id": self.price_set["id"],
+                }
+            ],
+        )
+
+    def test_run_with_a_missing_required_signal_returns_400(self):
+        self.store.create_or_replace_scenario_draft(
+            scenario_id=self.scenario["id"], document=self._grid_battery_load_draft_document()
+        )
+        variant_id = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/case/default-variant"
+        ).json()["variant"]["id"]
+        self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/case/variants/{variant_id}/bindings",
+            json={"signal_key": "import_price_usd_per_mwh", "time_series_set_id": self.price_set["id"]},
+        )
+
+        run_response = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/case/variants/{variant_id}/run",
+            json={
+                "range_start": self.price_set["horizon"]["start"],
+                "range_end": self.price_set["horizon"]["end"],
+            },
+        )
+
+        self.assertEqual(run_response.status_code, 400)
+        self.assertIn("load_demand_mw", run_response.text)
+
+    @staticmethod
+    def _grid_battery_load_draft_document():
+        document = grid_battery_draft_document()
+        document["assets"].append({"id": "load_1", "type": "load"})
+        return document
 
     def test_bind_price_signal_then_run_launches_a_run(self):
         variant_id = self.client.get(
@@ -165,6 +233,31 @@ class CaseInputVariantApiTests(unittest.TestCase):
         )
 
         self.assertEqual(run_response.status_code, 400)
+
+
+class DefaultVariantWithoutADraftYetTests(unittest.TestCase):
+    """A scenario's editor draft is only created when someone opens it; the
+    input-variant panel is shown on the scenario page regardless, so it must
+    not 404 just because required-signal discovery has nothing to read yet.
+    """
+
+    def setUp(self):
+        self.client = TestClient(
+            create_app(
+                validation_service=StubValidationService(),
+                database_url="sqlite:///:memory:",
+                run_queue=RecordingRunQueue(),
+            )
+        )
+        self.store = self.client.app.state.analyst_store
+        project = self.store.create_project(name="TS-3 project")
+        self.scenario = self.store.create_scenario(project_id=project["id"], name="TS-3 scenario")
+
+    def test_get_default_variant_without_a_draft_returns_no_required_signals(self):
+        response = self.client.get(f"/api/scenarios/{self.scenario['id']}/case/default-variant")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["required_signals"], [])
 
 
 if __name__ == "__main__":

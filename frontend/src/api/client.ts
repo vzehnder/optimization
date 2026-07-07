@@ -1121,6 +1121,15 @@ export interface CaseTimeSeriesBinding {
   updated_at: string;
 }
 
+export interface RequiredSignalStatus {
+  entity_type: string;
+  entity_id: string;
+  signal_key: string;
+  bound: boolean;
+  bound_signal_key: string | null;
+  time_series_set_id: number | null;
+}
+
 export interface DefaultInputVariantResponse {
   case: {
     id: number;
@@ -1131,6 +1140,7 @@ export interface DefaultInputVariantResponse {
   };
   variant: CaseInputVariant;
   bindings: CaseTimeSeriesBinding[];
+  required_signals: RequiredSignalStatus[];
 }
 
 export interface CaseTimeSeriesBindingPayload {
