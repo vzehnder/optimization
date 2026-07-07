@@ -31,6 +31,7 @@ from app.draft_editor import (
 )
 from app.input_variants import InputVariantRangeError
 from app.required_signals import MissingRequiredSignalsError
+from app.variant_staleness import VariantStaleError
 from app.persistence import (
     AnalystStore,
     DEFAULT_PUBLICATION_ARTIFACT_TYPES,
@@ -1747,6 +1748,9 @@ def create_app(
             "required_signals": analyst_store.evaluate_case_input_variant_required_signals(
                 scenario_id=scenario_id, case_input_variant_id=variant["id"]
             ),
+            "staleness": analyst_store.evaluate_case_input_variant_staleness(
+                scenario_id=scenario_id, case_input_variant_id=variant["id"]
+            ),
         }
 
     def get_case_and_variant_for_scenario(scenario_id: int, variant_id: int) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -1854,6 +1858,27 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         return binding
 
+    @app.post("/api/scenarios/{scenario_id}/case/variants/{variant_id}/validate")
+    async def validate_case_input_variant(
+        scenario_id: int, variant_id: int, payload: CaseInputVariantRunRequest
+    ):
+        try:
+            case, _ = get_case_and_variant_for_scenario(scenario_id, variant_id)
+            validated = analyst_store.validate_case_input_variant(
+                scenario_id=scenario_id,
+                case_input_variant_id=variant_id,
+                range_start=payload.range_start,
+                range_end=payload.range_end,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except (DraftGenerationError, InputVariantRangeError, MissingRequiredSignalsError) as error:
+            return JSONResponse(
+                error_response_body("input_variant", str(error), phase="python_validation"),
+                status_code=400,
+            )
+        return {"status": "valid", "series_bindings": validated["series_bindings"]}
+
     @app.post("/api/scenarios/{scenario_id}/case/variants/{variant_id}/run", status_code=201)
     async def run_case_input_variant(scenario_id: int, variant_id: int, payload: CaseInputVariantRunRequest):
         try:
@@ -1866,7 +1891,7 @@ def create_app(
             )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        except (DraftGenerationError, InputVariantRangeError, MissingRequiredSignalsError) as error:
+        except (DraftGenerationError, InputVariantRangeError, MissingRequiredSignalsError, VariantStaleError) as error:
             return JSONResponse(
                 error_response_body("input_variant", str(error), phase="python_validation"),
                 status_code=400,

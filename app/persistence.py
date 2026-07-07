@@ -20,6 +20,11 @@ from app.required_signals import (
     evaluate_variant_completeness,
     required_signal_status_to_dict,
 )
+from app.variant_staleness import (
+    VariantStaleError,
+    evaluate_variant_staleness,
+    variant_staleness_result_to_dict,
+)
 from app.time_series_catalog import (
     TIME_SERIES_SIGNAL_CATALOG,
     CatalogValueEdit,
@@ -662,6 +667,18 @@ class AnalystStore:
                 FOREIGN KEY (case_input_variant_id) REFERENCES case_input_variants(id) ON DELETE CASCADE,
                 FOREIGN KEY (time_series_set_id) REFERENCES time_series_sets(id) ON DELETE CASCADE,
                 UNIQUE (case_input_variant_id, signal_key, entity_type, entity_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS validation_dependencies (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_type TEXT NOT NULL,
+                owner_id INTEGER NOT NULL,
+                dependency_type TEXT NOT NULL,
+                dependency_id TEXT NOT NULL DEFAULT '',
+                recorded_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (owner_type, owner_id, dependency_type, dependency_id)
             );
 
             CREATE TABLE IF NOT EXISTS runs (
@@ -4524,7 +4541,105 @@ class AnalystStore:
         statuses = evaluate_variant_completeness(required, bindings)
         return [required_signal_status_to_dict(status) for status in statuses]
 
-    def materialize_system_case_for_variant(
+    def _current_case_input_variant_dependencies(
+        self, *, scenario_id: int, case_input_variant_id: int
+    ) -> list[dict[str, Any]]:
+        try:
+            base_system_case = self._generate_base_system_case_for_variant(scenario_id)
+        except (KeyError, DraftGenerationError):
+            # No editor draft yet: nothing to hash topology/parameters from, and
+            # no bindings can meaningfully be validated either.
+            return []
+        scenario = self.get_scenario(scenario_id)
+        provenance = derive_case_hierarchy_provenance(base_system_case)
+        dependencies: list[dict[str, Any]] = [
+            {
+                "dependency_type": "topology",
+                "dependency_id": None,
+                "hash": provenance["topology"]["content_hash"],
+            },
+            {
+                "dependency_type": "parameters",
+                "dependency_id": None,
+                "hash": provenance["parameters"]["content_hash"],
+            },
+        ]
+        bound_set_ids = sorted(
+            {
+                int(binding["time_series_set_id"])
+                for binding in self.list_case_time_series_bindings(case_input_variant_id)
+            }
+        )
+        for time_series_set_id in bound_set_ids:
+            time_series_set = self.get_time_series_set(int(scenario["project_id"]), time_series_set_id)
+            dependencies.append(
+                {
+                    "dependency_type": "time_series_set",
+                    "dependency_id": str(time_series_set_id),
+                    "hash": time_series_set["content_hash"],
+                }
+            )
+        return dependencies
+
+    def get_case_input_variant_validation_dependencies(
+        self, case_input_variant_id: int
+    ) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            """
+            SELECT dependency_type, dependency_id, recorded_hash
+            FROM validation_dependencies
+            WHERE owner_type = 'case_input_variant' AND owner_id = ?
+            ORDER BY dependency_type, dependency_id
+            """,
+            (case_input_variant_id,),
+        ).fetchall()
+        return [
+            {
+                "dependency_type": row["dependency_type"],
+                "dependency_id": row["dependency_id"] or None,
+                "hash": row["recorded_hash"],
+            }
+            for row in rows
+        ]
+
+    def _record_case_input_variant_validation(
+        self, case_input_variant_id: int, dependencies: list[dict[str, Any]]
+    ) -> None:
+        now = utc_now_iso()
+        self.connection.execute(
+            "DELETE FROM validation_dependencies WHERE owner_type = 'case_input_variant' AND owner_id = ?",
+            (case_input_variant_id,),
+        )
+        for dependency in dependencies:
+            self.connection.execute(
+                """
+                INSERT INTO validation_dependencies (
+                    owner_type, owner_id, dependency_type, dependency_id, recorded_hash, created_at, updated_at
+                )
+                VALUES ('case_input_variant', ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    case_input_variant_id,
+                    dependency["dependency_type"],
+                    dependency.get("dependency_id") or "",
+                    dependency["hash"],
+                    now,
+                    now,
+                ),
+            )
+        self.connection.commit()
+
+    def evaluate_case_input_variant_staleness(
+        self, *, scenario_id: int, case_input_variant_id: int
+    ) -> dict[str, Any]:
+        recorded = self.get_case_input_variant_validation_dependencies(case_input_variant_id)
+        current = self._current_case_input_variant_dependencies(
+            scenario_id=scenario_id, case_input_variant_id=case_input_variant_id
+        )
+        result = evaluate_variant_staleness(recorded_dependencies=recorded, current_dependencies=current)
+        return variant_staleness_result_to_dict(result)
+
+    def _resolve_variant_series_for_range(
         self,
         *,
         scenario_id: int,
@@ -4573,7 +4688,67 @@ class AnalystStore:
 
         system_case = dict(base_system_case)
         system_case["time_series"] = materialize_variant_time_series(bound_signal_series)
+
+        provenance = derive_case_hierarchy_provenance(base_system_case)
+        dependencies = [
+            {"dependency_type": "topology", "dependency_id": None, "hash": provenance["topology"]["content_hash"]},
+            {"dependency_type": "parameters", "dependency_id": None, "hash": provenance["parameters"]["content_hash"]},
+        ]
+        for time_series_set_id in sorted({binding["time_series_set_id"] for binding in series_bindings}):
+            matching = next(
+                binding for binding in series_bindings if binding["time_series_set_id"] == time_series_set_id
+            )
+            dependencies.append(
+                {
+                    "dependency_type": "time_series_set",
+                    "dependency_id": str(time_series_set_id),
+                    "hash": matching["content_hash"],
+                }
+            )
+        self._record_case_input_variant_validation(case_input_variant_id, dependencies)
+
         return {"system_case": system_case, "series_bindings": series_bindings}
+
+    def materialize_system_case_for_variant(
+        self,
+        *,
+        scenario_id: int,
+        case_input_variant_id: int,
+        range_start: str,
+        range_end: str,
+    ) -> dict[str, Any]:
+        staleness = self.evaluate_case_input_variant_staleness(
+            scenario_id=scenario_id, case_input_variant_id=case_input_variant_id
+        )
+        if staleness["stale"]:
+            raise VariantStaleError(staleness["reasons"])
+        return self._resolve_variant_series_for_range(
+            scenario_id=scenario_id,
+            case_input_variant_id=case_input_variant_id,
+            range_start=range_start,
+            range_end=range_end,
+        )
+
+    def validate_case_input_variant(
+        self,
+        *,
+        scenario_id: int,
+        case_input_variant_id: int,
+        range_start: str,
+        range_end: str,
+    ) -> dict[str, Any]:
+        """Re-run variant validation and refresh its recorded dependency hashes.
+
+        Unlike ``materialize_system_case_for_variant``, this does not check
+        staleness first: it is the revalidation path that clears the stale
+        marker, so it must succeed even when the variant is currently stale.
+        """
+        return self._resolve_variant_series_for_range(
+            scenario_id=scenario_id,
+            case_input_variant_id=case_input_variant_id,
+            range_start=range_start,
+            range_end=range_end,
+        )
 
     def _get_or_create_optimization_case(self, scenario: dict[str, Any]) -> dict[str, Any]:
         row = self.connection.execute(

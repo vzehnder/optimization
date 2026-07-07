@@ -1,10 +1,16 @@
+import copy
 import unittest
 from datetime import datetime, timedelta
 
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from app.time_series_catalog import CatalogImportRequest, CatalogSignalMappingRequest, prepare_time_series_catalog_import
+from app.time_series_catalog import (
+    CatalogImportRequest,
+    CatalogSignalMappingRequest,
+    CatalogValueEdit,
+    prepare_time_series_catalog_import,
+)
 from app.validation import ValidationResult
 
 
@@ -316,6 +322,107 @@ class CaseInputVariantApiTests(unittest.TestCase):
 
         self.assertEqual(run_response.status_code, 400)
 
+    def test_default_variant_response_includes_not_stale_before_any_validation(self):
+        body = self.client.get(f"/api/scenarios/{self.scenario['id']}/case/default-variant").json()
+
+        self.assertEqual(
+            body["staleness"],
+            {"validated": False, "stale": False, "reasons": []},
+        )
+
+    def test_series_edit_after_run_marks_variant_stale_and_blocks_further_runs(self):
+        variant_id = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/case/default-variant"
+        ).json()["variant"]["id"]
+        self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/case/variants/{variant_id}/bindings",
+            json={"signal_key": "import_price_usd_per_mwh", "time_series_set_id": self.price_set["id"]},
+        )
+        run_response = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/case/variants/{variant_id}/run",
+            json={
+                "range_start": self.price_set["horizon"]["start"],
+                "range_end": self.price_set["horizon"]["end"],
+            },
+        )
+        self.assertEqual(run_response.status_code, 201, run_response.text)
+
+        self.store.edit_time_series_set_values(
+            project_id=self.store.get_scenario(self.scenario["id"])["project_id"],
+            time_series_set_id=self.price_set["id"],
+            edits=[
+                CatalogValueEdit(period_index=0, signal_key="import_price_usd_per_mwh", value_text="999.0")
+            ],
+        )
+
+        stale_body = self.client.get(f"/api/scenarios/{self.scenario['id']}/case/default-variant").json()
+        self.assertTrue(stale_body["staleness"]["stale"])
+        self.assertEqual(
+            [reason["dependency_type"] for reason in stale_body["staleness"]["reasons"]],
+            ["time_series_set"],
+        )
+
+        second_run_response = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/case/variants/{variant_id}/run",
+            json={
+                "range_start": self.price_set["horizon"]["start"],
+                "range_end": self.price_set["horizon"]["end"],
+            },
+        )
+        self.assertEqual(second_run_response.status_code, 400)
+        self.assertIn("stale", second_run_response.text.lower())
+
+    def test_validate_endpoint_revalidates_and_clears_stale_marker_then_run_succeeds(self):
+        variant_id = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/case/default-variant"
+        ).json()["variant"]["id"]
+        self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/case/variants/{variant_id}/bindings",
+            json={"signal_key": "import_price_usd_per_mwh", "time_series_set_id": self.price_set["id"]},
+        )
+        run_response = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/case/variants/{variant_id}/run",
+            json={
+                "range_start": self.price_set["horizon"]["start"],
+                "range_end": self.price_set["horizon"]["end"],
+            },
+        )
+        self.assertEqual(run_response.status_code, 201, run_response.text)
+        self.store.edit_time_series_set_values(
+            project_id=self.store.get_scenario(self.scenario["id"])["project_id"],
+            time_series_set_id=self.price_set["id"],
+            edits=[
+                CatalogValueEdit(period_index=0, signal_key="import_price_usd_per_mwh", value_text="999.0")
+            ],
+        )
+        self.assertTrue(
+            self.client.get(f"/api/scenarios/{self.scenario['id']}/case/default-variant").json()[
+                "staleness"
+            ]["stale"]
+        )
+
+        validate_response = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/case/variants/{variant_id}/validate",
+            json={
+                "range_start": self.price_set["horizon"]["start"],
+                "range_end": self.price_set["horizon"]["end"],
+            },
+        )
+        self.assertEqual(validate_response.status_code, 200, validate_response.text)
+        self.assertEqual(validate_response.json()["status"], "valid")
+
+        not_stale_body = self.client.get(f"/api/scenarios/{self.scenario['id']}/case/default-variant").json()
+        self.assertFalse(not_stale_body["staleness"]["stale"])
+
+        third_run_response = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/case/variants/{variant_id}/run",
+            json={
+                "range_start": self.price_set["horizon"]["start"],
+                "range_end": self.price_set["horizon"]["end"],
+            },
+        )
+        self.assertEqual(third_run_response.status_code, 201, third_run_response.text)
+
     def test_list_variants_clone_variant_and_rename_it(self):
         default_variant_id = self.client.get(
             f"/api/scenarios/{self.scenario['id']}/case/default-variant"
@@ -522,6 +629,153 @@ class CaseInputVariantApiTests(unittest.TestCase):
             version["system_case_json"]["time_series"][0]["minimum_flow_m3s"],
             {"reach_reservoir_intake": 2.0},
         )
+
+    def test_hydraulic_diagram_topology_change_after_validation_marks_variant_stale(self):
+        hydraulic_scenario = self.store.create_scenario(
+            project_id=self.scenario["project_id"], name="Hydraulic topology stale scenario"
+        )
+        create_response = self.client.post(
+            f"/api/scenarios/{hydraulic_scenario['id']}/hydraulic-diagram"
+        )
+        revision = create_response.json()["diagram"]["revision"]
+        save_response = self.client.put(
+            f"/api/scenarios/{hydraulic_scenario['id']}/hydraulic-diagram",
+            json={
+                "revision": revision,
+                "nodes": complete_hydraulic_v3_nodes(),
+                "reaches": [
+                    {
+                        "technical_key": "reach_reservoir_intake",
+                        "display_name": "Reservoir to intake",
+                        "from_node_key": "reservoir_alpha",
+                        "to_node_key": "junction_in",
+                        "reach_type": "river",
+                        "minimum_flow_series": {
+                            "version_label": "legacy",
+                            "points": [
+                                {"timestamp": "2026-01-01T00:00:00", "duration_hours": 1.0, "value_m3s": 2.0},
+                                {"timestamp": "2026-01-01T01:00:00", "duration_hours": 1.0, "value_m3s": 3.0},
+                            ],
+                        },
+                    }
+                ],
+            },
+        )
+        self.assertEqual(save_response.status_code, 200, save_response.text)
+
+        variant_id = self.client.get(
+            f"/api/scenarios/{hydraulic_scenario['id']}/case/default-variant"
+        ).json()["variant"]["id"]
+
+        inflow_set = self.store.import_time_series_catalog_set(
+            scenario_id=hydraulic_scenario["id"],
+            source={
+                "id": "hydro_inflow_source_topo",
+                "original_filename": "inflow.csv",
+                "media_type": "text/csv",
+                "checksum": "sha256:inflow_topo",
+            },
+            prepared_import=prepare_time_series_catalog_import(
+                rows=self._price_rows(datetime(2026, 1, 1), 2, value=5.0),
+                request=CatalogImportRequest(
+                    set_name="Natural inflow",
+                    version_label="v1",
+                    data_kind="real",
+                    timezone="America/Santiago",
+                    timestamp_column="period_start",
+                    duration_hours_column="hours",
+                    signal_mappings=[
+                        CatalogSignalMappingRequest(source_column="spot_price", signal_key="natural_inflow_m3s"),
+                    ],
+                ),
+            ),
+        )
+        min_flow_set = self.store.import_time_series_catalog_set(
+            scenario_id=hydraulic_scenario["id"],
+            source={
+                "id": "hydro_min_flow_source_topo",
+                "original_filename": "min_flow.csv",
+                "media_type": "text/csv",
+                "checksum": "sha256:minflow_topo",
+            },
+            prepared_import=prepare_time_series_catalog_import(
+                rows=self._price_rows(datetime(2026, 1, 1), 2, value=2.0),
+                request=CatalogImportRequest(
+                    set_name="Minimum flow",
+                    version_label="v1",
+                    data_kind="real",
+                    timezone="America/Santiago",
+                    timestamp_column="period_start",
+                    duration_hours_column="hours",
+                    signal_mappings=[
+                        CatalogSignalMappingRequest(source_column="spot_price", signal_key="minimum_flow_m3s"),
+                    ],
+                ),
+            ),
+        )
+        self.client.post(
+            f"/api/scenarios/{hydraulic_scenario['id']}/case/variants/{variant_id}/bindings",
+            json={
+                "signal_key": "natural_inflow_m3s",
+                "entity_type": "hydraulic_node",
+                "entity_id": "reservoir_alpha",
+                "time_series_set_id": inflow_set["id"],
+            },
+        )
+        self.client.post(
+            f"/api/scenarios/{hydraulic_scenario['id']}/case/variants/{variant_id}/bindings",
+            json={
+                "signal_key": "minimum_flow_m3s",
+                "entity_type": "hydraulic_reach",
+                "entity_id": "reach_reservoir_intake",
+                "time_series_set_id": min_flow_set["id"],
+            },
+        )
+
+        validate_response = self.client.post(
+            f"/api/scenarios/{hydraulic_scenario['id']}/case/variants/{variant_id}/validate",
+            json={"range_start": inflow_set["horizon"]["start"], "range_end": inflow_set["horizon"]["end"]},
+        )
+        self.assertEqual(validate_response.status_code, 200, validate_response.text)
+
+        not_stale_body = self.client.get(
+            f"/api/scenarios/{hydraulic_scenario['id']}/case/default-variant"
+        ).json()
+        self.assertFalse(not_stale_body["staleness"]["stale"])
+
+        reloaded = self.client.get(
+            f"/api/scenarios/{hydraulic_scenario['id']}/hydraulic-diagram"
+        ).json()["diagram"]
+        edited_nodes = copy.deepcopy(reloaded["nodes"])
+        for node in edited_nodes:
+            if node["technical_key"] == "plant_laja":
+                node["units"][0]["intake_node_key"] = "reservoir_alpha"
+        stale_save = self.client.put(
+            f"/api/scenarios/{hydraulic_scenario['id']}/hydraulic-diagram",
+            json={
+                "revision": reloaded["revision"],
+                "nodes": edited_nodes,
+                "reaches": reloaded["reaches"],
+                "viewport": reloaded["layout"]["viewport"],
+            },
+        )
+        self.assertEqual(stale_save.status_code, 200, stale_save.text)
+
+        stale_body = self.client.get(
+            f"/api/scenarios/{hydraulic_scenario['id']}/case/default-variant"
+        ).json()
+        self.assertTrue(stale_body["staleness"]["stale"])
+        self.assertIn(
+            "topology",
+            [reason["dependency_type"] for reason in stale_body["staleness"]["reasons"]],
+        )
+
+        run_response = self.client.post(
+            f"/api/scenarios/{hydraulic_scenario['id']}/case/variants/{variant_id}/run",
+            json={"range_start": inflow_set["horizon"]["start"], "range_end": inflow_set["horizon"]["end"]},
+        )
+        self.assertEqual(run_response.status_code, 400)
+        self.assertIn("stale", run_response.text.lower())
 
 
 class DefaultVariantWithoutADraftYetTests(unittest.TestCase):

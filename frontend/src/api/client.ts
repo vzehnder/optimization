@@ -1144,6 +1144,18 @@ export interface RequiredSignalStatus {
   time_series_set_id: number | null;
 }
 
+export interface VariantStalenessReason {
+  dependency_type: string;
+  dependency_id: string | null;
+  detail: string;
+}
+
+export interface VariantStaleness {
+  validated: boolean;
+  stale: boolean;
+  reasons: VariantStalenessReason[];
+}
+
 export interface DefaultInputVariantResponse {
   case: {
     id: number;
@@ -1155,12 +1167,14 @@ export interface DefaultInputVariantResponse {
   variant: CaseInputVariant;
   bindings: CaseTimeSeriesBinding[];
   required_signals: RequiredSignalStatus[];
+  staleness: VariantStaleness;
 }
 
 export interface CaseInputVariantDetail {
   variant: CaseInputVariant;
   bindings: CaseTimeSeriesBinding[];
   required_signals: RequiredSignalStatus[];
+  staleness: VariantStaleness;
 }
 
 export interface CaseInputVariantListResponse {
@@ -1261,6 +1275,22 @@ export async function runCaseInputVariant(
 ): Promise<ScenarioRun> {
   return postJsonWithCsrf<ScenarioRun>(
     `/api/scenarios/${scenarioId}/case/variants/${variantId}/run`,
+    payload,
+  );
+}
+
+export interface CaseInputVariantValidationResult {
+  status: string;
+  series_bindings: unknown[];
+}
+
+export async function validateCaseInputVariant(
+  scenarioId: number,
+  variantId: number,
+  payload: CaseInputVariantRunPayload,
+): Promise<CaseInputVariantValidationResult> {
+  return postJsonWithCsrf<CaseInputVariantValidationResult>(
+    `/api/scenarios/${scenarioId}/case/variants/${variantId}/validate`,
     payload,
   );
 }

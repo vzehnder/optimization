@@ -62,6 +62,7 @@ ID_TABLES = {
     "time_series_sources",
     "time_series_values",
     "users",
+    "validation_dependencies",
 }
 
 

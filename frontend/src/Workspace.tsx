@@ -38,6 +38,7 @@ import {
   getScenarioVersion,
   listCaseInputVariants,
   runCaseInputVariant,
+  validateCaseInputVariant,
   listDashboardTemplates,
   listProjectTimeSeriesSets,
   listProjects,
@@ -84,6 +85,7 @@ import {
   type CaseInputVariantDetail,
   type CaseTimeSeriesBinding,
   type RequiredSignalStatus,
+  type VariantStalenessReason,
   type ProjectCreatePayload,
   type ProjectTimeSeriesSet,
   type ProjectTimeSeriesSetRevision,
@@ -5148,11 +5150,28 @@ function CaseInputVariantBindingEditor({
     (signal: RequiredSignalStatus) =>
       typeof selectedSetIds[inputVariantRequirementKey(signal)] === "number",
   );
+  const isStale = variantDetail.staleness.stale;
   const canRun =
     allRequiredSignalsSelected &&
     rangeStart.trim() !== "" &&
     rangeEnd.trim() !== "" &&
-    rangeValidation.kind === "valid";
+    rangeValidation.kind === "valid" &&
+    !isStale;
+
+  const revalidateMutation = useMutation({
+    mutationFn: async () =>
+      validateCaseInputVariant(scenarioId, variantDetail.variant.id, {
+        range_start: rangeStart,
+        range_end: rangeEnd,
+      }),
+    onSuccess: () => {
+      setError("");
+      void queryClient.invalidateQueries({
+        queryKey: caseInputVariantsQueryKey(scenarioId),
+      });
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError)),
+  });
 
   const runMutation = useMutation({
     mutationFn: async () => {
@@ -5190,6 +5209,31 @@ function CaseInputVariantBindingEditor({
   return (
     <>
       {error ? <p role="alert">{error}</p> : null}
+      {isStale ? (
+        <div className="stale-banner" role="alert">
+          <p>Variante desactualizada: revalida antes de correr.</p>
+          <ul aria-label="Motivos de desactualizacion">
+            {variantDetail.staleness.reasons.map(
+              (reason: VariantStalenessReason, index: number) => (
+                <li key={`${reason.dependency_type}:${reason.dependency_id ?? ""}:${index}`}>
+                  {reason.detail}
+                </li>
+              ),
+            )}
+          </ul>
+          <button
+            type="button"
+            disabled={revalidateMutation.isPending}
+            onClick={() => {
+              if (!revalidateMutation.isPending) revalidateMutation.mutate();
+            }}
+          >
+            {revalidateMutation.isPending
+              ? "Revalidando variante"
+              : "Revalidar variante"}
+          </button>
+        </div>
+      ) : null}
       {priceSignal ? (
         <p className="source-note">
           {typeof selectedPriceSetId === "number"
@@ -5399,6 +5443,7 @@ function CaseInputVariantPanel({
               {entry.variant.is_default
                 ? `${entry.variant.display_name} (default)`
                 : entry.variant.display_name}
+              {entry.staleness.stale ? " (desactualizada)" : ""}
             </option>
           ))}
         </select>

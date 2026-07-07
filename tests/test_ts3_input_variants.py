@@ -2,7 +2,12 @@ import unittest
 from datetime import datetime, timedelta
 
 from app.persistence import AnalystStore
-from app.time_series_catalog import CatalogImportRequest, CatalogSignalMappingRequest, prepare_time_series_catalog_import
+from app.time_series_catalog import (
+    CatalogImportRequest,
+    CatalogSignalMappingRequest,
+    CatalogValueEdit,
+    prepare_time_series_catalog_import,
+)
 
 
 def price_import_request(*, signal_key="import_price_usd_per_mwh", version_label="v1"):
@@ -729,3 +734,128 @@ class MaterializeVariantEntityScopedSignalsTests(unittest.TestCase):
             result["system_case"]["time_series"][0]["load_demand_mw"],
             {"load_1": 10.0, "load_2": 20.0},
         )
+
+
+class VariantStalenessTests(unittest.TestCase):
+    def setUp(self):
+        self.store = AnalystStore("sqlite:///:memory:")
+        self.project = self.store.create_project(name="TS-3 project")
+        self.scenario = self.store.create_scenario(
+            project_id=self.project["id"], name="TS-3 scenario"
+        )
+        self.store.create_or_replace_scenario_draft(
+            scenario_id=self.scenario["id"], document=grid_battery_draft_document()
+        )
+        self.case = self.store.get_or_create_case_for_scenario(self.scenario["id"])
+        self.variant = self.store.get_or_create_default_input_variant(self.case["id"])
+        prepared = prepare_time_series_catalog_import(
+            rows=price_rows(datetime(2026, 1, 1), 3),
+            request=price_import_request(),
+        )
+        self.price_set = self.store.import_time_series_catalog_set(
+            scenario_id=self.scenario["id"],
+            source={
+                "id": "csv_source_1",
+                "original_filename": "price.csv",
+                "media_type": "text/csv",
+                "checksum": "sha256:test",
+            },
+            prepared_import=prepared,
+        )
+        self.store.upsert_case_time_series_binding(
+            case_input_variant_id=self.variant["id"],
+            signal_key="import_price_usd_per_mwh",
+            time_series_set_id=self.price_set["id"],
+        )
+
+    def _materialize(self):
+        return self.store.materialize_system_case_for_variant(
+            scenario_id=self.scenario["id"],
+            case_input_variant_id=self.variant["id"],
+            range_start=self.price_set["horizon"]["start"],
+            range_end=self.price_set["horizon"]["end"],
+        )
+
+    def _staleness(self):
+        return self.store.evaluate_case_input_variant_staleness(
+            scenario_id=self.scenario["id"], case_input_variant_id=self.variant["id"]
+        )
+
+    def test_never_validated_variant_is_not_stale(self):
+        staleness = self._staleness()
+
+        self.assertFalse(staleness["validated"])
+        self.assertFalse(staleness["stale"])
+        self.assertEqual(staleness["reasons"], [])
+
+    def test_successful_materialize_records_validation_then_variant_is_not_stale(self):
+        self._materialize()
+
+        staleness = self._staleness()
+
+        self.assertTrue(staleness["validated"])
+        self.assertFalse(staleness["stale"])
+
+    def test_series_revision_change_after_validation_marks_variant_stale(self):
+        from app.variant_staleness import VariantStaleError
+
+        self._materialize()
+
+        self.store.edit_time_series_set_values(
+            project_id=self.project["id"],
+            time_series_set_id=self.price_set["id"],
+            edits=[
+                CatalogValueEdit(
+                    period_index=0, signal_key="import_price_usd_per_mwh", value_text="999.0"
+                )
+            ],
+        )
+
+        staleness = self._staleness()
+        self.assertTrue(staleness["stale"])
+        self.assertEqual(
+            [reason["dependency_type"] for reason in staleness["reasons"]],
+            ["time_series_set"],
+        )
+
+        with self.assertRaises(VariantStaleError):
+            self._materialize()
+
+    def test_parameter_only_change_after_validation_marks_variant_stale(self):
+        self._materialize()
+
+        document = grid_battery_draft_document()
+        document["assets"][0]["charge_power_max_mw"] = 999.0
+        self.store.update_scenario_draft(scenario_id=self.scenario["id"], document=document)
+
+        staleness = self._staleness()
+        self.assertTrue(staleness["stale"])
+        self.assertEqual(
+            sorted(reason["dependency_type"] for reason in staleness["reasons"]),
+            ["parameters"],
+        )
+
+    def test_validate_case_input_variant_revalidates_and_clears_stale_marker(self):
+        self._materialize()
+        self.store.edit_time_series_set_values(
+            project_id=self.project["id"],
+            time_series_set_id=self.price_set["id"],
+            edits=[
+                CatalogValueEdit(
+                    period_index=0, signal_key="import_price_usd_per_mwh", value_text="999.0"
+                )
+            ],
+        )
+        self.assertTrue(self._staleness()["stale"])
+
+        self.store.validate_case_input_variant(
+            scenario_id=self.scenario["id"],
+            case_input_variant_id=self.variant["id"],
+            range_start=self.price_set["horizon"]["start"],
+            range_end=self.price_set["horizon"]["end"],
+        )
+
+        self.assertFalse(self._staleness()["stale"])
+        result = self._materialize()
+        self.assertNotEqual(result["series_bindings"][0]["content_hash"], self.price_set["content_hash"])
+        self.assertFalse(self._staleness()["stale"])

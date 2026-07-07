@@ -3627,6 +3627,62 @@
         "summary": "Run Case Input Variant"
       }
     },
+    "/api/scenarios/{scenario_id}/case/variants/{variant_id}/validate": {
+      "post": {
+        "operationId": "validate_case_input_variant_api_scenarios__scenario_id__case_variants__variant_id__validate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "variant_id",
+            "required": true,
+            "schema": {
+              "title": "Variant Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaseInputVariantRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Case Input Variant"
+      }
+    },
     "/api/scenarios/{scenario_id}/draft": {
       "get": {
         "operationId": "get_scenario_draft_api_scenarios__scenario_id__draft_get",
