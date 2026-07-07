@@ -6798,6 +6798,186 @@ describe("application shell", () => {
     expect(screen.getAllByText("Sin datos de procedencia").length).toBe(2);
   });
 
+  it("shows which input variant produced each run in the case run list", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-06-23T12:00:00Z",
+    };
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Initial modeling branch",
+      created_at: "2026-06-23T12:05:00Z",
+    };
+    const defaultVersion = {
+      id: 41,
+      scenario_id: 10,
+      version_number: 1,
+      case_name: "dispatch_case",
+      schema_version: "bess_system_dispatch.v1",
+      period_count: 3,
+      asset_counts: { battery: 1 },
+      created_at: "2026-07-28T12:00:00Z",
+      generation_metadata: {
+        kind: "case_input_variant",
+        input_variant: { id: 5, display_name: "Default" },
+      },
+    };
+    const stressVersion = {
+      id: 42,
+      scenario_id: 10,
+      version_number: 2,
+      case_name: "dispatch_case",
+      schema_version: "bess_system_dispatch.v1",
+      period_count: 3,
+      asset_counts: { battery: 1 },
+      created_at: "2026-07-28T12:05:00Z",
+      generation_metadata: {
+        kind: "case_input_variant",
+        input_variant: { id: 6, display_name: "Stress prices" },
+      },
+    };
+    const legacyVersion = {
+      id: 43,
+      scenario_id: 10,
+      version_number: 3,
+      case_name: "legacy_case",
+      schema_version: "bess_system_dispatch.v1",
+      period_count: 3,
+      asset_counts: { battery: 1 },
+      created_at: "2026-07-28T12:10:00Z",
+      generation_metadata: {},
+    };
+    const versions = [defaultVersion, stressVersion, legacyVersion];
+    const runs = [
+      {
+        id: 101,
+        scenario_version_id: 41,
+        status: "succeeded",
+        created_at: "2026-07-28T12:01:00Z",
+        started_at: null,
+        finished_at: null,
+        duration_seconds: null,
+        exit_code: null,
+        error_message: "",
+        stdout: "",
+        stderr: "",
+      },
+      {
+        id: 102,
+        scenario_version_id: 42,
+        status: "succeeded",
+        created_at: "2026-07-28T12:06:00Z",
+        started_at: null,
+        finished_at: null,
+        duration_seconds: null,
+        exit_code: null,
+        error_message: "",
+        stdout: "",
+        stderr: "",
+      },
+      {
+        id: 103,
+        scenario_version_id: 43,
+        status: "succeeded",
+        created_at: "2026-07-28T12:11:00Z",
+        started_at: null,
+        finished_at: null,
+        duration_seconds: null,
+        exit_code: null,
+        error_message: "",
+        stdout: "",
+        stderr: "",
+      },
+    ];
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/case/variants") {
+          return new Response(
+            JSON.stringify({
+              case: {
+                id: 1,
+                scenario_id: 10,
+                case_key: "scenario_10_case",
+                display_name: "Base case",
+                updated_at: "2026-07-06T12:00:00Z",
+              },
+              default_variant_id: null,
+              variants: [],
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/projects/1/time-series-sets") {
+          return new Response(JSON.stringify({ time_series_sets: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText("Run 101")).toBeVisible();
+    const defaultItem = screen.getByText("Run 101").closest("li")!;
+    const stressItem = screen.getByText("Run 102").closest("li")!;
+    const legacyItem = screen.getByText("Run 103").closest("li")!;
+    expect(within(defaultItem).getByText(/Variante: Default/)).toBeVisible();
+    expect(
+      within(stressItem).getByText(/Variante: Stress prices/),
+    ).toBeVisible();
+    expect(within(legacyItem).queryByText(/Variante:/)).not.toBeInTheDocument();
+  });
+
   it("shows run detail provenance inherited from its scenario version", async () => {
     window.history.replaceState({}, "", "/react/runs/99");
     const project = {

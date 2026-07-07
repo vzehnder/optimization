@@ -1,6 +1,7 @@
 import copy
 import unittest
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -12,6 +13,9 @@ from app.time_series_catalog import (
     prepare_time_series_catalog_import,
 )
 from app.validation import ValidationResult
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SAMPLE_CASE_PATH = REPO_ROOT / "data" / "cases" / "hybrid_system" / "system_case.json"
 
 
 def grid_battery_draft_document():
@@ -362,6 +366,117 @@ class CaseInputVariantApiTests(unittest.TestCase):
                 self.store.get_scenario(self.scenario["id"])["project_id"], self.price_set["id"]
             )["content_hash"],
         )
+
+    def test_two_variants_on_same_case_produce_distinct_runs_with_distinguishable_lineage(self):
+        """BESS-TS3-008: running one case with two variants must yield distinct
+        technical snapshots and input hashes, with both runs distinguishable in
+        the case run list, while the legacy scenario-version run path keeps
+        working unchanged."""
+        variant_id = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/case/default-variant"
+        ).json()["variant"]["id"]
+        self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/case/variants/{variant_id}/bindings",
+            json={"signal_key": "import_price_usd_per_mwh", "time_series_set_id": self.price_set["id"]},
+        )
+        range_start = self.price_set["horizon"]["start"]
+        range_end = self.price_set["horizon"]["end"]
+
+        default_run = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/case/variants/{variant_id}/run",
+            json={"range_start": range_start, "range_end": range_end},
+        ).json()
+
+        clone = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/case/variants/{variant_id}/clone",
+            json={"display_name": "Stress prices"},
+        ).json()
+        stress_set = self.store.import_time_series_catalog_set(
+            scenario_id=self.scenario["id"],
+            source={
+                "id": "csv_source_2",
+                "original_filename": "stress_price.csv",
+                "media_type": "text/csv",
+                "checksum": "sha256:test-2",
+            },
+            prepared_import=prepare_time_series_catalog_import(
+                rows=self._price_rows(datetime(2026, 1, 1), 3, value=500.0),
+                request=CatalogImportRequest(
+                    set_name="Stress price",
+                    version_label="v1",
+                    data_kind="synthetic",
+                    timezone="America/Santiago",
+                    timestamp_column="period_start",
+                    duration_hours_column="hours",
+                    signal_mappings=[
+                        CatalogSignalMappingRequest(
+                            source_column="spot_price", signal_key="import_price_usd_per_mwh"
+                        ),
+                    ],
+                ),
+            ),
+        )
+        self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/case/variants/{clone['id']}/bindings",
+            json={"signal_key": "import_price_usd_per_mwh", "time_series_set_id": stress_set["id"]},
+        )
+        stress_run = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/case/variants/{clone['id']}/run",
+            json={"range_start": range_start, "range_end": range_end},
+        ).json()
+
+        self.assertNotEqual(default_run["id"], stress_run["id"])
+        self.assertNotEqual(default_run["scenario_version_id"], stress_run["scenario_version_id"])
+
+        default_version = self.client.get(
+            f"/api/scenario-versions/{default_run['scenario_version_id']}"
+        ).json()["scenario_version"]
+        stress_version = self.client.get(
+            f"/api/scenario-versions/{stress_run['scenario_version_id']}"
+        ).json()["scenario_version"]
+
+        self.assertNotEqual(default_version["system_case_json"], stress_version["system_case_json"])
+        self.assertNotEqual(
+            default_version["generation_metadata"]["series_bindings"][0]["content_hash"],
+            stress_version["generation_metadata"]["series_bindings"][0]["content_hash"],
+        )
+        self.assertEqual(
+            default_version["generation_metadata"]["input_variant"]["display_name"], "Default"
+        )
+        self.assertEqual(
+            stress_version["generation_metadata"]["input_variant"]["display_name"], "Stress prices"
+        )
+
+        run_list = self.client.get(f"/api/scenarios/{self.scenario['id']}/runs").json()["runs"]
+        runs_by_id = {run["id"]: run for run in run_list}
+        self.assertIn(default_run["id"], runs_by_id)
+        self.assertIn(stress_run["id"], runs_by_id)
+        variant_names_by_run_id = {}
+        for run_id, run in runs_by_id.items():
+            version = self.client.get(
+                f"/api/scenario-versions/{run['scenario_version_id']}"
+            ).json()["scenario_version"]
+            variant_names_by_run_id[run_id] = version["generation_metadata"]["input_variant"]["display_name"]
+        self.assertEqual(variant_names_by_run_id[default_run["id"]], "Default")
+        self.assertEqual(variant_names_by_run_id[stress_run["id"]], "Stress prices")
+
+        # Legacy scenario-version run path must keep working unchanged, alongside variant runs.
+        legacy_project = self.client.post("/api/projects", json={"name": "Legacy project"}).json()
+        legacy_scenario = self.client.post(
+            f"/api/projects/{legacy_project['id']}/scenarios", json={"name": "Legacy scenario"}
+        ).json()
+        legacy_version = self.client.post(
+            f"/api/scenarios/{legacy_scenario['id']}/versions",
+            json={"system_case_json": SAMPLE_CASE_PATH.read_text()},
+        ).json()
+        legacy_run_response = self.client.post(f"/api/scenario-versions/{legacy_version['id']}/runs")
+        self.assertEqual(legacy_run_response.status_code, 201)
+        legacy_run = legacy_run_response.json()
+        self.assertEqual(legacy_run["scenario_version_id"], legacy_version["id"])
+        legacy_version_detail = self.client.get(
+            f"/api/scenario-versions/{legacy_version['id']}"
+        ).json()["scenario_version"]
+        self.assertNotIn("input_variant", legacy_version_detail["generation_metadata"])
 
     def test_run_with_range_not_covered_returns_400(self):
         variant_id = self.client.get(

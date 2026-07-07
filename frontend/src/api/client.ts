@@ -69,6 +69,7 @@ export interface ScenarioVersion {
   schema_version: string;
   period_count: number;
   asset_counts: Record<string, number>;
+  generation_metadata: CaseHierarchyProvenance;
   created_at: string;
   created_by?: string;
 }
@@ -76,7 +77,6 @@ export interface ScenarioVersion {
 export interface ScenarioVersionDetail extends ScenarioVersion {
   system_case_json: unknown;
   validation_payload: unknown;
-  generation_metadata: CaseHierarchyProvenance;
 }
 
 export interface ScenarioRun {

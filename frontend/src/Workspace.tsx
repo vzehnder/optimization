@@ -1907,21 +1907,27 @@ function RunList({
   if (runs.length === 0) {
     return <EmptyState>Aun no hay corridas para este escenario.</EmptyState>;
   }
-  const versionNumbers = new Map(
-    versions.map((version) => [version.id, version.version_number]),
-  );
+  const versionsById = new Map(versions.map((version) => [version.id, version]));
   return (
     <ul className="resource-list">
-      {runs.map((run) => (
-        <li key={run.id}>
-          <Link to={`/runs/${run.id}`}>Run {run.id}</Link>
-          <p>
-            Estado: {run.status} | Version{" "}
-            {versionNumbers.get(run.scenario_version_id) || "desconocida"} |
-            creado {run.created_at}
-          </p>
-        </li>
-      ))}
+      {runs.map((run) => {
+        const version = versionsById.get(run.scenario_version_id);
+        const variantDisplayName =
+          version?.generation_metadata?.kind === "case_input_variant"
+            ? version.generation_metadata.input_variant?.display_name
+            : undefined;
+        return (
+          <li key={run.id}>
+            <Link to={`/runs/${run.id}`}>Run {run.id}</Link>
+            <p>
+              Estado: {run.status} | Version{" "}
+              {version?.version_number || "desconocida"}
+              {variantDisplayName ? ` | Variante: ${variantDisplayName}` : ""} |
+              creado {run.created_at}
+            </p>
+          </li>
+        );
+      })}
     </ul>
   );
 }
