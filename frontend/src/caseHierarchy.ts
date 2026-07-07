@@ -2,10 +2,25 @@ export interface CaseHierarchyProvenanceEntry {
   content_hash: string;
 }
 
+export interface CaseInputVariantLineageBinding {
+  signal_key: string;
+  entity_type: string | null;
+  entity_id: string | null;
+  time_series_set_id: number;
+  version_number: number;
+  version_label: string;
+  revision_number: number;
+  content_hash: string;
+  validated_range: { start: string; end: string };
+}
+
 export interface CaseHierarchyProvenance {
   kind?: string;
   topology?: CaseHierarchyProvenanceEntry;
   parameters?: CaseHierarchyProvenanceEntry;
+  input_variant?: { id: number; display_name?: string };
+  date_range?: { start: string; end: string };
+  series_bindings?: CaseInputVariantLineageBinding[];
   [key: string]: unknown;
 }
 

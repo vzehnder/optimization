@@ -16,6 +16,7 @@ import {
   CaseHierarchyProvenanceSummary,
   HierarchyStaleBadges,
 } from "./CaseHierarchyProvenance";
+import { hierarchyProvenanceHashLabel } from "./caseHierarchy";
 import {
   ApiError,
   bindCaseTimeSeries,
@@ -5844,6 +5845,24 @@ function RunLineage({
         <dt>Immutable version ID</dt>
         <dd>{run.scenario_version_id}</dd>
       </div>
+      {version?.generation_metadata.input_variant ? (
+        <div>
+          <dt>Variante</dt>
+          <dd>
+            {version.generation_metadata.input_variant.display_name ||
+              `ID ${version.generation_metadata.input_variant.id}`}
+          </dd>
+        </div>
+      ) : null}
+      {version?.generation_metadata.date_range ? (
+        <div>
+          <dt>Rango de fechas</dt>
+          <dd>
+            {version.generation_metadata.date_range.start} -{" "}
+            {version.generation_metadata.date_range.end}
+          </dd>
+        </div>
+      ) : null}
     </dl>
   );
 }
@@ -5854,6 +5873,68 @@ function RunProvenance({ version }: { version?: ScenarioVersionDetail }) {
   }
   return (
     <CaseHierarchyProvenanceSummary provenance={version.generation_metadata} />
+  );
+}
+
+function RunSeriesBindingsLineage({
+  version,
+}: {
+  version?: ScenarioVersionDetail;
+}) {
+  if (!version) {
+    return <p className="source-note">Cargando series de entrada.</p>;
+  }
+  const bindings = version.generation_metadata.series_bindings;
+  if (!bindings || bindings.length === 0) {
+    return (
+      <p className="source-note">
+        Esta corrida no proviene de una variante de entrada.
+      </p>
+    );
+  }
+  return (
+    <ul aria-label="Series vinculadas" className="resource-list">
+      {bindings.map((binding, index) => (
+        <li
+          key={`${binding.signal_key}:${binding.entity_id ?? ""}:${index}`}
+        >
+          {binding.signal_key}
+          {binding.entity_id ? ` (${binding.entity_id})` : ""}: set #
+          {binding.time_series_set_id} - {binding.version_label} (v
+          {binding.version_number}, revision {binding.revision_number}) - hash{" "}
+          {hierarchyProvenanceHashLabel(binding)}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function RunTechnicalSnapshot({
+  version,
+}: {
+  version?: ScenarioVersionDetail;
+}) {
+  const [open, setOpen] = useState(false);
+  if (!version) {
+    return <p className="source-note">Cargando snapshot tecnico.</p>;
+  }
+  return (
+    <details
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>Ver snapshot tecnico</summary>
+      {open ? (
+        <>
+          <pre className="json-panel">
+            {prettyJson(version.system_case_json)}
+          </pre>
+          <pre className="json-panel">
+            {prettyJson(version.generation_metadata)}
+          </pre>
+        </>
+      ) : null}
+    </details>
   );
 }
 
@@ -6557,6 +6638,20 @@ export function RunDetailView() {
         <section className="workspace-section" aria-labelledby="run-provenance">
           <h2 id="run-provenance">Procedencia</h2>
           <RunProvenance version={version.data} />
+        </section>
+        <section
+          className="workspace-section"
+          aria-labelledby="run-series-lineage"
+        >
+          <h2 id="run-series-lineage">Series de entrada</h2>
+          <RunSeriesBindingsLineage version={version.data} />
+        </section>
+        <section
+          className="workspace-section"
+          aria-labelledby="run-technical-snapshot"
+        >
+          <h2 id="run-technical-snapshot">Snapshot tecnico</h2>
+          <RunTechnicalSnapshot version={version.data} />
         </section>
         <RunFailureDetails run={runData} />
         <RunResultsSection run={runData} />

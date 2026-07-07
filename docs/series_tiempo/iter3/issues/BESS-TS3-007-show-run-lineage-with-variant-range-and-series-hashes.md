@@ -1,6 +1,6 @@
 # BESS-TS3-007: Show Run Lineage With Variant, Range And Series Hashes
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter3/prd.md`
@@ -25,11 +25,11 @@ gain new revisions.
 
 ## Acceptance criteria
 
-- [ ] Run detail shows the selected variant name and the run date range.
-- [ ] Run detail shows topology version, parameter version and per-binding input set revisions with content hashes.
-- [ ] The generated technical snapshot is hidden by default and accessible on demand from the run detail.
-- [ ] Lineage is persisted at run creation and does not change when bound sets later gain revisions.
-- [ ] Backend tests prove lineage recording for variant runs; React tests cover the run-detail lineage display.
+- [x] Run detail shows the selected variant name and the run date range.
+- [x] Run detail shows topology version, parameter version and per-binding input set revisions with content hashes.
+- [x] The generated technical snapshot is hidden by default and accessible on demand from the run detail.
+- [x] Lineage is persisted at run creation and does not change when bound sets later gain revisions.
+- [x] Backend tests prove lineage recording for variant runs; React tests cover the run-detail lineage display.
 
 ## Blocked by
 

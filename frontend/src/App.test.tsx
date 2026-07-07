@@ -1046,6 +1046,173 @@ describe("application shell", () => {
     ).toBeVisible();
   });
 
+  function mockVariantRunLineage() {
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-06-23T12:00:00Z",
+    };
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Initial modeling branch",
+      created_at: "2026-06-23T12:05:00Z",
+    };
+    const run = {
+      id: 99,
+      scenario_version_id: 41,
+      status: "queued",
+      created_at: "2026-07-24T12:15:00Z",
+      started_at: null,
+      finished_at: null,
+      duration_seconds: null,
+      exit_code: null,
+      error_message: "",
+      stdout: "",
+      stderr: "",
+    };
+    const version = {
+      id: 41,
+      scenario_id: 10,
+      version_number: 3,
+      case_name: "dispatch_case",
+      schema_version: "bess_system_dispatch.v2",
+      period_count: 2,
+      asset_counts: { battery: 1 },
+      created_at: "2026-07-24T12:14:00Z",
+      system_case_json: {
+        case_name: "dispatch_case",
+        solver: { name: "HiGHS-TS3-007-MARKER" },
+      },
+      validation_payload: { status: "ok" },
+      generation_metadata: {
+        kind: "case_input_variant",
+        topology: { content_hash: "topohash1234567890" },
+        parameters: { content_hash: "paramhash1234567890" },
+        input_variant: { id: 7, display_name: "Stress prices" },
+        date_range: {
+          start: "2026-01-01T00:00:00-03:00",
+          end: "2026-01-02T00:00:00-03:00",
+        },
+        series_bindings: [
+          {
+            signal_key: "import_price_usd_per_mwh",
+            entity_type: null,
+            entity_id: null,
+            time_series_set_id: 16,
+            version_number: 2,
+            version_label: "v2",
+            revision_number: 3,
+            content_hash: "sha256:abcdef1234567890",
+            validated_range: {
+              start: "2026-01-01T00:00:00-03:00",
+              end: "2026-01-02T00:00:00-03:00",
+            },
+          },
+        ],
+      },
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/runs/99") {
+          return new Response(JSON.stringify({ run }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenario-versions/41") {
+          return new Response(JSON.stringify({ scenario_version: version }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    return fetchMock;
+  }
+
+  it("shows the selected variant name and run date range in run detail lineage", async () => {
+    window.history.replaceState({}, "", "/react/runs/99");
+    vi.stubGlobal("fetch", mockVariantRunLineage());
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Run 99" }),
+    ).toBeVisible();
+    expect(await screen.findByText("Stress prices")).toBeVisible();
+    expect(screen.getByText(/2026-01-01T00:00:00-03:00/)).toBeVisible();
+    expect(screen.getByText(/2026-01-02T00:00:00-03:00/)).toBeVisible();
+  });
+
+  it("shows per-binding input set revisions and content hashes in run detail lineage", async () => {
+    window.history.replaceState({}, "", "/react/runs/99");
+    vi.stubGlobal("fetch", mockVariantRunLineage());
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Run 99" }),
+    ).toBeVisible();
+    expect(
+      await screen.findByText(/import_price_usd_per_mwh/),
+    ).toBeVisible();
+    expect(screen.getByText(/revision 3/)).toBeVisible();
+    expect(screen.getByText(/sha256:abcde/)).toBeVisible();
+  });
+
+  it("hides the generated technical snapshot by default and reveals it on demand from run detail", async () => {
+    window.history.replaceState({}, "", "/react/runs/99");
+    vi.stubGlobal("fetch", mockVariantRunLineage());
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Run 99" }),
+    ).toBeVisible();
+    await screen.findByText("Ver snapshot tecnico");
+    expect(screen.queryByText(/HiGHS-TS3-007-MARKER/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByText("Ver snapshot tecnico"));
+
+    expect(await screen.findByText(/HiGHS-TS3-007-MARKER/)).toBeVisible();
+  });
+
   it("binds entity-scoped required signals independently before running", async () => {
     window.history.replaceState({}, "", "/react/scenarios/10");
     const scenario = {

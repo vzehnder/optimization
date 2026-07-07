@@ -306,6 +306,63 @@ class CaseInputVariantApiTests(unittest.TestCase):
         self.assertEqual(run["status"], "queued")
         self.assertEqual(self.run_queue.enqueued_run_ids, [run["id"]])
 
+    def test_run_records_variant_name_range_and_series_lineage_immutably(self):
+        variant_id = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/case/default-variant"
+        ).json()["variant"]["id"]
+        self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/case/variants/{variant_id}/bindings",
+            json={"signal_key": "import_price_usd_per_mwh", "time_series_set_id": self.price_set["id"]},
+        )
+        range_start = self.price_set["horizon"]["start"]
+        range_end = self.price_set["horizon"]["end"]
+
+        run_response = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/case/variants/{variant_id}/run",
+            json={"range_start": range_start, "range_end": range_end},
+        )
+        self.assertEqual(run_response.status_code, 201, run_response.text)
+        run = run_response.json()
+
+        version = self.client.get(
+            f"/api/scenario-versions/{run['scenario_version_id']}"
+        ).json()["scenario_version"]
+        metadata = version["generation_metadata"]
+
+        self.assertEqual(metadata["kind"], "case_input_variant")
+        self.assertEqual(
+            metadata["input_variant"], {"id": variant_id, "display_name": "Default"}
+        )
+        self.assertEqual(metadata["date_range"], {"start": range_start, "end": range_end})
+        self.assertTrue(metadata["topology"]["content_hash"])
+        self.assertTrue(metadata["parameters"]["content_hash"])
+        [binding] = metadata["series_bindings"]
+        self.assertEqual(binding["signal_key"], "import_price_usd_per_mwh")
+        self.assertEqual(binding["time_series_set_id"], self.price_set["id"])
+        self.assertEqual(binding["revision_number"], self.price_set["revision_number"])
+        original_hash = binding["content_hash"]
+        self.assertTrue(original_hash)
+
+        self.store.edit_time_series_set_values(
+            project_id=self.store.get_scenario(self.scenario["id"])["project_id"],
+            time_series_set_id=self.price_set["id"],
+            edits=[
+                CatalogValueEdit(period_index=0, signal_key="import_price_usd_per_mwh", value_text="999.0")
+            ],
+        )
+
+        version_after_edit = self.client.get(
+            f"/api/scenario-versions/{run['scenario_version_id']}"
+        ).json()["scenario_version"]
+        unchanged_binding = version_after_edit["generation_metadata"]["series_bindings"][0]
+        self.assertEqual(unchanged_binding["content_hash"], original_hash)
+        self.assertNotEqual(
+            unchanged_binding["content_hash"],
+            self.store.get_time_series_set(
+                self.store.get_scenario(self.scenario["id"])["project_id"], self.price_set["id"]
+            )["content_hash"],
+        )
+
     def test_run_with_range_not_covered_returns_400(self):
         variant_id = self.client.get(
             f"/api/scenarios/{self.scenario['id']}/case/default-variant"

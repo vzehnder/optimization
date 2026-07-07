@@ -1882,7 +1882,7 @@ def create_app(
     @app.post("/api/scenarios/{scenario_id}/case/variants/{variant_id}/run", status_code=201)
     async def run_case_input_variant(scenario_id: int, variant_id: int, payload: CaseInputVariantRunRequest):
         try:
-            case, _ = get_case_and_variant_for_scenario(scenario_id, variant_id)
+            case, variant = get_case_and_variant_for_scenario(scenario_id, variant_id)
             materialized = analyst_store.materialize_system_case_for_variant(
                 scenario_id=scenario_id,
                 case_input_variant_id=variant_id,
@@ -1899,7 +1899,7 @@ def create_app(
 
         generation_metadata = {
             "kind": "case_input_variant",
-            "input_variant": {"id": variant_id},
+            "input_variant": {"id": variant_id, "display_name": variant["display_name"]},
             "date_range": {"start": payload.range_start, "end": payload.range_end},
             "series_bindings": materialized["series_bindings"],
         }
