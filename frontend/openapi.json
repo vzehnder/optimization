@@ -143,6 +143,28 @@
       },
       "CaseTimeSeriesBindingRequest": {
         "properties": {
+          "entity_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Id"
+          },
+          "entity_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Type"
+          },
           "signal_key": {
             "minLength": 1,
             "title": "Signal Key",

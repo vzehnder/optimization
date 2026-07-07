@@ -52,27 +52,73 @@ def discover_required_signals(system_case: dict[str, Any]) -> list[RequiredSigna
     ``generate_system_case_from_draft``; each node type maps to the
     canonical ``signal_key`` its family needs, per the TS-2 signal catalog.
     """
-    nodes = system_case.get("nodes")
-    if not isinstance(nodes, list):
-        return []
-
     required: list[RequiredSignal] = []
-    for node in nodes:
-        if not isinstance(node, dict):
+    nodes = system_case.get("nodes")
+    if isinstance(nodes, list):
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            mapping = _ONE_BUS_ENTITY_SIGNALS.get(node.get("type"))
+            if mapping is None:
+                continue
+            entity_type, signal_key = mapping
+            candidates = PRICE_SIGNAL_FAMILY if entity_type == "grid" else (signal_key,)
+            required.append(
+                RequiredSignal(
+                    entity_type=entity_type,
+                    entity_id=str(node.get("id")),
+                    signal_key=signal_key,
+                    candidate_signal_keys=candidates,
+                )
+            )
+    required.extend(_discover_hydraulic_required_signals(system_case.get("hydraulic_network")))
+    return required
+
+
+def _discover_hydraulic_required_signals(hydraulic_network: Any) -> list[RequiredSignal]:
+    if not isinstance(hydraulic_network, dict):
+        return []
+    required: list[RequiredSignal] = []
+    seen: set[tuple[str, str, str]] = set()
+    for requirement in hydraulic_network.get("required_time_series", []):
+        if not isinstance(requirement, dict):
             continue
-        mapping = _ONE_BUS_ENTITY_SIGNALS.get(node.get("type"))
-        if mapping is None:
+        entity_type = str(requirement.get("entity_type") or "").strip()
+        entity_id = str(requirement.get("entity_id") or "").strip()
+        signal_key = str(requirement.get("signal_key") or "").strip()
+        if not entity_type or not entity_id or not signal_key:
             continue
-        entity_type, signal_key = mapping
-        candidates = PRICE_SIGNAL_FAMILY if entity_type == "grid" else (signal_key,)
+        dedupe_key = (entity_type, entity_id, signal_key)
+        if dedupe_key in seen:
+            continue
         required.append(
             RequiredSignal(
                 entity_type=entity_type,
-                entity_id=str(node.get("id")),
+                entity_id=entity_id,
                 signal_key=signal_key,
-                candidate_signal_keys=candidates,
+                candidate_signal_keys=(signal_key,),
             )
         )
+        seen.add(dedupe_key)
+
+    for reach in hydraulic_network.get("reaches", []):
+        if not isinstance(reach, dict) or str(reach.get("flow_min_source") or "") != "series":
+            continue
+        entity_id = str(reach.get("id") or "").strip()
+        if not entity_id:
+            continue
+        dedupe_key = ("hydraulic_reach", entity_id, "minimum_flow_m3s")
+        if dedupe_key in seen:
+            continue
+        required.append(
+            RequiredSignal(
+                entity_type="hydraulic_reach",
+                entity_id=entity_id,
+                signal_key="minimum_flow_m3s",
+                candidate_signal_keys=("minimum_flow_m3s",),
+            )
+        )
+        seen.add(dedupe_key)
     return required
 
 
@@ -82,18 +128,18 @@ def evaluate_variant_completeness(
 ) -> list[RequiredSignalStatus]:
     """Report bound/missing state for each required signal against ``bindings``.
 
-    ``case_time_series_bindings`` rows are keyed by ``signal_key`` only (not
-    yet entity-scoped; see BESS-TS3-005), so any binding whose ``signal_key``
-    is one of a requirement's ``candidate_signal_keys`` satisfies it.
+    Entity-scoped requirements must match the bound entity exactly. Legacy
+    unscoped price bindings remain accepted as a fallback for the single-grid
+    tracer-bullet path created before BESS-TS3-005.
     """
-    bindings_by_signal_key = {binding["signal_key"]: binding for binding in bindings}
     statuses: list[RequiredSignalStatus] = []
     for requirement in required_signals:
         bound_binding = next(
             (
-                bindings_by_signal_key[key]
-                for key in requirement.candidate_signal_keys
-                if key in bindings_by_signal_key
+                binding
+                for binding in bindings
+                if binding["signal_key"] in requirement.candidate_signal_keys
+                and _binding_matches_requirement(binding, requirement)
             ),
             None,
         )
@@ -108,6 +154,24 @@ def evaluate_variant_completeness(
             )
         )
     return statuses
+
+
+def _binding_matches_requirement(binding: dict[str, Any], requirement: RequiredSignal) -> bool:
+    binding_entity_type = _normalize_optional_scope(binding.get("entity_type"))
+    binding_entity_id = _normalize_optional_scope(binding.get("entity_id"))
+    if binding_entity_type is None and binding_entity_id is None:
+        return requirement.signal_key in PRICE_SIGNAL_FAMILY
+    return (
+        binding_entity_type == requirement.entity_type
+        and binding_entity_id == requirement.entity_id
+    )
+
+
+def _normalize_optional_scope(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def required_signal_status_to_dict(status: RequiredSignalStatus) -> dict[str, Any]:

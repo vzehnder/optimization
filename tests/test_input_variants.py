@@ -213,6 +213,40 @@ class MaterializeVariantTimeSeriesTests(unittest.TestCase):
             ],
         )
 
+    def test_entity_scoped_signal_families_materialize_as_maps(self):
+        price_rows = [
+            {"timestamp": "2026-01-01T00:00:00", "duration_hours": 1.0, "price_usd_per_mwh": 50.0},
+        ]
+        load_alpha_rows = [
+            {"timestamp": "2026-01-01T00:00:00", "duration_hours": 1.0, "load_demand_mw": 12.0},
+        ]
+        load_beta_rows = [
+            {"timestamp": "2026-01-01T00:00:00", "duration_hours": 1.0, "load_demand_mw": 7.5},
+        ]
+
+        merged = materialize_variant_time_series(
+            {
+                "price_usd_per_mwh": price_rows,
+                ("load_demand_mw", "component:load", "load_alpha"): load_alpha_rows,
+                ("load_demand_mw", "component:load", "load_beta"): load_beta_rows,
+            }
+        )
+
+        self.assertEqual(
+            merged,
+            [
+                {
+                    "timestamp": "2026-01-01T00:00:00",
+                    "duration_hours": 1.0,
+                    "price_usd_per_mwh": 50.0,
+                    "load_demand_mw": {
+                        "load_alpha": 12.0,
+                        "load_beta": 7.5,
+                    },
+                }
+            ],
+        )
+
     def test_mismatched_timestamps_between_signals_raises(self):
         price_rows = [
             {"timestamp": "2026-01-01T00:00:00", "duration_hours": 1.0, "import_price_usd_per_mwh": 50.0},

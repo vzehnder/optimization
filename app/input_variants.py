@@ -3,9 +3,32 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from app.time_series_catalog import TIME_SERIES_SIGNAL_CATALOG
+
 
 class InputVariantRangeError(ValueError):
     pass
+
+
+def _parse_bound_signal_key(
+    bound_signal_key: Any,
+) -> tuple[str, str | None, str | None]:
+    if isinstance(bound_signal_key, tuple):
+        if len(bound_signal_key) != 3:
+            raise InputVariantRangeError(
+                f"unsupported bound signal key {bound_signal_key!r}; expected "
+                "(signal_key, entity_type, entity_id)"
+            )
+        signal_key, entity_type, entity_id = bound_signal_key
+        return str(signal_key), _optional_scope_value(entity_type), _optional_scope_value(entity_id)
+    return str(bound_signal_key), None, None
+
+
+def _optional_scope_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _binding_label(signal_key: str, set_id: Any) -> str:
@@ -110,7 +133,7 @@ def resolve_bound_signal_series(
 
 
 def materialize_variant_time_series(
-    bound_signal_series: dict[str, list[dict[str, Any]]],
+    bound_signal_series: dict[Any, list[dict[str, Any]]],
 ) -> list[dict[str, Any]]:
     """Merge per-signal period rows sharing identical timestamps into wide rows.
 
@@ -121,14 +144,16 @@ def materialize_variant_time_series(
     if not bound_signal_series:
         return []
 
-    reference_signal, reference_rows = next(iter(bound_signal_series.items()))
+    reference_binding_key, reference_rows = next(iter(bound_signal_series.items()))
+    reference_signal, _, _ = _parse_bound_signal_key(reference_binding_key)
     merged: list[dict[str, Any]] = []
     for index, reference_row in enumerate(reference_rows):
         row = {
             "timestamp": reference_row["timestamp"],
             "duration_hours": reference_row["duration_hours"],
         }
-        for signal_key, rows in bound_signal_series.items():
+        for binding_key, rows in bound_signal_series.items():
+            signal_key, _, entity_id = _parse_bound_signal_key(binding_key)
             if len(rows) != len(reference_rows):
                 raise InputVariantRangeError(
                     f"horizon incompatible: bound signal {signal_key!r} has {len(rows)} periods, "
@@ -147,6 +172,15 @@ def materialize_variant_time_series(
                     f"{other_row['duration_hours']} does not match {reference_signal!r} duration "
                     f"{row['duration_hours']} at timestamp {row['timestamp']}; no implicit resampling"
                 )
-            row[signal_key] = other_row[signal_key]
+            signal_definition = TIME_SERIES_SIGNAL_CATALOG.get(signal_key)
+            if signal_definition is not None and signal_definition.entity_type is not None and entity_id is not None:
+                signal_map = row.setdefault(signal_key, {})
+                if not isinstance(signal_map, dict):
+                    raise InputVariantRangeError(
+                        f"bound signal {signal_key!r} mixes scalar and entity-scoped materialization"
+                    )
+                signal_map[entity_id] = other_row[signal_key]
+            else:
+                row[signal_key] = other_row[signal_key]
         merged.append(row)
     return merged

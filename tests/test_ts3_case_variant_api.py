@@ -41,6 +41,88 @@ def grid_battery_draft_document():
     }
 
 
+def complete_hydraulic_v3_nodes():
+    return [
+        {
+            "component_type": "reservoir",
+            "technical_key": "reservoir_alpha",
+            "display_name": "Reservoir Alpha",
+            "x": 120.0,
+            "y": 80.0,
+            "reservoir": {
+                "storage_min_hm3": 5.0,
+                "storage_max_hm3": 50.0,
+                "initial_storage_hm3": 20.0,
+                "terminal_condition": "none",
+            },
+            "storage_elevation_curve": {
+                "version_label": "v1",
+                "points": [
+                    {"x_value": 5.0, "y_value": 700.0},
+                    {"x_value": 50.0, "y_value": 760.0},
+                ],
+            },
+            "natural_inflow_series": {
+                "version_label": "legacy",
+                "points": [
+                    {
+                        "timestamp": "2026-01-01T00:00:00",
+                        "duration_hours": 1.0,
+                        "value_m3s": 1.0,
+                    },
+                    {
+                        "timestamp": "2026-01-01T01:00:00",
+                        "duration_hours": 1.0,
+                        "value_m3s": 1.0,
+                    },
+                ],
+            },
+        },
+        {
+            "component_type": "junction",
+            "technical_key": "junction_in",
+            "display_name": "Intake",
+            "x": 300.0,
+            "y": 80.0,
+        },
+        {
+            "component_type": "junction",
+            "technical_key": "junction_out",
+            "display_name": "Tailrace",
+            "x": 480.0,
+            "y": 120.0,
+        },
+        {
+            "component_type": "plant",
+            "technical_key": "plant_laja",
+            "display_name": "Plant Laja",
+            "x": 390.0,
+            "y": 200.0,
+            "plant": {"non_modeled": False, "max_power_mw": 30.0},
+            "units": [
+                {
+                    "technical_key": "unit_1",
+                    "display_name": "Unit 1",
+                    "is_active": True,
+                    "intake_node_key": "junction_in",
+                    "discharge_node_key": "junction_out",
+                    "min_power_mw": 0.0,
+                    "max_power_mw": 30.0,
+                    "min_flow_m3s": 0.0,
+                    "max_flow_m3s": 40.0,
+                    "flow_power_curve": {
+                        "version_label": "v1",
+                        "points": [
+                            {"x_value": 0.0, "y_value": 0.0},
+                            {"x_value": 40.0, "y_value": 30.0},
+                        ],
+                    },
+                }
+            ],
+        },
+    ]
+
+
 class StubValidationService:
     def validate_text(self, candidate_text):
         return ValidationResult(
@@ -276,6 +358,170 @@ class CaseInputVariantApiTests(unittest.TestCase):
         ])
         self.assertEqual(body["variants"][0]["bindings"][0]["time_series_set_id"], self.price_set["id"])
         self.assertEqual(body["variants"][2]["bindings"][0]["time_series_set_id"], self.price_set["id"])
+
+    def test_hydraulic_diagram_case_discovers_and_runs_entity_scoped_variant_signals(self):
+        hydraulic_scenario = self.store.create_scenario(
+            project_id=self.scenario["project_id"], name="Hydraulic TS-3 scenario"
+        )
+        create_response = self.client.post(
+            f"/api/scenarios/{hydraulic_scenario['id']}/hydraulic-diagram"
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.text)
+        revision = create_response.json()["diagram"]["revision"]
+        save_response = self.client.put(
+            f"/api/scenarios/{hydraulic_scenario['id']}/hydraulic-diagram",
+            json={
+                "revision": revision,
+                "nodes": complete_hydraulic_v3_nodes(),
+                "reaches": [
+                    {
+                        "technical_key": "reach_reservoir_intake",
+                        "display_name": "Reservoir to intake",
+                        "from_node_key": "reservoir_alpha",
+                        "to_node_key": "junction_in",
+                        "reach_type": "river",
+                        "minimum_flow_series": {
+                            "version_label": "legacy",
+                            "points": [
+                                {
+                                    "timestamp": "2026-01-01T00:00:00",
+                                    "duration_hours": 1.0,
+                                    "value_m3s": 2.0,
+                                },
+                                {
+                                    "timestamp": "2026-01-01T01:00:00",
+                                    "duration_hours": 1.0,
+                                    "value_m3s": 3.0,
+                                },
+                            ],
+                        },
+                    }
+                ],
+            },
+        )
+        self.assertEqual(save_response.status_code, 200, save_response.text)
+
+        variant_body = self.client.get(
+            f"/api/scenarios/{hydraulic_scenario['id']}/case/default-variant"
+        ).json()
+        self.assertEqual(
+            variant_body["required_signals"],
+            [
+                {
+                    "entity_type": "hydraulic_node",
+                    "entity_id": "reservoir_alpha",
+                    "signal_key": "natural_inflow_m3s",
+                    "bound": False,
+                    "bound_signal_key": None,
+                    "time_series_set_id": None,
+                },
+                {
+                    "entity_type": "hydraulic_reach",
+                    "entity_id": "reach_reservoir_intake",
+                    "signal_key": "minimum_flow_m3s",
+                    "bound": False,
+                    "bound_signal_key": None,
+                    "time_series_set_id": None,
+                },
+            ],
+        )
+
+        inflow_set = self.store.import_time_series_catalog_set(
+            scenario_id=hydraulic_scenario["id"],
+            source={
+                "id": "hydro_inflow_source",
+                "original_filename": "inflow.csv",
+                "media_type": "text/csv",
+                "checksum": "sha256:inflow",
+            },
+            prepared_import=prepare_time_series_catalog_import(
+                rows=self._price_rows(datetime(2026, 1, 1), 2, value=5.0),
+                request=CatalogImportRequest(
+                    set_name="Natural inflow",
+                    version_label="v1",
+                    data_kind="real",
+                    timezone="America/Santiago",
+                    timestamp_column="period_start",
+                    duration_hours_column="hours",
+                    signal_mappings=[
+                        CatalogSignalMappingRequest(
+                            source_column="spot_price",
+                            signal_key="natural_inflow_m3s",
+                        ),
+                    ],
+                ),
+            ),
+        )
+        min_flow_set = self.store.import_time_series_catalog_set(
+            scenario_id=hydraulic_scenario["id"],
+            source={
+                "id": "hydro_min_flow_source",
+                "original_filename": "min_flow.csv",
+                "media_type": "text/csv",
+                "checksum": "sha256:minflow",
+            },
+            prepared_import=prepare_time_series_catalog_import(
+                rows=self._price_rows(datetime(2026, 1, 1), 2, value=2.0),
+                request=CatalogImportRequest(
+                    set_name="Minimum flow",
+                    version_label="v1",
+                    data_kind="real",
+                    timezone="America/Santiago",
+                    timestamp_column="period_start",
+                    duration_hours_column="hours",
+                    signal_mappings=[
+                        CatalogSignalMappingRequest(
+                            source_column="spot_price",
+                            signal_key="minimum_flow_m3s",
+                        ),
+                    ],
+                ),
+            ),
+        )
+        variant_id = variant_body["variant"]["id"]
+        bind_inflow = self.client.post(
+            f"/api/scenarios/{hydraulic_scenario['id']}/case/variants/{variant_id}/bindings",
+            json={
+                "signal_key": "natural_inflow_m3s",
+                "entity_type": "hydraulic_node",
+                "entity_id": "reservoir_alpha",
+                "time_series_set_id": inflow_set["id"],
+            },
+        )
+        self.assertEqual(bind_inflow.status_code, 201, bind_inflow.text)
+        bind_min_flow = self.client.post(
+            f"/api/scenarios/{hydraulic_scenario['id']}/case/variants/{variant_id}/bindings",
+            json={
+                "signal_key": "minimum_flow_m3s",
+                "entity_type": "hydraulic_reach",
+                "entity_id": "reach_reservoir_intake",
+                "time_series_set_id": min_flow_set["id"],
+            },
+        )
+        self.assertEqual(bind_min_flow.status_code, 201, bind_min_flow.text)
+
+        run_response = self.client.post(
+            f"/api/scenarios/{hydraulic_scenario['id']}/case/variants/{variant_id}/run",
+            json={
+                "range_start": inflow_set["horizon"]["start"],
+                "range_end": inflow_set["horizon"]["end"],
+            },
+        )
+
+        self.assertEqual(run_response.status_code, 201, run_response.text)
+        run = run_response.json()
+        self.assertEqual(run["status"], "queued")
+        version = self.client.get(
+            f"/api/scenario-versions/{run['scenario_version_id']}"
+        ).json()["scenario_version"]
+        self.assertEqual(
+            version["system_case_json"]["time_series"][0]["natural_inflow_m3s"],
+            {"reservoir_alpha": 5.0},
+        )
+        self.assertEqual(
+            version["system_case_json"]["time_series"][0]["minimum_flow_m3s"],
+            {"reach_reservoir_intake": 2.0},
+        )
 
 
 class DefaultVariantWithoutADraftYetTests(unittest.TestCase):

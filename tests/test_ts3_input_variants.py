@@ -33,6 +33,20 @@ def price_rows(start, count, *, value=50.0):
     return rows
 
 
+def signal_import_request(*, set_name, signal_key, version_label="v1", value_column="value"):
+    return CatalogImportRequest(
+        set_name=set_name,
+        version_label=version_label,
+        data_kind="real",
+        timezone="America/Santiago",
+        timestamp_column="period_start",
+        duration_hours_column="hours",
+        signal_mappings=[
+            CatalogSignalMappingRequest(source_column=value_column, signal_key=signal_key),
+        ],
+    )
+
+
 def timed_rows(start, durations, *, value=50.0, value_column="spot_price"):
     rows = []
     cursor = start
@@ -140,6 +154,69 @@ class CaseTimeSeriesBindingTests(unittest.TestCase):
         self.assertEqual(rebound["time_series_set_id"], other_set["id"])
         bindings = self.store.list_case_time_series_bindings(self.variant["id"])
         self.assertEqual(len(bindings), 1)
+
+    def test_same_signal_key_can_bind_multiple_entities(self):
+        first_load_set = self.store.import_time_series_catalog_set(
+            scenario_id=self.scenario["id"],
+            source={
+                "id": "csv_source_load_1",
+                "original_filename": "load_1.csv",
+                "media_type": "text/csv",
+                "checksum": "sha256:load1",
+            },
+            prepared_import=prepare_time_series_catalog_import(
+                rows=price_rows(datetime(2026, 1, 1), 3, value=10.0),
+                request=signal_import_request(
+                    set_name="Load alpha",
+                    signal_key="load_demand_mw",
+                    value_column="spot_price",
+                ),
+            ),
+        )
+        second_load_set = self.store.import_time_series_catalog_set(
+            scenario_id=self.scenario["id"],
+            source={
+                "id": "csv_source_load_2",
+                "original_filename": "load_2.csv",
+                "media_type": "text/csv",
+                "checksum": "sha256:load2",
+            },
+            prepared_import=prepare_time_series_catalog_import(
+                rows=price_rows(datetime(2026, 1, 1), 3, value=20.0),
+                request=signal_import_request(
+                    set_name="Load beta",
+                    signal_key="load_demand_mw",
+                    value_column="spot_price",
+                ),
+            ),
+        )
+
+        self.store.upsert_case_time_series_binding(
+            case_input_variant_id=self.variant["id"],
+            signal_key="load_demand_mw",
+            entity_type="component:load",
+            entity_id="load_1",
+            time_series_set_id=first_load_set["id"],
+        )
+        self.store.upsert_case_time_series_binding(
+            case_input_variant_id=self.variant["id"],
+            signal_key="load_demand_mw",
+            entity_type="component:load",
+            entity_id="load_2",
+            time_series_set_id=second_load_set["id"],
+        )
+
+        bindings = self.store.list_case_time_series_bindings(self.variant["id"])
+        self.assertEqual(
+            [
+                (binding["signal_key"], binding["entity_type"], binding["entity_id"], binding["time_series_set_id"])
+                for binding in bindings
+            ],
+            [
+                ("load_demand_mw", "component:load", "load_1", first_load_set["id"]),
+                ("load_demand_mw", "component:load", "load_2", second_load_set["id"]),
+            ],
+        )
 
 
 class CaseInputVariantLifecycleTests(unittest.TestCase):
@@ -329,6 +406,8 @@ class MaterializeSystemCaseForVariantTests(unittest.TestCase):
             [
                 {
                     "signal_key": "import_price_usd_per_mwh",
+                    "entity_type": None,
+                    "entity_id": None,
                     "time_series_set_id": self.price_set["id"],
                     "version_number": self.price_set["version_number"],
                     "version_label": self.price_set["version_label"],
@@ -382,6 +461,13 @@ class MaterializeSystemCaseForVariantTests(unittest.TestCase):
 def grid_battery_load_draft_document():
     document = grid_battery_draft_document()
     document["assets"].append({"id": "load_1", "type": "load"})
+    return document
+
+
+def grid_battery_two_loads_draft_document():
+    document = grid_battery_draft_document()
+    document["assets"].append({"id": "load_1", "type": "load"})
+    document["assets"].append({"id": "load_2", "type": "load"})
     return document
 
 
@@ -464,6 +550,8 @@ class MaterializeVariantRequiredSignalsTests(unittest.TestCase):
         self.store.upsert_case_time_series_binding(
             case_input_variant_id=self.variant["id"],
             signal_key="load_demand_mw",
+            entity_type="component:load",
+            entity_id="load_1",
             time_series_set_id=load_set["id"],
         )
 
@@ -529,6 +617,8 @@ class MaterializeVariantRequiredSignalsTests(unittest.TestCase):
         self.store.upsert_case_time_series_binding(
             case_input_variant_id=self.variant["id"],
             signal_key="load_demand_mw",
+            entity_type="component:load",
+            entity_id="load_1",
             time_series_set_id=load_set["id"],
         )
 
@@ -539,3 +629,103 @@ class MaterializeVariantRequiredSignalsTests(unittest.TestCase):
                 range_start=long_price_set["horizon"]["start"],
                 range_end=long_price_set["horizon"]["end"],
             )
+
+
+class MaterializeVariantEntityScopedSignalsTests(unittest.TestCase):
+    def setUp(self):
+        self.store = AnalystStore("sqlite:///:memory:")
+        self.project = self.store.create_project(name="TS-3 project")
+        self.scenario = self.store.create_scenario(
+            project_id=self.project["id"], name="TS-3 scenario"
+        )
+        self.store.create_or_replace_scenario_draft(
+            scenario_id=self.scenario["id"], document=grid_battery_two_loads_draft_document()
+        )
+        self.case = self.store.get_or_create_case_for_scenario(self.scenario["id"])
+        self.variant = self.store.get_or_create_default_input_variant(self.case["id"])
+        self.price_set = self.store.import_time_series_catalog_set(
+            scenario_id=self.scenario["id"],
+            source={
+                "id": "csv_source_price",
+                "original_filename": "price.csv",
+                "media_type": "text/csv",
+                "checksum": "sha256:price",
+            },
+            prepared_import=prepare_time_series_catalog_import(
+                rows=price_rows(datetime(2026, 1, 1), 3),
+                request=signal_import_request(
+                    set_name="Price",
+                    signal_key="price_usd_per_mwh",
+                    value_column="spot_price",
+                ),
+            ),
+        )
+        self.load_alpha_set = self.store.import_time_series_catalog_set(
+            scenario_id=self.scenario["id"],
+            source={
+                "id": "csv_source_load_1",
+                "original_filename": "load_1.csv",
+                "media_type": "text/csv",
+                "checksum": "sha256:load1",
+            },
+            prepared_import=prepare_time_series_catalog_import(
+                rows=price_rows(datetime(2026, 1, 1), 3, value=10.0),
+                request=signal_import_request(
+                    set_name="Load alpha",
+                    signal_key="load_demand_mw",
+                    value_column="spot_price",
+                ),
+            ),
+        )
+        self.load_beta_set = self.store.import_time_series_catalog_set(
+            scenario_id=self.scenario["id"],
+            source={
+                "id": "csv_source_load_2",
+                "original_filename": "load_2.csv",
+                "media_type": "text/csv",
+                "checksum": "sha256:load2",
+            },
+            prepared_import=prepare_time_series_catalog_import(
+                rows=price_rows(datetime(2026, 1, 1), 3, value=20.0),
+                request=signal_import_request(
+                    set_name="Load beta",
+                    signal_key="load_demand_mw",
+                    value_column="spot_price",
+                ),
+            ),
+        )
+
+    def test_materializes_entity_scoped_load_bindings_as_asset_map(self):
+        self.store.upsert_case_time_series_binding(
+            case_input_variant_id=self.variant["id"],
+            signal_key="price_usd_per_mwh",
+            entity_type="grid",
+            entity_id="grid_1",
+            time_series_set_id=self.price_set["id"],
+        )
+        self.store.upsert_case_time_series_binding(
+            case_input_variant_id=self.variant["id"],
+            signal_key="load_demand_mw",
+            entity_type="component:load",
+            entity_id="load_1",
+            time_series_set_id=self.load_alpha_set["id"],
+        )
+        self.store.upsert_case_time_series_binding(
+            case_input_variant_id=self.variant["id"],
+            signal_key="load_demand_mw",
+            entity_type="component:load",
+            entity_id="load_2",
+            time_series_set_id=self.load_beta_set["id"],
+        )
+
+        result = self.store.materialize_system_case_for_variant(
+            scenario_id=self.scenario["id"],
+            case_input_variant_id=self.variant["id"],
+            range_start=self.price_set["horizon"]["start"],
+            range_end=self.price_set["horizon"]["end"],
+        )
+
+        self.assertEqual(
+            result["system_case"]["time_series"][0]["load_demand_mw"],
+            {"load_1": 10.0, "load_2": 20.0},
+        )

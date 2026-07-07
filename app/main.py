@@ -153,6 +153,8 @@ class ScenarioDraftWriteRequest(BaseModel):
 
 class CaseTimeSeriesBindingRequest(BaseModel):
     signal_key: str = Field(min_length=1)
+    entity_type: str | None = None
+    entity_id: str | None = None
     time_series_set_id: int
 
 
@@ -1843,6 +1845,8 @@ def create_app(
             binding = analyst_store.upsert_case_time_series_binding(
                 case_input_variant_id=variant_id,
                 signal_key=payload.signal_key,
+                entity_type=payload.entity_type,
+                entity_id=payload.entity_id,
                 time_series_set_id=payload.time_series_set_id,
                 created_by=current_user_email(request),
             )

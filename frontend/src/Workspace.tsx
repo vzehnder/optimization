@@ -4784,6 +4784,11 @@ export function HydraulicDiagramEditorView() {
 }
 
 const INPUT_VARIANT_PRICE_SIGNAL_KEY = "price_usd_per_mwh";
+const INPUT_VARIANT_PRICE_SIGNAL_KEYS = [
+  "price_usd_per_mwh",
+  "import_price_usd_per_mwh",
+  "export_price_usd_per_mwh",
+] as const;
 const INPUT_VARIANT_SELECTION_STORAGE_KEY = "case-input-variant-selection";
 
 function inputVariantSelectionStorageKey(scenarioId: number): string {
@@ -4837,7 +4842,64 @@ type InputVariantRangeValidation = {
   message: string;
 };
 
-function validateInputVariantRange(
+function inputVariantRequirementKey(signal: RequiredSignalStatus): string {
+  return `${signal.entity_type}:${signal.entity_id}:${signal.signal_key}`;
+}
+
+function candidateSignalKeysForRequiredSignal(
+  signal: RequiredSignalStatus,
+): readonly string[] {
+  return signal.signal_key === INPUT_VARIANT_PRICE_SIGNAL_KEY
+    ? INPUT_VARIANT_PRICE_SIGNAL_KEYS
+    : [signal.signal_key];
+}
+
+function bindingMatchesRequiredSignal(
+  binding: CaseTimeSeriesBinding,
+  signal: RequiredSignalStatus,
+): boolean {
+  if (binding.entity_type == null && binding.entity_id == null) {
+    return (
+      signal.signal_key === INPUT_VARIANT_PRICE_SIGNAL_KEY &&
+      candidateSignalKeysForRequiredSignal(signal).includes(binding.signal_key)
+    );
+  }
+  return (
+    candidateSignalKeysForRequiredSignal(signal).includes(binding.signal_key) &&
+    binding.entity_type === signal.entity_type &&
+    binding.entity_id === signal.entity_id
+  );
+}
+
+function requiredSignalSelectLabel(signal: RequiredSignalStatus): string {
+  if (
+    signal.entity_type === "grid" &&
+    signal.signal_key === INPUT_VARIANT_PRICE_SIGNAL_KEY
+  ) {
+    return "Serie de precio (price_usd_per_mwh)";
+  }
+  return `Serie ${signal.signal_key} (${signal.entity_id})`;
+}
+
+function requiredSignalSelectId(signal: RequiredSignalStatus): string {
+  return `input_variant_binding_${signal.entity_type.replaceAll(":", "_")}_${signal.entity_id}_${signal.signal_key}`;
+}
+
+function selectedPeriodsForInputVariantRange(
+  set: ProjectTimeSeriesSet | undefined,
+  rangeStart: string,
+  rangeEnd: string,
+): ProjectTimeSeriesSet["periods"] {
+  if (!set) return [];
+  return set.periods
+    .filter(
+      (period) =>
+        period.timestamp_start < rangeEnd && period.timestamp_end > rangeStart,
+    )
+    .sort((left, right) => left.period_index - right.period_index);
+}
+
+function validateSingleInputVariantRange(
   set: ProjectTimeSeriesSet | undefined,
   rangeStart: string,
   rangeEnd: string,
@@ -4846,12 +4908,7 @@ function validateInputVariantRange(
     return { kind: "idle", message: "" };
   }
 
-  const periods = set.periods
-    .filter(
-      (period) =>
-        period.timestamp_start < rangeEnd && period.timestamp_end > rangeStart,
-    )
-    .sort((left, right) => left.period_index - right.period_index);
+  const periods = selectedPeriodsForInputVariantRange(set, rangeStart, rangeEnd);
   if (periods.length === 0) {
     return {
       kind: "incomplete_coverage",
@@ -4907,6 +4964,102 @@ function validateInputVariantRange(
   return { kind: "valid", message: "Rango valido para correr." };
 }
 
+function validateInputVariantRange(
+  sets: ProjectTimeSeriesSet[],
+  rangeStart: string,
+  rangeEnd: string,
+): InputVariantRangeValidation {
+  if (sets.length === 0 || rangeStart.trim() === "" || rangeEnd.trim() === "") {
+    return { kind: "idle", message: "" };
+  }
+
+  const referenceSet = sets[0];
+  const referenceValidation = validateSingleInputVariantRange(
+    referenceSet,
+    rangeStart,
+    rangeEnd,
+  );
+  if (referenceValidation.kind !== "valid") {
+    return referenceValidation;
+  }
+  const referencePeriods = selectedPeriodsForInputVariantRange(
+    referenceSet,
+    rangeStart,
+    rangeEnd,
+  );
+
+  for (const set of sets.slice(1)) {
+    const setValidation = validateSingleInputVariantRange(set, rangeStart, rangeEnd);
+    if (setValidation.kind !== "valid") {
+      return {
+        kind: setValidation.kind,
+        message: `Set #${set.id}: ${setValidation.message}`,
+      };
+    }
+    const periods = selectedPeriodsForInputVariantRange(set, rangeStart, rangeEnd);
+    if (periods.length !== referencePeriods.length) {
+      return {
+        kind: "horizon_mismatch",
+        message: `Horizonte incompatible: set #${set.id} no coincide con set #${referenceSet.id}; no hay resampling implicito.`,
+      };
+    }
+    for (let index = 0; index < referencePeriods.length; index += 1) {
+      const referencePeriod = referencePeriods[index];
+      const period = periods[index];
+      if (period.timestamp_start !== referencePeriod.timestamp_start) {
+        return {
+          kind: "horizon_mismatch",
+          message: `Horizonte incompatible: set #${set.id} no coincide con set #${referenceSet.id} en ${referencePeriod.timestamp_start}.`,
+        };
+      }
+      if (period.duration_hours !== referencePeriod.duration_hours) {
+        return {
+          kind: "horizon_mismatch",
+          message: `Horizonte incompatible: set #${set.id} tiene distinta duracion en ${referencePeriod.timestamp_start}.`,
+        };
+      }
+    }
+  }
+
+  return { kind: "valid", message: "Rango valido para correr." };
+}
+
+function resolveRequiredSignalBindingKey(
+  signal: RequiredSignalStatus,
+  set: ProjectTimeSeriesSet | undefined,
+): string {
+  if (!set) {
+    return signal.signal_key;
+  }
+  const candidateSignalKeys = candidateSignalKeysForRequiredSignal(signal);
+  const matchingSignal = set.signals.find((setSignal: ProjectTimeSeriesSetSignal) =>
+    candidateSignalKeys.includes(setSignal.signal_key),
+  );
+  return matchingSignal?.signal_key ?? signal.signal_key;
+}
+
+function buildRequiredSignalBindingPayload(
+  signal: RequiredSignalStatus,
+  timeSeriesSetId: number,
+  set: ProjectTimeSeriesSet | undefined,
+): Parameters<typeof bindCaseTimeSeries>[2] {
+  if (
+    signal.entity_type === "grid" &&
+    signal.signal_key === INPUT_VARIANT_PRICE_SIGNAL_KEY
+  ) {
+    return {
+      signal_key: resolveRequiredSignalBindingKey(signal, set),
+      time_series_set_id: timeSeriesSetId,
+    };
+  }
+  return {
+    signal_key: resolveRequiredSignalBindingKey(signal, set),
+    entity_type: signal.entity_type,
+    entity_id: signal.entity_id,
+    time_series_set_id: timeSeriesSetId,
+  };
+}
+
 function CaseInputVariantBindingEditor({
   scenarioId,
   projectId,
@@ -4921,44 +5074,101 @@ function CaseInputVariantBindingEditor({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [error, setError] = useState("");
-  const priceBinding = variantDetail.bindings.find(
-    (binding: CaseTimeSeriesBinding) =>
-      binding.signal_key === INPUT_VARIANT_PRICE_SIGNAL_KEY,
+  const requiredSignals = variantDetail.required_signals || [];
+  const [selectedSetIds, setSelectedSetIds] = useState<
+    Record<string, number | "">
+  >(() =>
+    Object.fromEntries(
+      requiredSignals.map((signal: RequiredSignalStatus) => {
+        const matchedBinding = variantDetail.bindings.find(
+          (binding: CaseTimeSeriesBinding) =>
+            bindingMatchesRequiredSignal(binding, signal),
+        );
+        return [
+          inputVariantRequirementKey(signal),
+          matchedBinding?.time_series_set_id ?? "",
+        ];
+      }),
+    ),
   );
-  const [selectedSetId, setSelectedSetId] = useState<number | "">(
-    priceBinding?.time_series_set_id ?? "",
+  const priceSignal = requiredSignals.find(
+    (signal: RequiredSignalStatus) =>
+      signal.entity_type === "grid" &&
+      signal.signal_key === INPUT_VARIANT_PRICE_SIGNAL_KEY,
   );
+  const selectedPriceSetId = priceSignal
+    ? selectedSetIds[inputVariantRequirementKey(priceSignal)]
+    : "";
   const [rangeStartDraft, setRangeStartDraft] = useState<string | null>(null);
   const [rangeEndDraft, setRangeEndDraft] = useState<string | null>(null);
 
-  const selectedSetDetail = useQuery({
-    queryKey: timeSeriesSetQueryKey(projectId, selectedSetId || 0),
-    queryFn: ({ signal }) =>
-      getProjectTimeSeriesSet(projectId, selectedSetId as number, signal),
-    enabled: typeof selectedSetId === "number",
+  const selectedSetIdList = Array.from(
+    new Set(
+      Object.values(selectedSetIds).filter(
+        (value): value is number => typeof value === "number",
+      ),
+    ),
+  ).sort((left, right) => left - right);
+  const selectedSetDetailsQuery = useQuery({
+    queryKey: [
+      "case-input-variant-set-details",
+      projectId,
+      ...selectedSetIdList,
+    ] as const,
+    queryFn: async ({ signal }) =>
+      Promise.all(
+        selectedSetIdList.map((timeSeriesSetId) =>
+          getProjectTimeSeriesSet(projectId, timeSeriesSetId, signal),
+        ),
+      ),
+    enabled: selectedSetIdList.length > 0,
     retry: false,
   });
+  const selectedSetDetailsById = new Map(
+    (selectedSetDetailsQuery.data || []).map((set) => [set.id, set]),
+  );
+  const orderedSelectedSets = requiredSignals
+    .map((signal: RequiredSignalStatus) => {
+      const selectedSetId = selectedSetIds[inputVariantRequirementKey(signal)];
+      return typeof selectedSetId === "number"
+        ? selectedSetDetailsById.get(selectedSetId)
+        : undefined;
+    })
+    .filter((set): set is ProjectTimeSeriesSet => set !== undefined);
 
   const rangeStart =
-    rangeStartDraft ?? selectedSetDetail.data?.horizon.start ?? "";
-  const rangeEnd = rangeEndDraft ?? selectedSetDetail.data?.horizon.end ?? "";
+    rangeStartDraft ?? orderedSelectedSets[0]?.horizon.start ?? "";
+  const rangeEnd = rangeEndDraft ?? orderedSelectedSets[0]?.horizon.end ?? "";
   const rangeValidation = validateInputVariantRange(
-    selectedSetDetail.data,
+    orderedSelectedSets,
     rangeStart,
     rangeEnd,
   );
+  const allRequiredSignalsSelected = requiredSignals.every(
+    (signal: RequiredSignalStatus) =>
+      typeof selectedSetIds[inputVariantRequirementKey(signal)] === "number",
+  );
   const canRun =
-    selectedSetId !== "" &&
+    allRequiredSignalsSelected &&
     rangeStart.trim() !== "" &&
     rangeEnd.trim() !== "" &&
     rangeValidation.kind === "valid";
 
   const runMutation = useMutation({
     mutationFn: async () => {
-      await bindCaseTimeSeries(scenarioId, variantDetail.variant.id, {
-        signal_key: INPUT_VARIANT_PRICE_SIGNAL_KEY,
-        time_series_set_id: selectedSetId as number,
-      });
+      for (const signal of requiredSignals) {
+        const selectedSetId = selectedSetIds[inputVariantRequirementKey(signal)];
+        if (typeof selectedSetId !== "number") {
+          throw new Error(`Falta vincular ${signal.signal_key}.`);
+        }
+        await bindCaseTimeSeries(scenarioId, variantDetail.variant.id, {
+          ...buildRequiredSignalBindingPayload(
+            signal,
+            selectedSetId,
+            selectedSetDetailsById.get(selectedSetId),
+          ),
+        });
+      }
       return runCaseInputVariant(scenarioId, variantDetail.variant.id, {
         range_start: rangeStart,
         range_end: rangeEnd,
@@ -4980,13 +5190,15 @@ function CaseInputVariantBindingEditor({
   return (
     <>
       {error ? <p role="alert">{error}</p> : null}
-      <p className="source-note">
-        {priceBinding
-          ? `Precio vinculado: set #${priceBinding.time_series_set_id}.`
-          : "Aun no hay una serie de precio vinculada."}
-      </p>
+      {priceSignal ? (
+        <p className="source-note">
+          {typeof selectedPriceSetId === "number"
+            ? `Precio vinculado: set #${selectedPriceSetId}.`
+            : "Aun no hay una serie de precio vinculada."}
+        </p>
+      ) : null}
       <ul aria-label="Senales requeridas">
-        {(variantDetail.required_signals || []).map(
+        {requiredSignals.map(
           (signal: RequiredSignalStatus) => (
             <li
               key={`${signal.entity_type}:${signal.entity_id}:${signal.signal_key}`}
@@ -4998,29 +5210,38 @@ function CaseInputVariantBindingEditor({
           ),
         )}
       </ul>
-      <div className="field-row">
-        <label htmlFor="input_variant_price_set">
-          Serie de precio (price_usd_per_mwh)
-        </label>
-        <select
-          id="input_variant_price_set"
-          value={selectedSetId}
-          onChange={(event) => {
-            const value = event.target.value;
-            setError("");
-            setRangeStartDraft(null);
-            setRangeEndDraft(null);
-            setSelectedSetId(value === "" ? "" : Number(value));
-          }}
+      {requiredSignals.map((signal: RequiredSignalStatus) => (
+        <div
+          className="field-row"
+          key={`binding-select:${inputVariantRequirementKey(signal)}`}
         >
-          <option value="">Selecciona una serie</option>
-          {timeSeriesSets.map((set: ProjectTimeSeriesSetSummary) => (
-            <option key={set.id} value={set.id}>
-              {set.name} - {set.version_label}
-            </option>
-          ))}
-        </select>
-      </div>
+          <label htmlFor={requiredSignalSelectId(signal)}>
+            {requiredSignalSelectLabel(signal)}
+          </label>
+          <select
+            id={requiredSignalSelectId(signal)}
+            value={selectedSetIds[inputVariantRequirementKey(signal)] ?? ""}
+            onChange={(event) => {
+              const value = event.target.value;
+              setError("");
+              setRangeStartDraft(null);
+              setRangeEndDraft(null);
+              setSelectedSetIds((current) => ({
+                ...current,
+                [inputVariantRequirementKey(signal)]:
+                  value === "" ? "" : Number(value),
+              }));
+            }}
+          >
+            <option value="">Selecciona una serie</option>
+            {timeSeriesSets.map((set: ProjectTimeSeriesSetSummary) => (
+              <option key={`${signal.entity_id}:${set.id}`} value={set.id}>
+                {set.name} - {set.version_label}
+              </option>
+            ))}
+          </select>
+        </div>
+      ))}
       <div className="field-row">
         <label htmlFor="input_variant_range_start">Inicio de rango</label>
         <input

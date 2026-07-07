@@ -1128,6 +1128,10 @@ export interface components {
         };
         /** CaseTimeSeriesBindingRequest */
         CaseTimeSeriesBindingRequest: {
+            /** Entity Id */
+            entity_id?: string | null;
+            /** Entity Type */
+            entity_type?: string | null;
             /** Signal Key */
             signal_key: string;
             /** Time Series Set Id */

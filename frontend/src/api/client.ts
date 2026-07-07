@@ -1127,6 +1127,8 @@ export interface CaseTimeSeriesBinding {
   id: number;
   case_input_variant_id: number;
   signal_key: string;
+  entity_type: string | null;
+  entity_id: string | null;
   time_series_set_id: number;
   required: boolean;
   created_at: string;
@@ -1175,6 +1177,8 @@ export interface CaseInputVariantListResponse {
 
 export interface CaseTimeSeriesBindingPayload {
   signal_key: string;
+  entity_type?: string | null;
+  entity_id?: string | null;
   time_series_set_id: number;
 }
 

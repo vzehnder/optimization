@@ -1045,6 +1045,324 @@ describe("application shell", () => {
     ).toBeVisible();
   });
 
+  it("binds entity-scoped required signals independently before running", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Initial modeling branch",
+      created_at: "2026-06-23T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-06-23T12:00:00Z",
+    };
+    const buildSet = (id: number, name: string, signalKey: string) => ({
+      id,
+      project_id: 1,
+      name,
+      version_number: 1,
+      version_label: "v1",
+      revision_number: 1,
+      data_kind: "real",
+      timezone: "America/Santiago",
+      status: "validated",
+      content_hash: `hash-${id}`,
+      signal_count: 1,
+      period_count: 3,
+      signalKey,
+    });
+    const buildSetDetail = (
+      set: ReturnType<typeof buildSet>,
+      entityType: string | null,
+    ) => ({
+      ...set,
+      source_checksum: null,
+      revision_metadata: {},
+      source: null,
+      horizon: {
+        period_count: 3,
+        start: "2026-01-01T00:00:00-03:00",
+        end: "2026-01-01T03:00:00-03:00",
+      },
+      signals: [
+        {
+          signal_key: set.signalKey,
+          unit: set.signalKey === "price_usd_per_mwh" ? "USD/MWh" : "MW",
+          entity_type: entityType,
+          entity_key: null,
+        },
+      ],
+      periods: [
+        {
+          period_index: 0,
+          timestamp_start: "2026-01-01T00:00:00-03:00",
+          timestamp_end: "2026-01-01T01:00:00-03:00",
+          duration_hours: 1,
+        },
+        {
+          period_index: 1,
+          timestamp_start: "2026-01-01T01:00:00-03:00",
+          timestamp_end: "2026-01-01T02:00:00-03:00",
+          duration_hours: 1,
+        },
+        {
+          period_index: 2,
+          timestamp_start: "2026-01-01T02:00:00-03:00",
+          timestamp_end: "2026-01-01T03:00:00-03:00",
+          duration_hours: 1,
+        },
+      ],
+      values: [],
+    });
+    const priceSet = buildSet(5, "Spot price", "price_usd_per_mwh");
+    const loadAlphaSet = buildSet(6, "Load alpha", "load_demand_mw");
+    const loadBetaSet = buildSet(7, "Load beta", "load_demand_mw");
+    const run = {
+      id: 78,
+      scenario_version_id: 56,
+      status: "queued",
+      created_at: "2026-07-06T12:15:00Z",
+      started_at: null,
+      finished_at: null,
+      duration_seconds: null,
+      exit_code: null,
+      error_message: "",
+      stdout: "",
+      stderr: "",
+    };
+    const bindPayloads: unknown[] = [];
+    let runCalls = 0;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/versions") {
+          return new Response(JSON.stringify({ versions: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/case/variants") {
+          return new Response(
+            JSON.stringify({
+              case: {
+                id: 1,
+                scenario_id: 10,
+                case_key: "scenario_10_case",
+                display_name: "Base case",
+                updated_at: "2026-07-06T12:00:00Z",
+              },
+              default_variant_id: 3,
+              variants: [
+                {
+                  variant: {
+                    id: 3,
+                    case_id: 1,
+                    variant_key: "default",
+                    display_name: "Default",
+                    is_default: true,
+                    created_at: "2026-07-06T12:00:00Z",
+                    updated_at: "2026-07-06T12:00:00Z",
+                  },
+                  bindings: [],
+                  required_signals: [
+                    {
+                      entity_type: "grid",
+                      entity_id: "grid_1",
+                      signal_key: "price_usd_per_mwh",
+                      bound: false,
+                      bound_signal_key: null,
+                      time_series_set_id: null,
+                    },
+                    {
+                      entity_type: "component:load",
+                      entity_id: "load_1",
+                      signal_key: "load_demand_mw",
+                      bound: false,
+                      bound_signal_key: null,
+                      time_series_set_id: null,
+                    },
+                    {
+                      entity_type: "component:load",
+                      entity_id: "load_2",
+                      signal_key: "load_demand_mw",
+                      bound: false,
+                      bound_signal_key: null,
+                      time_series_set_id: null,
+                    },
+                  ],
+                },
+              ],
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/projects/1/time-series-sets") {
+          return new Response(
+            JSON.stringify({
+              time_series_sets: [priceSet, loadAlphaSet, loadBetaSet],
+            }),
+            {
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+        if (path === "/api/projects/1/time-series-sets/5") {
+          return new Response(
+            JSON.stringify({
+              time_series_set: buildSetDetail(priceSet, null),
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/projects/1/time-series-sets/6") {
+          return new Response(
+            JSON.stringify({
+              time_series_set: buildSetDetail(loadAlphaSet, "component:load"),
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/projects/1/time-series-sets/7") {
+          return new Response(
+            JSON.stringify({
+              time_series_set: buildSetDetail(loadBetaSet, "component:load"),
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (
+          path === "/api/scenarios/10/case/variants/3/bindings" &&
+          method === "POST"
+        ) {
+          const body = JSON.parse(String(init?.body));
+          bindPayloads.push(body);
+          return new Response(
+            JSON.stringify({
+              id: 9 + bindPayloads.length,
+              case_input_variant_id: 3,
+              signal_key: body.signal_key,
+              entity_type: body.entity_type ?? null,
+              entity_id: body.entity_id ?? null,
+              time_series_set_id: body.time_series_set_id,
+              required: true,
+              created_at: "2026-07-06T12:16:00Z",
+              updated_at: "2026-07-06T12:16:00Z",
+            }),
+            { status: 201, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (
+          path === "/api/scenarios/10/case/variants/3/run" &&
+          method === "POST"
+        ) {
+          runCalls += 1;
+          return new Response(JSON.stringify(run), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/runs/78") {
+          return new Response(JSON.stringify({ run }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.selectOptions(
+      await screen.findByLabelText("Serie de precio (price_usd_per_mwh)"),
+      "5",
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Serie load_demand_mw (load_1)"),
+      "6",
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Serie load_demand_mw (load_2)"),
+      "7",
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("Rango valido para correr.")).toBeVisible(),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Vincular y correr variante" }),
+    );
+
+    await waitFor(() => expect(runCalls).toBe(1));
+    expect(bindPayloads).toEqual([
+      {
+        signal_key: "price_usd_per_mwh",
+        time_series_set_id: 5,
+      },
+      {
+        signal_key: "load_demand_mw",
+        entity_type: "component:load",
+        entity_id: "load_1",
+        time_series_set_id: 6,
+      },
+      {
+        signal_key: "load_demand_mw",
+        entity_type: "component:load",
+        entity_id: "load_2",
+        time_series_set_id: 7,
+      },
+    ]);
+    expect(
+      await screen.findByRole("heading", { name: "Run 78" }),
+    ).toBeVisible();
+  });
+
   it("clones variants, switches them from dropdown, and persists active selection", async () => {
     window.localStorage.clear();
     window.history.replaceState({}, "", "/react/scenarios/10");
@@ -1555,7 +1873,16 @@ describe("application shell", () => {
                     updated_at: "2026-07-06T12:00:00Z",
                   },
                   bindings: [],
-                  required_signals: [],
+                  required_signals: [
+                    {
+                      entity_type: "grid",
+                      entity_id: "grid_1",
+                      signal_key: "price_usd_per_mwh",
+                      bound: false,
+                      bound_signal_key: null,
+                      time_series_set_id: null,
+                    },
+                  ],
                 },
               ],
             }),
@@ -1745,7 +2072,16 @@ describe("application shell", () => {
                     updated_at: "2026-07-06T12:00:00Z",
                   },
                   bindings: [],
-                  required_signals: [],
+                  required_signals: [
+                    {
+                      entity_type: "grid",
+                      entity_id: "grid_1",
+                      signal_key: "price_usd_per_mwh",
+                      bound: false,
+                      bound_signal_key: null,
+                      time_series_set_id: null,
+                    },
+                  ],
                 },
               ],
             }),

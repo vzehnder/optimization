@@ -3,12 +3,18 @@ import re
 import tempfile
 import unittest
 import uuid
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
 from app.auth import session_expires_at
 from app.database import ID_TABLES, database_url_from_env
 from app.persistence import AnalystStore
+from app.time_series_catalog import (
+    CatalogImportRequest,
+    CatalogSignalMappingRequest,
+    prepare_time_series_catalog_import,
+)
 
 
 POSTGRES_TEST_DATABASE_URL = os.environ.get("POSTGRES_TEST_DATABASE_URL")
@@ -178,5 +184,87 @@ class PostgresPersistenceTests(unittest.TestCase):
             )
             publication = store.publish_publication(publication["id"])
             self.assertEqual(publication["status"], "published")
+        finally:
+            store.close()
+
+    def test_upsert_case_time_series_binding_handles_null_and_scoped_entity_columns(self):
+        # psycopg cannot infer a parameter's type from a bare ``? IS NULL``
+        # comparison with no other typed context in the same statement, so an
+        # unscoped (entity_type/entity_id both NULL) upsert on PostgreSQL used
+        # to raise ``psycopg.errors.IndeterminateDatatype: could not determine
+        # data type of parameter``. SQLite never hit this because it infers
+        # untyped parameters permissively, so this regression only reproduces
+        # against a real PostgreSQL backend.
+        store = AnalystStore(POSTGRES_TEST_DATABASE_URL)
+        suffix = uuid.uuid4().hex
+        try:
+            project = store.create_project(name=f"PostgreSQL entity scope {suffix}")
+            scenario = store.create_scenario(project_id=project["id"], name="Base")
+            case = store.get_or_create_case_for_scenario(scenario["id"])
+            variant = store.get_or_create_default_input_variant(case["id"])
+
+            rows = [
+                {
+                    "period_start": (datetime(2026, 1, 1) + timedelta(hours=hour)).isoformat(),
+                    "hours": "1.0",
+                    "value": str(50.0 + hour),
+                }
+                for hour in range(2)
+            ]
+            prepared = prepare_time_series_catalog_import(
+                rows=rows,
+                request=CatalogImportRequest(
+                    set_name=f"Price {suffix}",
+                    version_label="v1",
+                    data_kind="real",
+                    timezone="America/Santiago",
+                    timestamp_column="period_start",
+                    duration_hours_column="hours",
+                    signal_mappings=[
+                        CatalogSignalMappingRequest(
+                            source_column="value", signal_key="price_usd_per_mwh"
+                        ),
+                    ],
+                ),
+            )
+            time_series_set = store.import_time_series_catalog_set(
+                scenario_id=scenario["id"],
+                source={
+                    "id": f"csv_source_{suffix}",
+                    "original_filename": "price.csv",
+                    "media_type": "text/csv",
+                    "checksum": f"sha256:{suffix}",
+                },
+                prepared_import=prepared,
+            )
+
+            unscoped = store.upsert_case_time_series_binding(
+                case_input_variant_id=variant["id"],
+                signal_key="price_usd_per_mwh",
+                time_series_set_id=time_series_set["id"],
+            )
+            self.assertIsNone(unscoped["entity_type"])
+            self.assertIsNone(unscoped["entity_id"])
+
+            # Re-upserting the same unscoped binding exercises the
+            # ``entity_type IS NULL AND ? IS NULL`` existence-check branch a
+            # second time, matching the existing row instead of inserting.
+            rebind = store.upsert_case_time_series_binding(
+                case_input_variant_id=variant["id"],
+                signal_key="price_usd_per_mwh",
+                time_series_set_id=time_series_set["id"],
+            )
+            self.assertEqual(rebind["id"], unscoped["id"])
+
+            scoped = store.upsert_case_time_series_binding(
+                case_input_variant_id=variant["id"],
+                signal_key="load_demand_mw",
+                entity_type="component:load",
+                entity_id="load_1",
+                time_series_set_id=time_series_set["id"],
+            )
+            self.assertEqual(scoped["entity_type"], "component:load")
+            self.assertEqual(scoped["entity_id"], "load_1")
+            self.assertNotEqual(scoped["id"], unscoped["id"])
         finally:
             store.close()
