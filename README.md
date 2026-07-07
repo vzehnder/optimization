@@ -895,3 +895,129 @@ formats:
 ```powershell
 julia --project=. -e "import Pkg; Pkg.test()"
 ```
+
+## TS-3: Input Variants, Date Range And Run Lineage
+
+TS-3 (`docs/series_tiempo/iter3/`) is the first iteration where one
+`OptimizationCase` can run against more than one database-backed time-series
+assumption without duplicating topology or parameters:
+
+```text
+OptimizationCase
+-> InputSeriesVariant
+-> DateRange
+-> ScenarioVersion / execution snapshot
+-> Run
+```
+
+An input variant is a named set of bindings from the case's required signals
+to TS-2 catalog sets/signals. Variants store references only; they never copy
+`time_series_values`. The default variant is created lazily the first time a
+case without variants is opened. Analysts can then bind the required signal
+families discovered from the current case shape:
+
+- `price_usd_per_mwh` for the grid family.
+- `load_demand_mw` per active load asset.
+- `renewable_available_power_mw` per active renewable asset.
+- `hydro_inflow_m3s` / `natural_inflow_m3s` / `minimum_flow_m3s` when the
+  active hydro or hydraulic-diagram model requires them.
+
+### Binding Completeness And Range Rules
+
+The case page exposes variants, not raw sets, because a run needs a coherent
+combination of all required signals. `GET /api/scenarios/{id}/case/default-variant`
+and `GET .../case/variants` both return `required_signals` so React can show
+which signals are still missing and which set currently satisfies each one.
+Running or validating an incomplete variant fails with one clear error per
+missing requirement.
+
+The run date range belongs to the execution snapshot, not to the variant. A
+variant can be validated or run for any explicit `[range_start, range_end)`
+slice of its bound sets. TS-3 enforces exact coverage and exact cross-signal
+horizon compatibility:
+
+- no missing periods inside the selected range;
+- no trailing or leading gaps;
+- no mixed durations or mismatched timestamps;
+- no implicit resampling.
+
+Failures are returned before a run row is created, with messages naming the
+binding, set and missing span or horizon mismatch.
+
+### Validation, Stale State And Revalidation
+
+Validating or running a variant records dependency hashes for the currently
+bound time-series sets plus the case's TS-1 topology/parameter provenance
+hashes. A variant becomes stale when:
+
+- a bound time-series set gets a new revision and therefore a new
+  `content_hash`; or
+- the case topology or parameters drift relative to the validated snapshot.
+
+Stale variants are visible in both the dropdown and the binding panel. A stale
+variant cannot run until `POST .../case/variants/{id}/validate` succeeds
+again. Revalidation clears the stale marker without mutating prior
+`ScenarioVersion` lineage.
+
+### Runs, Clone Workflow And Legacy Boundary
+
+`POST /api/scenarios/{id}/case/variants/{variant_id}/run` materializes a fresh
+immutable `ScenarioVersion` from:
+
+```text
+current case topology + current case parameters + selected variant + date range
+```
+
+The generated snapshot extends `generation_metadata_json` with:
+
+- `kind: "case_input_variant"`
+- `input_variant.id` / `input_variant.display_name`
+- `date_range.start` / `date_range.end`
+- one `series_bindings` entry per bound signal/entity, including
+  set id, version, revision, hash and validated range
+
+Run detail pages use that lineage to show which variant and range produced the
+run, and the raw technical snapshot stays collapsed by default. Analysts can
+clone a variant, keep the copied bindings by reference, and then rebind only
+the differing series (for example, "Default" versus "Stress prices") before
+running both on the same case.
+
+The legacy scenario-version flow still exists alongside TS-3:
+
+- `POST /api/scenarios/{id}/versions` still accepts a full raw
+  `system_case_json`.
+- `POST /api/scenario-versions/{id}/runs` still launches manual runs from that
+  frozen version.
+- Legacy runs simply omit TS-3 variant lineage fields.
+
+### TS-3 Acceptance Verification
+
+Run the focused TS-3 acceptance suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_ts3_acceptance -v
+```
+
+Run the full Python web acceptance suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Run frontend verification from `frontend/`:
+
+```powershell
+npm test -- --run
+npx tsc -b
+npx eslint .
+npm run api:check
+npm run build
+```
+
+TS-3 reuses the existing Julia contract and run worker. Run the Julia suite
+only when a later change touches generated `system_case_json`, optimizer
+behavior or artifact formats:
+
+```powershell
+julia --project=. -e "import Pkg; Pkg.test()"
+```
