@@ -11,6 +11,7 @@ from app.persistence import AnalystStore, derive_case_hierarchy_provenance
 from app.result_indexing import (
     index_run_asset_dispatch_results,
     index_run_dispatch_results,
+    index_run_results,
     index_run_summary_results,
 )
 from app.results import read_run_results
@@ -326,6 +327,140 @@ class DispatchResultIndexingTests(unittest.TestCase):
 
                 self.assertIsNotNone(indexed)
                 self.assertEqual(indexed["rows"][0]["battery_energy_mwh"], "20.0")
+            finally:
+                store.close()
+
+
+class ResultIndexingIdempotencyTests(unittest.TestCase):
+    def test_reindexing_an_already_indexed_run_converges_without_duplicate_rows(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_core_dispatch_artifacts(store, artifact_root)
+                artifacts = store.list_run_artifacts(run["id"])
+
+                index_run_dispatch_results(store=store, run=run, artifacts=artifacts, artifact_root=artifact_root)
+                index_run_dispatch_results(store=store, run=run, artifacts=artifacts, artifact_root=artifact_root)
+                index_run_asset_dispatch_results(store=store, run=run, artifacts=artifacts, artifact_root=artifact_root)
+                index_run_asset_dispatch_results(store=store, run=run, artifacts=artifacts, artifact_root=artifact_root)
+                index_run_summary_results(store=store, run=run, artifacts=artifacts, artifact_root=artifact_root)
+                index_run_summary_results(store=store, run=run, artifacts=artifacts, artifact_root=artifact_root)
+
+                dispatch_row_count = store.connection.execute(
+                    "SELECT COUNT(*) AS c FROM run_dispatch_result_rows WHERE run_id = ?", (run["id"],)
+                ).fetchone()["c"]
+                asset_row_count = store.connection.execute(
+                    "SELECT COUNT(*) AS c FROM run_asset_dispatch_result_rows WHERE run_id = ?", (run["id"],)
+                ).fetchone()["c"]
+                summary_index_count = store.connection.execute(
+                    "SELECT COUNT(*) AS c FROM run_summary_result_indexes WHERE run_id = ?", (run["id"],)
+                ).fetchone()["c"]
+
+                self.assertEqual(dispatch_row_count, 1)
+                self.assertEqual(asset_row_count, 1)
+                self.assertEqual(summary_index_count, 1)
+            finally:
+                store.close()
+
+    def test_reindexing_after_artifact_content_change_drops_stale_rows(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_core_dispatch_artifacts(store, artifact_root)
+                artifacts = store.list_run_artifacts(run["id"])
+                index_run_dispatch_results(store=store, run=run, artifacts=artifacts, artifact_root=artifact_root)
+
+                dispatch_path = artifact_root / "runs" / "1" / "outputs" / "dispatch.csv"
+                dispatch_path.write_text(
+                    "timestamp,duration_hours,price_usd_per_mwh,grid_import_mw,grid_export_mw,market_value_usd,"
+                    "battery_charge_mw,battery_discharge_mw,battery_energy_mwh,period_profit_usd\n"
+                    "2026-01-01T00:00:00,1.0,45.0,2.5,0.0,-112.5,0.0,0.0,20.0,-112.5\n"
+                    "2026-01-01T01:00:00,1.0,46.0,3.0,0.0,-138.0,0.0,0.0,25.0,-138.0\n",
+                    encoding="utf-8",
+                )
+
+                reindexed = index_run_dispatch_results(
+                    store=store,
+                    run=run,
+                    artifacts=artifacts,
+                    artifact_root=artifact_root,
+                )
+
+                self.assertEqual(len(reindexed["rows"]), 2)
+                row_count = store.connection.execute(
+                    "SELECT COUNT(*) AS c FROM run_dispatch_result_rows WHERE run_id = ?", (run["id"],)
+                ).fetchone()["c"]
+                self.assertEqual(row_count, 2)
+            finally:
+                store.close()
+
+
+class ResultIndexingFailureSafetyTests(unittest.TestCase):
+    def test_partial_row_failure_leaves_no_dispatch_index_and_is_safe_to_retry(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_core_dispatch_artifacts(store, artifact_root)
+                dispatch_path = artifact_root / "runs" / "1" / "outputs" / "dispatch.csv"
+                dispatch_path.write_text(
+                    "timestamp,duration_hours,price_usd_per_mwh,grid_import_mw,grid_export_mw,market_value_usd,"
+                    "battery_charge_mw,battery_discharge_mw,battery_energy_mwh,period_profit_usd\n"
+                    "2026-01-01T00:00:00,1.0,45.0,2.5,0.0,-112.5,0.0,0.0,20.0,-112.5\n"
+                    "2026-01-01T00:00:00,1.0,46.0,3.0,0.0,-138.0,0.0,0.0,25.0,-138.0\n",
+                    encoding="utf-8",
+                )
+
+                with self.assertLogs("app.result_indexing", level="ERROR") as logs:
+                    outcome = index_run_results(store=store, run=run, artifact_root=artifact_root)
+
+                self.assertIn("dispatch_table", outcome["failed"])
+                self.assertEqual(set(outcome["indexed"]), {"asset_dispatch_table", "summary"})
+                self.assertTrue(any(str(run["id"]) in message for message in logs.output))
+
+                self.assertIsNone(store.get_run_dispatch_result_index(run["id"]))
+                self.assertEqual(store.get_run(run["id"])["status"], "succeeded")
+                self.assertEqual(len(store.list_run_artifacts(run["id"])), 3)
+
+                results = read_run_results(run, store.list_run_artifacts(run["id"]), artifact_root, store=store)
+                self.assertEqual(len(results["dispatch_table"]["rows"]), 2)
+
+                dispatch_path.write_text(
+                    "timestamp,duration_hours,price_usd_per_mwh,grid_import_mw,grid_export_mw,market_value_usd,"
+                    "battery_charge_mw,battery_discharge_mw,battery_energy_mwh,period_profit_usd\n"
+                    "2026-01-01T00:00:00,1.0,45.0,2.5,0.0,-112.5,0.0,0.0,20.0,-112.5\n",
+                    encoding="utf-8",
+                )
+
+                retried = index_run_results(store=store, run=run, artifact_root=artifact_root)
+
+                self.assertEqual(retried["failed"], {})
+                self.assertIn("dispatch_table", retried["indexed"])
+                indexed = store.get_run_dispatch_result_index(run["id"])
+                self.assertIsNotNone(indexed)
+                self.assertEqual(len(indexed["rows"]), 1)
+            finally:
+                store.close()
+
+    def test_malformed_summary_does_not_block_dispatch_or_asset_dispatch_indexing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_core_dispatch_artifacts(store, artifact_root)
+                summary_path = artifact_root / "runs" / "1" / "outputs" / "summary.json"
+                summary_path.write_text("not json", encoding="utf-8")
+
+                outcome = index_run_results(store=store, run=run, artifact_root=artifact_root)
+
+                self.assertIn("summary", outcome["failed"])
+                self.assertEqual(set(outcome["indexed"]), {"dispatch_table", "asset_dispatch_table"})
+                self.assertIsNotNone(store.get_run_dispatch_result_index(run["id"]))
+                self.assertIsNotNone(store.get_run_asset_dispatch_result_index(run["id"]))
+                self.assertIsNone(store.get_run_summary_result_index(run["id"]))
+                self.assertEqual(store.get_run(run["id"])["status"], "succeeded")
             finally:
                 store.close()
 

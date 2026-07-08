@@ -4285,81 +4285,93 @@ class AnalystStore:
             scenario_version = self.get_scenario_version(scenario_version_id, include_document=False)
             lineage = result_lineage_from_scenario_version(run_id=run_id, scenario_version=scenario_version)
             now = utc_now_iso()
-            self.connection.execute(
-                """
-                INSERT INTO run_dispatch_result_indexes (
-                    run_id,
-                    scenario_version_id,
-                    dispatch_columns_json,
-                    signal_keys_json,
-                    lineage_json,
-                    created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT (run_id) DO UPDATE SET
-                    scenario_version_id = excluded.scenario_version_id,
-                    dispatch_columns_json = excluded.dispatch_columns_json,
-                    signal_keys_json = excluded.signal_keys_json,
-                    lineage_json = excluded.lineage_json,
-                    created_at = excluded.created_at
-                """,
-                (
-                    run_id,
-                    scenario_version_id,
-                    json.dumps(columns),
-                    json.dumps(signal_keys or {}),
-                    json.dumps(lineage, sort_keys=True),
-                    now,
-                ),
-            )
-            self.connection.execute(
-                "DELETE FROM run_dispatch_result_rows WHERE run_id = ?",
-                (run_id,),
-            )
-            self.connection.executemany(
-                """
-                INSERT INTO run_dispatch_result_rows (
-                    run_id,
-                    period_index,
-                    row_json,
-                    timestamp,
-                    duration_hours,
-                    price_usd_per_mwh,
-                    import_price_usd_per_mwh,
-                    export_price_usd_per_mwh,
-                    market_value_usd,
-                    grid_import_mw,
-                    grid_export_mw,
-                    battery_charge_mw,
-                    battery_discharge_mw,
-                    battery_energy_mwh,
-                    created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
+            try:
+                self.connection.execute(
+                    """
+                    INSERT INTO run_dispatch_result_indexes (
+                        run_id,
+                        scenario_version_id,
+                        dispatch_columns_json,
+                        signal_keys_json,
+                        lineage_json,
+                        created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (run_id) DO UPDATE SET
+                        scenario_version_id = excluded.scenario_version_id,
+                        dispatch_columns_json = excluded.dispatch_columns_json,
+                        signal_keys_json = excluded.signal_keys_json,
+                        lineage_json = excluded.lineage_json,
+                        created_at = excluded.created_at
+                    """,
                     (
                         run_id,
-                        period_index,
-                        json.dumps(row, ensure_ascii=True),
-                        str(row.get("timestamp") or ""),
-                        normalize_optional_text(row.get("duration_hours")),
-                        normalize_optional_text(row.get("price_usd_per_mwh")),
-                        normalize_optional_text(row.get("import_price_usd_per_mwh")),
-                        normalize_optional_text(row.get("export_price_usd_per_mwh")),
-                        normalize_optional_text(row.get("market_value_usd")),
-                        normalize_optional_text(row.get("grid_import_mw")),
-                        normalize_optional_text(row.get("grid_export_mw")),
-                        normalize_optional_text(row.get("battery_charge_mw")),
-                        normalize_optional_text(row.get("battery_discharge_mw")),
-                        normalize_optional_text(row.get("battery_energy_mwh")),
+                        scenario_version_id,
+                        json.dumps(columns),
+                        json.dumps(signal_keys or {}),
+                        json.dumps(lineage, sort_keys=True),
                         now,
+                    ),
+                )
+                self.connection.execute(
+                    "DELETE FROM run_dispatch_result_rows WHERE run_id = ?",
+                    (run_id,),
+                )
+                self.connection.executemany(
+                    """
+                    INSERT INTO run_dispatch_result_rows (
+                        run_id,
+                        period_index,
+                        row_json,
+                        timestamp,
+                        duration_hours,
+                        price_usd_per_mwh,
+                        import_price_usd_per_mwh,
+                        export_price_usd_per_mwh,
+                        market_value_usd,
+                        grid_import_mw,
+                        grid_export_mw,
+                        battery_charge_mw,
+                        battery_discharge_mw,
+                        battery_energy_mwh,
+                        created_at
                     )
-                    for period_index, row in enumerate(rows)
-                ],
-            )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            run_id,
+                            period_index,
+                            json.dumps(row, ensure_ascii=True),
+                            str(row.get("timestamp") or ""),
+                            normalize_optional_text(row.get("duration_hours")),
+                            normalize_optional_text(row.get("price_usd_per_mwh")),
+                            normalize_optional_text(row.get("import_price_usd_per_mwh")),
+                            normalize_optional_text(row.get("export_price_usd_per_mwh")),
+                            normalize_optional_text(row.get("market_value_usd")),
+                            normalize_optional_text(row.get("grid_import_mw")),
+                            normalize_optional_text(row.get("grid_export_mw")),
+                            normalize_optional_text(row.get("battery_charge_mw")),
+                            normalize_optional_text(row.get("battery_discharge_mw")),
+                            normalize_optional_text(row.get("battery_energy_mwh")),
+                            now,
+                        )
+                        for period_index, row in enumerate(rows)
+                    ],
+                )
+            except Exception:
+                self._discard_run_dispatch_result_index(run_id)
+                raise
             self.connection.commit()
             return self.get_run_dispatch_result_index(run_id)
+
+    def _discard_run_dispatch_result_index(self, run_id: int) -> None:
+        # A failed replace-write must never leave a header row paired with
+        # missing or partial detail rows: that mismatch would make BBDD-first
+        # reads silently prefer corrupt data over the complete artifact.
+        self.connection.execute("DELETE FROM run_dispatch_result_rows WHERE run_id = ?", (run_id,))
+        self.connection.execute("DELETE FROM run_dispatch_result_indexes WHERE run_id = ?", (run_id,))
+        self.connection.commit()
 
     def get_run_dispatch_result_index(self, run_id: int) -> dict[str, Any] | None:
         self.get_run(run_id)
@@ -4408,56 +4420,65 @@ class AnalystStore:
             scenario_version = self.get_scenario_version(scenario_version_id, include_document=False)
             lineage = result_lineage_from_scenario_version(run_id=run_id, scenario_version=scenario_version)
             now = utc_now_iso()
-            self.connection.execute(
-                """
-                INSERT INTO run_asset_dispatch_result_indexes (
-                    run_id,
-                    scenario_version_id,
-                    asset_dispatch_columns_json,
-                    lineage_json,
-                    created_at
+            try:
+                self.connection.execute(
+                    """
+                    INSERT INTO run_asset_dispatch_result_indexes (
+                        run_id,
+                        scenario_version_id,
+                        asset_dispatch_columns_json,
+                        lineage_json,
+                        created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT (run_id) DO UPDATE SET
+                        scenario_version_id = excluded.scenario_version_id,
+                        asset_dispatch_columns_json = excluded.asset_dispatch_columns_json,
+                        lineage_json = excluded.lineage_json,
+                        created_at = excluded.created_at
+                    """,
+                    (run_id, scenario_version_id, json.dumps(columns), json.dumps(lineage, sort_keys=True), now),
                 )
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT (run_id) DO UPDATE SET
-                    scenario_version_id = excluded.scenario_version_id,
-                    asset_dispatch_columns_json = excluded.asset_dispatch_columns_json,
-                    lineage_json = excluded.lineage_json,
-                    created_at = excluded.created_at
-                """,
-                (run_id, scenario_version_id, json.dumps(columns), json.dumps(lineage, sort_keys=True), now),
-            )
-            self.connection.execute(
-                "DELETE FROM run_asset_dispatch_result_rows WHERE run_id = ?",
-                (run_id,),
-            )
-            self.connection.executemany(
-                """
-                INSERT INTO run_asset_dispatch_result_rows (
-                    run_id,
-                    period_index,
-                    asset_id,
-                    asset_type,
-                    row_json,
-                    timestamp,
-                    created_at
+                self.connection.execute(
+                    "DELETE FROM run_asset_dispatch_result_rows WHERE run_id = ?",
+                    (run_id,),
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    (
+                self.connection.executemany(
+                    """
+                    INSERT INTO run_asset_dispatch_result_rows (
                         run_id,
                         period_index,
-                        str(row.get("asset_id") or ""),
-                        str(row.get("asset_type") or ""),
-                        json.dumps(row, ensure_ascii=True),
-                        str(row.get("timestamp") or ""),
-                        now,
+                        asset_id,
+                        asset_type,
+                        row_json,
+                        timestamp,
+                        created_at
                     )
-                    for period_index, row in enumerate(rows)
-                ],
-            )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            run_id,
+                            period_index,
+                            str(row.get("asset_id") or ""),
+                            str(row.get("asset_type") or ""),
+                            json.dumps(row, ensure_ascii=True),
+                            str(row.get("timestamp") or ""),
+                            now,
+                        )
+                        for period_index, row in enumerate(rows)
+                    ],
+                )
+            except Exception:
+                self._discard_run_asset_dispatch_result_index(run_id)
+                raise
             self.connection.commit()
             return self.get_run_asset_dispatch_result_index(run_id)
+
+    def _discard_run_asset_dispatch_result_index(self, run_id: int) -> None:
+        self.connection.execute("DELETE FROM run_asset_dispatch_result_rows WHERE run_id = ?", (run_id,))
+        self.connection.execute("DELETE FROM run_asset_dispatch_result_indexes WHERE run_id = ?", (run_id,))
+        self.connection.commit()
 
     def get_run_asset_dispatch_result_index(self, run_id: int) -> dict[str, Any] | None:
         self.get_run(run_id)
@@ -4505,46 +4526,54 @@ class AnalystStore:
             scenario_version = self.get_scenario_version(scenario_version_id, include_document=False)
             lineage = result_lineage_from_scenario_version(run_id=run_id, scenario_version=scenario_version)
             now = utc_now_iso()
-            self.connection.execute(
-                """
-                INSERT INTO run_summary_result_indexes (
-                    run_id,
-                    scenario_version_id,
-                    summary_json,
-                    solver_status,
-                    termination_status,
-                    objective_value_usd,
-                    linked_result_surfaces_json,
-                    lineage_json,
-                    created_at
+            try:
+                self.connection.execute(
+                    """
+                    INSERT INTO run_summary_result_indexes (
+                        run_id,
+                        scenario_version_id,
+                        summary_json,
+                        solver_status,
+                        termination_status,
+                        objective_value_usd,
+                        linked_result_surfaces_json,
+                        lineage_json,
+                        created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (run_id) DO UPDATE SET
+                        scenario_version_id = excluded.scenario_version_id,
+                        summary_json = excluded.summary_json,
+                        solver_status = excluded.solver_status,
+                        termination_status = excluded.termination_status,
+                        objective_value_usd = excluded.objective_value_usd,
+                        linked_result_surfaces_json = excluded.linked_result_surfaces_json,
+                        lineage_json = excluded.lineage_json,
+                        created_at = excluded.created_at
+                    """,
+                    (
+                        run_id,
+                        scenario_version_id,
+                        json.dumps(summary, ensure_ascii=True),
+                        normalize_optional_text(summary.get("solver_status")),
+                        normalize_optional_text(summary.get("termination_status")),
+                        float(summary["objective_value_usd"])
+                        if isinstance(summary.get("objective_value_usd"), (int, float))
+                        else None,
+                        json.dumps(linked_result_surfaces or []),
+                        json.dumps(lineage, sort_keys=True),
+                        now,
+                    ),
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (run_id) DO UPDATE SET
-                    scenario_version_id = excluded.scenario_version_id,
-                    summary_json = excluded.summary_json,
-                    solver_status = excluded.solver_status,
-                    termination_status = excluded.termination_status,
-                    objective_value_usd = excluded.objective_value_usd,
-                    linked_result_surfaces_json = excluded.linked_result_surfaces_json,
-                    lineage_json = excluded.lineage_json,
-                    created_at = excluded.created_at
-                """,
-                (
-                    run_id,
-                    scenario_version_id,
-                    json.dumps(summary, ensure_ascii=True),
-                    normalize_optional_text(summary.get("solver_status")),
-                    normalize_optional_text(summary.get("termination_status")),
-                    float(summary["objective_value_usd"])
-                    if isinstance(summary.get("objective_value_usd"), (int, float))
-                    else None,
-                    json.dumps(linked_result_surfaces or []),
-                    json.dumps(lineage, sort_keys=True),
-                    now,
-                ),
-            )
+            except Exception:
+                self._discard_run_summary_result_index(run_id)
+                raise
             self.connection.commit()
             return self.get_run_summary_result_index(run_id)
+
+    def _discard_run_summary_result_index(self, run_id: int) -> None:
+        self.connection.execute("DELETE FROM run_summary_result_indexes WHERE run_id = ?", (run_id,))
+        self.connection.commit()
 
     def get_run_summary_result_index(self, run_id: int) -> dict[str, Any] | None:
         self.get_run(run_id)

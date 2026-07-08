@@ -651,6 +651,71 @@ class JuliaRunExecutorTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_runner_survives_partial_result_indexing_failure_without_raising(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                scenario_version = create_persisted_scenario_version(store)
+                run = store.create_run(scenario_version_id=scenario_version["id"])
+
+                def fake_runner(command, **kwargs):
+                    output_root = Path(command[command.index("--output-root") + 1])
+                    output_dir = output_root / "hybrid_system" / "run-004"
+                    output_dir.mkdir(parents=True)
+                    (output_dir / "summary.json").write_text('{"termination_status":"OPTIMAL"}\n', encoding="utf-8")
+                    (output_dir / "dispatch.csv").write_text(
+                        "timestamp,duration_hours,price_usd_per_mwh,grid_import_mw,grid_export_mw,market_value_usd,"
+                        "battery_charge_mw,battery_discharge_mw,battery_energy_mwh,period_profit_usd\n"
+                        "2026-01-01T00:00:00,1.0,45.0,2.5,0.0,-112.5,0.0,0.0,20.0,-112.5\n"
+                        "2026-01-01T00:00:00,1.0,46.0,3.0,0.0,-138.0,0.0,0.0,25.0,-138.0\n",
+                        encoding="utf-8",
+                    )
+                    (output_dir / "asset_dispatch.csv").write_text(
+                        "timestamp,asset_id,asset_type\n2026-01-01T00:00:00,grid_1,grid\n",
+                        encoding="utf-8",
+                    )
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        stdout=json.dumps(
+                            {
+                                "case_name": "hybrid_system",
+                                "run_timestamp": "run-004",
+                                "output_dir": str(output_dir),
+                                "summary_path": str(output_dir / "summary.json"),
+                                "termination_status": "OPTIMAL",
+                            }
+                        ),
+                        stderr="",
+                    )
+
+                executor = JuliaRunExecutor(
+                    store=store,
+                    repo_root=REPO_ROOT,
+                    artifact_root=Path(temp_dir),
+                    julia_executable="julia",
+                    runner=fake_runner,
+                    validation_service=AcceptingRunValidationService(),
+                )
+
+                completed = executor.execute(run["id"])
+
+                self.assertEqual(completed["status"], "succeeded")
+                self.assertIsNone(store.get_run_dispatch_result_index(run["id"]))
+                self.assertIsNotNone(store.get_run_asset_dispatch_result_index(run["id"]))
+                artifact_types = {artifact["artifact_type"] for artifact in store.list_run_artifacts(run["id"])}
+                self.assertIn("dispatch_csv", artifact_types)
+
+                results = read_run_results(
+                    completed,
+                    store.list_run_artifacts(run["id"]),
+                    Path(temp_dir),
+                    store=store,
+                )
+                self.assertEqual(len(results["dispatch_table"]["rows"]), 2)
+            finally:
+                store.close()
+
     def test_runner_rejects_success_artifacts_outside_artifact_root(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = AnalystStore("sqlite:///:memory:")

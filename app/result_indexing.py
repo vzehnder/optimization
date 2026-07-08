@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 from app.persistence import AnalystStore
 
+
+logger = logging.getLogger(__name__)
 
 CORE_DISPATCH_BASE_COLUMNS = {
     "timestamp",
@@ -183,6 +186,53 @@ def index_run_summary_results(
         summary=summary,
         linked_result_surfaces=linked_result_surfaces,
     )
+
+
+def index_run_results(
+    *,
+    store: AnalystStore,
+    run: dict[str, Any],
+    artifact_root: Path | str,
+) -> dict[str, Any]:
+    """Index every TS4 result surface for a succeeded run, never raising.
+
+    Each surface (dispatch, asset dispatch, summary) is indexed independently:
+    a failure on one surface is logged and recorded, but never prevents the
+    other surfaces from being indexed and never propagates to the caller, so a
+    successful run's status and artifacts are never put at risk by indexing.
+    Re-invoking this for the same run is safe and will retry any surface that
+    previously failed alongside re-affirming the surfaces already indexed.
+    """
+    run_id = int(run["id"])
+    indexed: list[str] = []
+    failed: dict[str, str] = {}
+
+    try:
+        artifacts = store.list_run_artifacts(run_id)
+    except Exception as error:
+        logger.error("TS4 result indexing could not list artifacts for run %s: %s", run_id, error)
+        return {"run_id": run_id, "indexed": indexed, "failed": {"artifacts": str(error)}}
+
+    for surface, index_fn in (
+        ("dispatch_table", index_run_dispatch_results),
+        ("asset_dispatch_table", index_run_asset_dispatch_results),
+        ("summary", index_run_summary_results),
+    ):
+        try:
+            result = index_fn(store=store, run=run, artifacts=artifacts, artifact_root=artifact_root)
+        except Exception as error:
+            failed[surface] = str(error)
+            logger.error(
+                "TS4 result indexing failed for run %s surface %s: %s",
+                run_id,
+                surface,
+                error,
+            )
+            continue
+        if result is not None:
+            indexed.append(surface)
+
+    return {"run_id": run_id, "indexed": indexed, "failed": failed}
 
 
 def supports_asset_dispatch_index(columns: list[str]) -> bool:
