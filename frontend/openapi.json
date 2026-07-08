@@ -322,6 +322,38 @@
         "title": "DashboardTemplateWriteRequest",
         "type": "object"
       },
+      "DraftTimeSeriesExtractionRequest": {
+        "properties": {
+          "data_kind": {
+            "minLength": 1,
+            "title": "Data Kind",
+            "type": "string"
+          },
+          "set_name": {
+            "minLength": 1,
+            "title": "Set Name",
+            "type": "string"
+          },
+          "timezone": {
+            "minLength": 1,
+            "title": "Timezone",
+            "type": "string"
+          },
+          "version_label": {
+            "minLength": 1,
+            "title": "Version Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "set_name",
+          "version_label",
+          "data_kind",
+          "timezone"
+        ],
+        "title": "DraftTimeSeriesExtractionRequest",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -4169,6 +4201,62 @@
           }
         },
         "summary": "Import Draft Time Series Source To Catalog"
+      }
+    },
+    "/api/scenarios/{scenario_id}/draft/time-series-sources/{source_id}/extract": {
+      "post": {
+        "operationId": "extract_draft_time_series_source_to_catalog_api_scenarios__scenario_id__draft_time_series_sources__source_id__extract_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftTimeSeriesExtractionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Extract Draft Time Series Source To Catalog"
       }
     },
     "/api/scenarios/{scenario_id}/draft/time-series-sources/{source_id}/mapping": {

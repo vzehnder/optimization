@@ -315,6 +315,13 @@ export interface TimeSeriesCatalogSignalMappingPayload {
   source_unit?: string | null;
 }
 
+export interface DraftSeriesExtractionPayload {
+  set_name: string;
+  version_label: string;
+  data_kind: string;
+  timezone: string;
+}
+
 export interface ProjectTimeSeriesSetSignal {
   signal_key: string;
   unit: string;
@@ -1728,6 +1735,28 @@ export async function importTimeSeriesSourceToCatalog(
     `/api/scenarios/${scenarioId}/draft/time-series-sources/${encodeURIComponent(
       sourceId,
     )}/catalog-import`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrfToken,
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+  return response.time_series_set;
+}
+
+export async function extractDraftTimeSeriesSourceToCatalog(
+  scenarioId: number,
+  sourceId: string,
+  payload: DraftSeriesExtractionPayload,
+): Promise<ProjectTimeSeriesSet> {
+  const csrfToken = await getCsrfToken();
+  const response = await requestJson<{ time_series_set: ProjectTimeSeriesSet }>(
+    `/api/scenarios/${scenarioId}/draft/time-series-sources/${encodeURIComponent(
+      sourceId,
+    )}/extract`,
     {
       method: "POST",
       headers: {

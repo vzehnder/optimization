@@ -58,6 +58,7 @@ ID_TABLES = {
     "scenario_versions",
     "scenarios",
     "time_series_periods",
+    "time_series_set_extractions",
     "time_series_set_revisions",
     "time_series_sets",
     "time_series_signals",

@@ -30,6 +30,7 @@ from app.draft_editor import (
     structured_draft_document_from_system_case,
 )
 from app.input_variants import InputVariantRangeError
+from app.legacy_series_extraction import LegacyDraftExtractionError
 from app.required_signals import MissingRequiredSignalsError
 from app.variant_staleness import VariantStaleError
 from app.persistence import (
@@ -296,6 +297,13 @@ class TimeSeriesCatalogImportRequest(BaseModel):
     signal_key: str | None = None
     source_unit: str | None = None
     signal_mappings: list[TimeSeriesCatalogSignalMappingRequest] = Field(default_factory=list)
+
+
+class DraftTimeSeriesExtractionRequest(BaseModel):
+    set_name: str = Field(min_length=1)
+    version_label: str = Field(min_length=1)
+    data_kind: str = Field(min_length=1)
+    timezone: str = Field(min_length=1)
 
 
 class TimeSeriesSetValueEditRequest(BaseModel):
@@ -1583,6 +1591,35 @@ def create_app(
                 status_code=400,
             )
         return {"time_series_set": created_set}
+
+    @app.post(
+        "/api/scenarios/{scenario_id}/draft/time-series-sources/{source_id}/extract",
+        status_code=201,
+    )
+    async def extract_draft_time_series_source_to_catalog(
+        scenario_id: int,
+        source_id: str,
+        payload: DraftTimeSeriesExtractionRequest,
+        request: Request,
+    ):
+        try:
+            extracted_set = analyst_store.extract_draft_time_series_set(
+                scenario_id=scenario_id,
+                source_id=source_id,
+                set_name=payload.set_name,
+                version_label=payload.version_label,
+                data_kind=payload.data_kind,
+                timezone_name=payload.timezone,
+                created_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except (LegacyDraftExtractionError, TimeSeriesCatalogError, ValueError) as error:
+            return JSONResponse(
+                error_response_body("draft_extraction", str(error), phase="python_validation"),
+                status_code=400,
+            )
+        return {"time_series_set": extracted_set}
 
     @app.get("/api/projects/{project_id}/time-series-sets")
     async def list_project_time_series_sets(project_id: int):

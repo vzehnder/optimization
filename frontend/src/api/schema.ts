@@ -950,6 +950,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scenarios/{scenario_id}/draft/time-series-sources/{source_id}/extract": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Extract Draft Time Series Source To Catalog */
+        post: operations["extract_draft_time_series_source_to_catalog_api_scenarios__scenario_id__draft_time_series_sources__source_id__extract_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scenarios/{scenario_id}/draft/time-series-sources/{source_id}/mapping": {
         parameters: {
             query?: never;
@@ -1289,6 +1306,17 @@ export interface components {
              * @default 10
              */
             table_preview_limit: number;
+        };
+        /** DraftTimeSeriesExtractionRequest */
+        DraftTimeSeriesExtractionRequest: {
+            /** Data Kind */
+            data_kind: string;
+            /** Set Name */
+            set_name: string;
+            /** Timezone */
+            timezone: string;
+            /** Version Label */
+            version_label: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -3751,6 +3779,42 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["TimeSeriesCatalogImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    extract_draft_time_series_source_to_catalog_api_scenarios__scenario_id__draft_time_series_sources__source_id__extract_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DraftTimeSeriesExtractionRequest"];
             };
         };
         responses: {

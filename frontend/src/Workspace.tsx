@@ -116,6 +116,7 @@ import {
 import {
   catalogSignalUnit,
   findSuggestedCatalogColumn,
+  isRecord,
   suggestedCatalogMappings,
   timeSeriesCatalogDataKindOptions,
   timeSeriesCatalogSignalOptions,
@@ -1558,6 +1559,30 @@ function TimeSeriesSetReplacePanel({
   );
 }
 
+function TimeSeriesSetOriginSummary({
+  revisionMetadata,
+}: {
+  revisionMetadata: Record<string, unknown> | undefined;
+}) {
+  const origin = revisionMetadata?.origin;
+  if (!isRecord(origin) || origin.kind !== "legacy_draft_extraction") {
+    return null;
+  }
+  return (
+    <section className="workspace-section" aria-labelledby="set-origin">
+      <h2 id="set-origin">Origen</h2>
+      <p>
+        Extraido desde borrador legacy (scenario {String(origin.scenario_id)},
+        fuente {String(origin.source_filename || origin.source_id)})
+      </p>
+      <p>
+        Extraido por {String(origin.extracted_by)} el{" "}
+        {String(origin.extracted_at)}
+      </p>
+    </section>
+  );
+}
+
 function TimeSeriesSetRevisionHistory({
   revisions,
 }: {
@@ -1648,6 +1673,7 @@ export function TimeSeriesSetDetailView() {
             <code>{set.content_hash}</code>
           </p>
         </section>
+        <TimeSeriesSetOriginSummary revisionMetadata={set.revision_metadata} />
         <section className="workspace-section" aria-labelledby="set-horizon">
           <h2 id="set-horizon">Horizonte</h2>
           <p>{set.horizon.period_count} periodos</p>

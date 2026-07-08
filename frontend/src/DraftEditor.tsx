@@ -12,6 +12,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ApiError,
   createScenarioDraft,
+  extractDraftTimeSeriesSourceToCatalog,
   getGeneratedSystemCasePreview,
   getProject,
   getScenario,
@@ -19,6 +20,7 @@ import {
   getTimeSeriesRows,
   importTimeSeriesSourceToCatalog,
   promoteGeneratedSystemCase,
+  type DraftSeriesExtractionPayload,
   type ProjectTimeSeriesSet,
   saveTimeSeriesMapping,
   saveTimeSeriesRows,
@@ -1454,6 +1456,137 @@ function TimeSeriesCatalogImportPanel({
   );
 }
 
+function DraftSeriesExtractionPanel({
+  scenarioId,
+  source,
+  disabled,
+}: {
+  scenarioId: number;
+  source: TimeSeriesSource;
+  disabled: boolean;
+}) {
+  const [form, setForm] = useState<DraftSeriesExtractionPayload>({
+    set_name: "",
+    version_label: "v1",
+    data_kind: "real",
+    timezone: "UTC",
+  });
+  const [error, setError] = useState("");
+  const [extractedSet, setExtractedSet] = useState<ProjectTimeSeriesSet | null>(
+    null,
+  );
+
+  const extractMutation = useMutation({
+    mutationFn: () =>
+      extractDraftTimeSeriesSourceToCatalog(scenarioId, source.id, form),
+    onSuccess: (timeSeriesSet) => {
+      setExtractedSet(timeSeriesSet);
+      setError("");
+    },
+    onError: (mutationError) => {
+      setError(errorMessage(mutationError));
+      setExtractedSet(null);
+    },
+  });
+
+  if (!source.validation?.ok) {
+    return null;
+  }
+
+  const canExtract =
+    Boolean(form.set_name.trim()) &&
+    Boolean(form.version_label.trim()) &&
+    Boolean(form.data_kind.trim()) &&
+    Boolean(form.timezone.trim());
+
+  return (
+    <section className="source-catalog">
+      <h3>Extract legacy series to catalog</h3>
+      <p className="source-note">
+        Reuses this source&apos;s already-validated mapping directly, no
+        column remapping needed. The draft itself is never modified;
+        extraction adds a new catalog set with origin metadata pointing back
+        at this draft and source file.
+      </p>
+      <div className="draft-field-grid">
+        <TextInput
+          id="extraction_set_name"
+          label="Catalog set name"
+          value={form.set_name}
+          onChange={(value) =>
+            setForm((current) => ({ ...current, set_name: value }))
+          }
+          errors={{}}
+          required
+        />
+        <TextInput
+          id="extraction_version_label"
+          label="Catalog version label"
+          value={form.version_label}
+          onChange={(value) =>
+            setForm((current) => ({ ...current, version_label: value }))
+          }
+          errors={{}}
+          required
+        />
+        <SelectInput
+          id="extraction_data_kind"
+          label="Catalog data kind"
+          value={form.data_kind}
+          options={timeSeriesCatalogDataKindOptions.map((option) => ({
+            value: option.value,
+            label: option.label,
+          }))}
+          onChange={(value) =>
+            setForm((current) => ({ ...current, data_kind: value }))
+          }
+        />
+        <TextInput
+          id="extraction_timezone"
+          label="Catalog timezone"
+          value={form.timezone}
+          onChange={(value) =>
+            setForm((current) => ({ ...current, timezone: value }))
+          }
+          errors={{}}
+          required
+        />
+      </div>
+      <button
+        type="button"
+        onClick={() => extractMutation.mutate()}
+        disabled={disabled || extractMutation.isPending || !canExtract}
+      >
+        {extractMutation.isPending
+          ? "Extracting to catalog"
+          : "Extract to catalog"}
+      </button>
+      {error ? <p role="alert">{error}</p> : null}
+      {extractedSet ? (
+        <div className="source-summary">
+          <p className="source-ok">Extracted to catalog</p>
+          <dl className="source-metadata">
+            <div>
+              <dt>Name</dt>
+              <dd>{extractedSet.name}</dd>
+            </div>
+            <div>
+              <dt>Version</dt>
+              <dd>
+                {extractedSet.version_label} (v{extractedSet.version_number})
+              </dd>
+            </div>
+            <div>
+              <dt>Periods</dt>
+              <dd>{extractedSet.period_count} periods</dd>
+            </div>
+          </dl>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function TimeSeriesWorkflow({
   scenarioId,
   document,
@@ -1560,6 +1693,12 @@ function TimeSeriesWorkflow({
             document={document}
             disabled={dirty}
             onSourcePersisted={onSourcePersisted}
+          />
+          <DraftSeriesExtractionPanel
+            key={`extraction-${source.id}`}
+            scenarioId={scenarioId}
+            source={source}
+            disabled={dirty}
           />
           <TimeSeriesRowsEditor
             key={`rows-${source.id}`}

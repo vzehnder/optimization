@@ -34,6 +34,11 @@ from app.time_series_catalog import (
     normalize_optional_text,
     validate_catalog_value_edits,
 )
+from app.legacy_series_extraction import (
+    PreparedDraftSeriesExtraction,
+    prepare_draft_series_extraction,
+)
+from app.time_series_ingestion import find_source
 
 
 DASHBOARD_TEMPLATE_FLAGS = [
@@ -632,6 +637,19 @@ class AnalystStore:
                 FOREIGN KEY (time_series_signal_id) REFERENCES time_series_signals(id) ON DELETE CASCADE,
                 FOREIGN KEY (time_series_period_id) REFERENCES time_series_periods(id) ON DELETE CASCADE,
                 UNIQUE (time_series_signal_id, time_series_period_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS time_series_set_extractions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                time_series_set_id INTEGER NOT NULL,
+                scenario_id INTEGER NOT NULL,
+                source_id TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                extracted_at TEXT NOT NULL,
+                extracted_by TEXT NOT NULL,
+                FOREIGN KEY (time_series_set_id) REFERENCES time_series_sets(id) ON DELETE CASCADE,
+                FOREIGN KEY (scenario_id) REFERENCES scenarios(id) ON DELETE CASCADE,
+                UNIQUE (scenario_id, source_id)
             );
 
             CREATE TABLE IF NOT EXISTS case_input_variants (
@@ -2063,7 +2081,7 @@ class AnalystStore:
         prepared_import: PreparedTimeSeriesCatalogImport,
         now: str,
     ) -> None:
-        signal_ids_by_key: dict[str, int] = {}
+        signal_ids_by_key: dict[tuple[str, str | None], int] = {}
         for signal in prepared_import.signals:
             signal_cursor = self.connection.execute(
                 """
@@ -2092,7 +2110,7 @@ class AnalystStore:
                     now,
                 ),
             )
-            signal_ids_by_key[signal.signal_key] = int(signal_cursor.lastrowid)
+            signal_ids_by_key[(signal.signal_key, signal.entity_key)] = int(signal_cursor.lastrowid)
         period_ids_by_index: dict[int, int] = {}
         for period in prepared_import.periods:
             period_cursor = self.connection.execute(
@@ -2122,7 +2140,7 @@ class AnalystStore:
             time_series_set_id=time_series_set_id,
             values=[
                 (
-                    signal_ids_by_key[value.signal_key],
+                    signal_ids_by_key[(value.signal_key, value.entity_key)],
                     period_ids_by_index[value.period_index],
                     value.value_numeric,
                     value.source_row_number,
@@ -2417,6 +2435,197 @@ class AnalystStore:
             ],
             now=now,
         )
+
+    def extract_draft_time_series_set(
+        self,
+        *,
+        scenario_id: int,
+        source_id: str,
+        set_name: str,
+        version_label: str,
+        data_kind: str,
+        timezone_name: str,
+        created_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        with self._lock:
+            scenario = self.get_scenario(scenario_id)
+            project_id = int(scenario["project_id"])
+            draft = self.get_scenario_draft(scenario_id)
+            prepared = prepare_draft_series_extraction(
+                document=draft["document"],
+                source_id=source_id,
+                set_name=set_name,
+                version_label=version_label,
+                data_kind=data_kind,
+                timezone_name=timezone_name,
+            )
+            source = find_source(draft["document"], source_id)
+            now = utc_now_iso()
+
+            existing_extraction = self.connection.execute(
+                """
+                SELECT time_series_set_id, content_hash
+                FROM time_series_set_extractions
+                WHERE scenario_id = ? AND source_id = ?
+                """,
+                (scenario_id, source_id),
+            ).fetchone()
+            if existing_extraction is not None:
+                time_series_set_id = int(existing_extraction["time_series_set_id"])
+                if str(existing_extraction["content_hash"]) == prepared.content_hash:
+                    return self.get_time_series_set(project_id, time_series_set_id)
+                raise ValueError(
+                    f"time-series source {source_id!r} was already extracted into "
+                    f"time-series set {time_series_set_id}; its validated data has since "
+                    "changed. Edit values on the extracted set or use a new version_label "
+                    "instead of re-extracting."
+                )
+
+            name_conflict = self.connection.execute(
+                """
+                SELECT id FROM time_series_sets
+                WHERE project_id = ? AND name = ? AND version_label = ?
+                """,
+                (project_id, prepared.set_name, prepared.version_label),
+            ).fetchone()
+            if name_conflict is not None:
+                raise ValueError(
+                    f"time-series set {prepared.set_name!r} already has version_label "
+                    f"{prepared.version_label!r}"
+                )
+
+            time_series_set_id = self._insert_draft_extraction_set(
+                project_id=project_id,
+                scenario_id=scenario_id,
+                source_id=source_id,
+                source=source,
+                prepared=prepared,
+                created_by=created_by,
+                now=now,
+            )
+            self.connection.execute(
+                """
+                INSERT INTO time_series_set_extractions (
+                    time_series_set_id, scenario_id, source_id, content_hash,
+                    extracted_at, extracted_by
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (time_series_set_id, scenario_id, source_id, prepared.content_hash, now, created_by),
+            )
+            self.connection.commit()
+            return self.get_time_series_set(project_id, time_series_set_id)
+
+    def _insert_draft_extraction_set(
+        self,
+        *,
+        project_id: int,
+        scenario_id: int,
+        source_id: str,
+        source: dict[str, Any],
+        prepared: PreparedDraftSeriesExtraction,
+        created_by: str,
+        now: str,
+    ) -> int:
+        source_record = self._get_or_create_time_series_source_record(
+            project_id=project_id,
+            source=source,
+            created_by=created_by,
+            now=now,
+        )
+        version_row = self.connection.execute(
+            """
+            SELECT COALESCE(MAX(version_number), 0) AS max_version
+            FROM time_series_sets
+            WHERE project_id = ? AND name = ?
+            """,
+            (project_id, prepared.set_name),
+        ).fetchone()
+        version_number = int(version_row["max_version"]) + 1
+        cursor = self.connection.execute(
+            """
+            INSERT INTO time_series_sets (
+                project_id,
+                name,
+                version_number,
+                version_label,
+                data_kind,
+                timezone,
+                status,
+                content_hash,
+                created_at,
+                updated_at,
+                created_by,
+                updated_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 'validated', ?, ?, ?, ?, ?)
+            """,
+            (
+                project_id,
+                prepared.set_name,
+                version_number,
+                prepared.version_label,
+                prepared.data_kind,
+                prepared.timezone,
+                prepared.content_hash,
+                now,
+                now,
+                created_by,
+                created_by,
+            ),
+        )
+        time_series_set_id = int(cursor.lastrowid)
+        try:
+            origin_metadata = {
+                "origin": {
+                    "kind": "legacy_draft_extraction",
+                    "scenario_id": scenario_id,
+                    "source_id": source_id,
+                    "source_filename": source.get("original_filename"),
+                    "source_checksum": source.get("checksum"),
+                    "extracted_by": created_by,
+                    "extracted_at": now,
+                }
+            }
+            self.connection.execute(
+                """
+                INSERT INTO time_series_set_revisions (
+                    time_series_set_id,
+                    revision_number,
+                    time_series_source_id,
+                    superseded_revision_number,
+                    content_hash,
+                    change_summary,
+                    created_at,
+                    created_by,
+                    metadata_json
+                )
+                VALUES (?, 1, ?, NULL, ?, ?, ?, ?, ?)
+                """,
+                (
+                    time_series_set_id,
+                    int(source_record["id"]),
+                    prepared.content_hash,
+                    "Extracted from legacy draft",
+                    now,
+                    created_by,
+                    json.dumps(origin_metadata, sort_keys=True),
+                ),
+            )
+            self._insert_time_series_signals_periods_values(
+                time_series_set_id=time_series_set_id,
+                prepared_import=prepared,
+                now=now,
+            )
+        except Exception:
+            self.connection.rollback()
+            self.connection.execute(
+                "DELETE FROM time_series_sets WHERE id = ?",
+                (time_series_set_id,),
+            )
+            self.connection.commit()
+            raise
+        return time_series_set_id
 
     def list_time_series_sets(self, project_id: int) -> list[dict[str, Any]]:
         self.get_project(project_id)

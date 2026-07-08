@@ -122,6 +122,7 @@ class CatalogValue:
     signal_key: str
     value_numeric: float
     source_row_number: int
+    entity_key: str | None = None
 
 
 @dataclass(frozen=True)
