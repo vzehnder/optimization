@@ -1,11 +1,13 @@
 # BESS-TS4-009: Compare Two Runs Of The Same Case
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter4/prd.md`
 Fecha de inicio planificada: 2026-07-28
 Fecha de termino planificada: 2026-07-29
+Fecha de inicio real: 2026-07-08
+Fecha de termino real: 2026-07-08
 
 ## User stories covered
 
@@ -26,12 +28,12 @@ with a clear message pointing at the rebuild path instead of a blank screen.
 
 ## Acceptance criteria
 
-- [ ] Two runs of the same case can be selected and compared from the UI.
-- [ ] The comparison shows differences in key KPIs between the two runs.
-- [ ] The comparison shows period-level differences for a selected result series.
-- [ ] Each compared run's input variant and date range are visible for context.
-- [ ] Comparing a non-indexed run fails gracefully with a message pointing at the rebuild path.
-- [ ] Tests cover comparing two runs with different input variants or different ranges.
+- [x] Two runs of the same case can be selected and compared from the UI.
+- [x] The comparison shows differences in key KPIs between the two runs.
+- [x] The comparison shows period-level differences for a selected result series.
+- [x] Each compared run's input variant and date range are visible for context.
+- [x] Comparing a non-indexed run fails gracefully with a message pointing at the rebuild path.
+- [x] Tests cover comparing two runs with different input variants or different ranges.
 
 ## Blocked by
 

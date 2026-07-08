@@ -2993,6 +2993,68 @@
         "summary": "Download Run Artifact"
       }
     },
+    "/api/run-comparisons": {
+      "get": {
+        "operationId": "get_run_comparison_api_run_comparisons_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "baseline_run_id",
+            "required": true,
+            "schema": {
+              "title": "Baseline Run Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "candidate_run_id",
+            "required": true,
+            "schema": {
+              "title": "Candidate Run Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "series",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Series"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Run Comparison"
+      }
+    },
     "/api/runs/{run_id}": {
       "get": {
         "operationId": "get_run_api_runs__run_id__get",

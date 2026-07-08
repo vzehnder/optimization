@@ -21,6 +21,7 @@ import {
   ApiError,
   bindCaseTimeSeries,
   cloneCaseInputVariant,
+  compareRuns,
   createManualRun,
   createDashboardTemplate,
   createHydraulicDiagram,
@@ -93,6 +94,7 @@ import {
   type ProjectTimeSeriesSetSignal,
   type ProjectTimeSeriesSetSummary,
   type RunArtifact,
+  type RunComparison,
   type Scenario,
   type ScenarioCreatePayload,
   type ScenarioRun,
@@ -149,6 +151,11 @@ const runPublicationsQueryKey = (runId: number) =>
   ["run-publications", runId] as const;
 const runArtifactsQueryKey = (runId: number) =>
   ["publication-run-artifacts", runId] as const;
+const runComparisonQueryKey = (
+  baselineRunId: number,
+  candidateRunId: number,
+  series?: string,
+) => ["run-comparison", baselineRunId, candidateRunId, series || null] as const;
 const publicationPreviewQueryKey = (publicationId: number) =>
   ["publication-preview", publicationId] as const;
 const terminalRunStatuses = new Set(["succeeded", "failed"]);
@@ -1929,6 +1936,335 @@ function RunList({
         );
       })}
     </ul>
+  );
+}
+
+export function RunComparisonView() {
+  const scenarioId = useNumericParam("scenarioId");
+  const scenario = useQuery({
+    queryKey: scenarioQueryKey(scenarioId || 0),
+    queryFn: ({ signal }) => getScenario(scenarioId || 0, signal),
+    enabled: scenarioId !== null,
+    retry: false,
+  });
+  const versions = useQuery({
+    queryKey: scenarioVersionsQueryKey(scenarioId || 0),
+    queryFn: ({ signal }) => listScenarioVersions(scenarioId || 0, signal),
+    enabled: scenarioId !== null,
+    retry: false,
+  });
+  const runs = useQuery({
+    queryKey: scenarioRunsQueryKey(scenarioId || 0),
+    queryFn: ({ signal }) => listScenarioRuns(scenarioId || 0, signal),
+    enabled: scenarioId !== null,
+    retry: false,
+  });
+
+  const succeededRuns = useMemo(
+    () => (runs.data || []).filter((run) => run.status === "succeeded"),
+    [runs.data],
+  );
+  const versionsById = useMemo(
+    () => new Map((versions.data || []).map((version) => [version.id, version])),
+    [versions.data],
+  );
+
+  const [baselineRunId, setBaselineRunId] = useState<number | null>(null);
+  const [candidateRunId, setCandidateRunId] = useState<number | null>(null);
+  const [series, setSeries] = useState<string | undefined>(undefined);
+
+  const effectiveBaselineId = baselineRunId ?? succeededRuns[0]?.id ?? null;
+  const effectiveCandidateId =
+    candidateRunId ??
+    succeededRuns.find((run) => run.id !== effectiveBaselineId)?.id ??
+    null;
+  const canCompare =
+    effectiveBaselineId !== null &&
+    effectiveCandidateId !== null &&
+    effectiveBaselineId !== effectiveCandidateId;
+
+  const comparison = useQuery({
+    queryKey: runComparisonQueryKey(
+      effectiveBaselineId ?? 0,
+      effectiveCandidateId ?? 0,
+      series,
+    ),
+    queryFn: ({ signal }) =>
+      compareRuns(
+        {
+          baselineRunId: effectiveBaselineId as number,
+          candidateRunId: effectiveCandidateId as number,
+          series,
+        },
+        signal,
+      ),
+    enabled: canCompare,
+    retry: false,
+  });
+
+  if (scenarioId === null) {
+    return <NotFoundView>El escenario solicitado no existe.</NotFoundView>;
+  }
+  if (scenario.isPending || versions.isPending || runs.isPending) {
+    return <LoadingView label="Cargando escenario" />;
+  }
+  if (scenario.isError) {
+    return (
+      <RequestErrorView
+        error={scenario.error}
+        retry={() => void scenario.refetch()}
+      />
+    );
+  }
+  if (runs.isError) {
+    return (
+      <RequestErrorView error={runs.error} retry={() => void runs.refetch()} />
+    );
+  }
+
+  function runOptionLabel(run: ScenarioRun): string {
+    const version = versionsById.get(run.scenario_version_id);
+    const variantDisplayName =
+      version?.generation_metadata?.kind === "case_input_variant"
+        ? version.generation_metadata.input_variant?.display_name
+        : undefined;
+    return `Run ${run.id}${variantDisplayName ? ` - ${variantDisplayName}` : ""} (${run.created_at})`;
+  }
+
+  return (
+    <section className="workspace-view">
+      <Breadcrumbs>
+        <Link to="/projects">Proyectos</Link>
+        <span aria-hidden="true">/</span>
+        <Link to={`/scenarios/${scenario.data.id}`}>{scenario.data.name}</Link>
+        <span aria-hidden="true">/</span>
+        <span>Comparar corridas</span>
+      </Breadcrumbs>
+      <header className="workspace-heading">
+        <h1>Comparar corridas</h1>
+        <p>Compara dos corridas exitosas de este mismo caso.</p>
+      </header>
+      {succeededRuns.length < 2 ? (
+        <EmptyState>
+          Se necesitan al menos dos corridas exitosas de este escenario para
+          comparar.
+        </EmptyState>
+      ) : (
+        <div className="workspace-stack">
+          <section
+            className="workspace-section"
+            aria-labelledby="run-comparison-picker"
+          >
+            <h2 id="run-comparison-picker">Seleccionar corridas</h2>
+            <div className="inline-actions">
+              <label>
+                Corrida base{" "}
+                <select
+                  value={effectiveBaselineId === null ? "" : String(effectiveBaselineId)}
+                  onChange={(event) => setBaselineRunId(Number(event.target.value))}
+                >
+                  {succeededRuns.map((run) => (
+                    <option key={run.id} value={run.id}>
+                      {runOptionLabel(run)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Corrida candidata{" "}
+                <select
+                  value={
+                    effectiveCandidateId === null ? "" : String(effectiveCandidateId)
+                  }
+                  onChange={(event) => setCandidateRunId(Number(event.target.value))}
+                >
+                  {succeededRuns.map((run) => (
+                    <option key={run.id} value={run.id}>
+                      {runOptionLabel(run)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {effectiveBaselineId !== null &&
+            effectiveCandidateId !== null &&
+            effectiveBaselineId === effectiveCandidateId ? (
+              <p className="result-alert" role="alert">
+                Selecciona dos corridas distintas.
+              </p>
+            ) : null}
+          </section>
+          {comparison.isPending && canCompare ? (
+            <LoadingView label="Cargando comparacion" />
+          ) : null}
+          {comparison.isError ? (
+            <div className="result-alert" role="alert">
+              <strong>No se pudo comparar</strong>
+              <p>{errorMessage(comparison.error)}</p>
+            </div>
+          ) : null}
+          {comparison.data ? (
+            <RunComparisonResult
+              comparison={comparison.data}
+              series={series}
+              onSelectSeries={setSeries}
+            />
+          ) : null}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function RunComparisonSideSummary({
+  title,
+  side,
+}: {
+  title: string;
+  side: RunComparison["baseline"];
+}) {
+  return (
+    <div>
+      <h3>{title}</h3>
+      <dl className="source-metadata version-metadata">
+        <div>
+          <dt>Run</dt>
+          <dd>
+            <Link to={`/runs/${side.run_id}`}>Run {side.run_id}</Link>
+          </dd>
+        </div>
+        <div>
+          <dt>Variante</dt>
+          <dd>
+            {side.input_variant?.display_name ||
+              (side.input_variant ? `ID ${side.input_variant.id}` : "Sin variante")}
+          </dd>
+        </div>
+        <div>
+          <dt>Rango de fechas</dt>
+          <dd>
+            {side.date_range
+              ? `${side.date_range.start} - ${side.date_range.end}`
+              : "Sin rango"}
+          </dd>
+        </div>
+        <div>
+          <dt>Finalizado</dt>
+          <dd>{displayValue(side.finished_at)}</dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
+
+function RunComparisonResult({
+  comparison,
+  series,
+  onSelectSeries,
+}: {
+  comparison: RunComparison;
+  series: string | undefined;
+  onSelectSeries: (series: string) => void;
+}) {
+  return (
+    <>
+      <section
+        className="workspace-section"
+        aria-labelledby="run-comparison-context"
+      >
+        <h2 id="run-comparison-context">Contexto de las corridas</h2>
+        <div className="inline-actions">
+          <RunComparisonSideSummary title="Base" side={comparison.baseline} />
+          <RunComparisonSideSummary
+            title="Candidata"
+            side={comparison.candidate}
+          />
+        </div>
+      </section>
+      <section
+        className="workspace-section"
+        aria-labelledby="run-comparison-kpis"
+      >
+        <h2 id="run-comparison-kpis">Diferencias en KPIs</h2>
+        {comparison.kpis.length === 0 ? (
+          <EmptyState>No hay KPIs escalares para comparar.</EmptyState>
+        ) : (
+          <div className="time-series-table-scroll result-table-scroll" tabIndex={0}>
+            <table>
+              <thead>
+                <tr>
+                  <th>KPI</th>
+                  <th>Base</th>
+                  <th>Candidata</th>
+                  <th>Diferencia</th>
+                </tr>
+              </thead>
+              <tbody>
+                {comparison.kpis.map((kpi) => (
+                  <tr key={kpi.key}>
+                    <td>{kpi.key}</td>
+                    <td>{displayValue(kpi.baseline, "-")}</td>
+                    <td>{displayValue(kpi.candidate, "-")}</td>
+                    <td>{kpi.delta === null ? "-" : kpi.delta}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+      <section
+        className="workspace-section"
+        aria-labelledby="run-comparison-series"
+      >
+        <h2 id="run-comparison-series">Diferencias por periodo</h2>
+        {comparison.available_signal_keys.length === 0 ? (
+          <EmptyState>Ninguna serie de resultado en comun para comparar.</EmptyState>
+        ) : (
+          <>
+            <label>
+              Serie{" "}
+              <select
+                value={series || comparison.selected_series || ""}
+                onChange={(event) => onSelectSeries(event.target.value)}
+              >
+                {comparison.available_signal_keys.map((key) => (
+                  <option key={key} value={key}>
+                    {key}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {comparison.series_periods && comparison.series_periods.length > 0 ? (
+              <div className="time-series-table-scroll result-table-scroll" tabIndex={0}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Periodo</th>
+                      <th>Base</th>
+                      <th>Candidata</th>
+                      <th>Diferencia</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {comparison.series_periods.map((period) => (
+                      <tr key={period.timestamp}>
+                        <td>{period.timestamp}</td>
+                        <td>{displayValue(period.baseline, "-")}</td>
+                        <td>{displayValue(period.candidate, "-")}</td>
+                        <td>{period.delta === null ? "-" : period.delta}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <EmptyState>Sin datos de periodo para esta serie.</EmptyState>
+            )}
+          </>
+        )}
+      </section>
+    </>
   );
 }
 
@@ -5577,6 +5913,14 @@ export function ScenarioDetailView() {
         <ExpertVersionForm scenarioId={scenario.data.id} />
         <section className="workspace-section" aria-labelledby="run-list">
           <h2 id="run-list">Corridas</h2>
+          <div className="inline-actions">
+            <Link
+              className="button-link"
+              to={`/scenarios/${scenario.data.id}/runs/compare`}
+            >
+              Comparar corridas
+            </Link>
+          </div>
           <RunList runs={runs.data} versions={versions.data} />
         </section>
       </div>

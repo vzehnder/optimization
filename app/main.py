@@ -42,6 +42,7 @@ from app.persistence import (
     optimization_case_public_dict,
     utc_now_iso,
 )
+from app.result_comparison import ComparisonError, compare_runs
 from app.result_indexing import rebuild_all_run_results, rebuild_run_results
 from app.results import ResultReadError, apply_dashboard_template, read_run_results
 from app.time_series_catalog import (
@@ -2036,6 +2037,24 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         outcome = rebuild_run_results(store=analyst_store, run=run, artifact_root=configured_artifact_root, force=force)
         return {"rebuild": outcome}
+
+    @app.get("/api/run-comparisons")
+    async def get_run_comparison(baseline_run_id: int, candidate_run_id: int, series: str | None = None):
+        try:
+            comparison = compare_runs(
+                store=analyst_store,
+                baseline_run_id=baseline_run_id,
+                candidate_run_id=candidate_run_id,
+                series=series,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ComparisonError as error:
+            return JSONResponse(
+                {"status": "error", "message": error.message},
+                status_code=error.status_code,
+            )
+        return {"comparison": comparison}
 
     @app.get("/api/runs/{run_id}/publications")
     async def list_run_publications(run_id: int):

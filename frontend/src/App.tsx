@@ -42,6 +42,7 @@ import {
   PublicationPreviewView,
   ProjectDetailView,
   ProjectListView,
+  RunComparisonView,
   RunDetailView,
   ScenarioDetailView,
   ScenarioVersionDetailView,
@@ -301,6 +302,10 @@ function AuthenticatedRoutes({ user }: { user: CurrentUser }) {
           <Route
             path="scenarios/:scenarioId/draft"
             element={isClient ? <ForbiddenView /> : <ScenarioDraftEditorView />}
+          />
+          <Route
+            path="scenarios/:scenarioId/runs/compare"
+            element={isClient ? <ForbiddenView /> : <RunComparisonView />}
           />
           <Route
             path="scenarios/:scenarioId/hydraulic-diagram"

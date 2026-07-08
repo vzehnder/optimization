@@ -138,6 +138,39 @@ export interface DashboardResults {
   plot_series?: unknown[];
 }
 
+export interface RunComparisonKpi {
+  key: string;
+  baseline: ResultCell;
+  candidate: ResultCell;
+  delta: number | null;
+}
+
+export interface RunComparisonSeriesPeriod {
+  timestamp: string;
+  baseline: number | null;
+  candidate: number | null;
+  delta: number | null;
+}
+
+export interface RunComparisonSide {
+  run_id: number;
+  status: string;
+  created_at?: string | null;
+  finished_at?: string | null;
+  scenario_version_id: number;
+  input_variant?: { id: number; display_name?: string } | null;
+  date_range?: { start: string; end: string } | null;
+}
+
+export interface RunComparison {
+  baseline: RunComparisonSide;
+  candidate: RunComparisonSide;
+  kpis: RunComparisonKpi[];
+  available_signal_keys: string[];
+  selected_series: string | null;
+  series_periods: RunComparisonSeriesPeriod[] | null;
+}
+
 export interface RunArtifact {
   id: number;
   run_id: number;
@@ -1315,6 +1348,22 @@ export async function getRunResults(
     { signal },
   );
   return response.results;
+}
+
+export async function compareRuns(
+  params: { baselineRunId: number; candidateRunId: number; series?: string },
+  signal?: AbortSignal,
+): Promise<RunComparison> {
+  const query = new URLSearchParams({
+    baseline_run_id: String(params.baselineRunId),
+    candidate_run_id: String(params.candidateRunId),
+  });
+  if (params.series) query.set("series", params.series);
+  const response = await requestJson<{ comparison: RunComparison }>(
+    `/api/run-comparisons?${query.toString()}`,
+    { signal },
+  );
+  return response.comparison;
 }
 
 export async function listRunArtifacts(
