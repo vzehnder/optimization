@@ -1,18 +1,25 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from app.persistence import AnalystStore
+from app.persistence import AnalystStore, derive_case_hierarchy_provenance
 from app.result_indexing import (
     index_run_asset_dispatch_results,
     index_run_dispatch_results,
     index_run_summary_results,
 )
 from app.results import read_run_results
+from app.time_series_catalog import (
+    CatalogImportRequest,
+    CatalogSignalMappingRequest,
+    CatalogValueEdit,
+    prepare_time_series_catalog_import,
+)
 from app.validation import ValidationResult
 
 
@@ -323,16 +330,279 @@ class DispatchResultIndexingTests(unittest.TestCase):
                 store.close()
 
 
-def create_completed_run_with_core_dispatch_artifacts(store: AnalystStore, artifact_root: Path) -> dict:
+class ResultLineageIndexingTests(unittest.TestCase):
+    def test_indexed_result_surfaces_store_full_frozen_run_lineage(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                generation_metadata = {
+                    "kind": "case_input_variant",
+                    "topology": {"content_hash": "sha256:topology-v1"},
+                    "parameters": {"content_hash": "sha256:parameters-v1"},
+                    "input_variant": {"id": 7, "display_name": "Dry year"},
+                    "date_range": {
+                        "start": "2026-01-01T00:00:00",
+                        "end": "2026-01-01T01:00:00",
+                    },
+                    "series_bindings": [
+                        {
+                            "signal_key": "import_price_usd_per_mwh",
+                            "entity_type": None,
+                            "entity_id": None,
+                            "time_series_set_id": 11,
+                            "version_number": 2,
+                            "version_label": "dry_year_v2",
+                            "revision_number": 3,
+                            "content_hash": "sha256:series-price-v3",
+                            "validated_range": {
+                                "start": "2026-01-01T00:00:00",
+                                "end": "2026-01-01T01:00:00",
+                            },
+                        }
+                    ],
+                }
+                run = create_completed_run_with_core_dispatch_artifacts(
+                    store, artifact_root, generation_metadata=generation_metadata
+                )
+                scenario_version = store.get_scenario_version(
+                    int(run["scenario_version_id"]), include_document=False
+                )
+                scenario_metadata = scenario_version["generation_metadata"]
+                artifacts = store.list_run_artifacts(run["id"])
+
+                dispatch_index = index_run_dispatch_results(
+                    store=store,
+                    run=run,
+                    artifacts=artifacts,
+                    artifact_root=artifact_root,
+                )
+                asset_dispatch_index = index_run_asset_dispatch_results(
+                    store=store,
+                    run=run,
+                    artifacts=artifacts,
+                    artifact_root=artifact_root,
+                )
+                summary_index = index_run_summary_results(
+                    store=store,
+                    run=run,
+                    artifacts=artifacts,
+                    artifact_root=artifact_root,
+                )
+
+                expected_lineage = {
+                    "run_id": run["id"],
+                    "scenario_version_id": run["scenario_version_id"],
+                    "case": {
+                        "scenario_id": scenario_version["scenario_id"],
+                        "case_name": scenario_version["case_name"],
+                    },
+                    "topology_hash": scenario_metadata["topology"]["content_hash"],
+                    "parameters_hash": scenario_metadata["parameters"]["content_hash"],
+                    "input_variant": {"id": 7, "display_name": "Dry year"},
+                    "date_range": {
+                        "start": "2026-01-01T00:00:00",
+                        "end": "2026-01-01T01:00:00",
+                    },
+                    "input_series": [
+                        {
+                            "signal_key": "import_price_usd_per_mwh",
+                            "entity_type": None,
+                            "entity_id": None,
+                            "time_series_set_id": 11,
+                            "version_number": 2,
+                            "version_label": "dry_year_v2",
+                            "revision_number": 3,
+                            "content_hash": "sha256:series-price-v3",
+                        }
+                    ],
+                }
+                self.assertEqual(dispatch_index["lineage"], expected_lineage)
+                self.assertEqual(asset_dispatch_index["lineage"], expected_lineage)
+                self.assertEqual(summary_index["lineage"], expected_lineage)
+            finally:
+                store.close()
+
+    def test_legacy_run_indexes_absent_variant_lineage_fields_without_fabrication(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_core_dispatch_artifacts(
+                    store,
+                    artifact_root,
+                    generation_metadata={"topology": {"content_hash": "sha256:legacy-topology"}},
+                )
+                scenario_version = store.get_scenario_version(
+                    int(run["scenario_version_id"]), include_document=False
+                )
+
+                indexed = index_run_dispatch_results(
+                    store=store,
+                    run=run,
+                    artifacts=store.list_run_artifacts(run["id"]),
+                    artifact_root=artifact_root,
+                )
+
+                self.assertEqual(
+                    indexed["lineage"]["topology_hash"],
+                    scenario_version["generation_metadata"]["topology"]["content_hash"],
+                )
+                self.assertEqual(
+                    indexed["lineage"]["parameters_hash"],
+                    scenario_version["generation_metadata"]["parameters"]["content_hash"],
+                )
+                self.assertIsNone(indexed["lineage"]["input_variant"])
+                self.assertIsNone(indexed["lineage"]["date_range"])
+                self.assertEqual(indexed["lineage"]["input_series"], [])
+            finally:
+                store.close()
+
+    def test_indexed_lineage_stays_frozen_after_live_series_topology_and_parameter_edits(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                prepared = prepare_time_series_catalog_import(
+                    rows=price_rows(datetime(2026, 1, 1), 3),
+                    request=price_import_request(),
+                )
+                project = store.create_project(name="TS4 lineage project")
+                scenario = store.create_scenario(project_id=project["id"], name="TS4 lineage scenario")
+                store.create_or_replace_scenario_draft(
+                    scenario_id=scenario["id"], document=grid_battery_draft_document()
+                )
+                optimization_case = store.get_or_create_case_for_scenario(scenario["id"])
+                variant = store.get_or_create_default_input_variant(optimization_case["id"])
+                price_set = store.import_time_series_catalog_set(
+                    scenario_id=scenario["id"],
+                    source={
+                        "id": "csv_source_1",
+                        "original_filename": "price.csv",
+                        "media_type": "text/csv",
+                        "checksum": "sha256:price-v1",
+                    },
+                    prepared_import=prepared,
+                )
+                store.upsert_case_time_series_binding(
+                    case_input_variant_id=variant["id"],
+                    signal_key="import_price_usd_per_mwh",
+                    time_series_set_id=price_set["id"],
+                )
+                materialized = store.materialize_system_case_for_variant(
+                    scenario_id=scenario["id"],
+                    case_input_variant_id=variant["id"],
+                    range_start=price_set["horizon"]["start"],
+                    range_end=price_set["horizon"]["end"],
+                )
+                scenario_version = store.create_scenario_version(
+                    scenario_id=scenario["id"],
+                    system_case_json=materialized["system_case"],
+                    validation_payload={"status": "ok"},
+                    generation_metadata={
+                        "kind": "case_input_variant",
+                        "input_variant": {"id": variant["id"], "display_name": variant["display_name"]},
+                        "date_range": {
+                            "start": price_set["horizon"]["start"],
+                            "end": price_set["horizon"]["end"],
+                        },
+                        "series_bindings": materialized["series_bindings"],
+                    },
+                )
+                run = create_completed_run_with_core_dispatch_artifacts(
+                    store,
+                    artifact_root,
+                    scenario_version=scenario_version,
+                )
+
+                indexed = index_run_dispatch_results(
+                    store=store,
+                    run=run,
+                    artifacts=store.list_run_artifacts(run["id"]),
+                    artifact_root=artifact_root,
+                )
+                frozen_lineage = indexed["lineage"]
+
+                store.edit_time_series_set_values(
+                    project_id=project["id"],
+                    time_series_set_id=price_set["id"],
+                    edits=[
+                        CatalogValueEdit(
+                            period_index=0,
+                            signal_key="import_price_usd_per_mwh",
+                            value_text="99.0",
+                        )
+                    ],
+                    created_by="lineage-test@example.local",
+                )
+                mutated_draft = grid_battery_draft_document()
+                mutated_draft["assets"][0]["charge_power_max_mw"] = 9.0
+                mutated_draft["assets"].append(
+                    {
+                        "id": "battery_2",
+                        "type": "battery",
+                        "charge_power_max_mw": 2.0,
+                        "discharge_power_max_mw": 2.0,
+                        "energy_min_mwh": 0.0,
+                        "energy_max_mwh": 4.0,
+                        "initial_energy_mwh": 2.0,
+                        "charge_efficiency": 0.95,
+                        "discharge_efficiency": 0.95,
+                        "degradation_cost_per_mwh_delta_soc": 0.0,
+                        "terminal_condition": "none",
+                        "prevent_simultaneous_charge_discharge": True,
+                        "degradation_linear_delta_soc": True,
+                    }
+                )
+                store.update_scenario_draft(
+                    scenario_id=scenario["id"],
+                    document=mutated_draft,
+                )
+
+                live_materialized = store.validate_case_input_variant(
+                    scenario_id=scenario["id"],
+                    case_input_variant_id=variant["id"],
+                    range_start=price_set["horizon"]["start"],
+                    range_end=price_set["horizon"]["end"],
+                )
+                live_price_set = store.get_time_series_set(project["id"], price_set["id"])
+                live_provenance = derive_case_hierarchy_provenance(live_materialized["system_case"])
+                reloaded = store.get_run_dispatch_result_index(run["id"])
+
+                self.assertEqual(reloaded["lineage"], frozen_lineage)
+                self.assertNotEqual(
+                    live_price_set["content_hash"],
+                    frozen_lineage["input_series"][0]["content_hash"],
+                )
+                self.assertNotEqual(
+                    live_provenance["topology"]["content_hash"],
+                    frozen_lineage["topology_hash"],
+                )
+                self.assertNotEqual(
+                    live_provenance["parameters"]["content_hash"],
+                    frozen_lineage["parameters_hash"],
+                )
+            finally:
+                store.close()
+
+
+def create_completed_run_with_core_dispatch_artifacts(
+    store: AnalystStore,
+    artifact_root: Path,
+    *,
+    generation_metadata: dict | None = None,
+    scenario_version: dict | None = None,
+) -> dict:
     output_dir = artifact_root / "runs" / "1" / "outputs"
     output_dir.mkdir(parents=True)
     summary_path = output_dir / "summary.json"
     dispatch_path = output_dir / "dispatch.csv"
     asset_dispatch_path = output_dir / "asset_dispatch.csv"
+    case_name = str((scenario_version or {}).get("case_name") or "hybrid_system")
     summary_path.write_text(
         json.dumps(
             {
-                "case_name": "hybrid_system",
+                "case_name": case_name,
                 "solver_status": "OPTIMAL",
                 "termination_status": "OPTIMAL",
                 "objective_value_usd": 1250.5,
@@ -353,18 +623,20 @@ def create_completed_run_with_core_dispatch_artifacts(store: AnalystStore, artif
         encoding="utf-8",
     )
 
-    project = store.create_project(name="TS4 Project")
-    scenario = store.create_scenario(project_id=project["id"], name="Base case")
-    scenario_version = store.create_scenario_version(
-        scenario_id=scenario["id"],
-        system_case_json={
-            "schema_version": "bess_system_dispatch.v1",
-            "case_name": "hybrid_system",
-            "nodes": [],
-            "time_series": [],
-        },
-        validation_payload={"status": "ok"},
-    )
+    if scenario_version is None:
+        project = store.create_project(name="TS4 Project")
+        scenario = store.create_scenario(project_id=project["id"], name="Base case")
+        scenario_version = store.create_scenario_version(
+            scenario_id=scenario["id"],
+            system_case_json={
+                "schema_version": "bess_system_dispatch.v1",
+                "case_name": case_name,
+                "nodes": [],
+                "time_series": [],
+            },
+            validation_payload={"status": "ok"},
+            generation_metadata=generation_metadata,
+        )
     run = store.create_run(scenario_version_id=scenario_version["id"])
     store.mark_run_running(
         run["id"],
@@ -393,6 +665,67 @@ def create_completed_run_with_core_dispatch_artifacts(store: AnalystStore, artif
             media_type=media_type,
         )
     return run
+
+
+def price_import_request(*, signal_key="import_price_usd_per_mwh", version_label="v1"):
+    return CatalogImportRequest(
+        set_name="Spot price",
+        version_label=version_label,
+        data_kind="real",
+        timezone="America/Santiago",
+        timestamp_column="period_start",
+        duration_hours_column="hours",
+        signal_mappings=[
+            CatalogSignalMappingRequest(source_column="spot_price", signal_key=signal_key),
+        ],
+    )
+
+
+def price_rows(start: datetime, count: int, *, value: float = 50.0):
+    rows = []
+    for hour in range(count):
+        instant = start + timedelta(hours=hour)
+        rows.append(
+            {
+                "period_start": instant.isoformat(),
+                "hours": "1.0",
+                "spot_price": str(value + hour),
+            }
+        )
+    return rows
+
+
+def grid_battery_draft_document():
+    return {
+        "schema_version": "bess_editor_draft.v1",
+        "case": {"name": "grid_battery_case", "description": ""},
+        "pcc": {"id": "bus_1", "type": "bus"},
+        "grid": {
+            "id": "grid_1",
+            "import_power_max_mw": 10.0,
+            "export_power_max_mw": 10.0,
+            "prevent_simultaneous_grid_import_export": True,
+        },
+        "assets": [
+            {
+                "id": "battery_1",
+                "type": "battery",
+                "charge_power_max_mw": 4.0,
+                "discharge_power_max_mw": 4.0,
+                "energy_min_mwh": 0.0,
+                "energy_max_mwh": 8.0,
+                "initial_energy_mwh": 4.0,
+                "charge_efficiency": 0.95,
+                "discharge_efficiency": 0.95,
+                "degradation_cost_per_mwh_delta_soc": 0.0,
+                "terminal_condition": "none",
+                "prevent_simultaneous_charge_discharge": True,
+                "degradation_linear_delta_soc": True,
+            },
+        ],
+        "time_series": {"sources": []},
+        "solver": {"name": "HiGHS", "options": {}},
+    }
 
 
 def create_completed_run_with_hydro_only_dispatch_artifacts(store: AnalystStore, artifact_root: Path) -> dict:

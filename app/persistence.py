@@ -725,6 +725,7 @@ class AnalystStore:
                 scenario_version_id INTEGER NOT NULL,
                 dispatch_columns_json TEXT NOT NULL,
                 signal_keys_json TEXT NOT NULL DEFAULT '{}',
+                lineage_json TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
                 FOREIGN KEY (scenario_version_id) REFERENCES scenario_versions(id) ON DELETE CASCADE
@@ -756,6 +757,7 @@ class AnalystStore:
                 run_id INTEGER PRIMARY KEY,
                 scenario_version_id INTEGER NOT NULL,
                 asset_dispatch_columns_json TEXT NOT NULL,
+                lineage_json TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
                 FOREIGN KEY (scenario_version_id) REFERENCES scenario_versions(id) ON DELETE CASCADE
@@ -782,6 +784,7 @@ class AnalystStore:
                 termination_status TEXT,
                 objective_value_usd REAL,
                 linked_result_surfaces_json TEXT NOT NULL DEFAULT '[]',
+                lineage_json TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
                 FOREIGN KEY (scenario_version_id) REFERENCES scenario_versions(id) ON DELETE CASCADE
@@ -894,6 +897,9 @@ class AnalystStore:
             "TEXT NOT NULL DEFAULT 'flow_power_curve'",
         )
         self._ensure_column("run_dispatch_result_indexes", "signal_keys_json", "TEXT NOT NULL DEFAULT '{}'")
+        self._ensure_column("run_dispatch_result_indexes", "lineage_json", "TEXT NOT NULL DEFAULT '{}'")
+        self._ensure_column("run_asset_dispatch_result_indexes", "lineage_json", "TEXT NOT NULL DEFAULT '{}'")
+        self._ensure_column("run_summary_result_indexes", "lineage_json", "TEXT NOT NULL DEFAULT '{}'")
         self.connection.commit()
 
     def _ensure_column(self, table_name: str, column_name: str, definition: str) -> None:
@@ -4276,7 +4282,8 @@ class AnalystStore:
             run = self.get_run(run_id)
             if int(run["scenario_version_id"]) != scenario_version_id:
                 raise ValueError("run_dispatch_result_index scenario_version_id does not match the run")
-            self.get_scenario_version(scenario_version_id, include_document=False)
+            scenario_version = self.get_scenario_version(scenario_version_id, include_document=False)
+            lineage = result_lineage_from_scenario_version(run_id=run_id, scenario_version=scenario_version)
             now = utc_now_iso()
             self.connection.execute(
                 """
@@ -4285,13 +4292,15 @@ class AnalystStore:
                     scenario_version_id,
                     dispatch_columns_json,
                     signal_keys_json,
+                    lineage_json,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT (run_id) DO UPDATE SET
                     scenario_version_id = excluded.scenario_version_id,
                     dispatch_columns_json = excluded.dispatch_columns_json,
                     signal_keys_json = excluded.signal_keys_json,
+                    lineage_json = excluded.lineage_json,
                     created_at = excluded.created_at
                 """,
                 (
@@ -4299,6 +4308,7 @@ class AnalystStore:
                     scenario_version_id,
                     json.dumps(columns),
                     json.dumps(signal_keys or {}),
+                    json.dumps(lineage, sort_keys=True),
                     now,
                 ),
             )
@@ -4355,7 +4365,7 @@ class AnalystStore:
         self.get_run(run_id)
         index_row = self.connection.execute(
             """
-            SELECT run_id, scenario_version_id, dispatch_columns_json, signal_keys_json, created_at
+            SELECT run_id, scenario_version_id, dispatch_columns_json, signal_keys_json, lineage_json, created_at
             FROM run_dispatch_result_indexes
             WHERE run_id = ?
             """,
@@ -4378,6 +4388,7 @@ class AnalystStore:
             "scenario_version_id": int(index_row["scenario_version_id"]),
             "columns": json.loads(index_row["dispatch_columns_json"]),
             "signal_keys": json.loads(index_row["signal_keys_json"] or "{}"),
+            "lineage": json.loads(index_row["lineage_json"] or "{}"),
             "rows": [json.loads(str(row["row_json"])) for row in row_records],
             "created_at": str(index_row["created_at"]),
         }
@@ -4394,7 +4405,8 @@ class AnalystStore:
             run = self.get_run(run_id)
             if int(run["scenario_version_id"]) != scenario_version_id:
                 raise ValueError("run_asset_dispatch_result_index scenario_version_id does not match the run")
-            self.get_scenario_version(scenario_version_id, include_document=False)
+            scenario_version = self.get_scenario_version(scenario_version_id, include_document=False)
+            lineage = result_lineage_from_scenario_version(run_id=run_id, scenario_version=scenario_version)
             now = utc_now_iso()
             self.connection.execute(
                 """
@@ -4402,15 +4414,17 @@ class AnalystStore:
                     run_id,
                     scenario_version_id,
                     asset_dispatch_columns_json,
+                    lineage_json,
                     created_at
                 )
-                VALUES (?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT (run_id) DO UPDATE SET
                     scenario_version_id = excluded.scenario_version_id,
                     asset_dispatch_columns_json = excluded.asset_dispatch_columns_json,
+                    lineage_json = excluded.lineage_json,
                     created_at = excluded.created_at
                 """,
-                (run_id, scenario_version_id, json.dumps(columns), now),
+                (run_id, scenario_version_id, json.dumps(columns), json.dumps(lineage, sort_keys=True), now),
             )
             self.connection.execute(
                 "DELETE FROM run_asset_dispatch_result_rows WHERE run_id = ?",
@@ -4449,7 +4463,7 @@ class AnalystStore:
         self.get_run(run_id)
         index_row = self.connection.execute(
             """
-            SELECT run_id, scenario_version_id, asset_dispatch_columns_json, created_at
+            SELECT run_id, scenario_version_id, asset_dispatch_columns_json, lineage_json, created_at
             FROM run_asset_dispatch_result_indexes
             WHERE run_id = ?
             """,
@@ -4471,6 +4485,7 @@ class AnalystStore:
             "run_id": int(index_row["run_id"]),
             "scenario_version_id": int(index_row["scenario_version_id"]),
             "columns": json.loads(index_row["asset_dispatch_columns_json"]),
+            "lineage": json.loads(index_row["lineage_json"] or "{}"),
             "rows": [json.loads(str(row["row_json"])) for row in row_records],
             "created_at": str(index_row["created_at"]),
         }
@@ -4487,7 +4502,8 @@ class AnalystStore:
             run = self.get_run(run_id)
             if int(run["scenario_version_id"]) != scenario_version_id:
                 raise ValueError("run_summary_result_index scenario_version_id does not match the run")
-            self.get_scenario_version(scenario_version_id, include_document=False)
+            scenario_version = self.get_scenario_version(scenario_version_id, include_document=False)
+            lineage = result_lineage_from_scenario_version(run_id=run_id, scenario_version=scenario_version)
             now = utc_now_iso()
             self.connection.execute(
                 """
@@ -4499,9 +4515,10 @@ class AnalystStore:
                     termination_status,
                     objective_value_usd,
                     linked_result_surfaces_json,
+                    lineage_json,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (run_id) DO UPDATE SET
                     scenario_version_id = excluded.scenario_version_id,
                     summary_json = excluded.summary_json,
@@ -4509,6 +4526,7 @@ class AnalystStore:
                     termination_status = excluded.termination_status,
                     objective_value_usd = excluded.objective_value_usd,
                     linked_result_surfaces_json = excluded.linked_result_surfaces_json,
+                    lineage_json = excluded.lineage_json,
                     created_at = excluded.created_at
                 """,
                 (
@@ -4521,6 +4539,7 @@ class AnalystStore:
                     if isinstance(summary.get("objective_value_usd"), (int, float))
                     else None,
                     json.dumps(linked_result_surfaces or []),
+                    json.dumps(lineage, sort_keys=True),
                     now,
                 ),
             )
@@ -4539,6 +4558,7 @@ class AnalystStore:
                 termination_status,
                 objective_value_usd,
                 linked_result_surfaces_json,
+                lineage_json,
                 created_at
             FROM run_summary_result_indexes
             WHERE run_id = ?
@@ -4555,6 +4575,7 @@ class AnalystStore:
             "termination_status": normalize_optional_text(row["termination_status"]),
             "objective_value_usd": row["objective_value_usd"],
             "linked_result_surfaces": json.loads(row["linked_result_surfaces_json"] or "[]"),
+            "lineage": json.loads(row["lineage_json"] or "{}"),
             "created_at": str(row["created_at"]),
         }
 
@@ -8336,6 +8357,58 @@ def scenario_version_hydraulic_diagram_snapshot_row_to_dict(
     value = row_to_dict(row)
     value["layout_snapshot"] = json.loads(value.pop("layout_snapshot_json"))
     return value
+
+
+def result_lineage_from_scenario_version(
+    *, run_id: int, scenario_version: Mapping[str, Any]
+) -> dict[str, Any]:
+    generation_metadata = scenario_version.get("generation_metadata") or {}
+    topology = generation_metadata.get("topology") if isinstance(generation_metadata, Mapping) else {}
+    parameters = generation_metadata.get("parameters") if isinstance(generation_metadata, Mapping) else {}
+    input_variant = generation_metadata.get("input_variant") if isinstance(generation_metadata, Mapping) else None
+    date_range = generation_metadata.get("date_range") if isinstance(generation_metadata, Mapping) else None
+    raw_bindings = generation_metadata.get("series_bindings") if isinstance(generation_metadata, Mapping) else []
+    input_series: list[dict[str, Any]] = []
+    for binding in raw_bindings or []:
+        if not isinstance(binding, Mapping):
+            continue
+        input_series.append(
+            {
+                "signal_key": normalize_optional_text(binding.get("signal_key")),
+                "entity_type": normalize_optional_text(binding.get("entity_type")),
+                "entity_id": normalize_optional_text(binding.get("entity_id")),
+                "time_series_set_id": binding.get("time_series_set_id"),
+                "version_number": binding.get("version_number"),
+                "version_label": normalize_optional_text(binding.get("version_label")),
+                "revision_number": binding.get("revision_number"),
+                "content_hash": normalize_optional_text(binding.get("content_hash")),
+            }
+        )
+    input_series.sort(
+        key=lambda binding: (
+            str(binding.get("signal_key") or ""),
+            str(binding.get("entity_type") or ""),
+            str(binding.get("entity_id") or ""),
+            str(binding.get("time_series_set_id") or ""),
+        )
+    )
+    return {
+        "run_id": int(run_id),
+        "scenario_version_id": int(scenario_version["id"]),
+        "case": {
+            "scenario_id": int(scenario_version["scenario_id"]),
+            "case_name": str(scenario_version.get("case_name") or ""),
+        },
+        "topology_hash": normalize_optional_text(
+            topology.get("content_hash") if isinstance(topology, Mapping) else None
+        ),
+        "parameters_hash": normalize_optional_text(
+            parameters.get("content_hash") if isinstance(parameters, Mapping) else None
+        ),
+        "input_variant": dict(input_variant) if isinstance(input_variant, Mapping) else None,
+        "date_range": dict(date_range) if isinstance(date_range, Mapping) else None,
+        "input_series": input_series,
+    }
 
 
 def scenario_version_row_to_dict(
