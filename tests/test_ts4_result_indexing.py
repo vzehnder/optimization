@@ -13,6 +13,8 @@ from app.result_indexing import (
     index_run_dispatch_results,
     index_run_results,
     index_run_summary_results,
+    rebuild_all_run_results,
+    rebuild_run_results,
 )
 from app.results import read_run_results
 from app.time_series_catalog import (
@@ -1251,6 +1253,241 @@ class MixedSurfaceReadPathTests(unittest.TestCase):
                 self.assertEqual(results["summary"]["objective_value_usd"], 1250.5)
                 self.assertEqual(results["asset_dispatch_table"]["rows"][0]["asset_id"], "grid_1")
                 self.assertTrue(results["charts"]["grid_import_export"]["available"])
+            finally:
+                store.close()
+
+
+class RebuildRunResultsTests(unittest.TestCase):
+    def test_rebuild_indexes_a_never_indexed_historical_run_from_its_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_core_dispatch_artifacts(store, artifact_root)
+                self.assertIsNone(store.get_run_dispatch_result_index(run["id"]))
+
+                outcome = rebuild_run_results(store=store, run=run, artifact_root=artifact_root)
+
+                self.assertEqual(outcome["run_id"], run["id"])
+                self.assertEqual(outcome["status"], "indexed")
+                self.assertEqual(
+                    set(outcome["indexed"]), {"dispatch_table", "asset_dispatch_table", "summary"}
+                )
+                self.assertEqual(outcome["failed"], {})
+                self.assertIsNotNone(store.get_run_dispatch_result_index(run["id"]))
+                self.assertIsNotNone(store.get_run_asset_dispatch_result_index(run["id"]))
+                self.assertIsNotNone(store.get_run_summary_result_index(run["id"]))
+            finally:
+                store.close()
+
+    def test_rebuild_skips_an_already_fully_indexed_run_unless_forced(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_core_dispatch_artifacts(store, artifact_root)
+                rebuild_run_results(store=store, run=run, artifact_root=artifact_root)
+                first_index = store.get_run_dispatch_result_index(run["id"])
+
+                skipped = rebuild_run_results(store=store, run=run, artifact_root=artifact_root)
+
+                self.assertEqual(skipped, {"run_id": run["id"], "status": "skipped", "indexed": [], "failed": {}})
+                self.assertEqual(store.get_run_dispatch_result_index(run["id"]), first_index)
+
+                forced = rebuild_run_results(store=store, run=run, artifact_root=artifact_root, force=True)
+
+                self.assertEqual(forced["status"], "indexed")
+                self.assertEqual(set(forced["indexed"]), {"dispatch_table", "asset_dispatch_table", "summary"})
+            finally:
+                store.close()
+
+    def test_rebuild_of_legacy_run_without_ts3_lineage_indexes_absent_lineage_and_serves_from_bbdd(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_core_dispatch_artifacts(store, artifact_root)
+
+                outcome = rebuild_run_results(store=store, run=run, artifact_root=artifact_root)
+
+                self.assertEqual(outcome["status"], "indexed")
+                dispatch_index = store.get_run_dispatch_result_index(run["id"])
+                self.assertIsNone(dispatch_index["lineage"]["input_variant"])
+                self.assertIsNone(dispatch_index["lineage"]["date_range"])
+                self.assertEqual(dispatch_index["lineage"]["input_series"], [])
+
+                dispatch_path = artifact_root / "runs" / "1" / "outputs" / "dispatch.csv"
+                dispatch_path.unlink()
+                results = read_run_results(
+                    run, store.list_run_artifacts(run["id"]), artifact_root, store=store
+                )
+                self.assertEqual(results["dispatch_table"]["rows"][0]["grid_import_mw"], "2.5")
+            finally:
+                store.close()
+
+    def test_rebuild_reports_failed_status_with_surviving_indexed_surfaces_on_a_broken_artifact(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_core_dispatch_artifacts(store, artifact_root)
+                summary_path = artifact_root / "runs" / "1" / "outputs" / "summary.json"
+                summary_path.write_text("not json", encoding="utf-8")
+
+                outcome = rebuild_run_results(store=store, run=run, artifact_root=artifact_root)
+
+                self.assertEqual(outcome["status"], "failed")
+                self.assertEqual(set(outcome["indexed"]), {"dispatch_table", "asset_dispatch_table"})
+                self.assertIn("summary", outcome["failed"])
+            finally:
+                store.close()
+
+
+class RebuildResultsApiTests(unittest.TestCase):
+    def test_admin_rebuild_run_endpoint_indexes_a_historical_run_and_reports_the_outcome(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_core_dispatch_artifacts(store, artifact_root)
+                client = TestClient(
+                    create_app(
+                        validation_service=StubValidationService(),
+                        store=store,
+                        run_queue=RecordingRunQueue(),
+                        artifact_root=artifact_root,
+                    )
+                )
+
+                response = client.post(f"/api/admin/runs/{run['id']}/rebuild-results")
+
+                self.assertEqual(response.status_code, 200)
+                rebuild = response.json()["rebuild"]
+                self.assertEqual(rebuild["run_id"], run["id"])
+                self.assertEqual(rebuild["status"], "indexed")
+                self.assertIsNotNone(store.get_run_dispatch_result_index(run["id"]))
+            finally:
+                store.close()
+
+    def test_admin_rebuild_all_endpoint_reports_indexed_and_skipped_runs(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir)
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                never_indexed_run = create_completed_run_with_core_dispatch_artifacts(
+                    store, artifact_root / "never-indexed"
+                )
+                already_indexed_run = create_completed_run_with_core_dispatch_artifacts(
+                    store, artifact_root / "already-indexed"
+                )
+                rebuild_run_results(
+                    store=store, run=already_indexed_run, artifact_root=artifact_root / "already-indexed"
+                )
+                client = TestClient(
+                    create_app(
+                        validation_service=StubValidationService(),
+                        store=store,
+                        run_queue=RecordingRunQueue(),
+                        artifact_root=artifact_root,
+                    )
+                )
+
+                response = client.post("/api/admin/runs/rebuild-results")
+
+                self.assertEqual(response.status_code, 200)
+                report = response.json()["rebuild"]
+                self.assertEqual(report["indexed"], [never_indexed_run["id"]])
+                self.assertEqual(report["skipped"], [already_indexed_run["id"]])
+                self.assertEqual(report["failed"], {})
+            finally:
+                store.close()
+
+
+class RebuildAllRunResultsTests(unittest.TestCase):
+    def test_rebuild_all_reports_indexed_skipped_and_failed_runs_separately(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir)
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                never_indexed_run = create_completed_run_with_core_dispatch_artifacts(
+                    store, artifact_root / "never-indexed"
+                )
+                already_indexed_run = create_completed_run_with_core_dispatch_artifacts(
+                    store, artifact_root / "already-indexed"
+                )
+                rebuild_run_results(
+                    store=store, run=already_indexed_run, artifact_root=artifact_root / "already-indexed"
+                )
+                broken_run = create_completed_run_with_core_dispatch_artifacts(
+                    store, artifact_root / "broken"
+                )
+                (artifact_root / "broken" / "runs" / "1" / "outputs" / "summary.json").write_text(
+                    "not json", encoding="utf-8"
+                )
+
+                report = rebuild_all_run_results(store=store, artifact_root=artifact_root)
+
+                self.assertEqual(report["indexed"], [never_indexed_run["id"]])
+                self.assertEqual(report["skipped"], [already_indexed_run["id"]])
+                self.assertEqual(list(report["failed"].keys()), [broken_run["id"]])
+                self.assertIn("summary", report["failed"][broken_run["id"]])
+            finally:
+                store.close()
+
+    def test_rebuild_all_is_idempotent_and_converges_to_all_skipped_on_second_pass(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir)
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_core_dispatch_artifacts(store, artifact_root / "run")
+
+                first_pass = rebuild_all_run_results(store=store, artifact_root=artifact_root)
+                second_pass = rebuild_all_run_results(store=store, artifact_root=artifact_root)
+
+                self.assertEqual(first_pass["indexed"], [run["id"]])
+                self.assertEqual(second_pass["indexed"], [])
+                self.assertEqual(second_pass["skipped"], [run["id"]])
+            finally:
+                store.close()
+
+
+class ListSucceededRunsTests(unittest.TestCase):
+    def test_list_succeeded_runs_returns_only_succeeded_runs_across_all_scenarios(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                succeeded_run = create_completed_run_with_core_dispatch_artifacts(store, artifact_root)
+                other_project = store.create_project(name="Other project")
+                other_scenario = store.create_scenario(project_id=other_project["id"], name="Other scenario")
+                other_version = store.create_scenario_version(
+                    scenario_id=other_scenario["id"],
+                    system_case_json={
+                        "schema_version": "bess_system_dispatch.v1",
+                        "case_name": "other",
+                        "nodes": [],
+                        "time_series": [],
+                    },
+                    validation_payload={"status": "ok"},
+                )
+                running_run = store.create_run(scenario_version_id=other_version["id"])
+                store.mark_run_running(
+                    running_run["id"],
+                    workspace_path=str(artifact_root / "runs" / str(running_run["id"])),
+                    input_snapshot_path=str(artifact_root / "runs" / str(running_run["id"]) / "input" / "system_case.json"),
+                )
+                failed_run = store.create_run(scenario_version_id=other_version["id"])
+                store.mark_run_failed(
+                    failed_run["id"],
+                    exit_code=1,
+                    stdout="",
+                    stderr="boom",
+                    error_payload={"status": "error", "message": "boom"},
+                )
+
+                succeeded_run_ids = [run["id"] for run in store.list_succeeded_runs()]
+
+                self.assertEqual(succeeded_run_ids, [succeeded_run["id"]])
             finally:
                 store.close()
 

@@ -1,6 +1,6 @@
 # BESS-TS4-008: Rebuild BBDD Results From Artifacts For Historical Runs
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter4/prd.md`
@@ -27,11 +27,11 @@ afterwards.
 
 ## Acceptance criteria
 
-- [ ] A rebuild action or tool indexes a historical successful run's results from its registered artifacts.
-- [ ] Rebuild reuses the same parsing, normalization, lineage and write modules as post-run indexing.
-- [ ] Rebuild is idempotent and skips already-indexed runs unless forced.
-- [ ] Rebuild reports what was indexed, skipped and failed.
-- [ ] Legacy runs without TS-3 lineage rebuild with absent lineage fields and serve tables and charts from BBDD afterwards.
+- [x] A rebuild action or tool indexes a historical successful run's results from its registered artifacts.
+- [x] Rebuild reuses the same parsing, normalization, lineage and write modules as post-run indexing.
+- [x] Rebuild is idempotent and skips already-indexed runs unless forced.
+- [x] Rebuild reports what was indexed, skipped and failed.
+- [x] Legacy runs without TS-3 lineage rebuild with absent lineage fields and serve tables and charts from BBDD afterwards.
 
 ## Blocked by
 

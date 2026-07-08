@@ -1673,6 +1673,91 @@
         "summary": "Admin Remove Project Client Access"
       }
     },
+    "/api/admin/runs/rebuild-results": {
+      "post": {
+        "operationId": "admin_rebuild_all_run_results_api_admin_runs_rebuild_results_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Rebuild All Run Results"
+      }
+    },
+    "/api/admin/runs/{run_id}/rebuild-results": {
+      "post": {
+        "operationId": "admin_rebuild_run_results_api_admin_runs__run_id__rebuild_results_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Rebuild Run Results"
+      }
+    },
     "/api/admin/users": {
       "get": {
         "operationId": "admin_list_users_api_admin_users_get",

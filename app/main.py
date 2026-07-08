@@ -42,6 +42,7 @@ from app.persistence import (
     optimization_case_public_dict,
     utc_now_iso,
 )
+from app.result_indexing import rebuild_all_run_results, rebuild_run_results
 from app.results import ResultReadError, apply_dashboard_template, read_run_results
 from app.time_series_catalog import (
     CatalogImportRequest as PreparedCatalogImportRequest,
@@ -2019,6 +2020,22 @@ def create_app(
                 status_code=error.status_code,
             )
         return {"results": results}
+
+    @app.post("/api/admin/runs/rebuild-results")
+    async def admin_rebuild_all_run_results(request: Request, force: bool = False):
+        require_admin_user(request)
+        report = rebuild_all_run_results(store=analyst_store, artifact_root=configured_artifact_root, force=force)
+        return {"rebuild": report}
+
+    @app.post("/api/admin/runs/{run_id}/rebuild-results")
+    async def admin_rebuild_run_results(run_id: int, request: Request, force: bool = False):
+        require_admin_user(request)
+        try:
+            run = analyst_store.get_run(run_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        outcome = rebuild_run_results(store=analyst_store, run=run, artifact_root=configured_artifact_root, force=force)
+        return {"rebuild": outcome}
 
     @app.get("/api/runs/{run_id}/publications")
     async def list_run_publications(run_id: int):

@@ -4035,6 +4035,38 @@ class AnalystStore:
         ).fetchall()
         return [run_row_to_dict(row) for row in rows]
 
+    def list_succeeded_runs(self) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            """
+            SELECT
+                id,
+                scenario_version_id,
+                status,
+                created_at,
+                started_at,
+                finished_at,
+                duration_seconds,
+                exit_code,
+                workspace_path,
+                input_snapshot_path,
+                output_dir,
+                summary_path,
+                stdout_log_path,
+                stderr_log_path,
+                error_message,
+                success_payload_json,
+                error_payload_json,
+                stdout,
+                stderr,
+                triggered_by,
+                trigger_type
+            FROM runs
+            WHERE status = 'succeeded'
+            ORDER BY id
+            """
+        ).fetchall()
+        return [run_row_to_dict(row) for row in rows]
+
     def get_run_project_id(self, run_id: int) -> int:
         row = self.connection.execute(
             """

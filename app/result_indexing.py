@@ -235,6 +235,69 @@ def index_run_results(
     return {"run_id": run_id, "indexed": indexed, "failed": failed}
 
 
+def run_results_fully_indexed(store: AnalystStore, run_id: int) -> bool:
+    """Whether every result surface with a registered artifact already has a BBDD index.
+
+    A run with no registered dispatch/asset-dispatch/summary artifacts at all is
+    vacuously "fully indexed": there is nothing a rebuild could add for it.
+    """
+    artifact_types = {artifact["artifact_type"] for artifact in store.list_run_artifacts(run_id)}
+    if "dispatch_csv" in artifact_types and store.get_run_dispatch_result_index(run_id) is None:
+        return False
+    if "asset_dispatch_csv" in artifact_types and store.get_run_asset_dispatch_result_index(run_id) is None:
+        return False
+    if "summary_json" in artifact_types and store.get_run_summary_result_index(run_id) is None:
+        return False
+    return True
+
+
+def rebuild_run_results(
+    *,
+    store: AnalystStore,
+    run: dict[str, Any],
+    artifact_root: Path | str,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Rebuild every TS4 result surface for one historical run from its artifacts.
+
+    Reuses `index_run_results`, so a rebuilt run's indexes are indistinguishable
+    from a freshly (live) indexed one: same parsing, normalization, lineage and
+    replace-on-write modules. Already fully-indexed runs are skipped unless
+    `force` is set, so re-running a bulk rebuild converges without redoing work.
+    """
+    run_id = int(run["id"])
+    if run["status"] != "succeeded":
+        return {"run_id": run_id, "status": "failed", "indexed": [], "failed": {"run": "run did not succeed"}}
+
+    if not force and run_results_fully_indexed(store, run_id):
+        return {"run_id": run_id, "status": "skipped", "indexed": [], "failed": {}}
+
+    outcome = index_run_results(store=store, run=run, artifact_root=artifact_root)
+    status = "failed" if outcome["failed"] else "indexed"
+    return {"run_id": run_id, "status": status, "indexed": outcome["indexed"], "failed": outcome["failed"]}
+
+
+def rebuild_all_run_results(
+    *,
+    store: AnalystStore,
+    artifact_root: Path | str,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Rebuild TS4 result indexes for every historical succeeded run.
+
+    Reports what was indexed, skipped (already fully indexed, not forced),
+    partially indexed and failed, keyed by run id.
+    """
+    report: dict[str, Any] = {"indexed": [], "skipped": [], "failed": {}}
+    for run in store.list_succeeded_runs():
+        outcome = rebuild_run_results(store=store, run=run, artifact_root=artifact_root, force=force)
+        if outcome["status"] == "failed":
+            report["failed"][outcome["run_id"]] = outcome["failed"]
+        else:
+            report[outcome["status"]].append(outcome["run_id"])
+    return report
+
+
 def supports_asset_dispatch_index(columns: list[str]) -> bool:
     return ASSET_DISPATCH_BASE_COLUMNS.issubset(set(columns))
 

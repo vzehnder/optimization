@@ -240,6 +240,10 @@ class Iteration6ProjectAccessTests(unittest.TestCase):
             ).status_code,
             403,
         )
+        self.assertEqual(
+            post_json_with_csrf(analyst_session, "/api/admin/runs/rebuild-results").status_code,
+            403,
+        )
 
     def create_client_user(self, email):
         response = post_json_with_csrf(
