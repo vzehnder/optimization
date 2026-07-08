@@ -34,12 +34,18 @@ def read_run_results(
         raise ResultReadError("run results are available only for succeeded runs", status_code=409)
 
     artifacts_by_type = {artifact["artifact_type"]: artifact for artifact in artifacts}
-    summary = read_json_artifact(
-        artifacts_by_type,
-        "summary_json",
-        artifact_root,
-        display_name="summary.json",
-    )
+    summary = None
+    if store is not None:
+        indexed_summary = store.get_run_summary_result_index(int(run["id"]))
+        if indexed_summary is not None:
+            summary = dict(indexed_summary["summary"])
+    if summary is None:
+        summary = read_json_artifact(
+            artifacts_by_type,
+            "summary_json",
+            artifact_root,
+            display_name="summary.json",
+        )
     dispatch_table = None
     if store is not None:
         indexed_dispatch = store.get_run_dispatch_result_index(int(run["id"]))

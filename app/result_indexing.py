@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 from typing import Any
 
@@ -138,6 +139,49 @@ def index_run_asset_dispatch_results(
         scenario_version_id=int(run["scenario_version_id"]),
         columns=columns,
         rows=rows,
+    )
+
+
+def index_run_summary_results(
+    *,
+    store: AnalystStore,
+    run: dict[str, Any],
+    artifacts: list[dict[str, Any]],
+    artifact_root: Path | str,
+) -> dict[str, Any]:
+    if run["status"] != "succeeded":
+        raise ResultIndexingError("run summary results can only be indexed for succeeded runs")
+
+    summary_artifact = next(
+        (artifact for artifact in artifacts if artifact["artifact_type"] == "summary_json"),
+        None,
+    )
+    if summary_artifact is None:
+        raise ResultIndexingError("summary.json artifact is not registered")
+
+    summary_path = resolve_artifact_path(summary_artifact["path"], artifact_root)
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except OSError as error:
+        raise ResultIndexingError(f"summary.json could not be read: {error}") from error
+    except json.JSONDecodeError as error:
+        raise ResultIndexingError(
+            f"summary.json is malformed JSON: {error.msg} at line {error.lineno}, column {error.colno}"
+        ) from error
+    if not isinstance(summary, dict):
+        raise ResultIndexingError("summary.json must contain a JSON object")
+
+    linked_result_surfaces = []
+    if store.get_run_dispatch_result_index(int(run["id"])) is not None:
+        linked_result_surfaces.append("dispatch_table")
+    if store.get_run_asset_dispatch_result_index(int(run["id"])) is not None:
+        linked_result_surfaces.append("asset_dispatch_table")
+
+    return store.replace_run_summary_result_index(
+        run_id=int(run["id"]),
+        scenario_version_id=int(run["scenario_version_id"]),
+        summary=summary,
+        linked_result_surfaces=linked_result_surfaces,
     )
 
 

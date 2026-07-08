@@ -774,6 +774,19 @@ class AnalystStore:
                 UNIQUE (run_id, period_index)
             );
 
+            CREATE TABLE IF NOT EXISTS run_summary_result_indexes (
+                run_id INTEGER PRIMARY KEY,
+                scenario_version_id INTEGER NOT NULL,
+                summary_json TEXT NOT NULL,
+                solver_status TEXT,
+                termination_status TEXT,
+                objective_value_usd REAL,
+                linked_result_surfaces_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
+                FOREIGN KEY (scenario_version_id) REFERENCES scenario_versions(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 email TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -4460,6 +4473,89 @@ class AnalystStore:
             "columns": json.loads(index_row["asset_dispatch_columns_json"]),
             "rows": [json.loads(str(row["row_json"])) for row in row_records],
             "created_at": str(index_row["created_at"]),
+        }
+
+    def replace_run_summary_result_index(
+        self,
+        *,
+        run_id: int,
+        scenario_version_id: int,
+        summary: dict[str, Any],
+        linked_result_surfaces: list[str] | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            run = self.get_run(run_id)
+            if int(run["scenario_version_id"]) != scenario_version_id:
+                raise ValueError("run_summary_result_index scenario_version_id does not match the run")
+            self.get_scenario_version(scenario_version_id, include_document=False)
+            now = utc_now_iso()
+            self.connection.execute(
+                """
+                INSERT INTO run_summary_result_indexes (
+                    run_id,
+                    scenario_version_id,
+                    summary_json,
+                    solver_status,
+                    termination_status,
+                    objective_value_usd,
+                    linked_result_surfaces_json,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (run_id) DO UPDATE SET
+                    scenario_version_id = excluded.scenario_version_id,
+                    summary_json = excluded.summary_json,
+                    solver_status = excluded.solver_status,
+                    termination_status = excluded.termination_status,
+                    objective_value_usd = excluded.objective_value_usd,
+                    linked_result_surfaces_json = excluded.linked_result_surfaces_json,
+                    created_at = excluded.created_at
+                """,
+                (
+                    run_id,
+                    scenario_version_id,
+                    json.dumps(summary, ensure_ascii=True),
+                    normalize_optional_text(summary.get("solver_status")),
+                    normalize_optional_text(summary.get("termination_status")),
+                    float(summary["objective_value_usd"])
+                    if isinstance(summary.get("objective_value_usd"), (int, float))
+                    else None,
+                    json.dumps(linked_result_surfaces or []),
+                    now,
+                ),
+            )
+            self.connection.commit()
+            return self.get_run_summary_result_index(run_id)
+
+    def get_run_summary_result_index(self, run_id: int) -> dict[str, Any] | None:
+        self.get_run(run_id)
+        row = self.connection.execute(
+            """
+            SELECT
+                run_id,
+                scenario_version_id,
+                summary_json,
+                solver_status,
+                termination_status,
+                objective_value_usd,
+                linked_result_surfaces_json,
+                created_at
+            FROM run_summary_result_indexes
+            WHERE run_id = ?
+            """,
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "run_id": int(row["run_id"]),
+            "scenario_version_id": int(row["scenario_version_id"]),
+            "summary": json.loads(str(row["summary_json"])),
+            "solver_status": normalize_optional_text(row["solver_status"]),
+            "termination_status": normalize_optional_text(row["termination_status"]),
+            "objective_value_usd": row["objective_value_usd"],
+            "linked_result_surfaces": json.loads(row["linked_result_surfaces_json"] or "[]"),
+            "created_at": str(row["created_at"]),
         }
 
     def get_run_artifact(self, artifact_id: int) -> dict[str, Any]:

@@ -7,7 +7,11 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 from app.persistence import AnalystStore
-from app.result_indexing import index_run_asset_dispatch_results, index_run_dispatch_results
+from app.result_indexing import (
+    index_run_asset_dispatch_results,
+    index_run_dispatch_results,
+    index_run_summary_results,
+)
 from app.results import read_run_results
 from app.validation import ValidationResult
 
@@ -50,6 +54,46 @@ class DispatchResultIndexingTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_indexes_summary_json_into_bbdd_linked_to_run_and_indexed_result_surfaces(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_core_dispatch_artifacts(store, artifact_root)
+                artifacts = store.list_run_artifacts(run["id"])
+                index_run_dispatch_results(
+                    store=store,
+                    run=run,
+                    artifacts=artifacts,
+                    artifact_root=artifact_root,
+                )
+                index_run_asset_dispatch_results(
+                    store=store,
+                    run=run,
+                    artifacts=artifacts,
+                    artifact_root=artifact_root,
+                )
+
+                indexed = index_run_summary_results(
+                    store=store,
+                    run=run,
+                    artifacts=artifacts,
+                    artifact_root=artifact_root,
+                )
+
+                self.assertIsNotNone(indexed)
+                self.assertEqual(indexed["run_id"], run["id"])
+                self.assertEqual(indexed["scenario_version_id"], run["scenario_version_id"])
+                self.assertEqual(indexed["summary"]["solver_status"], "OPTIMAL")
+                self.assertEqual(indexed["summary"]["termination_status"], "OPTIMAL")
+                self.assertEqual(indexed["summary"]["objective_value_usd"], 1250.5)
+                self.assertEqual(
+                    indexed["linked_result_surfaces"],
+                    ["dispatch_table", "asset_dispatch_table"],
+                )
+            finally:
+                store.close()
+
     def test_read_run_results_prefers_indexed_dispatch_table_over_csv_artifact(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             artifact_root = Path(temp_dir) / "artifacts"
@@ -71,6 +115,69 @@ class DispatchResultIndexingTests(unittest.TestCase):
 
                 self.assertEqual(results["dispatch_table"]["rows"][0]["grid_import_mw"], "2.5")
                 self.assertEqual(results["asset_dispatch_table"]["rows"][0]["asset_id"], "grid_1")
+            finally:
+                store.close()
+
+    def test_read_run_results_prefers_indexed_summary_over_json_artifact(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_core_dispatch_artifacts(store, artifact_root)
+                artifacts = store.list_run_artifacts(run["id"])
+                index_run_summary_results(
+                    store=store,
+                    run=run,
+                    artifacts=artifacts,
+                    artifact_root=artifact_root,
+                )
+
+                summary_path = artifact_root / "runs" / "1" / "outputs" / "summary.json"
+                summary_path.unlink()
+
+                results = read_run_results(run, artifacts, artifact_root, store=store)
+
+                self.assertEqual(results["summary"]["case_name"], "hybrid_system")
+                self.assertEqual(results["summary"]["termination_status"], "OPTIMAL")
+                self.assertEqual(results["summary"]["objective_value_usd"], 1250.5)
+            finally:
+                store.close()
+
+    def test_results_api_prefers_indexed_summary_over_json_artifact(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_core_dispatch_artifacts(store, artifact_root)
+                artifacts = store.list_run_artifacts(run["id"])
+                index_run_summary_results(
+                    store=store,
+                    run=run,
+                    artifacts=artifacts,
+                    artifact_root=artifact_root,
+                )
+                summary_path = artifact_root / "runs" / "1" / "outputs" / "summary.json"
+                summary_path.unlink()
+                client = TestClient(
+                    create_app(
+                        validation_service=StubValidationService(),
+                        store=store,
+                        run_queue=RecordingRunQueue(),
+                        artifact_root=artifact_root,
+                    )
+                )
+
+                response = client.get(f"/api/runs/{run['id']}/results")
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    response.json()["results"]["summary"]["termination_status"],
+                    "OPTIMAL",
+                )
+                self.assertEqual(
+                    response.json()["results"]["summary"]["objective_value_usd"],
+                    1250.5,
+                )
             finally:
                 store.close()
 

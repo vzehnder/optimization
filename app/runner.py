@@ -13,6 +13,7 @@ from app.result_indexing import (
     ResultIndexingError,
     index_run_asset_dispatch_results,
     index_run_dispatch_results,
+    index_run_summary_results,
 )
 from app.validation import JuliaValidationService, ValidationResult, resolve_julia_executable
 
@@ -387,6 +388,17 @@ class JuliaRunExecutor:
             pass
         try:
             index_run_asset_dispatch_results(
+                store=self.store,
+                run=run,
+                artifacts=artifacts,
+                artifact_root=self.artifact_root,
+            )
+        except ResultIndexingError:
+            pass
+        except OSError:
+            pass
+        try:
+            index_run_summary_results(
                 store=self.store,
                 run=run,
                 artifacts=artifacts,
