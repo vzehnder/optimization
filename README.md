@@ -1021,3 +1021,114 @@ behavior or artifact formats:
 ```powershell
 julia --project=. -e "import Pkg; Pkg.test()"
 ```
+
+## TS-4: Result Series, Rebuild, And Run Comparison
+
+TS-4 (`docs/series_tiempo/iter4/`) makes run outputs queryable in BBDD while
+keeping artifacts as the durable audit record:
+
+```text
+Run
+-> Dispatch result index
+-> Asset-dispatch result index
+-> Summary result index
+```
+
+The accepted TS-4 storage model is a dedicated run-owned result layer, not
+the editable TS-2 `time_series_sets` catalog. Indexed result rows are derived
+only from a succeeded run's registered artifacts and are linked back to the
+immutable execution snapshot (`scenario_version`) plus its frozen lineage.
+
+### Indexed Surfaces And Artifact Boundary
+
+TS-4 indexes three result surfaces independently:
+
+- `dispatch.csv` into `run_dispatch_result_indexes` and
+  `run_dispatch_result_rows`.
+- `asset_dispatch.csv` into `run_asset_dispatch_result_indexes` and
+  `run_asset_dispatch_result_rows`.
+- `summary.json` into `run_summary_result_indexes`.
+
+Artifacts are never replaced or removed by indexing. The read policy is
+BBDD-first per surface, with artifact fallback when that surface has not been
+indexed yet. That keeps pre-TS4 historical runs readable without migration
+and keeps artifacts as the rebuild source if indexing ever fails.
+
+### Signal Scope, Asset Rows, And Lineage
+
+Dispatch indexing normalizes raw artifact columns into canonical signal keys so
+comparison, charts and client-facing surfaces do not depend on CSV spelling.
+The indexed scope now covers:
+
+- core grid+BESS fields (`grid_import_mw`, `grid_export_mw`, prices, market
+  value, charge/discharge, stored energy, period profit);
+- demand, renewable and economics families
+  (`load_demand_mw`, `renewable_used_mw`, `renewable_curtailed_mw`,
+  import/export cost fields, degradation and curtailment penalties);
+- hydro-only result families (`total_hydro_power_mw`, inflow, turbine flow,
+  spill flow, storage, reservoir elevation and terminal water value); and
+- asset-level rows from `asset_dispatch.csv`.
+
+Each indexed surface stores frozen lineage copied from the immutable run
+snapshot instead of live mutable state: case/scenario context, TS-1
+topology/parameter provenance when present, TS-3 `input_variant`,
+`date_range`, and any recorded input-series bindings.
+
+### Idempotent Rebuild And Comparison
+
+Indexing is replace-whole-run and idempotent: re-indexing the same run
+converges to one dispatch index, one asset-dispatch index and one summary
+index for that run. `index_run_results()` isolates failures per surface so an
+indexing problem never changes a succeeded run's status or its artifacts.
+
+Historical runs can be backfilled from their registered artifacts through:
+
+- `POST /api/admin/runs/{run_id}/rebuild-results`
+- `POST /api/admin/runs/rebuild-results`
+
+Run comparison is intentionally narrow: `GET /api/run-comparisons` compares
+two indexed succeeded runs of the same case, shows summary-KPI deltas, and
+diffs one selected indexed series period by period. Runs without TS-4 indexes
+must be rebuilt first, and cross-case comparisons are rejected.
+
+### Deferred Beyond TS-4
+
+TS-4 finishes BBDD-backed run-result storage, fallback, rebuild and basic
+comparison. Out of scope and deferred beyond this slice:
+
+- removing artifacts as the audit source;
+- reusing outputs as editable inputs;
+- cross-case BI / multi-run analytics beyond pairwise comparison; and
+- resampling or transforming indexed result series.
+
+### TS-4 Acceptance Verification
+
+Run the focused TS-4 acceptance suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_ts4_acceptance -v
+```
+
+Run the full Python web acceptance suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Run frontend verification from `frontend/`:
+
+```powershell
+npm test -- --run
+npx tsc -b
+npx eslint .
+npm run api:check
+npm run build
+```
+
+TS-4 only reads run artifacts after success. Run the Julia suite only when a
+later change touches optimizer behavior, generated `system_case_json`, or
+artifact formats:
+
+```powershell
+julia --project=. -e "import Pkg; Pkg.test()"
+```
