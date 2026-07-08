@@ -30,7 +30,7 @@ really begins and ends.
 
 | ID | Title | Type | Triage | Status | Fecha de inicio planificada | Fecha de termino planificada | Blocked by | Issue file |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| BESS-TS5-000 | Review TS-5 PRD And Migration Semantics | HITL | ready-for-agent | Todo | 2026-07-09 | 2026-07-09 | None | [BESS-TS5-000-review-ts5-prd-and-migration-semantics.md](BESS-TS5-000-review-ts5-prd-and-migration-semantics.md) |
+| BESS-TS5-000 | Review TS-5 PRD And Migration Semantics | HITL | ready-for-agent | Done | 2026-07-09 | 2026-07-09 | None | [BESS-TS5-000-review-ts5-prd-and-migration-semantics.md](BESS-TS5-000-review-ts5-prd-and-migration-semantics.md) |
 | BESS-TS5-001 | Extract A Legacy Draft Series Source Into The Generic Catalog | AFK | ready-for-agent | Todo | 2026-07-10 | 2026-07-13 | BESS-TS5-000 | [BESS-TS5-001-extract-a-legacy-draft-series-source-into-the-generic-catalog.md](BESS-TS5-001-extract-a-legacy-draft-series-source-into-the-generic-catalog.md) |
 | BESS-TS5-002 | Read Legacy Hydraulic Series Through The Common Catalog | AFK | ready-for-agent | Todo | 2026-07-14 | 2026-07-15 | BESS-TS5-000 | [BESS-TS5-002-read-legacy-hydraulic-series-through-the-common-catalog.md](BESS-TS5-002-read-legacy-hydraulic-series-through-the-common-catalog.md) |
 | BESS-TS5-003 | Route New Hydraulic Series Writes To The Generic Model | AFK | ready-for-agent | Todo | 2026-07-16 | 2026-07-17 | BESS-TS5-002 | [BESS-TS5-003-route-new-hydraulic-series-writes-to-the-generic-model.md](BESS-TS5-003-route-new-hydraulic-series-writes-to-the-generic-model.md) |
@@ -76,6 +76,7 @@ really begins and ends.
 | Date | Issue | Status change | Notes |
 | --- | --- | --- | --- |
 | 2026-07-08 | All | Created | Initial local issue set generated from the TS-5 PRD (`docs/series_tiempo/iter5/prd.md`) and the series hierarchy roadmap. |
+| 2026-07-08 | BESS-TS5-000 | Todo -> Done | Accepted TS-5 migration semantics in `docs/series_tiempo/iter5/decision_record_ts5_migration_semantics.md`: per-path strategy (extract-on-demand for draft/structured series, adapt-then-migrate-on-demand for hydraulic series, freeze-read-only for historical scenario versions, rebuild-on-demand for artifact-only runs); `ScenarioDraft` stays a compatibility surface; `Scenario -> OptimizationCase` cardinality confirmed one-to-one (no migration); hydraulic write strategy is generic-model writes with adapter reads, no dual write, open-ended per-project compatibility window; permission matrix formalizes the existing internal/client split; retention boundary is the TS-4 result-index tables (rebuildable) versus everything else (immutable audit). No PRD correction required. |
 
 ## Final TS-5 Verification
 
