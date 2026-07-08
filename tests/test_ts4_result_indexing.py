@@ -1195,6 +1195,66 @@ def create_completed_run_with_multi_asset_dispatch_artifacts(store: AnalystStore
     return run
 
 
+class MixedSurfaceReadPathTests(unittest.TestCase):
+    def test_read_run_results_degrades_gracefully_per_surface_for_a_partially_indexed_run(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_core_dispatch_artifacts(store, artifact_root)
+                artifacts = store.list_run_artifacts(run["id"])
+                index_run_dispatch_results(store=store, run=run, artifacts=artifacts, artifact_root=artifact_root)
+                index_run_summary_results(store=store, run=run, artifacts=artifacts, artifact_root=artifact_root)
+
+                dispatch_path = artifact_root / "runs" / "1" / "outputs" / "dispatch.csv"
+                summary_path = artifact_root / "runs" / "1" / "outputs" / "summary.json"
+                dispatch_path.unlink()
+                summary_path.unlink()
+
+                results = read_run_results(run, artifacts, artifact_root, store=store)
+
+                self.assertEqual(results["dispatch_table"]["rows"][0]["grid_import_mw"], "2.5")
+                self.assertEqual(results["summary"]["objective_value_usd"], 1250.5)
+                self.assertEqual(results["asset_dispatch_table"]["rows"][0]["asset_id"], "grid_1")
+            finally:
+                store.close()
+
+    def test_results_api_serves_partially_indexed_run_without_failing_whole_view(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            store = AnalystStore("sqlite:///:memory:")
+            try:
+                run = create_completed_run_with_core_dispatch_artifacts(store, artifact_root)
+                artifacts = store.list_run_artifacts(run["id"])
+                index_run_dispatch_results(store=store, run=run, artifacts=artifacts, artifact_root=artifact_root)
+                index_run_summary_results(store=store, run=run, artifacts=artifacts, artifact_root=artifact_root)
+
+                dispatch_path = artifact_root / "runs" / "1" / "outputs" / "dispatch.csv"
+                summary_path = artifact_root / "runs" / "1" / "outputs" / "summary.json"
+                dispatch_path.unlink()
+                summary_path.unlink()
+
+                client = TestClient(
+                    create_app(
+                        validation_service=StubValidationService(),
+                        store=store,
+                        run_queue=RecordingRunQueue(),
+                        artifact_root=artifact_root,
+                    )
+                )
+
+                response = client.get(f"/api/runs/{run['id']}/results")
+
+                self.assertEqual(response.status_code, 200)
+                results = response.json()["results"]
+                self.assertEqual(results["dispatch_table"]["rows"][0]["grid_import_mw"], "2.5")
+                self.assertEqual(results["summary"]["objective_value_usd"], 1250.5)
+                self.assertEqual(results["asset_dispatch_table"]["rows"][0]["asset_id"], "grid_1")
+                self.assertTrue(results["charts"]["grid_import_export"]["available"])
+            finally:
+                store.close()
+
+
 class StubValidationService:
     def validate_text(self, candidate_text: str) -> ValidationResult:
         return ValidationResult(ok=True, phase="julia", message="ok", payload={"status": "ok"})

@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from app.auth import hash_password
 from app.main import create_app
 from app.persistence import AnalystStore
+from app.result_indexing import index_run_dispatch_results
 from tests.auth_test_helpers import login_json_with_csrf, post_json_with_csrf, put_json_with_csrf
 from tests.test_results_review import (
     create_completed_run_with_hydro_result_artifacts,
@@ -199,6 +200,47 @@ class Iteration6DashboardTemplateTests(unittest.TestCase):
             self.assertIn("total_hydro_power_mw", results["charts"]["hydro_power"]["missing_columns"])
             self.assertIsNone(results["dispatch_table"])
             self.assertIsNone(results["asset_dispatch_table"])
+
+    def test_dashboard_template_rendering_mixes_bbdd_dispatch_with_artifact_fallback_surfaces(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_root = Path(temp_dir) / "artifacts"
+            run = create_completed_run_with_result_artifacts(self.store, artifact_root)
+            artifacts = self.store.list_run_artifacts(run["id"])
+            index_run_dispatch_results(
+                store=self.store, run=run, artifacts=artifacts, artifact_root=artifact_root
+            )
+            (artifact_root / "runs" / "1" / "outputs" / "dispatch.csv").unlink()
+
+            project_id = self.project_id_for_run(run["id"])
+            template = self.store.create_dashboard_template(
+                project_id=project_id,
+                name="Mixed Source View",
+                show_summary=True,
+                show_price_chart=True,
+                show_grid_chart=True,
+                show_renewable_chart=False,
+                show_bess_chart=False,
+                show_hydro_chart=False,
+                show_profit_chart=False,
+                show_system_dispatch_table=True,
+                show_asset_dispatch_table=True,
+                table_preview_limit=5,
+                created_by="admin@example.local",
+            )
+            client = TestClient(
+                create_app(store=self.store, artifact_root=artifact_root, auth_enabled=True)
+            )
+            self.login(client, "admin@example.local", "admin pass")
+
+            response = client.get(f"/api/dashboard-templates/{template['id']}/runs/{run['id']}/results")
+
+            self.assertEqual(response.status_code, 200)
+            results = response.json()["dashboard"]["results"]
+            self.assertEqual(results["dispatch_table"]["rows"][0]["grid_import_mw"], "2.5")
+            self.assertEqual(results["summary"]["case_name"], "hybrid_system")
+            self.assertEqual(results["asset_dispatch_table"]["rows"][0]["asset_id"], "grid_1")
+            self.assertTrue(results["charts"]["price"]["available"])
+            self.assertTrue(results["charts"]["grid_import_export"]["available"])
 
     def test_dashboard_templates_remain_project_scoped_and_client_blocked(self):
         first_project = post_json_with_csrf(
