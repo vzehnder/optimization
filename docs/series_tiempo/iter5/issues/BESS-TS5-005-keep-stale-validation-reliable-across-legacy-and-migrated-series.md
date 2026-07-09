@@ -1,6 +1,6 @@
 # BESS-TS5-005: Keep Stale Validation Reliable Across Legacy And Migrated Series
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter5/prd.md`
@@ -29,11 +29,11 @@ does not regress behavior for any origin.
 
 ## Acceptance criteria
 
-- [ ] Editing an extracted or migrated series set marks every case input variant bound to it stale, exactly like a natively created set.
-- [ ] Topology and parameter provenance staleness keeps working for cases whose series were extracted or migrated.
-- [ ] Legacy hydraulic binding staleness keeps working during the compatibility window.
-- [ ] Stale variants keep blocking runs until revalidated (fail closed) across old and new storage.
-- [ ] Tests cover staleness for extracted, migrated, adapter-read and natively created sets.
+- [x] Editing an extracted or migrated series set marks every case input variant bound to it stale, exactly like a natively created set.
+- [x] Topology and parameter provenance staleness keeps working for cases whose series were extracted or migrated.
+- [x] Legacy hydraulic binding staleness keeps working during the compatibility window.
+- [x] Stale variants keep blocking runs until revalidated (fail closed) across old and new storage.
+- [x] Tests cover staleness for extracted, migrated, adapter-read and natively created sets.
 
 ## Blocked by
 
