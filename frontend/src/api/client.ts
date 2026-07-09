@@ -1886,6 +1886,40 @@ export async function getProjectHydraulicTimeSeriesSet(
   return response.hydraulic_time_series_set;
 }
 
+export interface HydraulicTimeSeriesSetMigrationResult {
+  time_series_set: ProjectTimeSeriesSet;
+  hydraulic_time_series_set_id: number;
+  already_migrated: boolean;
+}
+
+export async function migrateHydraulicTimeSeriesSet(
+  projectId: number,
+  hydraulicTimeSeriesSetId: number,
+): Promise<HydraulicTimeSeriesSetMigrationResult> {
+  return postJsonWithCsrf<HydraulicTimeSeriesSetMigrationResult>(
+    `/api/projects/${projectId}/time-series-sets/hydraulic/${hydraulicTimeSeriesSetId}/migrate`,
+  );
+}
+
+export interface HydraulicTimeSeriesSetBulkMigrationFailure {
+  hydraulic_time_series_set_id: number;
+  error: string;
+}
+
+export interface HydraulicTimeSeriesSetBulkMigrationReport {
+  migrated: number[];
+  skipped: number[];
+  failed: HydraulicTimeSeriesSetBulkMigrationFailure[];
+}
+
+export async function migrateAllHydraulicTimeSeriesSets(
+  projectId: number,
+): Promise<HydraulicTimeSeriesSetBulkMigrationReport> {
+  return postJsonWithCsrf<HydraulicTimeSeriesSetBulkMigrationReport>(
+    `/api/projects/${projectId}/time-series-sets/hydraulic/migrate-all`,
+  );
+}
+
 export async function listTimeSeriesSetRevisions(
   projectId: number,
   timeSeriesSetId: number,

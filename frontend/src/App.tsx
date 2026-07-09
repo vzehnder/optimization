@@ -288,7 +288,15 @@ function AuthenticatedRoutes({ user }: { user: CurrentUser }) {
           />
           <Route
             path="projects/:projectId/time-series-sets"
-            element={isClient ? <ForbiddenView /> : <TimeSeriesCatalogView />}
+            element={
+              isClient ? (
+                <ForbiddenView />
+              ) : (
+                <TimeSeriesCatalogView
+                  canBulkMigrateHydraulicSeries={user.role === "admin"}
+                />
+              )
+            }
           />
           <Route
             path="projects/:projectId/time-series-sets/hydraulic/:hydraulicTimeSeriesSetId"

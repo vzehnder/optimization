@@ -1656,6 +1656,39 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"hydraulic_time_series_set": hydraulic_time_series_set}
 
+    @app.post(
+        "/api/projects/{project_id}/time-series-sets/hydraulic/{hydraulic_time_series_set_id}/migrate"
+    )
+    async def migrate_project_hydraulic_time_series_set(
+        project_id: int, hydraulic_time_series_set_id: int, request: Request
+    ):
+        try:
+            result = analyst_store.migrate_hydraulic_time_series_set(
+                project_id=project_id,
+                hydraulic_time_series_set_id=hydraulic_time_series_set_id,
+                migrated_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            return JSONResponse(
+                error_response_body("hydraulic_migration", str(error), phase="python_validation"),
+                status_code=400,
+            )
+        return result
+
+    @app.post("/api/projects/{project_id}/time-series-sets/hydraulic/migrate-all")
+    async def migrate_all_project_hydraulic_time_series_sets(project_id: int, request: Request):
+        require_admin_user(request)
+        try:
+            report = analyst_store.migrate_all_hydraulic_time_series_sets(
+                project_id=project_id,
+                migrated_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return report
+
     @app.get("/api/projects/{project_id}/time-series-sets/{time_series_set_id}")
     async def get_project_time_series_set(project_id: int, time_series_set_id: int):
         try:

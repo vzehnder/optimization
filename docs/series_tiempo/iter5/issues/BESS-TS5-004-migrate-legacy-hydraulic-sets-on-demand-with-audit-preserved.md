@@ -1,6 +1,6 @@
 # BESS-TS5-004: Migrate Legacy Hydraulic Sets On Demand With Audit Preserved
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter5/prd.md`
@@ -29,11 +29,11 @@ environments can be repaired safely.
 
 ## Acceptance criteria
 
-- [ ] An admin or analyst can migrate one legacy hydraulic series set into the generic catalog on demand.
-- [ ] Migration preserves audit metadata: origin, source linkage where present, version identity and content-hash lineage.
-- [ ] Historical scenario versions and runs that referenced the legacy set remain untouched and readable.
-- [ ] Migration is idempotent: re-running converges (skip or stable replace) without duplicates, in local SQLite and PostgreSQL.
-- [ ] A bulk routine can migrate all remaining legacy hydraulic sets of a project and report migrated/skipped/failed stably across repeated runs.
+- [x] An admin or analyst can migrate one legacy hydraulic series set into the generic catalog on demand.
+- [x] Migration preserves audit metadata: origin, source linkage where present, version identity and content-hash lineage.
+- [x] Historical scenario versions and runs that referenced the legacy set remain untouched and readable.
+- [x] Migration is idempotent: re-running converges (skip or stable replace) without duplicates, in local SQLite and PostgreSQL.
+- [x] A bulk routine can migrate all remaining legacy hydraulic sets of a project and report migrated/skipped/failed stably across repeated runs.
 
 ## Blocked by
 

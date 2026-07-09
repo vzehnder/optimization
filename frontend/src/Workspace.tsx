@@ -52,6 +52,8 @@ import {
   listScenarios,
   listScenarioVersions,
   listTimeSeriesSetRevisions,
+  migrateAllHydraulicTimeSeriesSets,
+  migrateHydraulicTimeSeriesSet,
   promoteHydraulicDiagram,
   publishPublication,
   replaceTimeSeriesSetSource,
@@ -83,6 +85,7 @@ import {
   type HydraulicStorageElevationCurveWrite,
   type HydraulicTerminalCondition,
   type HydraulicTimeSeriesSet,
+  type HydraulicTimeSeriesSetBulkMigrationReport,
   type HydraulicTimeSeriesSetSummary,
   type HydraulicUnitWrite,
   type Publication,
@@ -853,7 +856,11 @@ function TimeSeriesCatalogList({
   );
 }
 
-export function TimeSeriesCatalogView() {
+export function TimeSeriesCatalogView({
+  canBulkMigrateHydraulicSeries = false,
+}: {
+  canBulkMigrateHydraulicSeries?: boolean;
+}) {
   const projectId = useNumericParam("projectId");
   const project = useQuery({
     queryKey: projectQueryKey(projectId || 0),
@@ -944,8 +951,62 @@ export function TimeSeriesCatalogView() {
           projectId={projectId}
           sets={hydraulicTimeSeriesSets.data}
         />
+        {canBulkMigrateHydraulicSeries &&
+        hydraulicTimeSeriesSets.data.length > 0 ? (
+          <HydraulicBulkMigrationSection projectId={projectId} />
+        ) : null}
       </section>
     </section>
+  );
+}
+
+function HydraulicBulkMigrationSection({ projectId }: { projectId: number }) {
+  const queryClient = useQueryClient();
+  const [report, setReport] =
+    useState<HydraulicTimeSeriesSetBulkMigrationReport | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: () => migrateAllHydraulicTimeSeriesSets(projectId),
+    onSuccess: (result) => {
+      setReport(result);
+      void queryClient.invalidateQueries({
+        queryKey: hydraulicTimeSeriesCatalogQueryKey(projectId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: timeSeriesCatalogQueryKey(projectId),
+      });
+    },
+  });
+
+  return (
+    <div className="workspace-stack">
+      <button
+        type="button"
+        onClick={() => mutation.mutate()}
+        disabled={mutation.isPending}
+      >
+        {mutation.isPending
+          ? "Migrando series hidraulicas legacy"
+          : "Migrar todas las series hidraulicas legacy"}
+      </button>
+      {mutation.isError ? (
+        <p role="alert">{errorMessage(mutation.error)}</p>
+      ) : null}
+      {report ? (
+        <p>
+          Migradas: {report.migrated.length} | Ya migradas:{" "}
+          {report.skipped.length} | Fallidas: {report.failed.length}
+          {report.failed.length > 0
+            ? ` (${report.failed
+                .map(
+                  (failure) =>
+                    `set ${failure.hydraulic_time_series_set_id}: ${failure.error}`,
+                )
+                .join("; ")})`
+            : ""}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -1638,22 +1699,42 @@ function TimeSeriesSetOriginSummary({
   revisionMetadata: Record<string, unknown> | undefined;
 }) {
   const origin = revisionMetadata?.origin;
-  if (!isRecord(origin) || origin.kind !== "legacy_draft_extraction") {
+  if (!isRecord(origin)) {
     return null;
   }
-  return (
-    <section className="workspace-section" aria-labelledby="set-origin">
-      <h2 id="set-origin">Origen</h2>
-      <p>
-        Extraido desde borrador legacy (scenario {String(origin.scenario_id)},
-        fuente {String(origin.source_filename || origin.source_id)})
-      </p>
-      <p>
-        Extraido por {String(origin.extracted_by)} el{" "}
-        {String(origin.extracted_at)}
-      </p>
-    </section>
-  );
+  if (origin.kind === "legacy_draft_extraction") {
+    return (
+      <section className="workspace-section" aria-labelledby="set-origin">
+        <h2 id="set-origin">Origen</h2>
+        <p>
+          Extraido desde borrador legacy (scenario {String(origin.scenario_id)},
+          fuente {String(origin.source_filename || origin.source_id)})
+        </p>
+        <p>
+          Extraido por {String(origin.extracted_by)} el{" "}
+          {String(origin.extracted_at)}
+        </p>
+      </section>
+    );
+  }
+  if (origin.kind === "hydraulic_legacy_migration") {
+    return (
+      <section className="workspace-section" aria-labelledby="set-origin">
+        <h2 id="set-origin">Origen</h2>
+        <p>
+          Migrado desde el set hidraulico legacy{" "}
+          {String(origin.hydraulic_time_series_set_id)} (version{" "}
+          {String(origin.legacy_version_label)}, hash{" "}
+          <code>{String(origin.legacy_content_hash)}</code>)
+        </p>
+        <p>
+          Migrado por {String(origin.migrated_by)} el{" "}
+          {String(origin.migrated_at)}
+        </p>
+      </section>
+    );
+  }
+  return null;
 }
 
 function TimeSeriesSetRevisionHistory({
@@ -1889,7 +1970,69 @@ export function HydraulicTimeSeriesSetDetailView() {
           <h2 id="hydraulic-set-signals">Senales</h2>
           <HydraulicTimeSeriesSetSignalList set={set} />
         </section>
+        <HydraulicTimeSeriesSetMigrationSection
+          projectId={projectId}
+          hydraulicTimeSeriesSetId={hydraulicTimeSeriesSetId}
+        />
       </div>
+    </section>
+  );
+}
+
+function HydraulicTimeSeriesSetMigrationSection({
+  projectId,
+  hydraulicTimeSeriesSetId,
+}: {
+  projectId: number;
+  hydraulicTimeSeriesSetId: number;
+}) {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: () =>
+      migrateHydraulicTimeSeriesSet(projectId, hydraulicTimeSeriesSetId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: timeSeriesCatalogQueryKey(projectId),
+      });
+    },
+  });
+
+  return (
+    <section
+      className="workspace-section"
+      aria-labelledby="hydraulic-set-migration"
+    >
+      <h2 id="hydraulic-set-migration">Migracion</h2>
+      <p>
+        Convierte este set legacy en un set del catalogo generico,
+        preservando origen y trazabilidad de contenido. El set legacy y los
+        runs historicos que lo referencian no se modifican.
+      </p>
+      <button
+        type="button"
+        onClick={() => mutation.mutate()}
+        disabled={mutation.isPending}
+      >
+        {mutation.isPending
+          ? "Migrando al catalogo generico"
+          : "Migrar al catalogo generico"}
+      </button>
+      {mutation.isError ? (
+        <p role="alert">{errorMessage(mutation.error)}</p>
+      ) : null}
+      {mutation.isSuccess ? (
+        <p>
+          {mutation.data.already_migrated
+            ? "Ya estaba migrado a "
+            : "Migrado a "}
+          <Link
+            to={`/projects/${projectId}/time-series-sets/${mutation.data.time_series_set.id}`}
+          >
+            {mutation.data.time_series_set.name} (
+            {mutation.data.time_series_set.version_label})
+          </Link>
+        </p>
+      ) : null}
     </section>
   );
 }

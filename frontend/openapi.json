@@ -2630,6 +2630,43 @@
         "summary": "List Project Hydraulic Time Series Sets"
       }
     },
+    "/api/projects/{project_id}/time-series-sets/hydraulic/migrate-all": {
+      "post": {
+        "operationId": "migrate_all_project_hydraulic_time_series_sets_api_projects__project_id__time_series_sets_hydraulic_migrate_all_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Migrate All Project Hydraulic Time Series Sets"
+      }
+    },
     "/api/projects/{project_id}/time-series-sets/hydraulic/{hydraulic_time_series_set_id}": {
       "get": {
         "operationId": "get_project_hydraulic_time_series_set_api_projects__project_id__time_series_sets_hydraulic__hydraulic_time_series_set_id__get",
@@ -2674,6 +2711,52 @@
           }
         },
         "summary": "Get Project Hydraulic Time Series Set"
+      }
+    },
+    "/api/projects/{project_id}/time-series-sets/hydraulic/{hydraulic_time_series_set_id}/migrate": {
+      "post": {
+        "operationId": "migrate_project_hydraulic_time_series_set_api_projects__project_id__time_series_sets_hydraulic__hydraulic_time_series_set_id__migrate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "hydraulic_time_series_set_id",
+            "required": true,
+            "schema": {
+              "title": "Hydraulic Time Series Set Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Migrate Project Hydraulic Time Series Set"
       }
     },
     "/api/projects/{project_id}/time-series-sets/{time_series_set_id}": {

@@ -418,6 +418,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/time-series-sets/hydraulic/migrate-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Migrate All Project Hydraulic Time Series Sets */
+        post: operations["migrate_all_project_hydraulic_time_series_sets_api_projects__project_id__time_series_sets_hydraulic_migrate_all_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/time-series-sets/hydraulic/{hydraulic_time_series_set_id}": {
         parameters: {
             query?: never;
@@ -429,6 +446,23 @@ export interface paths {
         get: operations["get_project_hydraulic_time_series_set_api_projects__project_id__time_series_sets_hydraulic__hydraulic_time_series_set_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/time-series-sets/hydraulic/{hydraulic_time_series_set_id}/migrate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Migrate Project Hydraulic Time Series Set */
+        post: operations["migrate_project_hydraulic_time_series_set_api_projects__project_id__time_series_sets_hydraulic__hydraulic_time_series_set_id__migrate_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2653,7 +2687,70 @@ export interface operations {
             };
         };
     };
+    migrate_all_project_hydraulic_time_series_sets_api_projects__project_id__time_series_sets_hydraulic_migrate_all_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_project_hydraulic_time_series_set_api_projects__project_id__time_series_sets_hydraulic__hydraulic_time_series_set_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                hydraulic_time_series_set_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    migrate_project_hydraulic_time_series_set_api_projects__project_id__time_series_sets_hydraulic__hydraulic_time_series_set_id__migrate_post: {
         parameters: {
             query?: never;
             header?: never;

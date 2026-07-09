@@ -44,6 +44,7 @@ ID_TABLES = {
     "hydraulic_reaches",
     "hydraulic_systems",
     "hydraulic_time_series_points",
+    "hydraulic_time_series_set_migrations",
     "hydraulic_time_series_sets",
     "hydraulic_units",
     "optimization_cases",

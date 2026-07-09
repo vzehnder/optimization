@@ -667,6 +667,18 @@ class AnalystStore:
                 UNIQUE (scenario_id, source_id)
             );
 
+            CREATE TABLE IF NOT EXISTS hydraulic_time_series_set_migrations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                hydraulic_time_series_set_id INTEGER NOT NULL UNIQUE,
+                time_series_set_id INTEGER NOT NULL,
+                content_hash TEXT NOT NULL,
+                migrated_at TEXT NOT NULL,
+                migrated_by TEXT NOT NULL,
+                FOREIGN KEY (hydraulic_time_series_set_id)
+                    REFERENCES hydraulic_time_series_sets(id) ON DELETE CASCADE,
+                FOREIGN KEY (time_series_set_id) REFERENCES time_series_sets(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS case_input_variants (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 case_id INTEGER NOT NULL,
@@ -2905,6 +2917,157 @@ class AnalystStore:
             raise KeyError(f"hydraulic time-series set {hydraulic_time_series_set_id} not found")
         points = self._load_inflow_series_points(hydraulic_time_series_set_id)
         return build_hydraulic_catalog_detail(row_to_dict(row), points)
+
+    def migrate_hydraulic_time_series_set(
+        self,
+        *,
+        project_id: int,
+        hydraulic_time_series_set_id: int,
+        migrated_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        """Migrate one legacy hydraulic series set into the generic catalog.
+
+        On demand, per BESS-TS5-004: never automatic/bulk-by-default. Reuses
+        ``_write_generic_hydraulic_time_series_set``'s name/content-hash
+        idempotency so a migrated set converges with any generic set already
+        written for the same entity+signal (e.g. by a live diagram resave
+        after TS5-003). A dedicated ledger table
+        (``hydraulic_time_series_set_migrations``) makes re-running the same
+        migration a stable no-op even before that content-hash check runs.
+        """
+        with self._lock:
+            self.get_project(project_id)
+            legacy_row = self.connection.execute(
+                """
+                SELECT id, entity_type, entity_id, signal_key, version_number,
+                       version_label, content_hash
+                FROM hydraulic_time_series_sets
+                WHERE project_id = ? AND id = ?
+                """,
+                (project_id, hydraulic_time_series_set_id),
+            ).fetchone()
+            if legacy_row is None:
+                raise KeyError(
+                    f"hydraulic time-series set {hydraulic_time_series_set_id} not found"
+                )
+
+            existing_migration = self.connection.execute(
+                """
+                SELECT time_series_set_id
+                FROM hydraulic_time_series_set_migrations
+                WHERE hydraulic_time_series_set_id = ?
+                """,
+                (hydraulic_time_series_set_id,),
+            ).fetchone()
+            if existing_migration is not None:
+                return {
+                    "time_series_set": self.get_time_series_set(
+                        project_id, int(existing_migration["time_series_set_id"])
+                    ),
+                    "hydraulic_time_series_set_id": hydraulic_time_series_set_id,
+                    "already_migrated": True,
+                }
+
+            points = self._load_inflow_series_points(hydraulic_time_series_set_id)
+            if not points:
+                raise ValueError(
+                    f"hydraulic time-series set {hydraulic_time_series_set_id} has no "
+                    "points to migrate"
+                )
+
+            entity_type = str(legacy_row["entity_type"])
+            entity_id = int(legacy_row["entity_id"])
+            signal_key = str(legacy_row["signal_key"])
+            now = utc_now_iso()
+            revision_metadata = {
+                "origin": {
+                    "kind": "hydraulic_legacy_migration",
+                    "hydraulic_time_series_set_id": hydraulic_time_series_set_id,
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "signal_key": signal_key,
+                    "legacy_version_number": int(legacy_row["version_number"]),
+                    "legacy_version_label": str(legacy_row["version_label"]),
+                    "legacy_content_hash": legacy_row["content_hash"],
+                    "migrated_by": migrated_by,
+                    "migrated_at": now,
+                }
+            }
+            time_series_set_id = self._write_generic_hydraulic_time_series_set(
+                project_id=project_id,
+                base_entity_type=entity_type,
+                base_entity_id=entity_id,
+                signal_key=signal_key,
+                points=points,
+                version_label=f"migrated-{legacy_row['version_label']}",
+                updated_by=migrated_by,
+                now=now,
+                status="validated",
+                revision_metadata=revision_metadata,
+                change_summary="Migrated from legacy hydraulic series set",
+            )
+            self.connection.execute(
+                """
+                INSERT INTO hydraulic_time_series_set_migrations (
+                    hydraulic_time_series_set_id, time_series_set_id, content_hash,
+                    migrated_at, migrated_by
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    hydraulic_time_series_set_id,
+                    time_series_set_id,
+                    hydraulic_inflow_series_content_hash(points),
+                    now,
+                    migrated_by,
+                ),
+            )
+            self.connection.commit()
+            return {
+                "time_series_set": self.get_time_series_set(project_id, time_series_set_id),
+                "hydraulic_time_series_set_id": hydraulic_time_series_set_id,
+                "already_migrated": False,
+            }
+
+    def migrate_all_hydraulic_time_series_sets(
+        self,
+        *,
+        project_id: int,
+        migrated_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        """Sweep every legacy hydraulic set of a project, converging stably.
+
+        Reports migrated/skipped/failed lists rather than raising, so a
+        partial failure (e.g. one empty legacy set) does not abort the sweep
+        for the rest of the project, and repeated runs report the same shape
+        (everything ends up ``skipped`` once migrated).
+        """
+        self.get_project(project_id)
+        legacy_ids = [
+            int(row["id"])
+            for row in self.connection.execute(
+                "SELECT id FROM hydraulic_time_series_sets WHERE project_id = ? ORDER BY id",
+                (project_id,),
+            ).fetchall()
+        ]
+        migrated: list[int] = []
+        skipped: list[int] = []
+        failed: list[dict[str, Any]] = []
+        for legacy_id in legacy_ids:
+            try:
+                result = self.migrate_hydraulic_time_series_set(
+                    project_id=project_id,
+                    hydraulic_time_series_set_id=legacy_id,
+                    migrated_by=migrated_by,
+                )
+            except ValueError as error:
+                failed.append({"hydraulic_time_series_set_id": legacy_id, "error": str(error)})
+                continue
+            if result["already_migrated"]:
+                skipped.append(legacy_id)
+            else:
+                migrated.append(legacy_id)
+        return {"migrated": migrated, "skipped": skipped, "failed": failed}
 
     def get_time_series_set(self, project_id: int, time_series_set_id: int) -> dict[str, Any]:
         self.get_project(project_id)
@@ -7691,6 +7854,9 @@ class AnalystStore:
         version_label: str | None,
         updated_by: str,
         now: str,
+        status: str = "draft",
+        revision_metadata: dict[str, Any] | None = None,
+        change_summary: str = "Hydro diagram series write",
     ) -> int:
         name = _generic_hydraulic_series_name(base_entity_type, base_entity_id, signal_key)
         content_hash = hydraulic_inflow_series_content_hash(points)
@@ -7785,7 +7951,7 @@ class AnalystStore:
                 created_by,
                 updated_by
             )
-            VALUES (?, ?, ?, ?, ?, 'UTC', 'draft', ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, 'UTC', ?, ?, ?, ?, ?, ?)
             """,
             (
                 project_id,
@@ -7793,6 +7959,7 @@ class AnalystStore:
                 version_number,
                 resolved_version_label,
                 HYDRAULIC_GENERIC_SERIES_DATA_KIND,
+                status,
                 content_hash,
                 now,
                 now,
@@ -7801,6 +7968,11 @@ class AnalystStore:
             ),
         )
         time_series_set_id = int(cursor.lastrowid)
+        resolved_revision_metadata = revision_metadata or {
+            "origin": "hydraulic_diagram",
+            "entity_type": base_entity_type,
+            "entity_id": base_entity_id,
+        }
         self.connection.execute(
             """
             INSERT INTO time_series_set_revisions (
@@ -7819,17 +7991,10 @@ class AnalystStore:
             (
                 time_series_set_id,
                 content_hash,
-                "Hydro diagram series write",
+                change_summary,
                 now,
                 updated_by,
-                json.dumps(
-                    {
-                        "origin": "hydraulic_diagram",
-                        "entity_type": base_entity_type,
-                        "entity_id": base_entity_id,
-                    },
-                    sort_keys=True,
-                ),
+                json.dumps(resolved_revision_metadata, sort_keys=True),
             ),
         )
         self._insert_time_series_signals_periods_values(
