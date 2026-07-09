@@ -168,6 +168,11 @@ class AnalystStore:
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
 
+            -- Scenario -> OptimizationCase is deliberately one-to-one (confirmed,
+            -- not migrated, in docs/series_tiempo/iter5/decision_record_ts5_migration_semantics.md
+            -- decision 4). The UNIQUE constraint below is intentional design, not
+            -- a leftover early-implementation limit: keep it unless a future
+            -- decision record explicitly reopens the cardinality question.
             CREATE TABLE IF NOT EXISTS optimization_cases (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 scenario_id INTEGER NOT NULL UNIQUE,
@@ -547,6 +552,10 @@ class AnalystStore:
                 UNIQUE (scenario_version_id, layout_key)
             );
 
+            -- scenario_id UNIQUE mirrors the same one-to-one decision as
+            -- optimization_cases (see decision_record_ts5_migration_semantics.md
+            -- decision 4): the structured draft stays a single compatibility
+            -- surface per scenario, not a list.
             CREATE TABLE IF NOT EXISTS scenario_drafts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 scenario_id INTEGER NOT NULL UNIQUE,
@@ -5245,6 +5254,11 @@ class AnalystStore:
         return row_to_dict(row)
 
     def get_or_create_case_for_scenario(self, scenario_id: int) -> dict[str, Any]:
+        """Resolve the scenario's one `OptimizationCase`, creating it lazily.
+
+        Cardinality is deliberately one-to-one (confirmed in TS-5 decision 4,
+        not migrated); this is the only creation path and it is idempotent.
+        """
         scenario = self.get_scenario(scenario_id)
         return self._get_or_create_optimization_case(scenario)
 

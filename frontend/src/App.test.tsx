@@ -424,6 +424,98 @@ describe("application shell", () => {
     expect(screen.getByText("2026-06-23T12:15:00Z")).toBeVisible();
   });
 
+  it("labels the version's case name as a name, not as a separate case entity, in version metadata", async () => {
+    // BESS-TS5-006: `scenario_versions.case_name` is a frozen free-text label
+    // from the payload at promotion time (it can differ between versions of
+    // the same scenario), not the stable `OptimizationCase` this scenario
+    // owns one-to-one. An unqualified "Case" label next to "Scenario ID"
+    // reads as if versions could belong to different case entities.
+    window.history.replaceState({}, "", "/react/scenario-versions/41");
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-06-23T12:00:00Z",
+    };
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Initial modeling branch",
+      created_at: "2026-06-23T12:05:00Z",
+    };
+    const version = {
+      id: 41,
+      scenario_id: 10,
+      version_number: 3,
+      case_name: "dispatch_case",
+      schema_version: "bess_system_dispatch.v1",
+      period_count: 2,
+      asset_counts: { battery: 1 },
+      created_at: "2026-06-23T12:14:00Z",
+      system_case_json: { case_name: "dispatch_case" },
+      validation_payload: { status: "ok" },
+      generation_metadata: {},
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenario-versions/41" && method === "GET") {
+          return new Response(JSON.stringify({ scenario_version: version }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10") {
+          return new Response(JSON.stringify({ scenario }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Version 3" }),
+    ).toBeVisible();
+    expect(screen.getByText("Nombre del caso")).toBeVisible();
+    expect(screen.queryByText("Case")).not.toBeInTheDocument();
+  });
+
   it("polls nonterminal runs, recovers from a temporary polling failure, and shows failure logs", async () => {
     window.history.replaceState({}, "", "/react/runs/99");
     const project = {

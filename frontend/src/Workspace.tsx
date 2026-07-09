@@ -6325,7 +6325,7 @@ function VersionMetadata({ version }: { version: ScenarioVersionDetail }) {
   return (
     <dl className="source-metadata version-metadata">
       <div>
-        <dt>Case</dt>
+        <dt>Nombre del caso</dt>
         <dd>{version.case_name}</dd>
       </div>
       <div>
