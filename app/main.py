@@ -209,8 +209,13 @@ class HydraulicNaturalInflowSeriesPointRequest(BaseModel):
     value_m3s: float
 
 
+class HydraulicSeriesOriginRequest(BaseModel):
+    kind: str
+
+
 class HydraulicNaturalInflowSeriesRequest(BaseModel):
     time_series_set_id: int | None = None
+    origin: HydraulicSeriesOriginRequest | None = None
     version_label: str | None = None
     points: list[HydraulicNaturalInflowSeriesPointRequest] = Field(default_factory=list)
 

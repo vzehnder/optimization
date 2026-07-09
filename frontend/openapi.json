@@ -713,6 +713,16 @@
       },
       "HydraulicNaturalInflowSeriesRequest": {
         "properties": {
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HydraulicSeriesOriginRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "points": {
             "items": {
               "$ref": "#/components/schemas/HydraulicNaturalInflowSeriesPointRequest"
@@ -826,6 +836,19 @@
           "initial_storage_hm3"
         ],
         "title": "HydraulicReservoirParametersRequest",
+        "type": "object"
+      },
+      "HydraulicSeriesOriginRequest": {
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "HydraulicSeriesOriginRequest",
         "type": "object"
       },
       "HydraulicStorageElevationCurveRequest": {

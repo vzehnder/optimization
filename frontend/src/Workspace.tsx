@@ -2580,6 +2580,7 @@ function editableHydraulicNodes(
             ? {
                 time_series_set_id:
                   node.natural_inflow_series.time_series_set_id,
+                origin: node.natural_inflow_series.origin,
                 version_label: node.natural_inflow_series.version_label,
                 points: node.natural_inflow_series.points.map((point) => ({
                   ...point,
@@ -2701,6 +2702,7 @@ function editableHydraulicReaches(
     minimum_flow_series: reach.minimum_flow_series
       ? {
           time_series_set_id: reach.minimum_flow_series.time_series_set_id,
+          origin: reach.minimum_flow_series.origin,
           version_label: reach.minimum_flow_series.version_label,
           points: reach.minimum_flow_series.points.map((point) => ({
             timestamp: point.timestamp,
@@ -3450,6 +3452,7 @@ function HydraulicReachMinimumFlowSeries({
                   updateReach(key, {
                     minimum_flow_series: {
                       time_series_set_id: selected.time_series_set_id,
+                      origin: selected.origin,
                       version_label: selected.version_label,
                       points: selected.points.map((point) => ({ ...point })),
                     },
@@ -3676,6 +3679,7 @@ export function HydraulicInflowPanel({
                   if (!selected) return;
                   updateInflowSeries(key, {
                     time_series_set_id: selected.time_series_set_id,
+                    origin: selected.origin,
                     version_label: selected.version_label,
                     points: selected.points.map((point) => ({ ...point })),
                   });

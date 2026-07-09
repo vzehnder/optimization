@@ -619,15 +619,25 @@ export interface HydraulicNaturalInflowSeriesPoint {
   value_m3s: number;
 }
 
+export interface HydraulicSeriesOrigin {
+  kind: string;
+}
+
 export interface HydraulicNaturalInflowSeriesSummary {
   time_series_set_id: number;
   version_number: number;
   version_label: string;
+  origin: HydraulicSeriesOrigin;
   points: HydraulicNaturalInflowSeriesPoint[];
 }
 
 export interface HydraulicNaturalInflowSeriesWrite {
   time_series_set_id?: number | null;
+  // Which store time_series_set_id refers to when re-sending an existing
+  // reference unchanged ("generic" for the TS-5 catalog, absent/omitted for
+  // a legacy hydraulic_time_series_sets id). Only meaningful together with
+  // time_series_set_id; ignored when submitting brand-new points.
+  origin?: HydraulicSeriesOrigin | null;
   version_label?: string | null;
   points: HydraulicNaturalInflowSeriesPoint[];
 }

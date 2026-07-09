@@ -1473,6 +1473,7 @@ export interface components {
         };
         /** HydraulicNaturalInflowSeriesRequest */
         HydraulicNaturalInflowSeriesRequest: {
+            origin?: components["schemas"]["HydraulicSeriesOriginRequest"] | null;
             /** Points */
             points?: components["schemas"]["HydraulicNaturalInflowSeriesPointRequest"][];
             /** Time Series Set Id */
@@ -1513,6 +1514,11 @@ export interface components {
              * @default 0
              */
             terminal_water_value_usd_per_hm3: number;
+        };
+        /** HydraulicSeriesOriginRequest */
+        HydraulicSeriesOriginRequest: {
+            /** Kind */
+            kind: string;
         };
         /** HydraulicStorageElevationCurveRequest */
         HydraulicStorageElevationCurveRequest: {
