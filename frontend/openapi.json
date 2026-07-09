@@ -2570,6 +2570,89 @@
         "summary": "List Project Time Series Sets"
       }
     },
+    "/api/projects/{project_id}/time-series-sets/hydraulic": {
+      "get": {
+        "operationId": "list_project_hydraulic_time_series_sets_api_projects__project_id__time_series_sets_hydraulic_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Project Hydraulic Time Series Sets"
+      }
+    },
+    "/api/projects/{project_id}/time-series-sets/hydraulic/{hydraulic_time_series_set_id}": {
+      "get": {
+        "operationId": "get_project_hydraulic_time_series_set_api_projects__project_id__time_series_sets_hydraulic__hydraulic_time_series_set_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "hydraulic_time_series_set_id",
+            "required": true,
+            "schema": {
+              "title": "Hydraulic Time Series Set Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Project Hydraulic Time Series Set"
+      }
+    },
     "/api/projects/{project_id}/time-series-sets/{time_series_set_id}": {
       "get": {
         "operationId": "get_project_time_series_set_api_projects__project_id__time_series_sets__time_series_set_id__get",

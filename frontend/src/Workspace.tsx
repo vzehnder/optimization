@@ -32,6 +32,7 @@ import {
   deleteScenarioVersion,
   editTimeSeriesSetValues,
   getHydraulicDiagram,
+  getProjectHydraulicTimeSeriesSet,
   getProjectTimeSeriesSet,
   getPublicationPreview,
   getRun,
@@ -42,6 +43,7 @@ import {
   runCaseInputVariant,
   validateCaseInputVariant,
   listDashboardTemplates,
+  listProjectHydraulicTimeSeriesSets,
   listProjectTimeSeriesSets,
   listProjects,
   listRunArtifacts,
@@ -80,6 +82,8 @@ import {
   type HydraulicReservoirParameters,
   type HydraulicStorageElevationCurveWrite,
   type HydraulicTerminalCondition,
+  type HydraulicTimeSeriesSet,
+  type HydraulicTimeSeriesSetSummary,
   type HydraulicUnitWrite,
   type Publication,
   type PublicationPayload,
@@ -135,6 +139,17 @@ const timeSeriesSetRevisionsQueryKey = (
   projectId: number,
   timeSeriesSetId: number,
 ) => ["project-time-series-set-revisions", projectId, timeSeriesSetId] as const;
+const hydraulicTimeSeriesCatalogQueryKey = (projectId: number) =>
+  ["project-hydraulic-time-series-sets", projectId] as const;
+const hydraulicTimeSeriesSetQueryKey = (
+  projectId: number,
+  hydraulicTimeSeriesSetId: number,
+) =>
+  [
+    "project-hydraulic-time-series-set",
+    projectId,
+    hydraulicTimeSeriesSetId,
+  ] as const;
 const scenarioQueryKey = (scenarioId: number) =>
   ["scenario", scenarioId] as const;
 const scenarioVersionsQueryKey = (scenarioId: number) =>
@@ -852,11 +867,18 @@ export function TimeSeriesCatalogView() {
     enabled: projectId !== null,
     retry: false,
   });
+  const hydraulicTimeSeriesSets = useQuery({
+    queryKey: hydraulicTimeSeriesCatalogQueryKey(projectId || 0),
+    queryFn: ({ signal }) =>
+      listProjectHydraulicTimeSeriesSets(projectId || 0, signal),
+    enabled: projectId !== null,
+    retry: false,
+  });
 
   if (projectId === null) {
     return <NotFoundView>El proyecto solicitado no existe.</NotFoundView>;
   }
-  if (project.isPending || timeSeriesSets.isPending) {
+  if (project.isPending || timeSeriesSets.isPending || hydraulicTimeSeriesSets.isPending) {
     return <LoadingView label="Cargando catalogo de series" />;
   }
   if (project.isError) {
@@ -872,6 +894,14 @@ export function TimeSeriesCatalogView() {
       <RequestErrorView
         error={timeSeriesSets.error}
         retry={() => void timeSeriesSets.refetch()}
+      />
+    );
+  }
+  if (hydraulicTimeSeriesSets.isError) {
+    return (
+      <RequestErrorView
+        error={hydraulicTimeSeriesSets.error}
+        retry={() => void hydraulicTimeSeriesSets.refetch()}
       />
     );
   }
@@ -899,7 +929,50 @@ export function TimeSeriesCatalogView() {
           sets={timeSeriesSets.data}
         />
       </section>
+      <section
+        className="workspace-section"
+        aria-labelledby="hydraulic-time-series-catalog"
+      >
+        <h2 id="hydraulic-time-series-catalog">
+          Series hidraulicas (origen legacy)
+        </h2>
+        <p>
+          Sets creados desde el editor de diagramas hidraulicos, expuestos
+          con la misma semantica del catalogo general sin migrar filas.
+        </p>
+        <HydraulicTimeSeriesCatalogList
+          projectId={projectId}
+          sets={hydraulicTimeSeriesSets.data}
+        />
+      </section>
     </section>
+  );
+}
+
+function HydraulicTimeSeriesCatalogList({
+  projectId,
+  sets,
+}: {
+  projectId: number;
+  sets: HydraulicTimeSeriesSetSummary[];
+}) {
+  if (sets.length === 0) {
+    return <EmptyState>Aun no hay series hidraulicas legacy.</EmptyState>;
+  }
+  return (
+    <ul className="resource-list">
+      {sets.map((set) => (
+        <li key={set.id}>
+          <Link to={`/projects/${projectId}/time-series-sets/hydraulic/${set.id}`}>
+            {set.name}
+          </Link>
+          <p>
+            Origen hidraulico | {set.status} | version {set.version_number} |{" "}
+            {set.period_count} periodos
+          </p>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -1709,6 +1782,112 @@ export function TimeSeriesSetDetailView() {
               revisions={timeSeriesSetRevisions.data}
             />
           )}
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function HydraulicTimeSeriesSetSignalList({
+  set,
+}: {
+  set: HydraulicTimeSeriesSet;
+}) {
+  return (
+    <ul className="resource-list">
+      {set.signals.map((signal) => (
+        <li key={signal.signal_key}>
+          <strong>{signal.signal_key}</strong>
+          <p>
+            {signal.unit} | {signal.entity_type}
+            {signal.entity_key ? `:${signal.entity_key}` : ""}
+          </p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function HydraulicTimeSeriesSetDetailView() {
+  const projectId = useNumericParam("projectId");
+  const hydraulicTimeSeriesSetId = useNumericParam("hydraulicTimeSeriesSetId");
+  const hydraulicTimeSeriesSet = useQuery({
+    queryKey: hydraulicTimeSeriesSetQueryKey(
+      projectId || 0,
+      hydraulicTimeSeriesSetId || 0,
+    ),
+    queryFn: ({ signal }) =>
+      getProjectHydraulicTimeSeriesSet(
+        projectId || 0,
+        hydraulicTimeSeriesSetId || 0,
+        signal,
+      ),
+    enabled: projectId !== null && hydraulicTimeSeriesSetId !== null,
+    retry: false,
+  });
+
+  if (projectId === null || hydraulicTimeSeriesSetId === null) {
+    return <NotFoundView>El set de series solicitado no existe.</NotFoundView>;
+  }
+  if (hydraulicTimeSeriesSet.isPending) {
+    return <LoadingView label="Cargando set de series hidraulico" />;
+  }
+  if (hydraulicTimeSeriesSet.isError) {
+    return (
+      <RequestErrorView
+        error={hydraulicTimeSeriesSet.error}
+        retry={() => void hydraulicTimeSeriesSet.refetch()}
+      />
+    );
+  }
+
+  const set = hydraulicTimeSeriesSet.data;
+  return (
+    <section className="workspace-view">
+      <Breadcrumbs>
+        <Link to="/projects">Proyectos</Link>
+        <span aria-hidden="true">/</span>
+        <Link to={`/projects/${projectId}/time-series-sets`}>
+          Catalogo de series
+        </Link>
+        <span aria-hidden="true">/</span>
+        <span>{set.name}</span>
+      </Breadcrumbs>
+      <header className="workspace-heading">
+        <h1>{set.name}</h1>
+        <p>
+          Origen hidraulico (legacy) | {set.status} | version{" "}
+          {set.version_number} ({set.version_label})
+        </p>
+      </header>
+      <div className="workspace-stack">
+        <section
+          className="workspace-section"
+          aria-labelledby="hydraulic-set-origin"
+        >
+          <h2 id="hydraulic-set-origin">Origen</h2>
+          <p>
+            {set.hydraulic_system_name} / {set.entity_display_name} (
+            {set.entity_type})
+          </p>
+        </section>
+        <section
+          className="workspace-section"
+          aria-labelledby="hydraulic-set-horizon"
+        >
+          <h2 id="hydraulic-set-horizon">Horizonte</h2>
+          <p>{set.horizon.period_count} periodos</p>
+          <p>
+            {set.horizon.start || "Sin datos"} -{" "}
+            {set.horizon.end || "Sin datos"}
+          </p>
+        </section>
+        <section
+          className="workspace-section"
+          aria-labelledby="hydraulic-set-signals"
+        >
+          <h2 id="hydraulic-set-signals">Senales</h2>
+          <HydraulicTimeSeriesSetSignalList set={set} />
         </section>
       </div>
     </section>

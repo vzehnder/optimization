@@ -1629,6 +1629,28 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"time_series_sets": time_series_sets}
 
+    @app.get("/api/projects/{project_id}/time-series-sets/hydraulic")
+    async def list_project_hydraulic_time_series_sets(project_id: int):
+        try:
+            hydraulic_time_series_sets = analyst_store.list_hydraulic_time_series_sets(
+                project_id
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"hydraulic_time_series_sets": hydraulic_time_series_sets}
+
+    @app.get("/api/projects/{project_id}/time-series-sets/hydraulic/{hydraulic_time_series_set_id}")
+    async def get_project_hydraulic_time_series_set(
+        project_id: int, hydraulic_time_series_set_id: int
+    ):
+        try:
+            hydraulic_time_series_set = analyst_store.get_hydraulic_time_series_set(
+                project_id, hydraulic_time_series_set_id
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"hydraulic_time_series_set": hydraulic_time_series_set}
+
     @app.get("/api/projects/{project_id}/time-series-sets/{time_series_set_id}")
     async def get_project_time_series_set(project_id: int, time_series_set_id: int):
         try:

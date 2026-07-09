@@ -8289,6 +8289,12 @@ describe("application shell", () => {
             { headers: { "Content-Type": "application/json" } },
           );
         }
+        if (path === "/api/projects/1/time-series-sets/hydraulic") {
+          return new Response(
+            JSON.stringify({ hydraulic_time_series_sets: [] }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
         if (path === "/api/projects/1/time-series-sets/501") {
           return new Response(JSON.stringify({ time_series_set: setDetail }), {
             headers: { "Content-Type": "application/json" },
@@ -8367,6 +8373,171 @@ describe("application shell", () => {
     });
     expect(
       within(revisionHistorySection).getByText("Revision 1"),
+    ).toBeVisible();
+  });
+
+  it("lists a legacy hydraulic series set in the project catalog and opens its detail", async () => {
+    window.history.replaceState({}, "", "/react/projects/1");
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-06-23T12:00:00Z",
+    };
+    const hydraulicSummary = {
+      id: 77,
+      project_id: 1,
+      name: "Laja System / Reservoir Alpha (natural_inflow_m3s)",
+      entity_type: "hydraulic_node",
+      entity_id: 3,
+      entity_key: "reservoir_alpha",
+      entity_display_name: "Reservoir Alpha",
+      hydraulic_system_name: "Laja System",
+      signal_key: "natural_inflow_m3s",
+      unit: "m3/s",
+      version_number: 1,
+      version_label: "v1",
+      status: "draft",
+      content_hash: "sha256:hydraulic-abc",
+      period_count: 2,
+      created_at: "2026-07-09T12:00:00Z",
+      updated_at: "2026-07-09T12:00:00Z",
+      origin: {
+        kind: "hydraulic_legacy",
+        entity_type: "hydraulic_node",
+        entity_id: 3,
+        signal_key: "natural_inflow_m3s",
+      },
+    };
+    const hydraulicDetail = {
+      ...hydraulicSummary,
+      signals: [
+        {
+          signal_key: "natural_inflow_m3s",
+          unit: "m3/s",
+          entity_type: "hydraulic_node",
+          entity_key: "reservoir_alpha",
+        },
+      ],
+      periods: [
+        {
+          period_index: 0,
+          timestamp_start: "2026-01-01T00:00:00",
+          timestamp_end: "2026-01-01T01:00:00",
+          duration_hours: 1.0,
+        },
+      ],
+      values: [
+        { period_index: 0, signal_key: "natural_inflow_m3s", value_numeric: 5.0 },
+      ],
+      horizon: {
+        period_count: 1,
+        start: "2026-01-01T00:00:00",
+        end: "2026-01-01T01:00:00",
+      },
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/scenarios") {
+          return new Response(JSON.stringify({ scenarios: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/dashboard-templates") {
+          return new Response(JSON.stringify({ dashboard_templates: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/time-series-sets" && method === "GET") {
+          return new Response(JSON.stringify({ time_series_sets: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/time-series-sets/hydraulic") {
+          return new Response(
+            JSON.stringify({ hydraulic_time_series_sets: [hydraulicSummary] }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/projects/1/time-series-sets/hydraulic/77") {
+          return new Response(
+            JSON.stringify({ hydraulic_time_series_set: hydraulicDetail }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Hybrid PMGD" }),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("link", { name: "Ver catalogo de series de tiempo" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Series hidraulicas (origen legacy)",
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("link", {
+        name: "Laja System / Reservoir Alpha (natural_inflow_m3s)",
+      }),
+    ).toBeVisible();
+    expect(screen.getByText(/Origen hidraulico \| draft/)).toBeVisible();
+
+    await user.click(
+      screen.getByRole("link", {
+        name: "Laja System / Reservoir Alpha (natural_inflow_m3s)",
+      }),
+    );
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Laja System / Reservoir Alpha (natural_inflow_m3s)",
+      }),
+    ).toBeVisible();
+    expect(window.location.pathname).toBe(
+      "/react/projects/1/time-series-sets/hydraulic/77",
+    );
+    expect(screen.getByText("natural_inflow_m3s")).toBeVisible();
+    expect(screen.getByText(/m3\/s \| hydraulic_node:reservoir_alpha/)).toBeVisible();
+    expect(
+      screen.getByText(/Laja System \/ Reservoir Alpha \(hydraulic_node\)/),
     ).toBeVisible();
   });
 

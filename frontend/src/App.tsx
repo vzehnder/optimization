@@ -38,6 +38,7 @@ import "./styles.css";
 import {
   ForbiddenView,
   HydraulicDiagramEditorView,
+  HydraulicTimeSeriesSetDetailView,
   NotFoundView,
   PublicationPreviewView,
   ProjectDetailView,
@@ -288,6 +289,16 @@ function AuthenticatedRoutes({ user }: { user: CurrentUser }) {
           <Route
             path="projects/:projectId/time-series-sets"
             element={isClient ? <ForbiddenView /> : <TimeSeriesCatalogView />}
+          />
+          <Route
+            path="projects/:projectId/time-series-sets/hydraulic/:hydraulicTimeSeriesSetId"
+            element={
+              isClient ? (
+                <ForbiddenView />
+              ) : (
+                <HydraulicTimeSeriesSetDetailView />
+              )
+            }
           />
           <Route
             path="projects/:projectId/time-series-sets/:timeSeriesSetId"

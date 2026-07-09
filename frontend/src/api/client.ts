@@ -440,6 +440,67 @@ export interface ProjectTimeSeriesSetSummary {
   updated_at?: string;
 }
 
+export interface HydraulicTimeSeriesSetOrigin {
+  kind: string;
+  entity_type: string;
+  entity_id: number;
+  signal_key: string;
+}
+
+export interface HydraulicTimeSeriesSetSummary {
+  id: number;
+  project_id: number;
+  name: string;
+  entity_type: string;
+  entity_id: number;
+  entity_key: string | null;
+  entity_display_name: string;
+  hydraulic_system_name: string;
+  signal_key: string;
+  unit: string;
+  version_number: number;
+  version_label: string;
+  status: string;
+  content_hash: string | null;
+  period_count: number;
+  created_at?: string;
+  updated_at?: string;
+  origin: HydraulicTimeSeriesSetOrigin;
+}
+
+export interface HydraulicTimeSeriesSetSignal {
+  signal_key: string;
+  unit: string;
+  entity_type: string;
+  entity_key: string | null;
+}
+
+export interface HydraulicTimeSeriesSetPeriod {
+  period_index: number;
+  timestamp_start: string;
+  timestamp_end: string;
+  duration_hours: number;
+}
+
+export interface HydraulicTimeSeriesSetValue {
+  period_index: number;
+  signal_key: string;
+  value_numeric: number;
+}
+
+export interface HydraulicTimeSeriesSetHorizon {
+  period_count: number;
+  start: string | null;
+  end: string | null;
+}
+
+export interface HydraulicTimeSeriesSet extends HydraulicTimeSeriesSetSummary {
+  signals: HydraulicTimeSeriesSetSignal[];
+  periods: HydraulicTimeSeriesSetPeriod[];
+  values: HydraulicTimeSeriesSetValue[];
+  horizon: HydraulicTimeSeriesSetHorizon;
+}
+
 export interface GeneratedCaseValidation {
   ok?: boolean;
   phase?: string;
@@ -1789,6 +1850,30 @@ export async function getProjectTimeSeriesSet(
     { signal },
   );
   return response.time_series_set;
+}
+
+export async function listProjectHydraulicTimeSeriesSets(
+  projectId: number,
+  signal?: AbortSignal,
+): Promise<HydraulicTimeSeriesSetSummary[]> {
+  const response = await requestJson<{
+    hydraulic_time_series_sets: HydraulicTimeSeriesSetSummary[];
+  }>(`/api/projects/${projectId}/time-series-sets/hydraulic`, { signal });
+  return response.hydraulic_time_series_sets;
+}
+
+export async function getProjectHydraulicTimeSeriesSet(
+  projectId: number,
+  hydraulicTimeSeriesSetId: number,
+  signal?: AbortSignal,
+): Promise<HydraulicTimeSeriesSet> {
+  const response = await requestJson<{
+    hydraulic_time_series_set: HydraulicTimeSeriesSet;
+  }>(
+    `/api/projects/${projectId}/time-series-sets/hydraulic/${hydraulicTimeSeriesSetId}`,
+    { signal },
+  );
+  return response.hydraulic_time_series_set;
 }
 
 export async function listTimeSeriesSetRevisions(

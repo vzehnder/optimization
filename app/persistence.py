@@ -38,6 +38,10 @@ from app.legacy_series_extraction import (
     PreparedDraftSeriesExtraction,
     prepare_draft_series_extraction,
 )
+from app.hydraulic_time_series_adapter import (
+    build_hydraulic_catalog_detail,
+    build_hydraulic_catalog_summary,
+)
 from app.time_series_ingestion import find_source
 
 
@@ -2686,6 +2690,76 @@ class AnalystStore:
             }
             for row in rows
         ]
+
+    _HYDRAULIC_TIME_SERIES_CATALOG_COLUMNS = """
+        hydraulic_time_series_sets.id AS id,
+        hydraulic_time_series_sets.project_id AS project_id,
+        hydraulic_time_series_sets.entity_type AS entity_type,
+        hydraulic_time_series_sets.entity_id AS entity_id,
+        hydraulic_time_series_sets.signal_key AS signal_key,
+        hydraulic_time_series_sets.version_number AS version_number,
+        hydraulic_time_series_sets.version_label AS version_label,
+        hydraulic_time_series_sets.content_hash AS content_hash,
+        hydraulic_time_series_sets.status AS status,
+        hydraulic_time_series_sets.created_at AS created_at,
+        hydraulic_time_series_sets.updated_at AS updated_at,
+        COALESCE(hydraulic_nodes.display_name, hydraulic_reaches.display_name) AS entity_display_name,
+        COALESCE(hydraulic_nodes.node_key, hydraulic_reaches.reach_key) AS entity_key,
+        COALESCE(node_system.display_name, reach_system.display_name) AS hydraulic_system_name,
+        (
+            SELECT COUNT(*) FROM hydraulic_time_series_points
+            WHERE hydraulic_time_series_points.hydraulic_time_series_set_id = hydraulic_time_series_sets.id
+        ) AS period_count
+    """
+
+    _HYDRAULIC_TIME_SERIES_CATALOG_JOINS = """
+        FROM hydraulic_time_series_sets
+        LEFT JOIN hydraulic_nodes
+          ON hydraulic_time_series_sets.entity_type = 'hydraulic_node'
+         AND hydraulic_nodes.id = hydraulic_time_series_sets.entity_id
+        LEFT JOIN hydraulic_reaches
+          ON hydraulic_time_series_sets.entity_type = 'hydraulic_reach'
+         AND hydraulic_reaches.id = hydraulic_time_series_sets.entity_id
+        LEFT JOIN hydraulic_systems AS node_system
+          ON node_system.id = hydraulic_nodes.hydraulic_system_id
+        LEFT JOIN hydraulic_systems AS reach_system
+          ON reach_system.id = hydraulic_reaches.hydraulic_system_id
+    """
+
+    def list_hydraulic_time_series_sets(self, project_id: int) -> list[dict[str, Any]]:
+        self.get_project(project_id)
+        rows = self.connection.execute(
+            "SELECT " + self._HYDRAULIC_TIME_SERIES_CATALOG_COLUMNS
+            + self._HYDRAULIC_TIME_SERIES_CATALOG_JOINS
+            + """
+            WHERE hydraulic_time_series_sets.project_id = ?
+            ORDER BY hydraulic_time_series_sets.entity_type, hydraulic_time_series_sets.entity_id,
+                     hydraulic_time_series_sets.signal_key, hydraulic_time_series_sets.version_number
+            """,
+            (project_id,),
+        ).fetchall()
+        return [
+            build_hydraulic_catalog_summary(row_to_dict(row))
+            for row in rows
+        ]
+
+    def get_hydraulic_time_series_set(
+        self, project_id: int, hydraulic_time_series_set_id: int
+    ) -> dict[str, Any]:
+        self.get_project(project_id)
+        row = self.connection.execute(
+            "SELECT " + self._HYDRAULIC_TIME_SERIES_CATALOG_COLUMNS
+            + self._HYDRAULIC_TIME_SERIES_CATALOG_JOINS
+            + """
+            WHERE hydraulic_time_series_sets.project_id = ?
+              AND hydraulic_time_series_sets.id = ?
+            """,
+            (project_id, hydraulic_time_series_set_id),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"hydraulic time-series set {hydraulic_time_series_set_id} not found")
+        points = self._load_inflow_series_points(hydraulic_time_series_set_id)
+        return build_hydraulic_catalog_detail(row_to_dict(row), points)
 
     def get_time_series_set(self, project_id: int, time_series_set_id: int) -> dict[str, Any]:
         self.get_project(project_id)
