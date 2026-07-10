@@ -4676,6 +4676,42 @@ class AnalystStore:
         ).fetchall()
         return [run_row_to_dict(row) for row in rows]
 
+    def list_project_succeeded_runs(self, project_id: int) -> list[dict[str, Any]]:
+        self.get_project(project_id)
+        rows = self.connection.execute(
+            """
+            SELECT
+                runs.id,
+                runs.scenario_version_id,
+                runs.status,
+                runs.created_at,
+                runs.started_at,
+                runs.finished_at,
+                runs.duration_seconds,
+                runs.exit_code,
+                runs.workspace_path,
+                runs.input_snapshot_path,
+                runs.output_dir,
+                runs.summary_path,
+                runs.stdout_log_path,
+                runs.stderr_log_path,
+                runs.error_message,
+                runs.success_payload_json,
+                runs.error_payload_json,
+                runs.stdout,
+                runs.stderr,
+                runs.triggered_by,
+                runs.trigger_type
+            FROM runs
+            JOIN scenario_versions ON scenario_versions.id = runs.scenario_version_id
+            JOIN scenarios ON scenarios.id = scenario_versions.scenario_id
+            WHERE runs.status = 'succeeded' AND scenarios.project_id = ?
+            ORDER BY runs.id
+            """,
+            (project_id,),
+        ).fetchall()
+        return [run_row_to_dict(row) for row in rows]
+
     def get_run_project_id(self, run_id: int) -> int:
         row = self.connection.execute(
             """
@@ -5014,6 +5050,13 @@ class AnalystStore:
         self.connection.execute("DELETE FROM run_dispatch_result_indexes WHERE run_id = ?", (run_id,))
         self.connection.commit()
 
+    def delete_run_dispatch_result_index(self, run_id: int) -> bool:
+        with self._lock:
+            if self.get_run_dispatch_result_index(run_id) is None:
+                return False
+            self._discard_run_dispatch_result_index(run_id)
+            return True
+
     def get_run_dispatch_result_index(self, run_id: int) -> dict[str, Any] | None:
         self.get_run(run_id)
         index_row = self.connection.execute(
@@ -5121,6 +5164,13 @@ class AnalystStore:
         self.connection.execute("DELETE FROM run_asset_dispatch_result_indexes WHERE run_id = ?", (run_id,))
         self.connection.commit()
 
+    def delete_run_asset_dispatch_result_index(self, run_id: int) -> bool:
+        with self._lock:
+            if self.get_run_asset_dispatch_result_index(run_id) is None:
+                return False
+            self._discard_run_asset_dispatch_result_index(run_id)
+            return True
+
     def get_run_asset_dispatch_result_index(self, run_id: int) -> dict[str, Any] | None:
         self.get_run(run_id)
         index_row = self.connection.execute(
@@ -5215,6 +5265,13 @@ class AnalystStore:
     def _discard_run_summary_result_index(self, run_id: int) -> None:
         self.connection.execute("DELETE FROM run_summary_result_indexes WHERE run_id = ?", (run_id,))
         self.connection.commit()
+
+    def delete_run_summary_result_index(self, run_id: int) -> bool:
+        with self._lock:
+            if self.get_run_summary_result_index(run_id) is None:
+                return False
+            self._discard_run_summary_result_index(run_id)
+            return True
 
     def get_run_summary_result_index(self, run_id: int) -> dict[str, Any] | None:
         self.get_run(run_id)

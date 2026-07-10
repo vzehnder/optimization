@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/projects/{project_id}/cleanup-results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Admin Cleanup Project Results */
+        post: operations["admin_cleanup_project_results_api_admin_projects__project_id__cleanup_results_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/projects/{project_id}/client-access": {
         parameters: {
             query?: never;
@@ -67,6 +84,23 @@ export interface paths {
         put?: never;
         /** Admin Rebuild All Run Results */
         post: operations["admin_rebuild_all_run_results_api_admin_runs_rebuild_results_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/runs/{run_id}/cleanup-results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Admin Cleanup Run Results */
+        post: operations["admin_cleanup_run_results_api_admin_runs__run_id__cleanup_results_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1639,6 +1673,11 @@ export interface components {
             /** Public Title */
             public_title: string;
         };
+        /** ResultCleanupRequest */
+        ResultCleanupRequest: {
+            /** Targets */
+            targets?: string[];
+        };
         /** ScenarioCreateRequest */
         ScenarioCreateRequest: {
             /**
@@ -1825,6 +1864,41 @@ export interface operations {
             };
         };
     };
+    admin_cleanup_project_results_api_admin_projects__project_id__cleanup_results_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResultCleanupRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     admin_list_project_client_access_api_admin_projects__project_id__client_access_get: {
         parameters: {
             query?: never;
@@ -1933,6 +2007,41 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_cleanup_run_results_api_admin_runs__run_id__cleanup_results_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResultCleanupRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

@@ -45,6 +45,7 @@ from app.persistence import (
 )
 from app.result_comparison import ComparisonError, compare_runs
 from app.result_indexing import rebuild_all_run_results, rebuild_run_results
+from app.result_retention import cleanup_project_result_data, cleanup_run_result_data
 from app.results import ResultReadError, apply_dashboard_template, read_run_results
 from app.time_series_catalog import (
     CatalogImportRequest as PreparedCatalogImportRequest,
@@ -343,6 +344,10 @@ class TimeSeriesSetReplaceRequest(BaseModel):
     source_unit: str | None = None
     signal_mappings: list[TimeSeriesCatalogSignalMappingRequest] = Field(default_factory=list)
     change_summary: str | None = None
+
+
+class ResultCleanupRequest(BaseModel):
+    targets: list[str] = Field(default_factory=list)
 
 
 class DraftPromotionError(ValueError):
@@ -2134,6 +2139,32 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         outcome = rebuild_run_results(store=analyst_store, run=run, artifact_root=configured_artifact_root, force=force)
         return {"rebuild": outcome}
+
+    @app.post("/api/admin/runs/{run_id}/cleanup-results")
+    async def admin_cleanup_run_results(run_id: int, payload: ResultCleanupRequest, request: Request):
+        require_admin_user(request)
+        try:
+            cleanup = cleanup_run_result_data(
+                store=analyst_store,
+                run_id=run_id,
+                targets=payload.targets,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"cleanup": cleanup}
+
+    @app.post("/api/admin/projects/{project_id}/cleanup-results")
+    async def admin_cleanup_project_results(project_id: int, payload: ResultCleanupRequest, request: Request):
+        require_admin_user(request)
+        try:
+            cleanup = cleanup_project_result_data(
+                store=analyst_store,
+                project_id=project_id,
+                targets=payload.targets,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"cleanup": cleanup}
 
     @app.get("/api/run-comparisons")
     async def get_run_comparison(baseline_run_id: int, candidate_run_id: int, series: str | None = None):

@@ -1092,6 +1092,19 @@
         "title": "PublicationDraftWriteRequest",
         "type": "object"
       },
+      "ResultCleanupRequest": {
+        "properties": {
+          "targets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "title": "ResultCleanupRequest",
+        "type": "object"
+      },
       "ScenarioCreateRequest": {
         "properties": {
           "description": {
@@ -1600,6 +1613,53 @@
         "summary": "Root"
       }
     },
+    "/api/admin/projects/{project_id}/cleanup-results": {
+      "post": {
+        "operationId": "admin_cleanup_project_results_api_admin_projects__project_id__cleanup_results_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResultCleanupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Cleanup Project Results"
+      }
+    },
     "/api/admin/projects/{project_id}/client-access": {
       "get": {
         "operationId": "admin_list_project_client_access_api_admin_projects__project_id__client_access_get",
@@ -1764,6 +1824,53 @@
           }
         },
         "summary": "Admin Rebuild All Run Results"
+      }
+    },
+    "/api/admin/runs/{run_id}/cleanup-results": {
+      "post": {
+        "operationId": "admin_cleanup_run_results_api_admin_runs__run_id__cleanup_results_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResultCleanupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Cleanup Run Results"
       }
     },
     "/api/admin/runs/{run_id}/rebuild-results": {
