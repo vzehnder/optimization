@@ -955,6 +955,7 @@ class AnalystStore:
         self._ensure_column("run_dispatch_result_indexes", "lineage_json", "TEXT NOT NULL DEFAULT '{}'")
         self._ensure_column("run_asset_dispatch_result_indexes", "lineage_json", "TEXT NOT NULL DEFAULT '{}'")
         self._ensure_column("run_summary_result_indexes", "lineage_json", "TEXT NOT NULL DEFAULT '{}'")
+        self._ensure_query_shape_indexes()
         self.connection.commit()
 
     def _ensure_column(self, table_name: str, column_name: str, definition: str) -> None:
@@ -981,6 +982,32 @@ class AnalystStore:
         }
         if column_name not in columns:
             self.connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
+    def _ensure_query_shape_indexes(self) -> None:
+        self.connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_time_series_values_set_period_signal
+            ON time_series_values (time_series_set_id, time_series_period_id, time_series_signal_id)
+            """
+        )
+        self.connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_runs_status_scenario_version
+            ON runs (status, scenario_version_id, id)
+            """
+        )
+        self.connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_scenario_versions_scenario
+            ON scenario_versions (scenario_id, id)
+            """
+        )
+        self.connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_scenarios_project
+            ON scenarios (project_id, id)
+            """
+        )
 
     def _ensure_hydraulic_diagram_items_support_reaches(self) -> None:
         if self.database_backend != "sqlite":
