@@ -571,6 +571,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/time-series-sets/{time_series_set_id}/transformations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Project Time Series Transformation */
+        post: operations["apply_project_time_series_transformation_api_projects__project_id__time_series_sets__time_series_set_id__transformations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/time-series-sets/{time_series_set_id}/values": {
         parameters: {
             query?: never;
@@ -1808,6 +1825,19 @@ export interface components {
             /** Edits */
             edits?: components["schemas"]["TimeSeriesSetValueEditRequest"][];
         };
+        /** TimeSeriesTransformationRequest */
+        TimeSeriesTransformationRequest: {
+            /** Output Name */
+            output_name?: string | null;
+            /** Output Version Label */
+            output_version_label?: string | null;
+            /** Parameters */
+            parameters?: {
+                [key: string]: unknown;
+            };
+            /** Transformation Type */
+            transformation_type: string;
+        };
         /** UserCreateRequest */
         UserCreateRequest: {
             /**
@@ -3009,6 +3039,42 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_project_time_series_transformation_api_projects__project_id__time_series_sets__time_series_set_id__transformations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                time_series_set_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TimeSeriesTransformationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };

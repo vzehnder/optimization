@@ -33,10 +33,12 @@ from app.time_series_catalog import (
     CatalogValueEdit,
     PreparedTimeSeriesCatalogImport,
     TimeSeriesCatalogError,
+    catalog_content_hash,
     compute_catalog_content_hash,
     normalize_optional_text,
     validate_catalog_value_edits,
 )
+from app.transformations import TransformationInputSet, get_transformation_definition
 from app.legacy_series_extraction import (
     PreparedDraftSeriesExtraction,
     prepare_draft_series_extraction,
@@ -2378,6 +2380,273 @@ class AnalystStore:
                 for signal_id, period_id, value_numeric, source_row_number in values
             ],
         )
+
+    def apply_time_series_transformation(
+        self,
+        *,
+        project_id: int,
+        time_series_set_id: int,
+        transformation_type: str,
+        raw_parameters: dict[str, Any],
+        output_name: str | None = None,
+        output_version_label: str | None = None,
+        created_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        with self._lock:
+            self.get_project(project_id)
+            source_set = self.get_time_series_set(project_id, time_series_set_id)
+            definition = get_transformation_definition(transformation_type)
+            input_set = TransformationInputSet(
+                time_series_set_id=time_series_set_id,
+                revision_number=source_set["revision_number"],
+                content_hash=source_set["content_hash"],
+                signals=source_set["signals"],
+                periods=source_set["periods"],
+                values=source_set["values"],
+            )
+            parameters = definition.validate_parameters(raw_parameters, input_set)
+            parameters_dict = definition.parameters_to_dict(parameters)
+            output = definition.execute(input_set, parameters)
+
+            recipe_hash = catalog_content_hash(
+                {
+                    "transformation_type": transformation_type,
+                    "implementation_version": definition.implementation_version,
+                    "parameter_schema_version": definition.parameter_schema_version,
+                    "parameters": parameters_dict,
+                    "inputs": output.lineage_inputs,
+                }
+            )
+            existing = self._find_derived_time_series_set_by_recipe_hash(
+                project_id=project_id, recipe_hash=recipe_hash
+            )
+            if existing is not None:
+                return existing
+
+            resolved_name = (
+                normalize_optional_text(output_name)
+                or f"{source_set['name']}__{transformation_type}"
+            )
+            version_row = self.connection.execute(
+                """
+                SELECT COALESCE(MAX(version_number), 0) AS max_version
+                FROM time_series_sets
+                WHERE project_id = ? AND name = ?
+                """,
+                (project_id, resolved_name),
+            ).fetchone()
+            version_number = int(version_row["max_version"]) + 1
+            resolved_version_label = normalize_optional_text(output_version_label) or (
+                f"{transformation_type} v{version_number}"
+            )
+
+            entity_key_by_signal_key = {
+                str(signal["signal_key"]): signal.get("entity_key")
+                for signal in output.signals
+            }
+            prepared_signals = [
+                CatalogSignal(
+                    signal_key=str(signal["signal_key"]),
+                    unit=str(signal["unit"]),
+                    source_column=str(signal.get("source_column") or ""),
+                    source_unit=str(signal.get("source_unit") or signal["unit"]),
+                    entity_type=signal.get("entity_type"),
+                    entity_key=signal.get("entity_key"),
+                )
+                for signal in output.signals
+            ]
+            prepared_periods = [
+                CatalogPeriod(
+                    period_index=int(period["period_index"]),
+                    timestamp_start=str(period["timestamp_start"]),
+                    timestamp_end=str(period["timestamp_end"]),
+                    duration_hours=float(period["duration_hours"]),
+                )
+                for period in output.periods
+            ]
+            prepared_values = [
+                CatalogValue(
+                    period_index=int(value["period_index"]),
+                    signal_key=str(value["signal_key"]),
+                    value_numeric=float(value["value_numeric"]),
+                    source_row_number=0,
+                    entity_key=entity_key_by_signal_key.get(str(value["signal_key"])),
+                )
+                for value in output.values
+            ]
+            content_hash = compute_catalog_content_hash(
+                set_name=resolved_name,
+                version_label=resolved_version_label,
+                data_kind="derived",
+                timezone=source_set["timezone"],
+                signals=[signal.__dict__ for signal in prepared_signals],
+                periods=[period.__dict__ for period in prepared_periods],
+                values=[value.__dict__ for value in prepared_values],
+            )
+            prepared_import = PreparedTimeSeriesCatalogImport(
+                set_name=resolved_name,
+                version_label=resolved_version_label,
+                data_kind="derived",
+                timezone=source_set["timezone"],
+                signals=prepared_signals,
+                periods=prepared_periods,
+                values=prepared_values,
+                content_hash=content_hash,
+                mapping_summary={},
+            )
+
+            now = utc_now_iso()
+            existing_label = self.connection.execute(
+                """
+                SELECT id FROM time_series_sets
+                WHERE project_id = ? AND name = ? AND version_label = ?
+                """,
+                (project_id, resolved_name, resolved_version_label),
+            ).fetchone()
+            if existing_label is not None:
+                raise ValueError(
+                    f"time-series set {resolved_name!r} already has version_label "
+                    f"{resolved_version_label!r}"
+                )
+
+            cursor = self.connection.execute(
+                """
+                INSERT INTO time_series_sets (
+                    project_id,
+                    name,
+                    version_number,
+                    version_label,
+                    data_kind,
+                    timezone,
+                    status,
+                    content_hash,
+                    created_at,
+                    updated_at,
+                    created_by,
+                    updated_by
+                )
+                VALUES (?, ?, ?, ?, 'derived', ?, 'validated', ?, ?, ?, ?, ?)
+                """,
+                (
+                    project_id,
+                    resolved_name,
+                    version_number,
+                    resolved_version_label,
+                    source_set["timezone"],
+                    content_hash,
+                    now,
+                    now,
+                    created_by,
+                    created_by,
+                ),
+            )
+            derived_set_id = int(cursor.lastrowid)
+            try:
+                metadata = {
+                    "transformation": {
+                        "type": transformation_type,
+                        "implementation_version": definition.implementation_version,
+                        "parameter_schema_version": definition.parameter_schema_version,
+                        "parameters": parameters_dict,
+                        "recipe_hash": recipe_hash,
+                        "inputs": output.lineage_inputs,
+                    }
+                }
+                self.connection.execute(
+                    """
+                    INSERT INTO time_series_set_revisions (
+                        time_series_set_id,
+                        revision_number,
+                        time_series_source_id,
+                        superseded_revision_number,
+                        content_hash,
+                        change_summary,
+                        created_at,
+                        created_by,
+                        metadata_json
+                    )
+                    VALUES (?, 1, NULL, NULL, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        derived_set_id,
+                        content_hash,
+                        f"Derived via {transformation_type}",
+                        now,
+                        created_by,
+                        json.dumps(metadata, sort_keys=True),
+                    ),
+                )
+                self._insert_time_series_signals_periods_values(
+                    time_series_set_id=derived_set_id,
+                    prepared_import=prepared_import,
+                    now=now,
+                )
+                for lineage_input in output.lineage_inputs:
+                    self.connection.execute(
+                        """
+                        INSERT INTO validation_dependencies (
+                            owner_type, owner_id, dependency_type, dependency_id,
+                            recorded_hash, created_at, updated_at
+                        )
+                        VALUES ('time_series_set', ?, 'time_series_set', ?, ?, ?, ?)
+                        """,
+                        (
+                            derived_set_id,
+                            str(lineage_input["time_series_set_id"]),
+                            lineage_input["content_hash"],
+                            now,
+                            now,
+                        ),
+                    )
+                self.connection.execute(
+                    """
+                    INSERT INTO validation_dependencies (
+                        owner_type, owner_id, dependency_type, dependency_id,
+                        recorded_hash, created_at, updated_at
+                    )
+                    VALUES ('time_series_set', ?, 'transformation_implementation', ?, ?, ?, ?)
+                    """,
+                    (
+                        derived_set_id,
+                        transformation_type,
+                        str(definition.implementation_version),
+                        now,
+                        now,
+                    ),
+                )
+            except Exception:
+                # PostgreSQL runs autocommit, so a mid-write failure must clean
+                # up the already-inserted rows instead of relying on rollback.
+                self.connection.rollback()
+                self.connection.execute(
+                    "DELETE FROM time_series_sets WHERE id = ?",
+                    (derived_set_id,),
+                )
+                self.connection.commit()
+                raise
+
+            self.connection.commit()
+            return self.get_time_series_set(project_id, derived_set_id)
+
+    def _find_derived_time_series_set_by_recipe_hash(
+        self, *, project_id: int, recipe_hash: str
+    ) -> dict[str, Any] | None:
+        rows = self.connection.execute(
+            """
+            SELECT id FROM time_series_sets
+            WHERE project_id = ? AND data_kind = 'derived'
+            """,
+            (project_id,),
+        ).fetchall()
+        for row in rows:
+            derived_set_id = int(row["id"])
+            derived_set = self.get_time_series_set(project_id, derived_set_id)
+            transformation_meta = derived_set.get("revision_metadata", {}).get(
+                "transformation", {}
+            )
+            if transformation_meta.get("recipe_hash") == recipe_hash:
+                return derived_set
+        return None
 
     def replace_time_series_set_source(
         self,

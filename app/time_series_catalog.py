@@ -16,6 +16,7 @@ TIME_SERIES_DATA_KINDS = {
     "simulated",
     "synthetic",
     "mixed",
+    "derived",
 }
 
 

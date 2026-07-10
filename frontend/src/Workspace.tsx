@@ -19,6 +19,7 @@ import {
 import { hierarchyProvenanceHashLabel } from "./caseHierarchy";
 import {
   ApiError,
+  applyTimeSeriesTransformation,
   bindCaseTimeSeries,
   cloneCaseInputVariant,
   compareRuns,
@@ -110,6 +111,7 @@ import {
   type ScenarioVersionDetail,
   type TimeSeriesSetReplacePayload,
   type TimeSeriesSource,
+  type TimeSeriesTransformationPayload,
 } from "./api/client";
 import {
   InflowImportError,
@@ -1705,6 +1707,211 @@ function TimeSeriesSetReplacePanel({
   );
 }
 
+type TimeSeriesTransformationFormState = {
+  signal_key: string;
+  scale_factor: string;
+  output_name: string;
+  output_version_label: string;
+};
+
+function defaultTimeSeriesTransformationFormState(
+  signals: ProjectTimeSeriesSetSignal[],
+): TimeSeriesTransformationFormState {
+  return {
+    signal_key: signals[0]?.signal_key ?? "",
+    scale_factor: "1.0",
+    output_name: "",
+    output_version_label: "",
+  };
+}
+
+function TimeSeriesTransformationPanel({
+  projectId,
+  timeSeriesSet,
+}: {
+  projectId: number;
+  timeSeriesSet: ProjectTimeSeriesSet;
+}) {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [form, setForm] = useState<TimeSeriesTransformationFormState>(() =>
+    defaultTimeSeriesTransformationFormState(timeSeriesSet.signals),
+  );
+  const [error, setError] = useState("");
+
+  const mutation = useMutation({
+    mutationFn: () => {
+      const payload: TimeSeriesTransformationPayload = {
+        transformation_type: "scale_signal",
+        parameters: {
+          signal_key: form.signal_key,
+          scale_factor: Number(form.scale_factor),
+        },
+        output_name: form.output_name.trim() || undefined,
+        output_version_label: form.output_version_label.trim() || undefined,
+      };
+      return applyTimeSeriesTransformation(projectId, timeSeriesSet.id, payload);
+    },
+    onSuccess: (derivedSet) => {
+      setError("");
+      void queryClient.invalidateQueries({
+        queryKey: timeSeriesCatalogQueryKey(projectId),
+      });
+      queryClient.setQueryData(
+        timeSeriesSetQueryKey(projectId, derivedSet.id),
+        derivedSet,
+      );
+      navigate(`/projects/${projectId}/time-series-sets/${derivedSet.id}`);
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError)),
+  });
+
+  if (timeSeriesSet.signals.length === 0) {
+    return null;
+  }
+
+  const scaleFactorIsValid =
+    form.scale_factor.trim() !== "" && Number.isFinite(Number(form.scale_factor));
+
+  return (
+    <section
+      className="workspace-section"
+      aria-labelledby="set-transformations"
+    >
+      <h2 id="set-transformations">Transformaciones</h2>
+      <p>
+        Aplica una transformacion allowlisted sobre este set para crear un
+        nuevo set derivado. El set origen no se modifica.
+      </p>
+      {error ? <p role="alert">{error}</p> : null}
+      <div className="version-actions">
+        <label htmlFor="transformation-signal-key">Senal a escalar</label>
+        <select
+          id="transformation-signal-key"
+          value={form.signal_key}
+          onChange={(event) =>
+            setForm((current) => ({
+              ...current,
+              signal_key: event.target.value,
+            }))
+          }
+          disabled={mutation.isPending}
+        >
+          {timeSeriesSet.signals.map((signal) => (
+            <option key={signal.signal_key} value={signal.signal_key}>
+              {signal.signal_key} ({signal.unit})
+            </option>
+          ))}
+        </select>
+        <label htmlFor="transformation-scale-factor">Factor de escala</label>
+        <input
+          id="transformation-scale-factor"
+          type="number"
+          step="any"
+          value={form.scale_factor}
+          onChange={(event) =>
+            setForm((current) => ({
+              ...current,
+              scale_factor: event.target.value,
+            }))
+          }
+          disabled={mutation.isPending}
+        />
+        <label htmlFor="transformation-output-name">
+          Nombre del set derivado (opcional)
+        </label>
+        <input
+          id="transformation-output-name"
+          value={form.output_name}
+          onChange={(event) =>
+            setForm((current) => ({
+              ...current,
+              output_name: event.target.value,
+            }))
+          }
+          disabled={mutation.isPending}
+        />
+        <label htmlFor="transformation-output-version-label">
+          Version del set derivado (opcional)
+        </label>
+        <input
+          id="transformation-output-version-label"
+          value={form.output_version_label}
+          onChange={(event) =>
+            setForm((current) => ({
+              ...current,
+              output_version_label: event.target.value,
+            }))
+          }
+          disabled={mutation.isPending}
+        />
+        <button
+          type="button"
+          onClick={() => mutation.mutate()}
+          disabled={mutation.isPending || !form.signal_key || !scaleFactorIsValid}
+        >
+          {mutation.isPending
+            ? "Aplicando transformacion"
+            : "Aplicar scale_signal"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function TimeSeriesSetLineageSummary({
+  projectId,
+  revisionMetadata,
+}: {
+  projectId: number;
+  revisionMetadata: Record<string, unknown> | undefined;
+}) {
+  const transformation = revisionMetadata?.transformation;
+  if (!isRecord(transformation)) {
+    return null;
+  }
+  const inputs = Array.isArray(transformation.inputs) ? transformation.inputs : [];
+  const parameters = isRecord(transformation.parameters)
+    ? transformation.parameters
+    : {};
+  return (
+    <section className="workspace-section" aria-labelledby="set-lineage">
+      <h2 id="set-lineage">Lineage de transformacion</h2>
+      <p>
+        Derivado con <strong>{String(transformation.type)}</strong> (impl v
+        {String(transformation.implementation_version)}, esquema de
+        parametros v{String(transformation.parameter_schema_version)}).
+      </p>
+      <p>
+        Parametros:{" "}
+        {Object.entries(parameters)
+          .map(([key, value]) => `${key}=${String(value)}`)
+          .join(", ")}
+      </p>
+      <ul className="resource-list">
+        {inputs.filter(isRecord).map((input, index) => (
+          <li key={index}>
+            <Link
+              to={`/projects/${projectId}/time-series-sets/${String(
+                input.time_series_set_id,
+              )}`}
+            >
+              Set de entrada {String(input.time_series_set_id)}
+            </Link>
+            <p>
+              revision {String(input.revision_number)} |{" "}
+              <code>{String(input.content_hash)}</code>
+            </p>
+            {Array.isArray(input.signals) ? (
+              <p>senales: {input.signals.map((signal) => String(signal)).join(", ")}</p>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function TimeSeriesSetOriginSummary({
   revisionMetadata,
 }: {
@@ -1840,6 +2047,10 @@ export function TimeSeriesSetDetailView() {
           </p>
         </section>
         <TimeSeriesSetOriginSummary revisionMetadata={set.revision_metadata} />
+        <TimeSeriesSetLineageSummary
+          projectId={projectId}
+          revisionMetadata={set.revision_metadata}
+        />
         <section className="workspace-section" aria-labelledby="set-horizon">
           <h2 id="set-horizon">Horizonte</h2>
           <p>{set.horizon.period_count} periodos</p>
@@ -1858,6 +2069,10 @@ export function TimeSeriesSetDetailView() {
         </section>
         <TimeSeriesSetValuesEditor projectId={projectId} timeSeriesSet={set} />
         <TimeSeriesSetReplacePanel projectId={projectId} timeSeriesSet={set} />
+        <TimeSeriesTransformationPanel
+          projectId={projectId}
+          timeSeriesSet={set}
+        />
         <section
           className="workspace-section"
           aria-labelledby="set-revision-history"

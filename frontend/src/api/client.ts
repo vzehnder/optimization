@@ -400,6 +400,13 @@ export interface TimeSeriesSetValuesEditPayload {
   change_summary?: string;
 }
 
+export interface TimeSeriesTransformationPayload {
+  transformation_type: string;
+  parameters: Record<string, unknown>;
+  output_name?: string;
+  output_version_label?: string;
+}
+
 export interface TimeSeriesSetReplacementSource {
   id: string;
   kind: string;
@@ -1953,6 +1960,26 @@ export async function editTimeSeriesSetValues(
     `/api/projects/${projectId}/time-series-sets/${timeSeriesSetId}/values`,
     {
       method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrfToken,
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+  return response.time_series_set;
+}
+
+export async function applyTimeSeriesTransformation(
+  projectId: number,
+  timeSeriesSetId: number,
+  payload: TimeSeriesTransformationPayload,
+): Promise<ProjectTimeSeriesSet> {
+  const csrfToken = await getCsrfToken();
+  const response = await requestJson<{ time_series_set: ProjectTimeSeriesSet }>(
+    `/api/projects/${projectId}/time-series-sets/${timeSeriesSetId}/transformations`,
+    {
+      method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-CSRF-Token": csrfToken,

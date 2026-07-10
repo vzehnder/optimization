@@ -1518,6 +1518,47 @@
         "title": "TimeSeriesSetValuesEditRequest",
         "type": "object"
       },
+      "TimeSeriesTransformationRequest": {
+        "properties": {
+          "output_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Name"
+          },
+          "output_version_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Version Label"
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "title": "Parameters",
+            "type": "object"
+          },
+          "transformation_type": {
+            "minLength": 1,
+            "title": "Transformation Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "transformation_type"
+        ],
+        "title": "TimeSeriesTransformationRequest",
+        "type": "object"
+      },
       "UserCreateRequest": {
         "properties": {
           "display_name": {
@@ -3068,6 +3109,62 @@
           }
         },
         "summary": "List Project Time Series Set Revisions"
+      }
+    },
+    "/api/projects/{project_id}/time-series-sets/{time_series_set_id}/transformations": {
+      "post": {
+        "operationId": "apply_project_time_series_transformation_api_projects__project_id__time_series_sets__time_series_set_id__transformations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "time_series_set_id",
+            "required": true,
+            "schema": {
+              "title": "Time Series Set Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TimeSeriesTransformationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Project Time Series Transformation"
       }
     },
     "/api/projects/{project_id}/time-series-sets/{time_series_set_id}/values": {
