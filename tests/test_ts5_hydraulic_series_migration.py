@@ -243,6 +243,56 @@ class HydraulicTimeSeriesMigrationTests(unittest.TestCase):
         ).json()["time_series_sets"]
         self.assertEqual(len(generic_list), 1)
 
+    def test_hydraulic_set_reports_migration_status_on_reload_not_only_after_clicking(self):
+        created = self._create_diagram()
+        save_response = self._save_reservoir(created["revision"])
+        node = save_response.json()["diagram"]["nodes"][0]
+        legacy_id = self._seed_legacy_inflow_set(
+            case_id=save_response.json()["diagram"]["optimization_case"]["id"],
+            case_node_id=node["entity_id"],
+            values=[5.0, 6.0],
+        )
+
+        before_detail = self.client.get(
+            f"/api/projects/{self.project['id']}/time-series-sets/hydraulic/{legacy_id}"
+        ).json()["hydraulic_time_series_set"]
+        self.assertIsNone(before_detail["migration"])
+        before_summary = next(
+            item
+            for item in self.client.get(
+                f"/api/projects/{self.project['id']}/time-series-sets/hydraulic"
+            ).json()["hydraulic_time_series_sets"]
+            if item["id"] == legacy_id
+        )
+        self.assertIsNone(before_summary["migration"])
+
+        migrate_response = self.client.post(
+            f"/api/projects/{self.project['id']}/time-series-sets/hydraulic/{legacy_id}/migrate"
+        ).json()
+        migrated_set_id = migrate_response["time_series_set"]["id"]
+
+        # A second GET (simulating a page reload, not a fresh migrate click)
+        # must still report the migration, since it already happened.
+        after_detail = self.client.get(
+            f"/api/projects/{self.project['id']}/time-series-sets/hydraulic/{legacy_id}"
+        ).json()["hydraulic_time_series_set"]
+        self.assertIsNotNone(after_detail["migration"])
+        self.assertEqual(after_detail["migration"]["time_series_set_id"], migrated_set_id)
+        self.assertEqual(
+            after_detail["migration"]["time_series_set_name"],
+            migrate_response["time_series_set"]["name"],
+        )
+        self.assertEqual(after_detail["migration"]["migrated_by"], "internal_analyst")
+
+        after_summary = next(
+            item
+            for item in self.client.get(
+                f"/api/projects/{self.project['id']}/time-series-sets/hydraulic"
+            ).json()["hydraulic_time_series_sets"]
+            if item["id"] == legacy_id
+        )
+        self.assertEqual(after_summary["migration"]["time_series_set_id"], migrated_set_id)
+
     def test_bulk_sweep_migrates_all_legacy_sets_and_is_stable_on_repeat(self):
         created = self._create_diagram()
         save_response = self._save_reservoir(created["revision"])

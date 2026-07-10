@@ -14,6 +14,19 @@ def _hydraulic_signal_unit(signal_key: str) -> str:
     return definition.unit if definition is not None else ""
 
 
+def _hydraulic_migration_status(raw: Mapping[str, Any]) -> dict[str, Any] | None:
+    migrated_time_series_set_id = raw.get("migrated_time_series_set_id")
+    if migrated_time_series_set_id is None:
+        return None
+    return {
+        "time_series_set_id": int(migrated_time_series_set_id),
+        "time_series_set_name": str(raw.get("migrated_time_series_set_name")),
+        "version_label": str(raw.get("migrated_time_series_set_version_label")),
+        "migrated_by": str(raw.get("migrated_by")),
+        "migrated_at": str(raw.get("migrated_at")),
+    }
+
+
 def build_hydraulic_catalog_summary(raw: Mapping[str, Any]) -> dict[str, Any]:
     signal_key = str(raw["signal_key"])
     entity_type = str(raw["entity_type"])
@@ -38,6 +51,7 @@ def build_hydraulic_catalog_summary(raw: Mapping[str, Any]) -> dict[str, Any]:
         "period_count": int(raw["period_count"]),
         "created_at": raw["created_at"],
         "updated_at": raw["updated_at"],
+        "migration": _hydraulic_migration_status(raw),
         "origin": {
             "kind": HYDRAULIC_LEGACY_ORIGIN_KIND,
             "entity_type": entity_type,

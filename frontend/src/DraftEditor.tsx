@@ -1276,10 +1276,12 @@ function TimeSeriesCatalogImportPanel({
 
   return (
     <section className="source-catalog">
-      <h3>TS-2 catalog import</h3>
+      <h3>Import mapped columns to catalog</h3>
       <p className="source-note">
         Preview source, map columns to canonical signals, then create one
-        project-scoped catalog set.
+        project-scoped catalog set. Use this for a fresh mapping; to reuse
+        this source&apos;s already-validated draft rows instead, use
+        &quot;Extract legacy series to catalog&quot; below.
       </p>
       <div className="draft-field-grid">
         <TextInput
@@ -1511,7 +1513,7 @@ function DraftSeriesExtractionPanel({
       <div className="draft-field-grid">
         <TextInput
           id="extraction_set_name"
-          label="Catalog set name"
+          label="Extraction set name"
           value={form.set_name}
           onChange={(value) =>
             setForm((current) => ({ ...current, set_name: value }))
@@ -1521,7 +1523,7 @@ function DraftSeriesExtractionPanel({
         />
         <TextInput
           id="extraction_version_label"
-          label="Catalog version label"
+          label="Extraction version label"
           value={form.version_label}
           onChange={(value) =>
             setForm((current) => ({ ...current, version_label: value }))
@@ -1531,7 +1533,7 @@ function DraftSeriesExtractionPanel({
         />
         <SelectInput
           id="extraction_data_kind"
-          label="Catalog data kind"
+          label="Extraction data kind"
           value={form.data_kind}
           options={timeSeriesCatalogDataKindOptions.map((option) => ({
             value: option.value,
@@ -1543,7 +1545,7 @@ function DraftSeriesExtractionPanel({
         />
         <TextInput
           id="extraction_timezone"
-          label="Catalog timezone"
+          label="Extraction timezone"
           value={form.timezone}
           onChange={(value) =>
             setForm((current) => ({ ...current, timezone: value }))
@@ -1635,6 +1637,13 @@ function TimeSeriesWorkflow({
 
   return (
     <div className="time-series-workflow">
+      <p className="source-note">
+        A draft's embedded time series is this draft's legacy storage: rows
+        live inside the draft document itself. For new work, prefer building
+        reusable series directly in the project's time-series catalog; use
+        &quot;Extract legacy series to catalog&quot; below to turn an
+        already-validated source here into a catalog set instead.
+      </p>
       {dirty ? (
         <p className="source-note">
           Save draft before uploading or changing time-series sources.

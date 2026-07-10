@@ -447,6 +447,14 @@ export interface HydraulicTimeSeriesSetOrigin {
   signal_key: string;
 }
 
+export interface HydraulicTimeSeriesSetMigration {
+  time_series_set_id: number;
+  time_series_set_name: string;
+  version_label: string;
+  migrated_by: string;
+  migrated_at: string;
+}
+
 export interface HydraulicTimeSeriesSetSummary {
   id: number;
   project_id: number;
@@ -466,6 +474,7 @@ export interface HydraulicTimeSeriesSetSummary {
   created_at?: string;
   updated_at?: string;
   origin: HydraulicTimeSeriesSetOrigin;
+  migration: HydraulicTimeSeriesSetMigration | null;
 }
 
 export interface HydraulicTimeSeriesSetSignal {

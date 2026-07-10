@@ -255,6 +255,8 @@ describe("application shell", () => {
       await screen.findByRole("heading", { name: "Run Results" }),
     ).toBeVisible();
     expect(await screen.findByText("hybrid_system")).toBeVisible();
+    expect(screen.getByText("Nombre del caso")).toBeVisible();
+    expect(screen.queryByText("Case Name")).not.toBeInTheDocument();
     expect(screen.getByText("1250.5")).toBeVisible();
     expect(screen.getByText("total_market_value_usd")).toBeVisible();
     expect(screen.getByText("total_hydro_generation_mwh")).toBeVisible();
@@ -5701,6 +5703,8 @@ describe("application shell", () => {
           sell_price: "45.0",
         },
       ],
+      validation: { ok: true },
+      validated_rows: [],
     };
     let lastImportBody: unknown = null;
     const fetchMock = vi.fn(
@@ -5887,6 +5891,11 @@ describe("application shell", () => {
     expect(
       await screen.findByRole("heading", { name: "Draft estructurado" }),
     ).toBeVisible();
+    expect(
+      screen.getByText(
+        /embedded time series is this draft's legacy storage/,
+      ),
+    ).toBeVisible();
     await user.upload(
       screen.getByLabelText("Source file"),
       new File(
@@ -5897,6 +5906,17 @@ describe("application shell", () => {
     );
     await user.click(screen.getByRole("button", { name: "Upload source" }));
     expect(await screen.findByText("price.csv")).toBeVisible();
+
+    expect(
+      screen.getByRole("heading", { name: "Import mapped columns to catalog" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByText("TS-2 catalog import"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Extract legacy series to catalog" }),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Extraction set name")).toBeVisible();
 
     await user.clear(screen.getByLabelText("Catalog set name"));
     await user.type(
@@ -6734,10 +6754,9 @@ describe("application shell", () => {
       await screen.findByRole("heading", { name: "Version 1" }),
     ).toBeVisible();
     expect(screen.getAllByText("expert_case").length).toBeGreaterThan(0);
-    expect(
-      (screen.getByLabelText("Immutable system_case") as HTMLTextAreaElement)
-        .value,
-    ).toContain('"case_name": "expert_case"');
+    expect(screen.queryByText(/"time_series"/)).not.toBeInTheDocument();
+    await user.click(screen.getByText("Ver snapshot tecnico"));
+    expect(await screen.findByText(/"time_series"/)).toBeVisible();
 
     await user.click(screen.getByRole("link", { name: "Base case" }));
     await screen.findByRole("heading", { name: "Base case" });
@@ -8468,6 +8487,259 @@ describe("application shell", () => {
     ).toBeVisible();
   });
 
+  it("labels an extracted set's legacy origin distinctly from its source-file origin", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/react/projects/1/time-series-sets/501",
+    );
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-06-23T12:00:00Z",
+    };
+    const setDetail = {
+      id: 501,
+      project_id: 1,
+      name: "Draft prices extracted",
+      version_number: 1,
+      version_label: "v1",
+      revision_number: 1,
+      data_kind: "real",
+      timezone: "America/Santiago",
+      status: "validated",
+      content_hash: "sha256:abc123",
+      signal_count: 1,
+      period_count: 2,
+      created_at: "2026-07-04T12:00:00Z",
+      updated_at: "2026-07-04T12:00:00Z",
+      source_checksum: "sha256:def456",
+      revision_metadata: {
+        origin: {
+          kind: "legacy_draft_extraction",
+          scenario_id: 10,
+          source_id: "csv_source_1",
+          source_filename: "price.csv",
+          extracted_by: "internal_analyst",
+          extracted_at: "2026-07-08T12:00:00Z",
+        },
+      },
+      source: {
+        original_filename: "price.csv",
+        media_type: "text/csv",
+        checksum: "sha256:def456",
+        selected_sheet: null,
+      },
+      horizon: {
+        period_count: 2,
+        start: "2026-01-01T00:00:00-03:00",
+        end: "2026-01-01T02:00:00-03:00",
+      },
+      signals: [
+        {
+          signal_key: "price_usd_per_mwh",
+          unit: "USD/MWh",
+          source_column: "spot_price",
+          source_unit: "USD/MWh",
+          entity_type: null,
+          entity_key: null,
+        },
+      ],
+      periods: [],
+      values: [],
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/time-series-sets/501") {
+          return new Response(JSON.stringify({ time_series_set: setDetail }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/time-series-sets/501/revisions") {
+          return new Response(
+            JSON.stringify({ time_series_set_revisions: [] }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Draft prices extracted (v1)",
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Origen legacy" }),
+    ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Origen" })).toBeVisible();
+    expect(
+      screen.getByText(/Extraido desde borrador legacy/),
+    ).toBeVisible();
+    expect(screen.getByText(/price\.csv \(text\/csv\)/)).toBeVisible();
+  });
+
+  it("labels a migrated set's legacy origin distinctly from its source-file origin", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/react/projects/1/time-series-sets/502",
+    );
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-06-23T12:00:00Z",
+    };
+    const setDetail = {
+      id: 502,
+      project_id: 1,
+      name: "hydro_hydraulic_node_124_natural_inflow_m3s",
+      version_number: 1,
+      version_label: "migrated-v1-legacy",
+      revision_number: 1,
+      data_kind: "real",
+      timezone: "UTC",
+      status: "validated",
+      content_hash: "sha256:migrated123",
+      signal_count: 1,
+      period_count: 3,
+      created_at: "2026-07-09T12:00:00Z",
+      updated_at: "2026-07-09T12:00:00Z",
+      source_checksum: null,
+      revision_metadata: {
+        origin: {
+          kind: "hydraulic_legacy_migration",
+          hydraulic_time_series_set_id: 10,
+          legacy_version_label: "v1-legacy",
+          legacy_content_hash: "sha256:legacyhash",
+          migrated_by: "internal_analyst",
+          migrated_at: "2026-07-09T12:05:00Z",
+        },
+      },
+      source: null,
+      horizon: {
+        period_count: 3,
+        start: "2026-01-01T00:00:00Z",
+        end: "2026-01-01T03:00:00Z",
+      },
+      signals: [
+        {
+          signal_key: "natural_inflow_m3s",
+          unit: "m3/s",
+          source_column: null,
+          source_unit: null,
+          entity_type: "hydraulic_node",
+          entity_key: "reservoir_alpha",
+        },
+      ],
+      periods: [],
+      values: [],
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/time-series-sets/502") {
+          return new Response(JSON.stringify({ time_series_set: setDetail }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/time-series-sets/502/revisions") {
+          return new Response(
+            JSON.stringify({ time_series_set_revisions: [] }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "hydro_hydraulic_node_124_natural_inflow_m3s (migrated-v1-legacy)",
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Origen legacy" }),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/Migrado desde el set hidraulico legacy 10/),
+    ).toBeVisible();
+  });
+
   it("lists a legacy hydraulic series set in the project catalog and opens its detail", async () => {
     window.history.replaceState({}, "", "/react/projects/1");
     const project = {
@@ -8631,6 +8903,177 @@ describe("application shell", () => {
     expect(
       screen.getByText(/Laja System \/ Reservoir Alpha \(hydraulic_node\)/),
     ).toBeVisible();
+  });
+
+  it("shows a legacy hydraulic set's migration status on load, without needing to click migrate again", async () => {
+    window.history.replaceState({}, "", "/react/projects/1");
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-06-23T12:00:00Z",
+    };
+    const migration = {
+      time_series_set_id: 91,
+      time_series_set_name: "hydro_hydraulic_node_3_natural_inflow_m3s",
+      version_label: "migrated-v1-legacy",
+      migrated_by: "internal_analyst",
+      migrated_at: "2026-07-09T12:05:00Z",
+    };
+    const hydraulicSummary = {
+      id: 77,
+      project_id: 1,
+      name: "Laja System / Reservoir Alpha (natural_inflow_m3s)",
+      entity_type: "hydraulic_node",
+      entity_id: 3,
+      entity_key: "reservoir_alpha",
+      entity_display_name: "Reservoir Alpha",
+      hydraulic_system_name: "Laja System",
+      signal_key: "natural_inflow_m3s",
+      unit: "m3/s",
+      version_number: 1,
+      version_label: "v1",
+      status: "draft",
+      content_hash: "sha256:hydraulic-abc",
+      period_count: 1,
+      created_at: "2026-07-09T12:00:00Z",
+      updated_at: "2026-07-09T12:00:00Z",
+      origin: {
+        kind: "hydraulic_legacy",
+        entity_type: "hydraulic_node",
+        entity_id: 3,
+        signal_key: "natural_inflow_m3s",
+      },
+      migration,
+    };
+    const hydraulicDetail = {
+      ...hydraulicSummary,
+      signals: [
+        {
+          signal_key: "natural_inflow_m3s",
+          unit: "m3/s",
+          entity_type: "hydraulic_node",
+          entity_key: "reservoir_alpha",
+        },
+      ],
+      periods: [
+        {
+          period_index: 0,
+          timestamp_start: "2026-01-01T00:00:00",
+          timestamp_end: "2026-01-01T01:00:00",
+          duration_hours: 1.0,
+        },
+      ],
+      values: [
+        { period_index: 0, signal_key: "natural_inflow_m3s", value_numeric: 5.0 },
+      ],
+      horizon: {
+        period_count: 1,
+        start: "2026-01-01T00:00:00",
+        end: "2026-01-01T01:00:00",
+      },
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/projects/1") {
+          return new Response(JSON.stringify({ project }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/scenarios") {
+          return new Response(JSON.stringify({ scenarios: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/dashboard-templates") {
+          return new Response(JSON.stringify({ dashboard_templates: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/time-series-sets" && method === "GET") {
+          return new Response(JSON.stringify({ time_series_sets: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1/time-series-sets/hydraulic") {
+          return new Response(
+            JSON.stringify({ hydraulic_time_series_sets: [hydraulicSummary] }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/projects/1/time-series-sets/hydraulic/77") {
+          return new Response(
+            JSON.stringify({ hydraulic_time_series_set: hydraulicDetail }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Hybrid PMGD" }),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("link", { name: "Ver catalogo de series de tiempo" }),
+    );
+    expect(
+      await screen.findByRole("heading", {
+        name: "Series hidraulicas (origen legacy)",
+      }),
+    ).toBeVisible();
+    expect(screen.getByText("Ya migrado a")).toBeVisible();
+    expect(
+      screen.getByRole("link", {
+        name: /hydro_hydraulic_node_3_natural_inflow_m3s/,
+      }),
+    ).toBeVisible();
+
+    await user.click(
+      screen.getByRole("link", {
+        name: "Laja System / Reservoir Alpha (natural_inflow_m3s)",
+      }),
+    );
+    expect(
+      await screen.findByRole("heading", {
+        name: "Laja System / Reservoir Alpha (natural_inflow_m3s)",
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("link", {
+        name: /hydro_hydraulic_node_3_natural_inflow_m3s/,
+      }),
+    ).toHaveAttribute("href", "/react/projects/1/time-series-sets/91");
+    expect(
+      screen.queryByRole("button", { name: "Migrar al catalogo generico" }),
+    ).not.toBeInTheDocument();
   });
 
   it("edits a time-series set value and creates a new auditable revision", async () => {

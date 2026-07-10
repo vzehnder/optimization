@@ -1,11 +1,13 @@
 # BESS-TS5-007: Unify Concept Labels And Deprecation Paths In The UI
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter5/prd.md`
 Fecha de inicio planificada: 2026-07-27
 Fecha de termino planificada: 2026-07-27
+Fecha de inicio real: 2026-07-10
+Fecha de termino real: 2026-07-10
 
 ## User stories covered
 
@@ -33,11 +35,11 @@ drift.
 
 ## Acceptance criteria
 
-- [ ] Case, topology, parameters, input variant and run are labeled consistently across scenario, case, catalog, run and comparison screens.
-- [ ] Legacy-origin objects are visibly labeled with their origin and, when applicable, their deprecation status.
-- [ ] Deprecated workflows point the analyst to the common-model path.
-- [ ] Executable snapshots are presented as technical run inputs, not as the analyst's main editing object.
-- [ ] Frontend tests cover the labeling contract.
+- [x] Case, topology, parameters, input variant and run are labeled consistently across scenario, case, catalog, run and comparison screens.
+- [x] Legacy-origin objects are visibly labeled with their origin and, when applicable, their deprecation status.
+- [x] Deprecated workflows point the analyst to the common-model path.
+- [x] Executable snapshots are presented as technical run inputs, not as the analyst's main editing object.
+- [x] Frontend tests cover the labeling contract.
 
 ## Blocked by
 

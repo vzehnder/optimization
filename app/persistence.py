@@ -2875,7 +2875,12 @@ class AnalystStore:
         (
             SELECT COUNT(*) FROM hydraulic_time_series_points
             WHERE hydraulic_time_series_points.hydraulic_time_series_set_id = hydraulic_time_series_sets.id
-        ) AS period_count
+        ) AS period_count,
+        hydraulic_time_series_set_migrations.time_series_set_id AS migrated_time_series_set_id,
+        migrated_time_series_set.name AS migrated_time_series_set_name,
+        migrated_time_series_set.version_label AS migrated_time_series_set_version_label,
+        hydraulic_time_series_set_migrations.migrated_by AS migrated_by,
+        hydraulic_time_series_set_migrations.migrated_at AS migrated_at
     """
 
     _HYDRAULIC_TIME_SERIES_CATALOG_JOINS = """
@@ -2890,6 +2895,10 @@ class AnalystStore:
           ON node_system.id = hydraulic_nodes.hydraulic_system_id
         LEFT JOIN hydraulic_systems AS reach_system
           ON reach_system.id = hydraulic_reaches.hydraulic_system_id
+        LEFT JOIN hydraulic_time_series_set_migrations
+          ON hydraulic_time_series_set_migrations.hydraulic_time_series_set_id = hydraulic_time_series_sets.id
+        LEFT JOIN time_series_sets AS migrated_time_series_set
+          ON migrated_time_series_set.id = hydraulic_time_series_set_migrations.time_series_set_id
     """
 
     def list_hydraulic_time_series_sets(self, project_id: int) -> list[dict[str, Any]]:

@@ -86,6 +86,7 @@ import {
   type HydraulicTerminalCondition,
   type HydraulicTimeSeriesSet,
   type HydraulicTimeSeriesSetBulkMigrationReport,
+  type HydraulicTimeSeriesSetMigration,
   type HydraulicTimeSeriesSetSummary,
   type HydraulicUnitWrite,
   type Publication,
@@ -1031,6 +1032,17 @@ function HydraulicTimeSeriesCatalogList({
             Origen hidraulico | {set.status} | version {set.version_number} |{" "}
             {set.period_count} periodos
           </p>
+          {set.migration ? (
+            <p>
+              Ya migrado a{" "}
+              <Link
+                to={`/projects/${projectId}/time-series-sets/${set.migration.time_series_set_id}`}
+              >
+                {set.migration.time_series_set_name} (
+                {set.migration.version_label})
+              </Link>
+            </p>
+          ) : null}
         </li>
       ))}
     </ul>
@@ -1705,7 +1717,7 @@ function TimeSeriesSetOriginSummary({
   if (origin.kind === "legacy_draft_extraction") {
     return (
       <section className="workspace-section" aria-labelledby="set-origin">
-        <h2 id="set-origin">Origen</h2>
+        <h2 id="set-origin">Origen legacy</h2>
         <p>
           Extraido desde borrador legacy (scenario {String(origin.scenario_id)},
           fuente {String(origin.source_filename || origin.source_id)})
@@ -1720,7 +1732,7 @@ function TimeSeriesSetOriginSummary({
   if (origin.kind === "hydraulic_legacy_migration") {
     return (
       <section className="workspace-section" aria-labelledby="set-origin">
-        <h2 id="set-origin">Origen</h2>
+        <h2 id="set-origin">Origen legacy</h2>
         <p>
           Migrado desde el set hidraulico legacy{" "}
           {String(origin.hydraulic_time_series_set_id)} (version{" "}
@@ -1973,6 +1985,7 @@ export function HydraulicTimeSeriesSetDetailView() {
         <HydraulicTimeSeriesSetMigrationSection
           projectId={projectId}
           hydraulicTimeSeriesSetId={hydraulicTimeSeriesSetId}
+          migration={set.migration}
         />
       </div>
     </section>
@@ -1982,9 +1995,11 @@ export function HydraulicTimeSeriesSetDetailView() {
 function HydraulicTimeSeriesSetMigrationSection({
   projectId,
   hydraulicTimeSeriesSetId,
+  migration,
 }: {
   projectId: number;
   hydraulicTimeSeriesSetId: number;
+  migration: HydraulicTimeSeriesSetMigration | null;
 }) {
   const queryClient = useQueryClient();
   const mutation = useMutation({
@@ -1997,6 +2012,20 @@ function HydraulicTimeSeriesSetMigrationSection({
     },
   });
 
+  const migratedTo = mutation.data
+    ? {
+        id: mutation.data.time_series_set.id,
+        name: mutation.data.time_series_set.name,
+        versionLabel: mutation.data.time_series_set.version_label,
+      }
+    : migration
+      ? {
+          id: migration.time_series_set_id,
+          name: migration.time_series_set_name,
+          versionLabel: migration.version_label,
+        }
+      : null;
+
   return (
     <section
       className="workspace-section"
@@ -2008,28 +2037,27 @@ function HydraulicTimeSeriesSetMigrationSection({
         preservando origen y trazabilidad de contenido. El set legacy y los
         runs historicos que lo referencian no se modifican.
       </p>
-      <button
-        type="button"
-        onClick={() => mutation.mutate()}
-        disabled={mutation.isPending}
-      >
-        {mutation.isPending
-          ? "Migrando al catalogo generico"
-          : "Migrar al catalogo generico"}
-      </button>
+      {migratedTo ? null : (
+        <button
+          type="button"
+          onClick={() => mutation.mutate()}
+          disabled={mutation.isPending}
+        >
+          {mutation.isPending
+            ? "Migrando al catalogo generico"
+            : "Migrar al catalogo generico"}
+        </button>
+      )}
       {mutation.isError ? (
         <p role="alert">{errorMessage(mutation.error)}</p>
       ) : null}
-      {mutation.isSuccess ? (
+      {migratedTo ? (
         <p>
-          {mutation.data.already_migrated
-            ? "Ya estaba migrado a "
-            : "Migrado a "}
+          Ya migrado a{" "}
           <Link
-            to={`/projects/${projectId}/time-series-sets/${mutation.data.time_series_set.id}`}
+            to={`/projects/${projectId}/time-series-sets/${migratedTo.id}`}
           >
-            {mutation.data.time_series_set.name} (
-            {mutation.data.time_series_set.version_label})
+            {migratedTo.name} ({migratedTo.versionLabel})
           </Link>
         </p>
       ) : null}
@@ -6321,6 +6349,27 @@ function ScenarioVersionRunControl({
   );
 }
 
+function VersionExecutableSnapshot({
+  version,
+}: {
+  version: ScenarioVersionDetail;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>Ver snapshot tecnico</summary>
+      {open ? (
+        <pre className="json-panel">
+          {prettyJson(version.system_case_json)}
+        </pre>
+      ) : null}
+    </details>
+  );
+}
+
 function VersionMetadata({ version }: { version: ScenarioVersionDetail }) {
   return (
     <dl className="source-metadata version-metadata">
@@ -6435,20 +6484,12 @@ export function ScenarioVersionDetailView() {
           </pre>
         </section>
         <section className="workspace-section" aria-labelledby="version-input">
-          <h2 id="version-input">Immutable input</h2>
-          <label
-            className="field-row field-row-wide"
-            htmlFor="immutable_system_case"
-          >
-            <span>Immutable system_case</span>
-            <textarea
-              id="immutable_system_case"
-              value={prettyJson(version.data.system_case_json)}
-              readOnly
-              spellCheck={false}
-              rows={16}
-            />
-          </label>
+          <h2 id="version-input">Snapshot ejecutable</h2>
+          <p className="source-note">
+            Input tecnico congelado que usan las corridas de esta version, no
+            el objeto de edicion principal del analista.
+          </p>
+          <VersionExecutableSnapshot version={version.data} />
         </section>
       </div>
     </section>

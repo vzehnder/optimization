@@ -186,7 +186,7 @@ function SummarySection({ summary }: { summary: Record<string, unknown> }) {
 
 function summaryLabel(key: string): string {
   const labels: Record<string, string> = {
-    case_name: "Case Name",
+    case_name: "Nombre del caso",
     run_timestamp: "Run Timestamp",
     solver_name: "Solver",
     solver_status: "Solver Status",
