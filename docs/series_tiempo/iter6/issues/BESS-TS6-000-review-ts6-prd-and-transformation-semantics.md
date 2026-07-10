@@ -1,11 +1,13 @@
 # BESS-TS6-000: Review TS-6 PRD And Transformation Semantics
 
-Status: Todo
+Status: Done
 Type: HITL
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter6/prd.md`
 Fecha de inicio planificada: 2026-07-13
 Fecha de termino planificada: 2026-07-13
+Fecha de inicio real: 2026-07-10
+Fecha de termino real: 2026-07-10
 
 ## User stories covered
 
@@ -47,15 +49,24 @@ semantics need adjustment before downstream issues begin.
 
 ## Acceptance criteria
 
-- [ ] The activation decision (start TS-6 now versus keep deferring) is explicitly recorded with its justification, per user story 18.
-- [ ] The initial allowlist of transformation types is decided, including which transformations this iteration ships and which stay future.
-- [ ] The output model is decided: when a transformation produces a new set versus a derived revision, and how derived objects are named and versioned.
-- [ ] The lineage contract is agreed: input sets, input revisions/hashes, validated parameters, parameter schema version and implementation version.
-- [ ] Derived-set staleness semantics are agreed, including how they compose with the existing TS-3 variant staleness and TS-5 fail-closed guarantees.
-- [ ] The first external connector target and its test mocking strategy are decided, keeping ingestion inside the existing source/set model.
-- [ ] The scheduling mechanism and its permission rules (who defines, who executes, who sees results) are agreed under the TS-5 permission matrix.
-- [ ] Physical storage optimizations (partitioning, TimescaleDB) are confirmed out of scope until real volume is measured.
-- [ ] Any PRD correction is committed before downstream TS-6 implementation issues begin.
+- [x] The activation decision (start TS-6 now versus keep deferring) is explicitly recorded with its justification, per user story 18.
+- [x] The initial allowlist of transformation types is decided, including which transformations this iteration ships and which stay future.
+- [x] The output model is decided: when a transformation produces a new set versus a derived revision, and how derived objects are named and versioned.
+- [x] The lineage contract is agreed: input sets, input revisions/hashes, validated parameters, parameter schema version and implementation version.
+- [x] Derived-set staleness semantics are agreed, including how they compose with the existing TS-3 variant staleness and TS-5 fail-closed guarantees.
+- [x] The first external connector target and its test mocking strategy are decided, keeping ingestion inside the existing source/set model.
+- [x] The scheduling mechanism and its permission rules (who defines, who executes, who sees results) are agreed under the TS-5 permission matrix.
+- [x] Physical storage optimizations (partitioning, TimescaleDB) are confirmed out of scope until real volume is measured.
+- [x] Any PRD correction is committed before downstream TS-6 implementation issues begin.
+
+## Outcome
+
+Accepted decision record:
+`docs/series_tiempo/iter6/decision_record_ts6_transformation_semantics.md`.
+TS-6 activation is accepted (start now), grounded in both the explicit
+product-owner instruction and measured real usage of the TS-2 through TS-5
+model in the `energy_dispatch` database (41 projects, 21 runs, 32 catalog
+sets across 39 revisions, 23 input variants). BESS-TS6-001 is unblocked.
 
 ## Blocked by
 
