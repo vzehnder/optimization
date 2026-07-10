@@ -1132,3 +1132,115 @@ artifact formats:
 ```powershell
 julia --project=. -e "import Pkg; Pkg.test()"
 ```
+
+## TS-5: Migration, Unification And Hardening
+
+TS-5 (`docs/series_tiempo/iter5/`) closes the gap between the common model
+built by TS-1 through TS-4 and everything that predates it: draft-embedded
+series, hydraulic-specific tables, historical scenario versions and
+artifact-only runs. See `docs/series_tiempo/iter5/architecture_ts5_final.md`
+for the full settled architecture; the summary:
+
+```text
+ScenarioDraft (legacy authoring surface)
+  -> extract on demand -> TimeSeriesSet (generic catalog)
+
+hydraulic_time_series_sets (legacy)
+  -> read adapter (no row migration)
+  -> migrate on demand -----------------> TimeSeriesSet (generic catalog)
+
+New hydraulic writes -----------------------------------^ (generic from creation)
+```
+
+### Per-Path Migration Strategy
+
+No legacy path is migrated automatically. Each one is adapted, extracted on
+demand, migrated on demand, or frozen read-only:
+
+- Series embedded in `scenario_drafts.document_json` extract on demand into
+  the generic catalog with origin metadata (draft id, source
+  filename/checksum, extracted-by/at); the draft itself is never rewritten,
+  and re-extraction is idempotent.
+- `hydraulic_time_series_sets` / `..._points` are read through
+  `app/hydraulic_time_series_adapter.py` (tagged
+  `origin: {"kind": "hydraulic_legacy"}`), with no row migration. New
+  hydraulic writes route to the generic model (`origin: {"kind": "generic"}`).
+  Existing legacy sets migrate on demand, per set or via an admin-only bulk
+  sweep, never automatically; migration carries
+  `origin: {"kind": "hydraulic_legacy_migration", ...}` and never rewrites the
+  original legacy row or its case binding.
+- Historical `scenario_versions.system_case_json` stays frozen and read-only,
+  already enforced by a DB trigger (`scenario_versions_immutable`).
+- Runs with artifacts but no BBDD result index rebuild on demand through the
+  existing TS-4 rebuild path; never a forced backfill.
+
+### Cardinality, Labels And Deprecation Paths
+
+`Scenario -> OptimizationCase` cardinality is confirmed one-to-one (not
+migrated): `case_input_variants` already covers input-series alternatives
+under one case, and a materially different topology/parameter set gets a new
+`Scenario`. The UI states this outright (`scenario_versions.case_name`
+labeled "Nombre del caso", not "Case") instead of implying hidden
+multiplicity. The structured draft editor remains a permanent
+compatibility/authoring surface with a labeled deprecation direction toward
+the catalog-plus-variant path, not a forced removal.
+
+### Permissions And Retention
+
+The accepted permission matrix (analyst/admin read-write on sources, input
+series and result series across all projects; clients never see input series
+or raw result series, only published outputs on projects they have access
+to) is enforced by one shared gate
+(`require_authenticated_app_boundary` in `app/main.py`) so a future route
+cannot bypass it by construction.
+
+Retention distinguishes immutable audit data (`scenario_versions`, `runs`,
+`run_artifacts`, `time_series_sources`, `time_series_set_revisions`,
+unmigrated legacy hydraulic rows) from rebuildable derived data (the TS-4
+result-index tables). `app/result_retention.py`
+(`cleanup_run_result_data` / `cleanup_project_result_data`, admin-only) removes
+only the rebuildable set and refuses everything else with a stable `kept`
+reason; every removal is restorable through the existing
+`rebuild_run_results` / `rebuild_all_run_results` path.
+
+### Stale Validation Across Storage Origins
+
+The TS-3 fail-closed staleness contract (`evaluate_case_input_variant_staleness`,
+`VariantStaleError`, and the hydraulic v3 promote-time gate) is
+origin-agnostic by construction: a bound series set going stale blocks
+`materialize_system_case_for_variant` (or hydraulic promotion) the same way
+whether the set is natively created, extracted from a legacy draft, migrated
+from a legacy hydraulic table, or read live through the legacy hydraulic
+adapter during the compatibility window.
+
+### TS-5 Acceptance Verification
+
+Run the focused TS-5 acceptance suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_ts5_acceptance -v
+```
+
+Run the full Python web acceptance suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Run frontend verification from `frontend/`:
+
+```powershell
+npm test -- --run
+npx tsc -b
+npx eslint .
+npm run api:check
+npm run build
+```
+
+TS-5's hydraulic write-path slices proved payload equivalence against the
+Julia suite when they landed; run it again only if a later change touches
+Julia-facing contracts, optimizer behavior, or artifact formats:
+
+```powershell
+julia --project=. -e "import Pkg; Pkg.test()"
+```
