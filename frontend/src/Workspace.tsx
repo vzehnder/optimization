@@ -1707,9 +1707,16 @@ function TimeSeriesSetReplacePanel({
   );
 }
 
+type TransformationKind = "scale_signal" | "resample";
+
+const RESAMPLE_METHOD_OPTIONS = ["mean", "sum"] as const;
+
 type TimeSeriesTransformationFormState = {
+  transformation_type: TransformationKind;
   signal_key: string;
   scale_factor: string;
+  target_resolution_hours: string;
+  signal_methods: Record<string, string>;
   output_name: string;
   output_version_label: string;
 };
@@ -1718,8 +1725,13 @@ function defaultTimeSeriesTransformationFormState(
   signals: ProjectTimeSeriesSetSignal[],
 ): TimeSeriesTransformationFormState {
   return {
+    transformation_type: "scale_signal",
     signal_key: signals[0]?.signal_key ?? "",
     scale_factor: "1.0",
+    target_resolution_hours: "",
+    signal_methods: Object.fromEntries(
+      signals.map((signal) => [signal.signal_key, "mean"]),
+    ),
     output_name: "",
     output_version_label: "",
   };
@@ -1741,15 +1753,28 @@ function TimeSeriesTransformationPanel({
 
   const mutation = useMutation({
     mutationFn: () => {
-      const payload: TimeSeriesTransformationPayload = {
-        transformation_type: "scale_signal",
-        parameters: {
-          signal_key: form.signal_key,
-          scale_factor: Number(form.scale_factor),
-        },
-        output_name: form.output_name.trim() || undefined,
-        output_version_label: form.output_version_label.trim() || undefined,
-      };
+      const outputName = form.output_name.trim() || undefined;
+      const outputVersionLabel = form.output_version_label.trim() || undefined;
+      const payload: TimeSeriesTransformationPayload =
+        form.transformation_type === "resample"
+          ? {
+              transformation_type: "resample",
+              parameters: {
+                target_resolution_hours: Number(form.target_resolution_hours),
+                signal_methods: form.signal_methods,
+              },
+              output_name: outputName,
+              output_version_label: outputVersionLabel,
+            }
+          : {
+              transformation_type: "scale_signal",
+              parameters: {
+                signal_key: form.signal_key,
+                scale_factor: Number(form.scale_factor),
+              },
+              output_name: outputName,
+              output_version_label: outputVersionLabel,
+            };
       return applyTimeSeriesTransformation(projectId, timeSeriesSet.id, payload);
     },
     onSuccess: (derivedSet) => {
@@ -1772,6 +1797,14 @@ function TimeSeriesTransformationPanel({
 
   const scaleFactorIsValid =
     form.scale_factor.trim() !== "" && Number.isFinite(Number(form.scale_factor));
+  const targetResolutionIsValid =
+    form.target_resolution_hours.trim() !== "" &&
+    Number.isFinite(Number(form.target_resolution_hours)) &&
+    Number(form.target_resolution_hours) > 0;
+  const canSubmit =
+    form.transformation_type === "resample"
+      ? targetResolutionIsValid
+      : Boolean(form.signal_key) && scaleFactorIsValid;
 
   return (
     <section
@@ -1785,38 +1818,106 @@ function TimeSeriesTransformationPanel({
       </p>
       {error ? <p role="alert">{error}</p> : null}
       <div className="version-actions">
-        <label htmlFor="transformation-signal-key">Senal a escalar</label>
+        <label htmlFor="transformation-type">Tipo de transformacion</label>
         <select
-          id="transformation-signal-key"
-          value={form.signal_key}
+          id="transformation-type"
+          value={form.transformation_type}
           onChange={(event) =>
             setForm((current) => ({
               ...current,
-              signal_key: event.target.value,
+              transformation_type: event.target.value as TransformationKind,
             }))
           }
           disabled={mutation.isPending}
         >
-          {timeSeriesSet.signals.map((signal) => (
-            <option key={signal.signal_key} value={signal.signal_key}>
-              {signal.signal_key} ({signal.unit})
-            </option>
-          ))}
+          <option value="scale_signal">scale_signal</option>
+          <option value="resample">resample</option>
         </select>
-        <label htmlFor="transformation-scale-factor">Factor de escala</label>
-        <input
-          id="transformation-scale-factor"
-          type="number"
-          step="any"
-          value={form.scale_factor}
-          onChange={(event) =>
-            setForm((current) => ({
-              ...current,
-              scale_factor: event.target.value,
-            }))
-          }
-          disabled={mutation.isPending}
-        />
+
+        {form.transformation_type === "scale_signal" ? (
+          <>
+            <label htmlFor="transformation-signal-key">Senal a escalar</label>
+            <select
+              id="transformation-signal-key"
+              value={form.signal_key}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  signal_key: event.target.value,
+                }))
+              }
+              disabled={mutation.isPending}
+            >
+              {timeSeriesSet.signals.map((signal) => (
+                <option key={signal.signal_key} value={signal.signal_key}>
+                  {signal.signal_key} ({signal.unit})
+                </option>
+              ))}
+            </select>
+            <label htmlFor="transformation-scale-factor">Factor de escala</label>
+            <input
+              id="transformation-scale-factor"
+              type="number"
+              step="any"
+              value={form.scale_factor}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  scale_factor: event.target.value,
+                }))
+              }
+              disabled={mutation.isPending}
+            />
+          </>
+        ) : (
+          <>
+            <label htmlFor="transformation-target-resolution-hours">
+              Resolucion objetivo (horas)
+            </label>
+            <input
+              id="transformation-target-resolution-hours"
+              type="number"
+              step="any"
+              min="0"
+              value={form.target_resolution_hours}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  target_resolution_hours: event.target.value,
+                }))
+              }
+              disabled={mutation.isPending}
+            />
+            {timeSeriesSet.signals.map((signal) => (
+              <div key={signal.signal_key}>
+                <label htmlFor={`transformation-method-${signal.signal_key}`}>
+                  Metodo para {signal.signal_key}
+                </label>
+                <select
+                  id={`transformation-method-${signal.signal_key}`}
+                  value={form.signal_methods[signal.signal_key] ?? "mean"}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      signal_methods: {
+                        ...current.signal_methods,
+                        [signal.signal_key]: event.target.value,
+                      },
+                    }))
+                  }
+                  disabled={mutation.isPending}
+                >
+                  {RESAMPLE_METHOD_OPTIONS.map((method) => (
+                    <option key={method} value={method}>
+                      {method}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ))}
+          </>
+        )}
+
         <label htmlFor="transformation-output-name">
           Nombre del set derivado (opcional)
         </label>
@@ -1848,11 +1949,11 @@ function TimeSeriesTransformationPanel({
         <button
           type="button"
           onClick={() => mutation.mutate()}
-          disabled={mutation.isPending || !form.signal_key || !scaleFactorIsValid}
+          disabled={mutation.isPending || !canSubmit}
         >
           {mutation.isPending
             ? "Aplicando transformacion"
-            : "Aplicar scale_signal"}
+            : `Aplicar ${form.transformation_type}`}
         </button>
       </div>
     </section>
@@ -1885,7 +1986,14 @@ function TimeSeriesSetLineageSummary({
       <p>
         Parametros:{" "}
         {Object.entries(parameters)
-          .map(([key, value]) => `${key}=${String(value)}`)
+          .map(
+            ([key, value]) =>
+              `${key}=${
+                typeof value === "object" && value !== null
+                  ? JSON.stringify(value)
+                  : String(value)
+              }`,
+          )
           .join(", ")}
       </p>
       <ul className="resource-list">

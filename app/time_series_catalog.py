@@ -26,6 +26,7 @@ class TimeSeriesSignalDefinition:
     unit: str
     entity_type: str | None = None
     nonnegative: bool = False
+    resampling_methods: tuple[str, ...] = ("mean",)
 
 
 TIME_SERIES_SIGNAL_CATALOG: dict[str, TimeSeriesSignalDefinition] = {

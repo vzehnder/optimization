@@ -209,5 +209,112 @@ class ApplyTimeSeriesTransformationTests(unittest.TestCase):
         self.assertNotEqual(first["id"], second["id"])
 
 
+class ApplyResampleTransformationTests(unittest.TestCase):
+    def setUp(self):
+        self.store = AnalystStore("sqlite:///:memory:")
+        self.project = self.store.create_project(name="TS-6 resample project")
+        self.scenario = self.store.create_scenario(
+            project_id=self.project["id"], name="TS-6 resample scenario"
+        )
+        prepared = prepare_time_series_catalog_import(
+            rows=demand_price_rows(datetime(2026, 1, 1), 4),
+            request=demand_price_import_request(),
+        )
+        self.source_set = self.store.import_time_series_catalog_set(
+            scenario_id=self.scenario["id"],
+            source={
+                "id": "csv_source_resample",
+                "original_filename": "demand_price.csv",
+                "media_type": "text/csv",
+                "checksum": "sha256:test-resample",
+            },
+            prepared_import=prepared,
+        )
+
+    def _apply_resample(self, **overrides):
+        raw_parameters = {
+            "target_resolution_hours": 2.0,
+            "signal_methods": {
+                "load_demand_mw": "mean",
+                "import_price_usd_per_mwh": "mean",
+            },
+        }
+        raw_parameters.update(overrides.pop("raw_parameters", {}))
+        return self.store.apply_time_series_transformation(
+            project_id=self.project["id"],
+            time_series_set_id=self.source_set["id"],
+            transformation_type="resample",
+            raw_parameters=raw_parameters,
+            **overrides,
+        )
+
+    def test_resample_creates_a_derived_set_with_the_target_resolution(self):
+        derived = self._apply_resample()
+
+        self.assertEqual(derived["data_kind"], "derived")
+        self.assertEqual(len(derived["periods"]), 2)
+        self.assertEqual(derived["periods"][0]["duration_hours"], 2.0)
+        values_by_key = {
+            (value["period_index"], value["signal_key"]): value["value_numeric"]
+            for value in derived["values"]
+        }
+        # Source demand is 100, 101, 102, 103 across four hourly periods.
+        self.assertAlmostEqual(values_by_key[(0, "load_demand_mw")], 100.5)
+        self.assertAlmostEqual(values_by_key[(1, "load_demand_mw")], 102.5)
+
+    def test_source_set_is_unchanged_after_resampling(self):
+        self._apply_resample()
+
+        reloaded_source = self.store.get_time_series_set(
+            self.project["id"], self.source_set["id"]
+        )
+        self.assertEqual(reloaded_source["content_hash"], self.source_set["content_hash"])
+        self.assertEqual(len(reloaded_source["periods"]), 4)
+
+    def test_resample_records_full_lineage_in_latest_revision_metadata(self):
+        derived = self._apply_resample()
+
+        transformation = derived["revision_metadata"]["transformation"]
+        self.assertEqual(transformation["type"], "resample")
+        self.assertEqual(transformation["implementation_version"], 1)
+        self.assertEqual(transformation["parameter_schema_version"], 1)
+        self.assertEqual(
+            transformation["parameters"],
+            {
+                "target_resolution_hours": 2.0,
+                "signal_methods": {
+                    "import_price_usd_per_mwh": "mean",
+                    "load_demand_mw": "mean",
+                },
+            },
+        )
+        lineage_input = transformation["inputs"][0]
+        self.assertEqual(lineage_input["time_series_set_id"], self.source_set["id"])
+        self.assertEqual(lineage_input["content_hash"], self.source_set["content_hash"])
+
+    def test_derived_resampled_set_is_bindable_in_a_case_input_variant(self):
+        derived = self._apply_resample()
+        case = self.store.get_or_create_case_for_scenario(self.scenario["id"])
+        variant = self.store.get_or_create_default_input_variant(case["id"])
+
+        binding = self.store.upsert_case_time_series_binding(
+            case_input_variant_id=variant["id"],
+            signal_key="load_demand_mw",
+            time_series_set_id=derived["id"],
+        )
+
+        self.assertEqual(binding["time_series_set_id"], derived["id"])
+
+    def test_invalid_resample_parameters_are_rejected_before_any_write(self):
+        sets_before = len(self.store.list_time_series_sets(self.project["id"]))
+
+        with self.assertRaises(TransformationError):
+            self._apply_resample(raw_parameters={"target_resolution_hours": 3.0})
+
+        self.assertEqual(
+            len(self.store.list_time_series_sets(self.project["id"])), sets_before
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
