@@ -1244,3 +1244,97 @@ Julia-facing contracts, optimizer behavior, or artifact formats:
 ```powershell
 julia --project=. -e "import Pkg; Pkg.test()"
 ```
+
+## TS-6: Transformations, Connectors And Automation
+
+TS-6 (`docs/series_tiempo/iter6/`) adds the layer on top of the settled
+TS-1 through TS-5 model: declarative allowlisted transformations, external
+data connectors and scheduled automation. See
+`docs/series_tiempo/iter6/architecture_ts6_final.md` for the full settled
+architecture; the summary:
+
+```text
+TimeSeriesSet (source) --> TRANSFORMATION_REGISTRY --> TimeSeriesSet (derived,
+  scale_signal | resample |                            full lineage + staleness,
+  interpolate_gaps | combine_signals                   regenerable revisions)
+
+External API --> ForecastConnector (isolated module) --> common source/set path
+                                                          (forecast / programmed
+                                                           + issuer/validity)
+
+run_schedules (case + variant + range rule + cadence)
+  --> run-due invocation --> same gates/snapshot/run/indexing as manual runs
+```
+
+### Transformations
+
+Transformations are explicit, declarative and versioned. The allowlist is a
+code-level registry (`TRANSFORMATION_REGISTRY` in `app/transformations.py`)
+— `scale_signal`, `resample`, `interpolate_gaps` and `combine_signals` —
+each pinning an implementation version and a parameter schema version. No
+user-provided script is ever stored in or executed from the database, and an
+unknown type is rejected before anything is written.
+
+A transformation never mutates its sources: the first run creates a new set
+with `data_kind = "derived"` and full lineage (input sets, revisions,
+content hashes, validated parameters, versions) in its revision metadata
+plus generic `validation_dependencies` rows; regeneration appends a new
+revision of the same set. When a source changes, the derived set goes stale
+(catalog badge + regenerate action) and any variant bound to it fails
+closed — for materialization and revalidation — until regenerated and
+revalidated. No implicit resampling or gap filling ever happens at run time.
+
+### Connectors
+
+External data enters the catalog exactly like a file, through the isolated
+`app/forecast_connector.py` module (narrow `ForecastConnector` protocol, one
+config-driven HTTP+JSON implementation). Ingestion reuses the TS-2 pipeline:
+connector-origin source rows (`kind = 'connector'`), validated sets
+(`data_kind = "forecast"` or `"programmed"`), convergence on unchanged data
+and one-revision advances on changed data. Programmed official data records
+issuer and validity per revision; reissues land as new revisions so each
+run's recorded hash maps to the exact program version it consumed.
+
+### Scheduled Automation
+
+Schedules are data (`run_schedules`: scenario, variant, range rule, cadence);
+firing is external invocation via the admin-only API or
+`scripts/run_due_schedules.py` — no in-process scheduler. Every firing is an
+auditable `run_schedule_ticks` row; executions pass through the same
+staleness/coverage gates, immutable snapshots (with automation lineage), run
+queue and TS-4 result indexing as manual runs. Fixed ranges rerun the same
+window; rolling schedules resolve each tick's range from its due time and
+record the concrete range per tick. Gate failures stay visible on the tick
+and never deactivate the schedule. Manual variant-driven runs are unchanged.
+
+### TS-6 Acceptance Verification
+
+Run the focused TS-6 acceptance suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_ts6_acceptance -v
+```
+
+Run the full Python web acceptance suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Run frontend verification from `frontend/`:
+
+```powershell
+npm test -- --run
+npx tsc -b
+npx eslint .
+npm run api:check
+npm run build
+```
+
+TS-6 reuses the manual pipeline and the existing materialization contract;
+run the Julia suite only if a later change touches Julia-facing contracts,
+optimizer behavior, or artifact formats:
+
+```powershell
+julia --project=. -e "import Pkg; Pkg.test()"
+```
