@@ -286,5 +286,143 @@ class ResampleTransformationTests(unittest.TestCase):
             )
 
 
+def gappy_input_set() -> TransformationInputSet:
+    return TransformationInputSet(
+        time_series_set_id=11,
+        revision_number=1,
+        content_hash="sha256:gappy-input",
+        signals=[
+            {
+                "signal_key": "import_price_usd_per_mwh",
+                "unit": "USD/MWh",
+                "source_column": "price",
+                "source_unit": "USD/MWh",
+                "entity_type": None,
+                "entity_key": None,
+            },
+            {
+                "signal_key": "load_demand_mw",
+                "unit": "MW",
+                "source_column": "demand",
+                "source_unit": "MW",
+                "entity_type": "component:load",
+                "entity_key": None,
+            },
+        ],
+        periods=[
+            {
+                "period_index": 0,
+                "timestamp_start": "2026-01-01T00:00:00-03:00",
+                "timestamp_end": "2026-01-01T01:00:00-03:00",
+                "duration_hours": 1.0,
+            },
+            {
+                "period_index": 1,
+                "timestamp_start": "2026-01-01T01:00:00-03:00",
+                "timestamp_end": "2026-01-01T02:00:00-03:00",
+                "duration_hours": 1.0,
+            },
+            # Gap: 2026-01-01T02:00:00-03:00 -> 2026-01-01T03:00:00-03:00 is missing.
+            {
+                "period_index": 2,
+                "timestamp_start": "2026-01-01T03:00:00-03:00",
+                "timestamp_end": "2026-01-01T04:00:00-03:00",
+                "duration_hours": 1.0,
+            },
+        ],
+        values=[
+            {"period_index": 0, "signal_key": "import_price_usd_per_mwh", "value_numeric": 50.0},
+            {"period_index": 0, "signal_key": "load_demand_mw", "value_numeric": 100.0},
+            {"period_index": 1, "signal_key": "import_price_usd_per_mwh", "value_numeric": 60.0},
+            {"period_index": 1, "signal_key": "load_demand_mw", "value_numeric": 110.0},
+            {"period_index": 2, "signal_key": "import_price_usd_per_mwh", "value_numeric": 80.0},
+            {"period_index": 2, "signal_key": "load_demand_mw", "value_numeric": 130.0},
+        ],
+    )
+
+
+class InterpolateGapsTransformationTests(unittest.TestCase):
+    def test_interpolate_gaps_fills_a_single_missing_period_with_linear_interpolation(self):
+        definition = get_transformation_definition("interpolate_gaps")
+        input_set = gappy_input_set()
+        parameters = definition.validate_parameters(
+            {"method": "linear", "max_gap_hours": 2.0}, input_set
+        )
+        output = definition.execute(input_set, parameters)
+
+        self.assertEqual(len(output.periods), 4)
+        values_by_key = {
+            (value["period_index"], value["signal_key"]): value["value_numeric"]
+            for value in output.values
+        }
+        self.assertAlmostEqual(values_by_key[(2, "load_demand_mw")], 120.0)
+        self.assertAlmostEqual(values_by_key[(2, "import_price_usd_per_mwh")], 70.0)
+        # Observed values pass through unchanged (though renumbered after the gap).
+        self.assertAlmostEqual(values_by_key[(0, "load_demand_mw")], 100.0)
+        self.assertAlmostEqual(values_by_key[(1, "load_demand_mw")], 110.0)
+        self.assertAlmostEqual(values_by_key[(3, "load_demand_mw")], 130.0)
+
+    def test_interpolate_gaps_records_filled_periods_and_lineage(self):
+        definition = get_transformation_definition("interpolate_gaps")
+        input_set = gappy_input_set()
+        parameters = definition.validate_parameters(
+            {"method": "linear", "max_gap_hours": 2.0}, input_set
+        )
+        output = definition.execute(input_set, parameters)
+
+        self.assertEqual(output.execution_metadata["filled_period_indexes"], [2])
+        self.assertEqual(len(output.lineage_inputs), 1)
+        lineage = output.lineage_inputs[0]
+        self.assertEqual(lineage["time_series_set_id"], 11)
+        self.assertEqual(lineage["revision_number"], 1)
+        self.assertEqual(lineage["content_hash"], "sha256:gappy-input")
+        self.assertEqual(
+            sorted(lineage["signals"]),
+            ["import_price_usd_per_mwh", "load_demand_mw"],
+        )
+
+    def test_interpolate_gaps_rejects_a_gap_larger_than_the_declared_maximum(self):
+        definition = get_transformation_definition("interpolate_gaps")
+        input_set = gappy_input_set()
+        with self.assertRaisesRegex(TransformationError, "exceeds max_gap_hours") as context:
+            definition.validate_parameters(
+                {"method": "linear", "max_gap_hours": 0.5}, input_set
+            )
+        message = str(context.exception)
+        self.assertIn("import_price_usd_per_mwh", message)
+        self.assertIn("load_demand_mw", message)
+        self.assertIn("2026-01-01T02:00:00-03:00", message)
+        self.assertIn("2026-01-01T03:00:00-03:00", message)
+
+    def test_interpolate_gaps_rejects_an_unsupported_method(self):
+        definition = get_transformation_definition("interpolate_gaps")
+        input_set = gappy_input_set()
+        with self.assertRaisesRegex(TransformationError, "not supported"):
+            definition.validate_parameters(
+                {"method": "cubic_spline", "max_gap_hours": 2.0}, input_set
+            )
+
+    def test_interpolate_gaps_rejects_a_gap_not_aligned_to_source_resolution(self):
+        definition = get_transformation_definition("interpolate_gaps")
+        input_set = gappy_input_set()
+        input_set.periods[2]["timestamp_start"] = "2026-01-01T02:30:00-03:00"
+        input_set.periods[2]["timestamp_end"] = "2026-01-01T03:30:00-03:00"
+        with self.assertRaisesRegex(TransformationError, "not an integer multiple"):
+            definition.validate_parameters(
+                {"method": "linear", "max_gap_hours": 2.0}, input_set
+            )
+
+    def test_interpolate_gaps_is_a_noop_on_the_filled_flag_when_source_has_no_gaps(self):
+        definition = get_transformation_definition("interpolate_gaps")
+        input_set = hourly_input_set()
+        parameters = definition.validate_parameters(
+            {"method": "linear", "max_gap_hours": 2.0}, input_set
+        )
+        output = definition.execute(input_set, parameters)
+
+        self.assertEqual(output.execution_metadata["filled_period_indexes"], [])
+        self.assertEqual(len(output.periods), len(input_set.periods))
+
+
 if __name__ == "__main__":
     unittest.main()

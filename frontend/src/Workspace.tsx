@@ -1139,6 +1139,15 @@ function TimeSeriesSetValuesEditor({
     return map;
   }, [timeSeriesSet.values]);
 
+  const filledPeriodIndexes = useMemo(() => {
+    const transformation = timeSeriesSet.revision_metadata?.transformation;
+    const execution = isRecord(transformation) ? transformation.execution : undefined;
+    const filled = isRecord(execution) ? execution.filled_period_indexes : undefined;
+    return new Set(
+      Array.isArray(filled) ? filled.map((index) => Number(index)) : [],
+    );
+  }, [timeSeriesSet.revision_metadata]);
+
   function cellValue(periodIndex: number, signalKey: string): string {
     const key = timeSeriesValueCellKey(periodIndex, signalKey);
     if (Object.prototype.hasOwnProperty.call(valueEdits, key)) {
@@ -1201,8 +1210,20 @@ function TimeSeriesSetValuesEditor({
             </thead>
             <tbody>
               {timeSeriesSet.periods.map((period) => (
-                <tr key={period.period_index}>
-                  <th scope="row">{period.timestamp_start}</th>
+                <tr
+                  key={period.period_index}
+                  className={
+                    filledPeriodIndexes.has(period.period_index)
+                      ? "value-row-filled"
+                      : undefined
+                  }
+                >
+                  <th scope="row">
+                    {period.timestamp_start}
+                    {filledPeriodIndexes.has(period.period_index) ? (
+                      <span className="value-row-filled-badge">interpolado</span>
+                    ) : null}
+                  </th>
                   {timeSeriesSet.signals.map((signal) => (
                     <td key={signal.signal_key}>
                       <input
@@ -1707,9 +1728,10 @@ function TimeSeriesSetReplacePanel({
   );
 }
 
-type TransformationKind = "scale_signal" | "resample";
+type TransformationKind = "scale_signal" | "resample" | "interpolate_gaps";
 
 const RESAMPLE_METHOD_OPTIONS = ["mean", "sum"] as const;
+const INTERPOLATION_METHOD_OPTIONS = ["linear"] as const;
 
 type TimeSeriesTransformationFormState = {
   transformation_type: TransformationKind;
@@ -1717,6 +1739,8 @@ type TimeSeriesTransformationFormState = {
   scale_factor: string;
   target_resolution_hours: string;
   signal_methods: Record<string, string>;
+  interpolation_method: string;
+  max_gap_hours: string;
   output_name: string;
   output_version_label: string;
 };
@@ -1732,6 +1756,8 @@ function defaultTimeSeriesTransformationFormState(
     signal_methods: Object.fromEntries(
       signals.map((signal) => [signal.signal_key, "mean"]),
     ),
+    interpolation_method: "linear",
+    max_gap_hours: "",
     output_name: "",
     output_version_label: "",
   };
@@ -1755,26 +1781,38 @@ function TimeSeriesTransformationPanel({
     mutationFn: () => {
       const outputName = form.output_name.trim() || undefined;
       const outputVersionLabel = form.output_version_label.trim() || undefined;
-      const payload: TimeSeriesTransformationPayload =
-        form.transformation_type === "resample"
-          ? {
-              transformation_type: "resample",
-              parameters: {
-                target_resolution_hours: Number(form.target_resolution_hours),
-                signal_methods: form.signal_methods,
-              },
-              output_name: outputName,
-              output_version_label: outputVersionLabel,
-            }
-          : {
-              transformation_type: "scale_signal",
-              parameters: {
-                signal_key: form.signal_key,
-                scale_factor: Number(form.scale_factor),
-              },
-              output_name: outputName,
-              output_version_label: outputVersionLabel,
-            };
+      let payload: TimeSeriesTransformationPayload;
+      if (form.transformation_type === "resample") {
+        payload = {
+          transformation_type: "resample",
+          parameters: {
+            target_resolution_hours: Number(form.target_resolution_hours),
+            signal_methods: form.signal_methods,
+          },
+          output_name: outputName,
+          output_version_label: outputVersionLabel,
+        };
+      } else if (form.transformation_type === "interpolate_gaps") {
+        payload = {
+          transformation_type: "interpolate_gaps",
+          parameters: {
+            method: form.interpolation_method,
+            max_gap_hours: Number(form.max_gap_hours),
+          },
+          output_name: outputName,
+          output_version_label: outputVersionLabel,
+        };
+      } else {
+        payload = {
+          transformation_type: "scale_signal",
+          parameters: {
+            signal_key: form.signal_key,
+            scale_factor: Number(form.scale_factor),
+          },
+          output_name: outputName,
+          output_version_label: outputVersionLabel,
+        };
+      }
       return applyTimeSeriesTransformation(projectId, timeSeriesSet.id, payload);
     },
     onSuccess: (derivedSet) => {
@@ -1801,10 +1839,16 @@ function TimeSeriesTransformationPanel({
     form.target_resolution_hours.trim() !== "" &&
     Number.isFinite(Number(form.target_resolution_hours)) &&
     Number(form.target_resolution_hours) > 0;
+  const maxGapHoursIsValid =
+    form.max_gap_hours.trim() !== "" &&
+    Number.isFinite(Number(form.max_gap_hours)) &&
+    Number(form.max_gap_hours) > 0;
   const canSubmit =
     form.transformation_type === "resample"
       ? targetResolutionIsValid
-      : Boolean(form.signal_key) && scaleFactorIsValid;
+      : form.transformation_type === "interpolate_gaps"
+        ? maxGapHoursIsValid
+        : Boolean(form.signal_key) && scaleFactorIsValid;
 
   return (
     <section
@@ -1832,6 +1876,7 @@ function TimeSeriesTransformationPanel({
         >
           <option value="scale_signal">scale_signal</option>
           <option value="resample">resample</option>
+          <option value="interpolate_gaps">interpolate_gaps</option>
         </select>
 
         {form.transformation_type === "scale_signal" ? (
@@ -1869,7 +1914,7 @@ function TimeSeriesTransformationPanel({
               disabled={mutation.isPending}
             />
           </>
-        ) : (
+        ) : form.transformation_type === "resample" ? (
           <>
             <label htmlFor="transformation-target-resolution-hours">
               Resolucion objetivo (horas)
@@ -1915,6 +1960,46 @@ function TimeSeriesTransformationPanel({
                 </select>
               </div>
             ))}
+          </>
+        ) : (
+          <>
+            <label htmlFor="transformation-interpolation-method">
+              Metodo de interpolacion
+            </label>
+            <select
+              id="transformation-interpolation-method"
+              value={form.interpolation_method}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  interpolation_method: event.target.value,
+                }))
+              }
+              disabled={mutation.isPending}
+            >
+              {INTERPOLATION_METHOD_OPTIONS.map((method) => (
+                <option key={method} value={method}>
+                  {method}
+                </option>
+              ))}
+            </select>
+            <label htmlFor="transformation-max-gap-hours">
+              Gap maximo a rellenar (horas)
+            </label>
+            <input
+              id="transformation-max-gap-hours"
+              type="number"
+              step="any"
+              min="0"
+              value={form.max_gap_hours}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  max_gap_hours: event.target.value,
+                }))
+              }
+              disabled={mutation.isPending}
+            />
           </>
         )}
 

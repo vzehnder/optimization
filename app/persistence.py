@@ -2550,6 +2550,11 @@ class AnalystStore:
                         "parameters": parameters_dict,
                         "recipe_hash": recipe_hash,
                         "inputs": output.lineage_inputs,
+                        **(
+                            {"execution": output.execution_metadata}
+                            if output.execution_metadata
+                            else {}
+                        ),
                     }
                 }
                 self.connection.execute(

@@ -1027,6 +1027,18 @@ button:focus-visible {
   font: inherit;
 }
 
+.value-row-filled th,
+.value-row-filled td {
+  background: #fff6e0;
+}
+
+.value-row-filled-badge {
+  margin-left: 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #926c00;
+}
+
 .source-validation p {
   margin: 0 0 0.35rem;
   font-weight: 800;
