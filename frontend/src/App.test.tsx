@@ -7583,6 +7583,41 @@ describe("application shell", () => {
       assigned_at: string;
       assigned_by: string;
     }> = [];
+    const schedules = [
+      {
+        id: 31,
+        scenario_id: 10,
+        case_id: 20,
+        case_input_variant_id: 30,
+        display_name: "Daily API schedule",
+        range_start: "2026-08-01T00:00:00-04:00",
+        range_end: "2026-08-02T00:00:00-04:00",
+        cadence: "daily",
+        next_run_at: "2026-08-06T09:00:00+00:00",
+        topology_hash: "sha256:topology",
+        parameter_hash: "sha256:parameters",
+        is_active: true,
+        last_fired_at: null,
+        created_at: "2026-08-05T12:00:00Z",
+        updated_at: "2026-08-05T12:00:00Z",
+        created_by: "admin@example.local",
+        updated_by: "admin@example.local",
+      },
+    ];
+    let scheduleTicks: Array<{
+      id: number;
+      schedule_id: number;
+      due_at: string;
+      fired_at: string;
+      range_start: string;
+      range_end: string;
+      status: string;
+      scenario_version_id: number | null;
+      run_id: number | null;
+      error_message: string;
+      created_at: string;
+      updated_at: string;
+    }> = [];
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const path = String(input);
@@ -7611,6 +7646,38 @@ describe("application shell", () => {
           return new Response(JSON.stringify({ users }), {
             headers: { "Content-Type": "application/json" },
           });
+        }
+        if (path === "/api/admin/schedules" && method === "GET") {
+          return new Response(
+            JSON.stringify({ schedules, ticks: scheduleTicks }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/admin/schedules/run-due" && method === "POST") {
+          scheduleTicks = [
+            {
+              id: 99,
+              schedule_id: 31,
+              due_at: "2026-08-06T09:00:00+00:00",
+              fired_at: "2026-08-06T10:00:00+00:00",
+              range_start: "2026-08-01T00:00:00-04:00",
+              range_end: "2026-08-02T00:00:00-04:00",
+              status: "queued",
+              scenario_version_id: 44,
+              run_id: 55,
+              error_message: "",
+              created_at: "2026-08-06T10:00:00+00:00",
+              updated_at: "2026-08-06T10:00:00+00:00",
+            },
+          ];
+          return new Response(
+            JSON.stringify({
+              now: "2026-08-06T10:00:00+00:00",
+              due_count: 1,
+              ticks: scheduleTicks,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
         }
         if (path === "/api/admin/users" && method === "POST") {
           const body = JSON.parse(String(init?.body));
@@ -7723,9 +7790,14 @@ describe("application shell", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "Usuarios" }),
+      await screen.findByRole("heading", { name: "Administracion" }),
     ).toBeVisible();
     expect(screen.getByText("admin@example.local")).toBeVisible();
+    expect(await screen.findByText("Daily API schedule")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Ejecutar vencidos" }));
+    expect(await screen.findByText("1 schedule(s) evaluados.")).toBeVisible();
+    expect(await screen.findByText(/ultimo tick queued/)).toBeVisible();
 
     await user.type(screen.getByLabelText("Email"), "client@example.local");
     await user.type(screen.getByLabelText("Nombre"), "Client User");

@@ -53,6 +53,8 @@ ID_TABLES = {
     "run_artifacts",
     "run_asset_dispatch_result_rows",
     "run_dispatch_result_rows",
+    "run_schedule_ticks",
+    "run_schedules",
     "runs",
     "scenario_drafts",
     "scenario_version_hydraulic_diagram_snapshots",

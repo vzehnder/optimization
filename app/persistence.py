@@ -25,6 +25,7 @@ from app.variant_staleness import (
     evaluate_variant_staleness,
     variant_staleness_result_to_dict,
 )
+from app.schedules import normalize_schedule_cadence, parse_schedule_datetime
 from app.time_series_catalog import (
     TIME_SERIES_SIGNAL_CATALOG,
     CatalogPeriod,
@@ -770,6 +771,50 @@ class AnalystStore:
                 CHECK (status IN ('queued', 'running', 'succeeded', 'failed'))
             );
 
+            CREATE TABLE IF NOT EXISTS run_schedules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scenario_id INTEGER NOT NULL,
+                case_id INTEGER NOT NULL,
+                case_input_variant_id INTEGER NOT NULL,
+                display_name TEXT NOT NULL,
+                range_start TEXT NOT NULL,
+                range_end TEXT NOT NULL,
+                cadence TEXT NOT NULL,
+                next_run_at TEXT NOT NULL,
+                topology_hash TEXT NOT NULL,
+                parameter_hash TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                last_fired_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (scenario_id) REFERENCES scenarios(id) ON DELETE CASCADE,
+                FOREIGN KEY (case_id) REFERENCES optimization_cases(id) ON DELETE CASCADE,
+                FOREIGN KEY (case_input_variant_id) REFERENCES case_input_variants(id) ON DELETE CASCADE,
+                CHECK (cadence IN ('hourly', 'daily', 'weekly'))
+            );
+
+            CREATE TABLE IF NOT EXISTS run_schedule_ticks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                schedule_id INTEGER NOT NULL,
+                due_at TEXT NOT NULL,
+                fired_at TEXT NOT NULL,
+                range_start TEXT NOT NULL,
+                range_end TEXT NOT NULL,
+                status TEXT NOT NULL,
+                scenario_version_id INTEGER,
+                run_id INTEGER,
+                error_message TEXT NOT NULL DEFAULT '',
+                error_payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (schedule_id) REFERENCES run_schedules(id) ON DELETE CASCADE,
+                FOREIGN KEY (scenario_version_id) REFERENCES scenario_versions(id) ON DELETE SET NULL,
+                FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE SET NULL,
+                CHECK (status IN ('queued', 'failed'))
+            );
+
             CREATE TABLE IF NOT EXISTS run_artifacts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 run_id INTEGER NOT NULL,
@@ -1015,6 +1060,18 @@ class AnalystStore:
             """
             CREATE INDEX IF NOT EXISTS idx_scenarios_project
             ON scenarios (project_id, id)
+            """
+        )
+        self.connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_run_schedules_due
+            ON run_schedules (is_active, next_run_at, id)
+            """
+        )
+        self.connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_run_schedule_ticks_schedule
+            ON run_schedule_ticks (schedule_id, id)
             """
         )
 
@@ -5597,6 +5654,279 @@ class AnalystStore:
             )
             self.connection.commit()
             return self.get_run(cursor.lastrowid)
+
+    def _get_case_for_schedule(self, *, scenario_id: int, case_input_variant_id: int) -> dict[str, Any]:
+        self.get_scenario(scenario_id)
+        variant = self.get_case_input_variant(case_input_variant_id)
+        row = self.connection.execute(
+            """
+            SELECT id, scenario_id, case_key, display_name, validation_payload_json,
+                   created_at, updated_at, created_by, updated_by
+            FROM optimization_cases
+            WHERE id = ?
+            """,
+            (variant["case_id"],),
+        ).fetchone()
+        if row is None or int(row["scenario_id"]) != int(scenario_id):
+            raise KeyError(
+                f"case input variant {case_input_variant_id} not found for scenario {scenario_id}"
+            )
+        return row_to_dict(row)
+
+    def create_run_schedule(
+        self,
+        *,
+        scenario_id: int,
+        case_input_variant_id: int,
+        display_name: str,
+        range_start: str,
+        range_end: str,
+        cadence: str,
+        next_run_at: str,
+        created_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        clean_name = normalize_optional_text(display_name)
+        if not clean_name:
+            raise ValueError("display_name is required")
+        normalized_cadence = normalize_schedule_cadence(cadence)
+        range_start_at = parse_schedule_datetime(range_start, field_name="range_start")
+        range_end_at = parse_schedule_datetime(range_end, field_name="range_end")
+        if range_start_at >= range_end_at:
+            raise ValueError("range_start must be before range_end")
+        normalized_next_run_at = parse_schedule_datetime(
+            next_run_at, field_name="next_run_at"
+        ).isoformat()
+        case = self._get_case_for_schedule(
+            scenario_id=scenario_id, case_input_variant_id=case_input_variant_id
+        )
+        base_system_case = self._generate_base_system_case_for_variant(scenario_id)
+        provenance = derive_case_hierarchy_provenance(base_system_case)
+        now = utc_now_iso()
+        with self._lock:
+            cursor = self.connection.execute(
+                """
+                INSERT INTO run_schedules (
+                    scenario_id,
+                    case_id,
+                    case_input_variant_id,
+                    display_name,
+                    range_start,
+                    range_end,
+                    cadence,
+                    next_run_at,
+                    topology_hash,
+                    parameter_hash,
+                    is_active,
+                    created_at,
+                    updated_at,
+                    created_by,
+                    updated_by
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+                """,
+                (
+                    scenario_id,
+                    case["id"],
+                    case_input_variant_id,
+                    clean_name,
+                    range_start_at.isoformat(),
+                    range_end_at.isoformat(),
+                    normalized_cadence,
+                    normalized_next_run_at,
+                    provenance["topology"]["content_hash"],
+                    provenance["parameters"]["content_hash"],
+                    now,
+                    now,
+                    created_by,
+                    created_by,
+                ),
+            )
+            self.connection.commit()
+            return self.get_run_schedule(cursor.lastrowid)
+
+    def get_run_schedule(self, schedule_id: int) -> dict[str, Any]:
+        row = self.connection.execute(
+            """
+            SELECT id, scenario_id, case_id, case_input_variant_id, display_name,
+                   range_start, range_end, cadence, next_run_at, topology_hash,
+                   parameter_hash, is_active, last_fired_at, created_at, updated_at,
+                   created_by, updated_by
+            FROM run_schedules
+            WHERE id = ?
+            """,
+            (schedule_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"run schedule {schedule_id} not found")
+        return run_schedule_row_to_dict(row)
+
+    def list_run_schedules(self) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            """
+            SELECT id, scenario_id, case_id, case_input_variant_id, display_name,
+                   range_start, range_end, cadence, next_run_at, topology_hash,
+                   parameter_hash, is_active, last_fired_at, created_at, updated_at,
+                   created_by, updated_by
+            FROM run_schedules
+            ORDER BY is_active DESC, next_run_at ASC, id ASC
+            """
+        ).fetchall()
+        return [run_schedule_row_to_dict(row) for row in rows]
+
+    def advance_run_schedule(
+        self,
+        schedule_id: int,
+        *,
+        next_run_at: str,
+        last_fired_at: str,
+        updated_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        with self._lock:
+            self.get_run_schedule(schedule_id)
+            updated_at = utc_now_iso()
+            self.connection.execute(
+                """
+                UPDATE run_schedules
+                SET
+                    next_run_at = ?,
+                    last_fired_at = ?,
+                    updated_at = ?,
+                    updated_by = ?
+                WHERE id = ?
+                """,
+                (next_run_at, last_fired_at, updated_at, updated_by, schedule_id),
+            )
+            self.connection.commit()
+            return self.get_run_schedule(schedule_id)
+
+    def create_run_schedule_tick(
+        self,
+        *,
+        schedule_id: int,
+        due_at: str,
+        fired_at: str,
+        range_start: str,
+        range_end: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            self.get_run_schedule(schedule_id)
+            now = utc_now_iso()
+            cursor = self.connection.execute(
+                """
+                INSERT INTO run_schedule_ticks (
+                    schedule_id,
+                    due_at,
+                    fired_at,
+                    range_start,
+                    range_end,
+                    status,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)
+                """,
+                (schedule_id, due_at, fired_at, range_start, range_end, now, now),
+            )
+            self.connection.commit()
+            return self.get_run_schedule_tick(cursor.lastrowid)
+
+    def get_run_schedule_tick(self, tick_id: int) -> dict[str, Any]:
+        row = self.connection.execute(
+            """
+            SELECT id, schedule_id, due_at, fired_at, range_start, range_end,
+                   status, scenario_version_id, run_id, error_message,
+                   error_payload_json, created_at, updated_at
+            FROM run_schedule_ticks
+            WHERE id = ?
+            """,
+            (tick_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"run schedule tick {tick_id} not found")
+        return run_schedule_tick_row_to_dict(row)
+
+    def list_run_schedule_ticks(self, schedule_id: int | None = None) -> list[dict[str, Any]]:
+        if schedule_id is None:
+            rows = self.connection.execute(
+                """
+                SELECT id, schedule_id, due_at, fired_at, range_start, range_end,
+                       status, scenario_version_id, run_id, error_message,
+                       error_payload_json, created_at, updated_at
+                FROM run_schedule_ticks
+                ORDER BY id DESC
+                """
+            ).fetchall()
+        else:
+            self.get_run_schedule(schedule_id)
+            rows = self.connection.execute(
+                """
+                SELECT id, schedule_id, due_at, fired_at, range_start, range_end,
+                       status, scenario_version_id, run_id, error_message,
+                       error_payload_json, created_at, updated_at
+                FROM run_schedule_ticks
+                WHERE schedule_id = ?
+                ORDER BY id DESC
+                """,
+                (schedule_id,),
+            ).fetchall()
+        return [run_schedule_tick_row_to_dict(row) for row in rows]
+
+    def mark_run_schedule_tick_queued(
+        self,
+        tick_id: int,
+        *,
+        scenario_version_id: int,
+        run_id: int,
+    ) -> dict[str, Any]:
+        with self._lock:
+            self.get_run_schedule_tick(tick_id)
+            updated_at = utc_now_iso()
+            self.connection.execute(
+                """
+                UPDATE run_schedule_ticks
+                SET
+                    status = 'queued',
+                    scenario_version_id = ?,
+                    run_id = ?,
+                    error_message = '',
+                    error_payload_json = '{}',
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (scenario_version_id, run_id, updated_at, tick_id),
+            )
+            self.connection.commit()
+            return self.get_run_schedule_tick(tick_id)
+
+    def mark_run_schedule_tick_failed(
+        self,
+        tick_id: int,
+        *,
+        error_message: str,
+        error_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            self.get_run_schedule_tick(tick_id)
+            updated_at = utc_now_iso()
+            self.connection.execute(
+                """
+                UPDATE run_schedule_ticks
+                SET
+                    status = 'failed',
+                    error_message = ?,
+                    error_payload_json = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    error_message,
+                    json.dumps(error_payload or {}, sort_keys=True),
+                    updated_at,
+                    tick_id,
+                ),
+            )
+            self.connection.commit()
+            return self.get_run_schedule_tick(tick_id)
 
     def get_run(self, run_id: int) -> dict[str, Any]:
         with self._lock:
@@ -10437,5 +10767,17 @@ def scenario_draft_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str
 def run_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
     value = row_to_dict(row)
     value["success_payload"] = json.loads(value.pop("success_payload_json") or "{}")
+    value["error_payload"] = json.loads(value.pop("error_payload_json") or "{}")
+    return value
+
+
+def run_schedule_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
+    value = row_to_dict(row)
+    value["is_active"] = bool(value["is_active"])
+    return value
+
+
+def run_schedule_tick_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
+    value = row_to_dict(row)
     value["error_payload"] = json.loads(value.pop("error_payload_json") or "{}")
     return value

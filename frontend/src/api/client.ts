@@ -44,6 +44,56 @@ export interface ProjectClientAccess {
   assigned_by: string;
 }
 
+export interface RunSchedule {
+  id: number;
+  scenario_id: number;
+  case_id: number;
+  case_input_variant_id: number;
+  display_name: string;
+  range_start: string;
+  range_end: string;
+  cadence: string;
+  next_run_at: string;
+  topology_hash: string;
+  parameter_hash: string;
+  is_active: boolean;
+  last_fired_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by: string;
+  updated_by: string;
+}
+
+export interface RunScheduleTick {
+  id: number;
+  schedule_id: number;
+  due_at: string;
+  fired_at: string;
+  range_start: string;
+  range_end: string;
+  status: string;
+  scenario_version_id?: number | null;
+  run_id?: number | null;
+  error_message: string;
+  error_payload?: unknown;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RunScheduleCreatePayload {
+  scenario_id: number;
+  case_input_variant_id: number;
+  display_name: string;
+  range_start: string;
+  range_end: string;
+  cadence: string;
+  next_run_at: string;
+}
+
+export interface RunDueSchedulesPayload {
+  now?: string | null;
+}
+
 export interface Project {
   id: number;
   name: string;
@@ -1159,6 +1209,40 @@ export async function removeProjectClientAccess(
       headers: { "X-CSRF-Token": csrfToken },
     },
   );
+}
+
+export async function listRunSchedules(signal?: AbortSignal): Promise<{
+  schedules: RunSchedule[];
+  ticks: RunScheduleTick[];
+}> {
+  return requestJson<{ schedules: RunSchedule[]; ticks: RunScheduleTick[] }>(
+    "/api/admin/schedules",
+    { signal },
+  );
+}
+
+export async function createRunSchedule(
+  payload: RunScheduleCreatePayload,
+): Promise<RunSchedule> {
+  const response = await postJsonWithCsrf<{ schedule: RunSchedule }>(
+    "/api/admin/schedules",
+    payload,
+  );
+  return response.schedule;
+}
+
+export async function runDueSchedules(
+  payload: RunDueSchedulesPayload = {},
+): Promise<{
+  now: string;
+  due_count: number;
+  ticks: RunScheduleTick[];
+}> {
+  return postJsonWithCsrf<{
+    now: string;
+    due_count: number;
+    ticks: RunScheduleTick[];
+  }>("/api/admin/schedules/run-due", payload);
 }
 
 export async function listScenarios(

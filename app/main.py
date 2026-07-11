@@ -53,6 +53,11 @@ from app.result_comparison import ComparisonError, compare_runs
 from app.result_indexing import rebuild_all_run_results, rebuild_run_results
 from app.result_retention import cleanup_project_result_data, cleanup_run_result_data
 from app.results import ResultReadError, apply_dashboard_template, read_run_results
+from app.schedules import (
+    ScheduleError,
+    due_fixed_range_schedules,
+    execute_fixed_range_schedule,
+)
 from app.time_series_catalog import (
     CatalogImportRequest as PreparedCatalogImportRequest,
     CatalogSignalMappingRequest as PreparedCatalogSignalMappingRequest,
@@ -390,6 +395,20 @@ class TimeSeriesSetReplaceRequest(BaseModel):
 
 class ResultCleanupRequest(BaseModel):
     targets: list[str] = Field(default_factory=list)
+
+
+class RunScheduleCreateRequest(BaseModel):
+    scenario_id: int
+    case_input_variant_id: int
+    display_name: str = Field(min_length=1)
+    range_start: str = Field(min_length=1)
+    range_end: str = Field(min_length=1)
+    cadence: str = Field(min_length=1)
+    next_run_at: str = Field(min_length=1)
+
+
+class RunDueSchedulesRequest(BaseModel):
+    now: str | None = None
 
 
 class DraftPromotionError(ValueError):
@@ -2363,6 +2382,58 @@ def create_app(
                 status_code=error.status_code,
             )
         return {"results": results}
+
+    @app.get("/api/admin/schedules")
+    async def admin_list_run_schedules(request: Request):
+        require_admin_user(request)
+        return {
+            "schedules": analyst_store.list_run_schedules(),
+            "ticks": analyst_store.list_run_schedule_ticks(),
+        }
+
+    @app.post("/api/admin/schedules", status_code=201)
+    async def admin_create_run_schedule(payload: RunScheduleCreateRequest, request: Request):
+        require_admin_user(request)
+        try:
+            schedule = analyst_store.create_run_schedule(
+                scenario_id=payload.scenario_id,
+                case_input_variant_id=payload.case_input_variant_id,
+                display_name=payload.display_name,
+                range_start=payload.range_start,
+                range_end=payload.range_end,
+                cadence=payload.cadence,
+                next_run_at=payload.next_run_at,
+                created_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except (DraftGenerationError, ScheduleError, ValueError) as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return {"schedule": schedule}
+
+    @app.post("/api/admin/schedules/run-due")
+    async def admin_run_due_schedules(payload: RunDueSchedulesRequest, request: Request):
+        require_admin_user(request)
+        now = payload.now or utc_now_iso()
+        try:
+            due_schedules = due_fixed_range_schedules(
+                analyst_store.list_run_schedules(), now=now
+            )
+        except ScheduleError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+        ticks = [
+            execute_fixed_range_schedule(
+                store=analyst_store,
+                validation_service=service,
+                run_queue=local_run_queue,
+                schedule=schedule,
+                now=now,
+                triggered_by=current_user_email(request),
+            )
+            for schedule in due_schedules
+        ]
+        return {"now": now, "due_count": len(due_schedules), "ticks": ticks}
 
     @app.post("/api/admin/runs/rebuild-results")
     async def admin_rebuild_all_run_results(request: Request, force: bool = False):

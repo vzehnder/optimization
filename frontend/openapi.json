@@ -1105,6 +1105,71 @@
         "title": "ResultCleanupRequest",
         "type": "object"
       },
+      "RunDueSchedulesRequest": {
+        "properties": {
+          "now": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Now"
+          }
+        },
+        "title": "RunDueSchedulesRequest",
+        "type": "object"
+      },
+      "RunScheduleCreateRequest": {
+        "properties": {
+          "cadence": {
+            "minLength": 1,
+            "title": "Cadence",
+            "type": "string"
+          },
+          "case_input_variant_id": {
+            "title": "Case Input Variant Id",
+            "type": "integer"
+          },
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "next_run_at": {
+            "minLength": 1,
+            "title": "Next Run At",
+            "type": "string"
+          },
+          "range_end": {
+            "minLength": 1,
+            "title": "Range End",
+            "type": "string"
+          },
+          "range_start": {
+            "minLength": 1,
+            "title": "Range Start",
+            "type": "string"
+          },
+          "scenario_id": {
+            "title": "Scenario Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scenario_id",
+          "case_input_variant_id",
+          "display_name",
+          "range_start",
+          "range_end",
+          "cadence",
+          "next_run_at"
+        ],
+        "title": "RunScheduleCreateRequest",
+        "type": "object"
+      },
       "ScenarioCreateRequest": {
         "properties": {
           "description": {
@@ -2125,6 +2190,92 @@
           }
         },
         "summary": "Admin Rebuild Run Results"
+      }
+    },
+    "/api/admin/schedules": {
+      "get": {
+        "operationId": "admin_list_run_schedules_api_admin_schedules_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Admin List Run Schedules"
+      },
+      "post": {
+        "operationId": "admin_create_run_schedule_api_admin_schedules_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunScheduleCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Create Run Schedule"
+      }
+    },
+    "/api/admin/schedules/run-due": {
+      "post": {
+        "operationId": "admin_run_due_schedules_api_admin_schedules_run_due_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunDueSchedulesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Run Due Schedules"
       }
     },
     "/api/admin/users": {

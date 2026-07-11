@@ -124,6 +124,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin List Run Schedules */
+        get: operations["admin_list_run_schedules_api_admin_schedules_get"];
+        put?: never;
+        /** Admin Create Run Schedule */
+        post: operations["admin_create_run_schedule_api_admin_schedules_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/schedules/run-due": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Admin Run Due Schedules */
+        post: operations["admin_run_due_schedules_api_admin_schedules_run_due_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/users": {
         parameters: {
             query?: never;
@@ -1746,6 +1781,28 @@ export interface components {
             /** Targets */
             targets?: string[];
         };
+        /** RunDueSchedulesRequest */
+        RunDueSchedulesRequest: {
+            /** Now */
+            now?: string | null;
+        };
+        /** RunScheduleCreateRequest */
+        RunScheduleCreateRequest: {
+            /** Cadence */
+            cadence: string;
+            /** Case Input Variant Id */
+            case_input_variant_id: number;
+            /** Display Name */
+            display_name: string;
+            /** Next Run At */
+            next_run_at: string;
+            /** Range End */
+            range_end: string;
+            /** Range Start */
+            range_start: string;
+            /** Scenario Id */
+            scenario_id: number;
+        };
         /** ScenarioCreateRequest */
         ScenarioCreateRequest: {
             /**
@@ -2204,6 +2261,92 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_list_run_schedules_api_admin_schedules_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    admin_create_run_schedule_api_admin_schedules_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunScheduleCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_run_due_schedules_api_admin_schedules_run_due_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunDueSchedulesRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

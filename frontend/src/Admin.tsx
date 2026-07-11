@@ -5,16 +5,23 @@ import {
   ApiError,
   assignProjectClientAccess,
   createAdminUser,
+  createRunSchedule,
   deactivateAdminUser,
   listAdminUsers,
   listProjectClientAccess,
+  listRunSchedules,
   removeProjectClientAccess,
+  runDueSchedules,
   type AdminUser,
   type ProjectClientAccess,
+  type RunSchedule,
+  type RunScheduleCreatePayload,
+  type RunScheduleTick,
   type UserCreatePayload,
 } from "./api/client";
 
 const adminUsersQueryKey = ["admin-users"] as const;
+const runSchedulesQueryKey = ["run-schedules"] as const;
 const projectClientAccessQueryKey = (projectId: number) =>
   ["project-client-access", projectId] as const;
 
@@ -52,6 +59,199 @@ function removeAssignment(
 ) {
   return (assignments || []).filter(
     (assignment) => assignment.user_id !== userId,
+  );
+}
+
+function appendSchedule(
+  schedules: RunSchedule[] | undefined,
+  schedule: RunSchedule,
+) {
+  if (!schedules) return [schedule];
+  if (schedules.some((candidate) => candidate.id === schedule.id))
+    return schedules;
+  return [...schedules, schedule];
+}
+
+function RunScheduleList({
+  schedules,
+  ticks,
+}: {
+  schedules: RunSchedule[];
+  ticks: RunScheduleTick[];
+}) {
+  if (!schedules.length) {
+    return <p className="empty-state">No hay schedules configurados.</p>;
+  }
+
+  const ticksBySchedule = new Map<number, RunScheduleTick[]>();
+  for (const tick of ticks) {
+    const current = ticksBySchedule.get(tick.schedule_id) || [];
+    current.push(tick);
+    ticksBySchedule.set(tick.schedule_id, current);
+  }
+
+  return (
+    <ul className="resource-list">
+      {schedules.map((schedule) => {
+        const latestTick = ticksBySchedule.get(schedule.id)?.[0];
+        return (
+          <li key={schedule.id}>
+            <div className="admin-resource-row">
+              <div>
+                <strong>{schedule.display_name}</strong>
+                <p>
+                  scenario {schedule.scenario_id} | variant{" "}
+                  {schedule.case_input_variant_id} | {schedule.cadence} | next{" "}
+                  {schedule.next_run_at}
+                </p>
+                <p>
+                  rango {schedule.range_start} - {schedule.range_end}
+                </p>
+                {latestTick ? (
+                  <p>
+                    ultimo tick {latestTick.status}
+                    {latestTick.run_id ? ` | run ${latestTick.run_id}` : ""}
+                    {latestTick.error_message
+                      ? ` | ${latestTick.error_message}`
+                      : ""}
+                  </p>
+                ) : null}
+              </div>
+              <span className="status-pill">
+                {schedule.is_active ? "active" : "inactive"}
+              </span>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function RunSchedulesPanel() {
+  const queryClient = useQueryClient();
+  const [error, setError] = useState("");
+  const [status, setStatus] = useState("");
+  const schedules = useQuery({
+    queryKey: runSchedulesQueryKey,
+    queryFn: ({ signal }) => listRunSchedules(signal),
+    retry: false,
+  });
+  const createMutation = useMutation({
+    mutationFn: createRunSchedule,
+    onSuccess: (schedule) => {
+      setError("");
+      setStatus(`${schedule.display_name} creado.`);
+      queryClient.setQueryData<{
+        schedules: RunSchedule[];
+        ticks: RunScheduleTick[];
+      }>(runSchedulesQueryKey, (current) => ({
+        schedules: appendSchedule(current?.schedules, schedule),
+        ticks: current?.ticks || [],
+      }));
+      void queryClient.invalidateQueries({ queryKey: runSchedulesQueryKey });
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError)),
+  });
+  const runDueMutation = useMutation({
+    mutationFn: runDueSchedules,
+    onSuccess: (report) => {
+      setError("");
+      setStatus(`${report.due_count} schedule(s) evaluados.`);
+      void queryClient.invalidateQueries({ queryKey: runSchedulesQueryKey });
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError)),
+  });
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setStatus("");
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const payload: RunScheduleCreatePayload = {
+      scenario_id: Number(form.get("scenario_id") || 0),
+      case_input_variant_id: Number(form.get("case_input_variant_id") || 0),
+      display_name: String(form.get("display_name") || ""),
+      range_start: String(form.get("range_start") || ""),
+      range_end: String(form.get("range_end") || ""),
+      cadence: String(form.get("cadence") || "daily"),
+      next_run_at: String(form.get("next_run_at") || ""),
+    };
+    createMutation.mutate(payload, {
+      onSuccess: () => formElement.reset(),
+    });
+  }
+
+  return (
+    <section className="workspace-section" aria-labelledby="admin-schedules">
+      <h2 id="admin-schedules">Schedules</h2>
+      {error ? <p role="alert">{error}</p> : null}
+      {status ? <p className="inline-status">{status}</p> : null}
+      {schedules.isPending ? (
+        <p role="status">Cargando schedules</p>
+      ) : schedules.isError ? (
+        <p role="alert">{errorMessage(schedules.error)}</p>
+      ) : (
+        <RunScheduleList
+          schedules={schedules.data.schedules}
+          ticks={schedules.data.ticks}
+        />
+      )}
+      <div className="action-row">
+        <button
+          type="button"
+          className="secondary-action"
+          disabled={runDueMutation.isPending}
+          onClick={() => runDueMutation.mutate({})}
+        >
+          Ejecutar vencidos
+        </button>
+        <button
+          type="button"
+          className="secondary-action"
+          onClick={() => void schedules.refetch()}
+        >
+          Refrescar
+        </button>
+      </div>
+      <form className="workspace-form nested-form" onSubmit={submit}>
+        <h3>Nuevo schedule</h3>
+        <label htmlFor="schedule-name">Nombre schedule</label>
+        <input id="schedule-name" name="display_name" required />
+        <label htmlFor="schedule-scenario">Scenario ID</label>
+        <input
+          id="schedule-scenario"
+          name="scenario_id"
+          type="number"
+          min="1"
+          required
+        />
+        <label htmlFor="schedule-variant">Variant ID</label>
+        <input
+          id="schedule-variant"
+          name="case_input_variant_id"
+          type="number"
+          min="1"
+          required
+        />
+        <label htmlFor="schedule-range-start">Rango inicio</label>
+        <input id="schedule-range-start" name="range_start" required />
+        <label htmlFor="schedule-range-end">Rango termino</label>
+        <input id="schedule-range-end" name="range_end" required />
+        <label htmlFor="schedule-cadence">Cadencia</label>
+        <select id="schedule-cadence" name="cadence" defaultValue="daily">
+          <option value="hourly">hourly</option>
+          <option value="daily">daily</option>
+          <option value="weekly">weekly</option>
+        </select>
+        <label htmlFor="schedule-next-run">Proxima ejecucion</label>
+        <input id="schedule-next-run" name="next_run_at" required />
+        <button type="submit" disabled={createMutation.isPending}>
+          Crear schedule
+        </button>
+      </form>
+    </section>
   );
 }
 
@@ -265,7 +465,7 @@ export function AdminUsersView() {
     <section className="workspace-view">
       <header className="workspace-heading">
         <p className="eyebrow">Admin</p>
-        <h1>Usuarios</h1>
+        <h1>Administracion</h1>
       </header>
       <div className="workspace-grid">
         <section className="workspace-section" aria-labelledby="admin-users">
@@ -283,6 +483,7 @@ export function AdminUsersView() {
           <AdminUserList users={users.data} onDeactivated={acceptDeactivated} />
         </section>
         <CreateUserForm />
+        <RunSchedulesPanel />
       </div>
     </section>
   );
