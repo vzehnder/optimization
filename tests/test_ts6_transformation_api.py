@@ -318,5 +318,153 @@ class InterpolateGapsTransformationApiTests(unittest.TestCase):
         self.assertIn("exceeds max_gap_hours", body["detail"])
 
 
+class CombineSignalsTransformationApiTests(unittest.TestCase):
+    def setUp(self):
+        self.client = TestClient(
+            create_app(
+                validation_service=StubValidationService(),
+                database_url="sqlite:///:memory:",
+                run_queue=RecordingRunQueue(),
+            )
+        )
+        self.store = self.client.app.state.analyst_store
+        self.project = self.store.create_project(name="TS-6 combine API project")
+        self.scenario = self.store.create_scenario(
+            project_id=self.project["id"], name="TS-6 combine API scenario"
+        )
+        price_prepared = prepare_time_series_catalog_import(
+            rows=[
+                {
+                    "period_start": (datetime(2026, 1, 1) + timedelta(hours=hour)).isoformat(),
+                    "hours": "1.0",
+                    "price": str(50.0 + hour),
+                }
+                for hour in range(3)
+            ],
+            request=CatalogImportRequest(
+                set_name="Price only",
+                version_label="v1",
+                data_kind="real",
+                timezone="America/Santiago",
+                timestamp_column="period_start",
+                duration_hours_column="hours",
+                signal_mappings=[
+                    CatalogSignalMappingRequest(
+                        source_column="price", signal_key="import_price_usd_per_mwh"
+                    ),
+                ],
+            ),
+        )
+        self.price_set = self.store.import_time_series_catalog_set(
+            scenario_id=self.scenario["id"],
+            source={
+                "id": "csv_source_price_api",
+                "original_filename": "price.csv",
+                "media_type": "text/csv",
+                "checksum": "sha256:test-price-api",
+            },
+            prepared_import=price_prepared,
+        )
+        demand_prepared = prepare_time_series_catalog_import(
+            rows=[
+                {
+                    "period_start": (datetime(2026, 1, 1) + timedelta(hours=hour)).isoformat(),
+                    "hours": "1.0",
+                    "demand": str(100.0 + hour),
+                }
+                for hour in range(3)
+            ],
+            request=CatalogImportRequest(
+                set_name="Demand only",
+                version_label="v1",
+                data_kind="real",
+                timezone="America/Santiago",
+                timestamp_column="period_start",
+                duration_hours_column="hours",
+                signal_mappings=[
+                    CatalogSignalMappingRequest(
+                        source_column="demand", signal_key="load_demand_mw"
+                    ),
+                ],
+            ),
+        )
+        self.demand_set = self.store.import_time_series_catalog_set(
+            scenario_id=self.scenario["id"],
+            source={
+                "id": "csv_source_demand_api",
+                "original_filename": "demand.csv",
+                "media_type": "text/csv",
+                "checksum": "sha256:test-demand-api",
+            },
+            prepared_import=demand_prepared,
+        )
+
+    def test_apply_combine_signals_returns_the_derived_set(self):
+        response = self.client.post(
+            f"/api/projects/{self.project['id']}/time-series-transformations",
+            json={
+                "transformation_type": "combine_signals",
+                "parameters": {
+                    "inputs": [
+                        {
+                            "time_series_set_id": self.price_set["id"],
+                            "signal_keys": ["import_price_usd_per_mwh"],
+                        },
+                        {
+                            "time_series_set_id": self.demand_set["id"],
+                            "signal_keys": ["load_demand_mw"],
+                        },
+                    ]
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 201, response.text)
+        derived = response.json()["time_series_set"]
+        self.assertEqual(derived["data_kind"], "derived")
+        signal_keys = {signal["signal_key"] for signal in derived["signals"]}
+        self.assertEqual(signal_keys, {"import_price_usd_per_mwh", "load_demand_mw"})
+
+    def test_fewer_than_two_inputs_returns_a_400_error(self):
+        response = self.client.post(
+            f"/api/projects/{self.project['id']}/time-series-transformations",
+            json={
+                "transformation_type": "combine_signals",
+                "parameters": {
+                    "inputs": [
+                        {
+                            "time_series_set_id": self.price_set["id"],
+                            "signal_keys": ["import_price_usd_per_mwh"],
+                        }
+                    ]
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        body = response.json()
+        self.assertEqual(body["status"], "error")
+        self.assertIn("at least two inputs", body["detail"])
+
+    def test_unknown_input_time_series_set_returns_404(self):
+        response = self.client.post(
+            f"/api/projects/{self.project['id']}/time-series-transformations",
+            json={
+                "transformation_type": "combine_signals",
+                "parameters": {
+                    "inputs": [
+                        {
+                            "time_series_set_id": self.price_set["id"],
+                            "signal_keys": ["import_price_usd_per_mwh"],
+                        },
+                        {"time_series_set_id": 999999, "signal_keys": ["load_demand_mw"]},
+                    ]
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+
 if __name__ == "__main__":
     unittest.main()

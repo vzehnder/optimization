@@ -19,6 +19,7 @@ import {
 import { hierarchyProvenanceHashLabel } from "./caseHierarchy";
 import {
   ApiError,
+  applyTimeSeriesCombination,
   applyTimeSeriesTransformation,
   bindCaseTimeSeries,
   cloneCaseInputVariant,
@@ -859,6 +860,230 @@ function TimeSeriesCatalogList({
   );
 }
 
+type CombinationInputState = {
+  time_series_set_id: string;
+  signal_keys: string[];
+};
+
+function defaultCombinationInputs(): CombinationInputState[] {
+  return [
+    { time_series_set_id: "", signal_keys: [] },
+    { time_series_set_id: "", signal_keys: [] },
+  ];
+}
+
+function CombinationInputRow({
+  projectId,
+  index,
+  sets,
+  input,
+  onChange,
+  onRemove,
+  canRemove,
+  disabled,
+}: {
+  projectId: number;
+  index: number;
+  sets: ProjectTimeSeriesSetSummary[];
+  input: CombinationInputState;
+  onChange: (next: CombinationInputState) => void;
+  onRemove: () => void;
+  canRemove: boolean;
+  disabled: boolean;
+}) {
+  const selectedSetId = input.time_series_set_id
+    ? Number(input.time_series_set_id)
+    : null;
+  const selectedSet = useQuery({
+    queryKey: timeSeriesSetQueryKey(projectId, selectedSetId || 0),
+    queryFn: ({ signal }) =>
+      getProjectTimeSeriesSet(projectId, selectedSetId || 0, signal),
+    enabled: selectedSetId !== null,
+  });
+
+  return (
+    <div className="version-actions">
+      <label htmlFor={`combination-input-set-${index}`}>
+        Set de entrada
+      </label>
+      <select
+        id={`combination-input-set-${index}`}
+        value={input.time_series_set_id}
+        onChange={(event) =>
+          onChange({ time_series_set_id: event.target.value, signal_keys: [] })
+        }
+        disabled={disabled}
+      >
+        <option value="">Selecciona un set</option>
+        {sets.map((set) => (
+          <option key={set.id} value={set.id}>
+            {set.name} ({set.version_label})
+          </option>
+        ))}
+      </select>
+      {selectedSetId !== null && selectedSet.data ? (
+        <div>
+          {selectedSet.data.signals.map((signal) => {
+            const checked = input.signal_keys.includes(signal.signal_key);
+            return (
+              <label key={signal.signal_key}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(event) => {
+                    const nextKeys = event.target.checked
+                      ? [...input.signal_keys, signal.signal_key]
+                      : input.signal_keys.filter(
+                          (key) => key !== signal.signal_key,
+                        );
+                    onChange({ ...input, signal_keys: nextKeys });
+                  }}
+                  disabled={disabled}
+                />{" "}
+                {signal.signal_key} ({signal.unit})
+              </label>
+            );
+          })}
+        </div>
+      ) : null}
+      {canRemove ? (
+        <button type="button" onClick={onRemove} disabled={disabled}>
+          Quitar input
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function TimeSeriesCombinationPanel({
+  projectId,
+  sets,
+}: {
+  projectId: number;
+  sets: ProjectTimeSeriesSetSummary[];
+}) {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [inputs, setInputs] = useState<CombinationInputState[]>(
+    defaultCombinationInputs,
+  );
+  const [outputName, setOutputName] = useState("");
+  const [outputVersionLabel, setOutputVersionLabel] = useState("");
+  const [error, setError] = useState("");
+
+  const mutation = useMutation({
+    mutationFn: () => {
+      const payload: TimeSeriesTransformationPayload = {
+        transformation_type: "combine_signals",
+        parameters: {
+          inputs: inputs.map((input) => ({
+            time_series_set_id: Number(input.time_series_set_id),
+            signal_keys: input.signal_keys,
+          })),
+        },
+        output_name: outputName.trim() || undefined,
+        output_version_label: outputVersionLabel.trim() || undefined,
+      };
+      return applyTimeSeriesCombination(projectId, payload);
+    },
+    onSuccess: (derivedSet) => {
+      setError("");
+      void queryClient.invalidateQueries({
+        queryKey: timeSeriesCatalogQueryKey(projectId),
+      });
+      queryClient.setQueryData(
+        timeSeriesSetQueryKey(projectId, derivedSet.id),
+        derivedSet,
+      );
+      navigate(`/projects/${projectId}/time-series-sets/${derivedSet.id}`);
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError)),
+  });
+
+  const canSubmit =
+    inputs.length >= 2 &&
+    inputs.every(
+      (input) =>
+        input.time_series_set_id !== "" && input.signal_keys.length > 0,
+    );
+
+  return (
+    <section
+      className="workspace-section"
+      aria-labelledby="time-series-combination"
+    >
+      <h2 id="time-series-combination">Combinar series</h2>
+      <p>
+        Compone un set derivado tomando senales de dos o mas sets existentes
+        (combine_signals). Los sets origen no se modifican.
+      </p>
+      {error ? <p role="alert">{error}</p> : null}
+      {inputs.map((input, index) => (
+        <CombinationInputRow
+          key={index}
+          projectId={projectId}
+          index={index}
+          sets={sets}
+          input={input}
+          onChange={(next) =>
+            setInputs((current) =>
+              current.map((item, itemIndex) =>
+                itemIndex === index ? next : item,
+              ),
+            )
+          }
+          onRemove={() =>
+            setInputs((current) =>
+              current.filter((_, itemIndex) => itemIndex !== index),
+            )
+          }
+          canRemove={inputs.length > 2}
+          disabled={mutation.isPending}
+        />
+      ))}
+      <button
+        type="button"
+        onClick={() =>
+          setInputs((current) => [
+            ...current,
+            { time_series_set_id: "", signal_keys: [] },
+          ])
+        }
+        disabled={mutation.isPending}
+      >
+        Agregar input
+      </button>
+      <div className="version-actions">
+        <label htmlFor="combination-output-name">
+          Nombre del set derivado (opcional)
+        </label>
+        <input
+          id="combination-output-name"
+          value={outputName}
+          onChange={(event) => setOutputName(event.target.value)}
+          disabled={mutation.isPending}
+        />
+        <label htmlFor="combination-output-version-label">
+          Version del set derivado (opcional)
+        </label>
+        <input
+          id="combination-output-version-label"
+          value={outputVersionLabel}
+          onChange={(event) => setOutputVersionLabel(event.target.value)}
+          disabled={mutation.isPending}
+        />
+        <button
+          type="button"
+          onClick={() => mutation.mutate()}
+          disabled={mutation.isPending || !canSubmit}
+        >
+          {mutation.isPending ? "Combinando series" : "Aplicar combine_signals"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
 export function TimeSeriesCatalogView({
   canBulkMigrateHydraulicSeries = false,
 }: {
@@ -939,6 +1164,12 @@ export function TimeSeriesCatalogView({
           sets={timeSeriesSets.data}
         />
       </section>
+      {timeSeriesSets.data.length >= 2 ? (
+        <TimeSeriesCombinationPanel
+          projectId={projectId}
+          sets={timeSeriesSets.data}
+        />
+      ) : null}
       <section
         className="workspace-section"
         aria-labelledby="hydraulic-time-series-catalog"

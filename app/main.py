@@ -1753,6 +1753,35 @@ def create_app(
             )
         return {"time_series_set": derived_set}
 
+    @app.post(
+        "/api/projects/{project_id}/time-series-transformations",
+        status_code=201,
+    )
+    async def apply_project_time_series_combination(
+        project_id: int,
+        payload: TimeSeriesTransformationRequest,
+        request: Request,
+    ):
+        try:
+            derived_set = analyst_store.apply_time_series_combination(
+                project_id=project_id,
+                transformation_type=payload.transformation_type,
+                raw_parameters=payload.parameters,
+                output_name=payload.output_name,
+                output_version_label=payload.output_version_label,
+                created_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except (TransformationError, ValueError) as error:
+            return JSONResponse(
+                error_response_body(
+                    "time_series_transformation", str(error), phase="python_validation"
+                ),
+                status_code=400,
+            )
+        return {"time_series_set": derived_set}
+
     @app.put("/api/projects/{project_id}/time-series-sets/{time_series_set_id}/values")
     async def edit_project_time_series_set_values(
         project_id: int,

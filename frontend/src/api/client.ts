@@ -1990,6 +1990,25 @@ export async function applyTimeSeriesTransformation(
   return response.time_series_set;
 }
 
+export async function applyTimeSeriesCombination(
+  projectId: number,
+  payload: TimeSeriesTransformationPayload,
+): Promise<ProjectTimeSeriesSet> {
+  const csrfToken = await getCsrfToken();
+  const response = await requestJson<{ time_series_set: ProjectTimeSeriesSet }>(
+    `/api/projects/${projectId}/time-series-transformations`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrfToken,
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+  return response.time_series_set;
+}
+
 export async function uploadTimeSeriesSetReplacementSource(
   projectId: number,
   timeSeriesSetId: number,

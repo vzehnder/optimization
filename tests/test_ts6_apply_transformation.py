@@ -59,6 +59,64 @@ def demand_price_rows_with_gap(start, hours, missing_hours):
     return rows
 
 
+def price_only_import_request(*, version_label="v1"):
+    return CatalogImportRequest(
+        set_name="Price only",
+        version_label=version_label,
+        data_kind="real",
+        timezone="America/Santiago",
+        timestamp_column="period_start",
+        duration_hours_column="hours",
+        signal_mappings=[
+            CatalogSignalMappingRequest(
+                source_column="price", signal_key="import_price_usd_per_mwh"
+            ),
+        ],
+    )
+
+
+def demand_only_import_request(*, version_label="v1"):
+    return CatalogImportRequest(
+        set_name="Demand only",
+        version_label=version_label,
+        data_kind="real",
+        timezone="America/Santiago",
+        timestamp_column="period_start",
+        duration_hours_column="hours",
+        signal_mappings=[
+            CatalogSignalMappingRequest(source_column="demand", signal_key="load_demand_mw"),
+        ],
+    )
+
+
+def price_only_rows(start, count):
+    rows = []
+    for hour in range(count):
+        instant = start + timedelta(hours=hour)
+        rows.append(
+            {
+                "period_start": instant.isoformat(),
+                "hours": "1.0",
+                "price": str(50.0 + hour),
+            }
+        )
+    return rows
+
+
+def demand_only_rows(start, count):
+    rows = []
+    for hour in range(count):
+        instant = start + timedelta(hours=hour)
+        rows.append(
+            {
+                "period_start": instant.isoformat(),
+                "hours": "1.0",
+                "demand": str(100.0 + hour),
+            }
+        )
+    return rows
+
+
 class ApplyTimeSeriesTransformationTests(unittest.TestCase):
     def setUp(self):
         self.store = AnalystStore("sqlite:///:memory:")
@@ -422,6 +480,166 @@ class ApplyInterpolateGapsTransformationTests(unittest.TestCase):
 
         with self.assertRaises(TransformationError):
             self._apply_interpolate_gaps(raw_parameters={"max_gap_hours": 0.5})
+
+        self.assertEqual(
+            len(self.store.list_time_series_sets(self.project["id"])), sets_before
+        )
+
+
+class ApplyCombineSignalsTransformationTests(unittest.TestCase):
+    def setUp(self):
+        self.store = AnalystStore("sqlite:///:memory:")
+        self.project = self.store.create_project(name="TS-6 combine project")
+        self.scenario = self.store.create_scenario(
+            project_id=self.project["id"], name="TS-6 combine scenario"
+        )
+        price_prepared = prepare_time_series_catalog_import(
+            rows=price_only_rows(datetime(2026, 1, 1), 3),
+            request=price_only_import_request(),
+        )
+        self.price_set = self.store.import_time_series_catalog_set(
+            scenario_id=self.scenario["id"],
+            source={
+                "id": "csv_source_price",
+                "original_filename": "price.csv",
+                "media_type": "text/csv",
+                "checksum": "sha256:test-price",
+            },
+            prepared_import=price_prepared,
+        )
+        demand_prepared = prepare_time_series_catalog_import(
+            rows=demand_only_rows(datetime(2026, 1, 1), 3),
+            request=demand_only_import_request(),
+        )
+        self.demand_set = self.store.import_time_series_catalog_set(
+            scenario_id=self.scenario["id"],
+            source={
+                "id": "csv_source_demand",
+                "original_filename": "demand.csv",
+                "media_type": "text/csv",
+                "checksum": "sha256:test-demand",
+            },
+            prepared_import=demand_prepared,
+        )
+
+    def _apply_combine(self, **overrides):
+        raw_parameters = {
+            "inputs": [
+                {
+                    "time_series_set_id": self.price_set["id"],
+                    "signal_keys": ["import_price_usd_per_mwh"],
+                },
+                {
+                    "time_series_set_id": self.demand_set["id"],
+                    "signal_keys": ["load_demand_mw"],
+                },
+            ]
+        }
+        raw_parameters.update(overrides.pop("raw_parameters", {}))
+        return self.store.apply_time_series_combination(
+            project_id=self.project["id"],
+            transformation_type="combine_signals",
+            raw_parameters=raw_parameters,
+            **overrides,
+        )
+
+    def test_combine_signals_creates_a_derived_set_with_both_signals(self):
+        derived = self._apply_combine()
+
+        self.assertEqual(derived["data_kind"], "derived")
+        signal_keys = {signal["signal_key"] for signal in derived["signals"]}
+        self.assertEqual(signal_keys, {"import_price_usd_per_mwh", "load_demand_mw"})
+        values_by_key = {
+            (value["period_index"], value["signal_key"]): value["value_numeric"]
+            for value in derived["values"]
+        }
+        self.assertAlmostEqual(values_by_key[(0, "import_price_usd_per_mwh")], 50.0)
+        self.assertAlmostEqual(values_by_key[(0, "load_demand_mw")], 100.0)
+        self.assertAlmostEqual(values_by_key[(2, "import_price_usd_per_mwh")], 52.0)
+        self.assertAlmostEqual(values_by_key[(2, "load_demand_mw")], 102.0)
+
+    def test_source_sets_are_unchanged_after_combination(self):
+        self._apply_combine()
+
+        reloaded_price = self.store.get_time_series_set(
+            self.project["id"], self.price_set["id"]
+        )
+        self.assertEqual(reloaded_price["content_hash"], self.price_set["content_hash"])
+        reloaded_demand = self.store.get_time_series_set(
+            self.project["id"], self.demand_set["id"]
+        )
+        self.assertEqual(reloaded_demand["content_hash"], self.demand_set["content_hash"])
+
+    def test_combine_signals_records_lineage_for_every_input(self):
+        derived = self._apply_combine()
+
+        transformation = derived["revision_metadata"]["transformation"]
+        self.assertEqual(transformation["type"], "combine_signals")
+        self.assertEqual(len(transformation["inputs"]), 2)
+        by_id = {entry["time_series_set_id"]: entry for entry in transformation["inputs"]}
+        self.assertEqual(
+            by_id[self.price_set["id"]]["signals"], ["import_price_usd_per_mwh"]
+        )
+        self.assertEqual(by_id[self.demand_set["id"]]["signals"], ["load_demand_mw"])
+
+    def test_derived_combined_set_is_bindable_in_a_case_input_variant(self):
+        derived = self._apply_combine()
+        case = self.store.get_or_create_case_for_scenario(self.scenario["id"])
+        variant = self.store.get_or_create_default_input_variant(case["id"])
+
+        binding = self.store.upsert_case_time_series_binding(
+            case_input_variant_id=variant["id"],
+            signal_key="load_demand_mw",
+            time_series_set_id=derived["id"],
+        )
+
+        self.assertEqual(binding["time_series_set_id"], derived["id"])
+
+    def test_rerunning_same_combination_converges_without_duplicates(self):
+        first = self._apply_combine()
+        sets_after_first = self.store.list_time_series_sets(self.project["id"])
+
+        second = self._apply_combine()
+        sets_after_second = self.store.list_time_series_sets(self.project["id"])
+
+        self.assertEqual(first["id"], second["id"])
+        self.assertEqual(first["content_hash"], second["content_hash"])
+        self.assertEqual(len(sets_after_first), len(sets_after_second))
+
+    def test_fewer_than_two_inputs_is_rejected_before_any_write(self):
+        sets_before = len(self.store.list_time_series_sets(self.project["id"]))
+
+        with self.assertRaises(TransformationError):
+            self._apply_combine(
+                raw_parameters={
+                    "inputs": [
+                        {
+                            "time_series_set_id": self.price_set["id"],
+                            "signal_keys": ["import_price_usd_per_mwh"],
+                        }
+                    ]
+                }
+            )
+
+        self.assertEqual(
+            len(self.store.list_time_series_sets(self.project["id"])), sets_before
+        )
+
+    def test_unknown_time_series_set_id_is_rejected_before_any_write(self):
+        sets_before = len(self.store.list_time_series_sets(self.project["id"]))
+
+        with self.assertRaises(KeyError):
+            self._apply_combine(
+                raw_parameters={
+                    "inputs": [
+                        {
+                            "time_series_set_id": self.price_set["id"],
+                            "signal_keys": ["import_price_usd_per_mwh"],
+                        },
+                        {"time_series_set_id": 999999, "signal_keys": ["load_demand_mw"]},
+                    ]
+                }
+            )
 
         self.assertEqual(
             len(self.store.list_time_series_sets(self.project["id"])), sets_before
