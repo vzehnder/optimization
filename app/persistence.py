@@ -25,7 +25,11 @@ from app.variant_staleness import (
     evaluate_variant_staleness,
     variant_staleness_result_to_dict,
 )
-from app.schedules import normalize_schedule_cadence, parse_schedule_datetime
+from app.schedules import (
+    normalize_schedule_cadence,
+    parse_schedule_datetime,
+    resolve_schedule_range,
+)
 from app.time_series_catalog import (
     TIME_SERIES_SIGNAL_CATALOG,
     CatalogPeriod,
@@ -779,6 +783,9 @@ class AnalystStore:
                 display_name TEXT NOT NULL,
                 range_start TEXT NOT NULL,
                 range_end TEXT NOT NULL,
+                range_mode TEXT NOT NULL DEFAULT 'fixed',
+                rolling_start_offset_hours REAL,
+                rolling_duration_hours REAL,
                 cadence TEXT NOT NULL,
                 next_run_at TEXT NOT NULL,
                 topology_hash TEXT NOT NULL,
@@ -1009,6 +1016,9 @@ class AnalystStore:
         self._ensure_column("run_dispatch_result_indexes", "lineage_json", "TEXT NOT NULL DEFAULT '{}'")
         self._ensure_column("run_asset_dispatch_result_indexes", "lineage_json", "TEXT NOT NULL DEFAULT '{}'")
         self._ensure_column("run_summary_result_indexes", "lineage_json", "TEXT NOT NULL DEFAULT '{}'")
+        self._ensure_column("run_schedules", "range_mode", "TEXT NOT NULL DEFAULT 'fixed'")
+        self._ensure_column("run_schedules", "rolling_start_offset_hours", "REAL")
+        self._ensure_column("run_schedules", "rolling_duration_hours", "REAL")
         self._ensure_query_shape_indexes()
         self.connection.commit()
 
@@ -5683,19 +5693,45 @@ class AnalystStore:
         range_end: str,
         cadence: str,
         next_run_at: str,
+        range_mode: str = "fixed",
+        rolling_start_offset_hours: float | None = None,
+        rolling_duration_hours: float | None = None,
         created_by: str = "internal_analyst",
     ) -> dict[str, Any]:
         clean_name = normalize_optional_text(display_name)
         if not clean_name:
             raise ValueError("display_name is required")
         normalized_cadence = normalize_schedule_cadence(cadence)
-        range_start_at = parse_schedule_datetime(range_start, field_name="range_start")
-        range_end_at = parse_schedule_datetime(range_end, field_name="range_end")
-        if range_start_at >= range_end_at:
-            raise ValueError("range_start must be before range_end")
         normalized_next_run_at = parse_schedule_datetime(
             next_run_at, field_name="next_run_at"
         ).isoformat()
+        normalized_range_mode = str(range_mode or "fixed").strip().lower()
+        if normalized_range_mode not in {"fixed", "rolling"}:
+            raise ValueError("range_mode must be fixed or rolling")
+        if normalized_range_mode == "rolling":
+            resolved_range = resolve_schedule_range(
+                schedule={
+                    "range_mode": normalized_range_mode,
+                    "rolling_start_offset_hours": rolling_start_offset_hours,
+                    "rolling_duration_hours": rolling_duration_hours,
+                },
+                due_at=normalized_next_run_at,
+            )
+            range_start_at = parse_schedule_datetime(
+                resolved_range["start"], field_name="range_start"
+            )
+            range_end_at = parse_schedule_datetime(
+                resolved_range["end"], field_name="range_end"
+            )
+            normalized_rolling_start_offset_hours = float(rolling_start_offset_hours)
+            normalized_rolling_duration_hours = float(rolling_duration_hours)
+        else:
+            range_start_at = parse_schedule_datetime(range_start, field_name="range_start")
+            range_end_at = parse_schedule_datetime(range_end, field_name="range_end")
+            if range_start_at >= range_end_at:
+                raise ValueError("range_start must be before range_end")
+            normalized_rolling_start_offset_hours = None
+            normalized_rolling_duration_hours = None
         case = self._get_case_for_schedule(
             scenario_id=scenario_id, case_input_variant_id=case_input_variant_id
         )
@@ -5712,6 +5748,9 @@ class AnalystStore:
                     display_name,
                     range_start,
                     range_end,
+                    range_mode,
+                    rolling_start_offset_hours,
+                    rolling_duration_hours,
                     cadence,
                     next_run_at,
                     topology_hash,
@@ -5722,7 +5761,7 @@ class AnalystStore:
                     created_by,
                     updated_by
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
                 """,
                 (
                     scenario_id,
@@ -5731,6 +5770,9 @@ class AnalystStore:
                     clean_name,
                     range_start_at.isoformat(),
                     range_end_at.isoformat(),
+                    normalized_range_mode,
+                    normalized_rolling_start_offset_hours,
+                    normalized_rolling_duration_hours,
                     normalized_cadence,
                     normalized_next_run_at,
                     provenance["topology"]["content_hash"],
@@ -5748,7 +5790,8 @@ class AnalystStore:
         row = self.connection.execute(
             """
             SELECT id, scenario_id, case_id, case_input_variant_id, display_name,
-                   range_start, range_end, cadence, next_run_at, topology_hash,
+                   range_start, range_end, range_mode, rolling_start_offset_hours,
+                   rolling_duration_hours, cadence, next_run_at, topology_hash,
                    parameter_hash, is_active, last_fired_at, created_at, updated_at,
                    created_by, updated_by
             FROM run_schedules
@@ -5764,7 +5807,8 @@ class AnalystStore:
         rows = self.connection.execute(
             """
             SELECT id, scenario_id, case_id, case_input_variant_id, display_name,
-                   range_start, range_end, cadence, next_run_at, topology_hash,
+                   range_start, range_end, range_mode, rolling_start_offset_hours,
+                   rolling_duration_hours, cadence, next_run_at, topology_hash,
                    parameter_hash, is_active, last_fired_at, created_at, updated_at,
                    created_by, updated_by
             FROM run_schedules

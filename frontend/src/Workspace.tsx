@@ -7691,6 +7691,17 @@ function RunLineage({
           </dd>
         </div>
       ) : null}
+      {version?.generation_metadata.automation ? (
+        <div>
+          <dt>Automatizacion</dt>
+          <dd>
+            {version.generation_metadata.automation.schedule_name ||
+              "Schedule"}{" "}
+            | schedule {version.generation_metadata.automation.schedule_id} |
+            tick {version.generation_metadata.automation.schedule_tick_id}
+          </dd>
+        </div>
+      ) : null}
     </dl>
   );
 }

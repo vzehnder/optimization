@@ -94,6 +94,10 @@ function RunScheduleList({
     <ul className="resource-list">
       {schedules.map((schedule) => {
         const latestTick = ticksBySchedule.get(schedule.id)?.[0];
+        const rangeRule =
+          schedule.range_mode === "rolling"
+            ? `rolling | offset ${schedule.rolling_start_offset_hours ?? 0}h | duracion ${schedule.rolling_duration_hours ?? 0}h`
+            : "fixed";
         return (
           <li key={schedule.id}>
             <div className="admin-resource-row">
@@ -107,6 +111,7 @@ function RunScheduleList({
                 <p>
                   rango {schedule.range_start} - {schedule.range_end}
                 </p>
+                <p>{rangeRule}</p>
                 {latestTick ? (
                   <p>
                     ultimo tick {latestTick.status}
@@ -115,6 +120,18 @@ function RunScheduleList({
                       ? ` | ${latestTick.error_message}`
                       : ""}
                   </p>
+                ) : null}
+                {ticksBySchedule.get(schedule.id)?.length ? (
+                  <ul aria-label={`Historial ${schedule.display_name}`}>
+                    {ticksBySchedule.get(schedule.id)?.map((tick) => (
+                      <li key={tick.id}>
+                        tick {tick.id} {tick.status} | rango {tick.range_start} -{" "}
+                        {tick.range_end}
+                        {tick.run_id ? ` | run ${tick.run_id}` : ""}
+                        {tick.error_message ? ` | ${tick.error_message}` : ""}
+                      </li>
+                    ))}
+                  </ul>
                 ) : null}
               </div>
               <span className="status-pill">
@@ -175,6 +192,15 @@ function RunSchedulesPanel() {
       display_name: String(form.get("display_name") || ""),
       range_start: String(form.get("range_start") || ""),
       range_end: String(form.get("range_end") || ""),
+      range_mode: String(form.get("range_mode") || "fixed"),
+      rolling_start_offset_hours:
+        form.get("rolling_start_offset_hours") === ""
+          ? null
+          : Number(form.get("rolling_start_offset_hours") || 0),
+      rolling_duration_hours:
+        form.get("rolling_duration_hours") === ""
+          ? null
+          : Number(form.get("rolling_duration_hours") || 0),
       cadence: String(form.get("cadence") || "daily"),
       next_run_at: String(form.get("next_run_at") || ""),
     };
@@ -239,6 +265,30 @@ function RunSchedulesPanel() {
         <input id="schedule-range-start" name="range_start" required />
         <label htmlFor="schedule-range-end">Rango termino</label>
         <input id="schedule-range-end" name="range_end" required />
+        <label htmlFor="schedule-range-mode">Modo de rango</label>
+        <select id="schedule-range-mode" name="range_mode" defaultValue="fixed">
+          <option value="fixed">fixed</option>
+          <option value="rolling">rolling</option>
+        </select>
+        <label htmlFor="schedule-rolling-offset">
+          Offset inicio rolling (horas)
+        </label>
+        <input
+          id="schedule-rolling-offset"
+          name="rolling_start_offset_hours"
+          type="number"
+          step="0.25"
+        />
+        <label htmlFor="schedule-rolling-duration">
+          Duracion rolling (horas)
+        </label>
+        <input
+          id="schedule-rolling-duration"
+          name="rolling_duration_hours"
+          type="number"
+          min="0.25"
+          step="0.25"
+        />
         <label htmlFor="schedule-cadence">Cadencia</label>
         <select id="schedule-cadence" name="cadence" defaultValue="daily">
           <option value="hourly">hourly</option>

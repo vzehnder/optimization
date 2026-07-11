@@ -1190,6 +1190,13 @@ describe("application shell", () => {
           start: "2026-01-01T00:00:00-03:00",
           end: "2026-01-02T00:00:00-03:00",
         },
+        automation: {
+          schedule_id: 31,
+          schedule_tick_id: 99,
+          schedule_name: "Rolling API schedule",
+          due_at: "2026-08-11T09:00:00+00:00",
+          fired_at: "2026-08-11T09:05:00+00:00",
+        },
         series_bindings: [
           {
             signal_key: "import_price_usd_per_mwh",
@@ -1271,6 +1278,8 @@ describe("application shell", () => {
     expect(await screen.findByText("Stress prices")).toBeVisible();
     expect(screen.getByText(/2026-01-01T00:00:00-03:00/)).toBeVisible();
     expect(screen.getByText(/2026-01-02T00:00:00-03:00/)).toBeVisible();
+    expect(screen.getByText(/Rolling API schedule/)).toBeVisible();
+    expect(screen.getByText(/schedule 31 \| tick 99/)).toBeVisible();
   });
 
   it("shows per-binding input set revisions and content hashes in run detail lineage", async () => {
@@ -7592,6 +7601,9 @@ describe("application shell", () => {
         display_name: "Daily API schedule",
         range_start: "2026-08-01T00:00:00-04:00",
         range_end: "2026-08-02T00:00:00-04:00",
+        range_mode: "fixed",
+        rolling_start_offset_hours: null,
+        rolling_duration_hours: null,
         cadence: "daily",
         next_run_at: "2026-08-06T09:00:00+00:00",
         topology_hash: "sha256:topology",
@@ -7678,6 +7690,36 @@ describe("application shell", () => {
             }),
             { headers: { "Content-Type": "application/json" } },
           );
+        }
+        if (path === "/api/admin/schedules" && method === "POST") {
+          const body = JSON.parse(String(init?.body));
+          const created = {
+            id: schedules.length + 31,
+            scenario_id: body.scenario_id,
+            case_id: 20,
+            case_input_variant_id: body.case_input_variant_id,
+            display_name: body.display_name,
+            range_start: "2026-08-11T09:00:00+00:00",
+            range_end: "2026-08-12T09:00:00+00:00",
+            range_mode: body.range_mode,
+            rolling_start_offset_hours: body.rolling_start_offset_hours,
+            rolling_duration_hours: body.rolling_duration_hours,
+            cadence: body.cadence,
+            next_run_at: body.next_run_at,
+            topology_hash: "sha256:topology",
+            parameter_hash: "sha256:parameters",
+            is_active: true,
+            last_fired_at: null,
+            created_at: "2026-08-05T12:05:00Z",
+            updated_at: "2026-08-05T12:05:00Z",
+            created_by: "admin@example.local",
+            updated_by: "admin@example.local",
+          };
+          schedules.push(created);
+          return new Response(JSON.stringify({ schedule: created }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
         }
         if (path === "/api/admin/users" && method === "POST") {
           const body = JSON.parse(String(init?.body));
@@ -7798,6 +7840,38 @@ describe("application shell", () => {
     await user.click(screen.getByRole("button", { name: "Ejecutar vencidos" }));
     expect(await screen.findByText("1 schedule(s) evaluados.")).toBeVisible();
     expect(await screen.findByText(/ultimo tick queued/)).toBeVisible();
+    expect(
+      await screen.findByText(
+        /tick 99 queued \| rango 2026-08-01T00:00:00-04:00 - 2026-08-02T00:00:00-04:00 \| run 55/,
+      ),
+    ).toBeVisible();
+
+    await user.type(
+      screen.getByLabelText("Nombre schedule"),
+      "Rolling API schedule",
+    );
+    await user.type(screen.getByLabelText("Scenario ID"), "10");
+    await user.type(screen.getByLabelText("Variant ID"), "30");
+    await user.type(
+      screen.getByLabelText("Rango inicio"),
+      "2020-01-01T00:00:00+00:00",
+    );
+    await user.type(
+      screen.getByLabelText("Rango termino"),
+      "2020-01-02T00:00:00+00:00",
+    );
+    await user.selectOptions(screen.getByLabelText("Modo de rango"), "rolling");
+    await user.type(screen.getByLabelText("Offset inicio rolling (horas)"), "0");
+    await user.type(screen.getByLabelText("Duracion rolling (horas)"), "24");
+    await user.type(
+      screen.getByLabelText("Proxima ejecucion"),
+      "2026-08-11T09:00:00+00:00",
+    );
+    await user.click(screen.getByRole("button", { name: "Crear schedule" }));
+    expect(await screen.findByText("Rolling API schedule creado.")).toBeVisible();
+    expect(
+      await screen.findByText(/rolling \| offset 0h \| duracion 24h/),
+    ).toBeVisible();
 
     await user.type(screen.getByLabelText("Email"), "client@example.local");
     await user.type(screen.getByLabelText("Nombre"), "Client User");

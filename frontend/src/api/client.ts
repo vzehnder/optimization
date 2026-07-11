@@ -52,6 +52,9 @@ export interface RunSchedule {
   display_name: string;
   range_start: string;
   range_end: string;
+  range_mode: string;
+  rolling_start_offset_hours?: number | null;
+  rolling_duration_hours?: number | null;
   cadence: string;
   next_run_at: string;
   topology_hash: string;
@@ -86,6 +89,9 @@ export interface RunScheduleCreatePayload {
   display_name: string;
   range_start: string;
   range_end: string;
+  range_mode: string;
+  rolling_start_offset_hours?: number | null;
+  rolling_duration_hours?: number | null;
   cadence: string;
   next_run_at: string;
 }

@@ -1148,10 +1148,37 @@
             "title": "Range End",
             "type": "string"
           },
+          "range_mode": {
+            "default": "fixed",
+            "title": "Range Mode",
+            "type": "string"
+          },
           "range_start": {
             "minLength": 1,
             "title": "Range Start",
             "type": "string"
+          },
+          "rolling_duration_hours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rolling Duration Hours"
+          },
+          "rolling_start_offset_hours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rolling Start Offset Hours"
           },
           "scenario_id": {
             "title": "Scenario Id",

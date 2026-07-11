@@ -405,6 +405,9 @@ class RunScheduleCreateRequest(BaseModel):
     range_end: str = Field(min_length=1)
     cadence: str = Field(min_length=1)
     next_run_at: str = Field(min_length=1)
+    range_mode: str = "fixed"
+    rolling_start_offset_hours: float | None = None
+    rolling_duration_hours: float | None = None
 
 
 class RunDueSchedulesRequest(BaseModel):
@@ -2403,6 +2406,9 @@ def create_app(
                 range_end=payload.range_end,
                 cadence=payload.cadence,
                 next_run_at=payload.next_run_at,
+                range_mode=payload.range_mode,
+                rolling_start_offset_hours=payload.rolling_start_offset_hours,
+                rolling_duration_hours=payload.rolling_duration_hours,
                 created_by=current_user_email(request),
             )
         except KeyError as error:

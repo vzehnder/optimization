@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime, timedelta
 from typing import Any, Iterable, Protocol
 
@@ -74,12 +75,48 @@ def next_fixed_range_fire_time(*, cadence: str, due_at: str, now: str) -> str:
     return next_fire.isoformat()
 
 
+def _float_schedule_field(schedule: dict[str, Any], field_name: str) -> float:
+    value = schedule.get(field_name)
+    if value is None:
+        raise ScheduleError(f"{field_name} is required for rolling schedules")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as error:
+        raise ScheduleError(f"{field_name} must be numeric") from error
+    if not math.isfinite(parsed):
+        raise ScheduleError(f"{field_name} must be numeric")
+    return parsed
+
+
+def resolve_schedule_range(
+    *, schedule: dict[str, Any], due_at: str
+) -> dict[str, str]:
+    range_mode = str(schedule.get("range_mode") or "fixed").strip().lower()
+    if range_mode == "fixed":
+        return {"start": str(schedule["range_start"]), "end": str(schedule["range_end"])}
+    if range_mode != "rolling":
+        raise ScheduleError("range_mode must be fixed or rolling")
+
+    anchor = parse_schedule_datetime(due_at, field_name="due_at")
+    start_offset_hours = _float_schedule_field(
+        schedule, "rolling_start_offset_hours"
+    )
+    duration_hours = _float_schedule_field(schedule, "rolling_duration_hours")
+    if duration_hours <= 0:
+        raise ScheduleError("rolling_duration_hours must be positive")
+
+    start = anchor + timedelta(hours=start_offset_hours)
+    end = start + timedelta(hours=duration_hours)
+    return {"start": start.isoformat(), "end": end.isoformat()}
+
+
 def fixed_range_schedule_metadata(
     *,
     schedule: dict[str, Any],
     tick: dict[str, Any],
     variant: dict[str, Any],
     materialized: dict[str, Any],
+    resolved_range: dict[str, str],
     fired_at: str,
 ) -> dict[str, Any]:
     return {
@@ -89,8 +126,8 @@ def fixed_range_schedule_metadata(
             "display_name": variant["display_name"],
         },
         "date_range": {
-            "start": schedule["range_start"],
-            "end": schedule["range_end"],
+            "start": resolved_range["start"],
+            "end": resolved_range["end"],
         },
         "series_bindings": materialized["series_bindings"],
         "automation": {
@@ -116,12 +153,13 @@ def execute_fixed_range_schedule(
     due_at = parse_schedule_datetime(
         str(schedule["next_run_at"]), field_name="next_run_at"
     ).isoformat()
+    resolved_range = resolve_schedule_range(schedule=schedule, due_at=due_at)
     tick = store.create_run_schedule_tick(
         schedule_id=int(schedule["id"]),
         due_at=due_at,
         fired_at=fired_at,
-        range_start=schedule["range_start"],
-        range_end=schedule["range_end"],
+        range_start=resolved_range["start"],
+        range_end=resolved_range["end"],
     )
     next_run_at = next_fixed_range_fire_time(
         cadence=schedule["cadence"], due_at=due_at, now=fired_at
@@ -134,8 +172,8 @@ def execute_fixed_range_schedule(
         materialized = store.materialize_system_case_for_variant(
             scenario_id=int(schedule["scenario_id"]),
             case_input_variant_id=int(schedule["case_input_variant_id"]),
-            range_start=schedule["range_start"],
-            range_end=schedule["range_end"],
+            range_start=resolved_range["start"],
+            range_end=resolved_range["end"],
         )
         candidate_text = json.dumps(materialized["system_case"], sort_keys=True)
         validation_result = validation_service.validate_text(candidate_text)
@@ -156,6 +194,7 @@ def execute_fixed_range_schedule(
                 tick=tick,
                 variant=variant,
                 materialized=materialized,
+                resolved_range=resolved_range,
                 fired_at=fired_at,
             ),
             created_by=triggered_by,

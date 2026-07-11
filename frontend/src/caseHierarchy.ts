@@ -20,6 +20,13 @@ export interface CaseHierarchyProvenance {
   parameters?: CaseHierarchyProvenanceEntry;
   input_variant?: { id: number; display_name?: string };
   date_range?: { start: string; end: string };
+  automation?: {
+    schedule_id: number;
+    schedule_tick_id: number;
+    schedule_name?: string;
+    due_at?: string;
+    fired_at?: string;
+  };
   series_bindings?: CaseInputVariantLineageBinding[];
   [key: string]: unknown;
 }

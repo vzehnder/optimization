@@ -1798,8 +1798,17 @@ export interface components {
             next_run_at: string;
             /** Range End */
             range_end: string;
+            /**
+             * Range Mode
+             * @default fixed
+             */
+            range_mode: string;
             /** Range Start */
             range_start: string;
+            /** Rolling Duration Hours */
+            rolling_duration_hours?: number | null;
+            /** Rolling Start Offset Hours */
+            rolling_start_offset_hours?: number | null;
             /** Scenario Id */
             scenario_id: number;
         };

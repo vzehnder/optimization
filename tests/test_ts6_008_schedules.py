@@ -10,6 +10,7 @@ from app.schedules import (
     due_fixed_range_schedules,
     execute_fixed_range_schedule,
     next_fixed_range_fire_time,
+    resolve_schedule_range,
 )
 from app.time_series_catalog import (
     CatalogImportRequest,
@@ -101,6 +102,28 @@ class SchedulePlanningTests(unittest.TestCase):
             "2026-08-09T09:00:00+00:00",
         )
 
+    def test_rolling_schedule_range_resolves_from_due_time(self):
+        schedule = {
+            "id": 4,
+            "range_mode": "rolling",
+            "rolling_start_offset_hours": 0.0,
+            "rolling_duration_hours": 168.0,
+            "range_start": "2026-08-01T00:00:00-04:00",
+            "range_end": "2026-08-08T00:00:00-04:00",
+        }
+
+        resolved = resolve_schedule_range(
+            schedule=schedule, due_at="2026-08-11T09:00:00+00:00"
+        )
+
+        self.assertEqual(
+            resolved,
+            {
+                "start": "2026-08-11T09:00:00+00:00",
+                "end": "2026-08-18T09:00:00+00:00",
+            },
+        )
+
 
 class RunSchedulePersistenceTests(unittest.TestCase):
     def setUp(self):
@@ -141,6 +164,30 @@ class RunSchedulePersistenceTests(unittest.TestCase):
 
         [listed] = self.store.list_run_schedules()
         self.assertEqual(listed["id"], schedule["id"])
+
+    def test_create_rolling_schedule_records_range_rule(self):
+        schedule = self.store.create_run_schedule(
+            scenario_id=self.scenario["id"],
+            case_input_variant_id=self.variant["id"],
+            display_name="Seven day rolling rerun",
+            range_start="2026-08-01T00:00:00-04:00",
+            range_end="2026-08-08T00:00:00-04:00",
+            cadence="daily",
+            next_run_at="2026-08-11T09:00:00+00:00",
+            range_mode="rolling",
+            rolling_start_offset_hours=0,
+            rolling_duration_hours=168,
+            created_by="scheduler-admin@example.com",
+        )
+
+        self.assertEqual(schedule["range_mode"], "rolling")
+        self.assertEqual(schedule["rolling_start_offset_hours"], 0.0)
+        self.assertEqual(schedule["rolling_duration_hours"], 168.0)
+        self.assertNotIn("system_case_json", schedule)
+
+        [listed] = self.store.list_run_schedules()
+        self.assertEqual(listed["range_mode"], "rolling")
+        self.assertEqual(listed["rolling_duration_hours"], 168.0)
 
 
 class FixedRangeScheduleExecutionTests(unittest.TestCase):
@@ -266,6 +313,51 @@ class FixedRangeScheduleExecutionTests(unittest.TestCase):
         self.assertTrue(advanced["is_active"])
         self.assertEqual(advanced["next_run_at"], "2026-08-07T09:00:00+00:00")
 
+    def test_rolling_schedule_recomputes_range_for_each_tick(self):
+        schedule = self.store.create_run_schedule(
+            scenario_id=self.scenario["id"],
+            case_input_variant_id=self.variant["id"],
+            display_name="Rolling daily rerun",
+            range_start="2020-01-01T00:00:00+00:00",
+            range_end="2020-01-02T00:00:00+00:00",
+            cadence="daily",
+            next_run_at=self.price_set["horizon"]["start"],
+            range_mode="rolling",
+            rolling_start_offset_hours=0,
+            rolling_duration_hours=24,
+            created_by="scheduler-admin@example.com",
+        )
+        queue = CapturingRunQueue()
+
+        first_tick = execute_fixed_range_schedule(
+            store=self.store,
+            validation_service=AcceptingValidationService(),
+            run_queue=queue,
+            schedule=schedule,
+            now="2026-08-01T01:00:00-04:00",
+            triggered_by="scheduler-admin@example.com",
+        )
+        second_schedule = self.store.get_run_schedule(schedule["id"])
+        second_tick = execute_fixed_range_schedule(
+            store=self.store,
+            validation_service=AcceptingValidationService(),
+            run_queue=queue,
+            schedule=second_schedule,
+            now="2026-08-02T01:00:00-04:00",
+            triggered_by="scheduler-admin@example.com",
+        )
+
+        self.assertEqual(first_tick["status"], "queued")
+        self.assertEqual(second_tick["status"], "failed")
+        self.assertIsNone(second_tick["run_id"])
+        self.assertEqual(second_tick["range_start"], "2026-08-02T00:00:00-04:00")
+        self.assertEqual(second_tick["range_end"], "2026-08-03T00:00:00-04:00")
+        self.assertIn("missing coverage", second_tick["error_message"])
+        self.assertEqual(queue.enqueued_run_ids, [first_tick["run_id"]])
+        advanced = self.store.get_run_schedule(schedule["id"])
+        self.assertTrue(advanced["is_active"])
+        self.assertEqual(advanced["next_run_at"], "2026-08-03T00:00:00-04:00")
+
 
 class ScheduleApiTests(unittest.TestCase):
     def setUp(self):
@@ -348,6 +440,30 @@ class ScheduleApiTests(unittest.TestCase):
         self.assertEqual(tick["schedule_id"], schedule["id"])
         self.assertEqual(tick["status"], "queued")
         self.assertEqual(self.run_queue.enqueued_run_ids, [tick["run_id"]])
+
+    def test_admin_api_creates_rolling_schedule(self):
+        create_response = self.client.post(
+            "/api/admin/schedules",
+            json={
+                "scenario_id": self.scenario["id"],
+                "case_input_variant_id": self.variant["id"],
+                "display_name": "Rolling API schedule",
+                "range_start": "2020-01-01T00:00:00+00:00",
+                "range_end": "2020-01-02T00:00:00+00:00",
+                "cadence": "daily",
+                "next_run_at": self.price_set["horizon"]["start"],
+                "range_mode": "rolling",
+                "rolling_start_offset_hours": 0,
+                "rolling_duration_hours": 24,
+            },
+        )
+
+        self.assertEqual(create_response.status_code, 201, create_response.text)
+        schedule = create_response.json()["schedule"]
+        self.assertEqual(schedule["range_mode"], "rolling")
+        self.assertEqual(schedule["range_start"], self.price_set["horizon"]["start"])
+        self.assertEqual(schedule["range_end"], self.price_set["horizon"]["end"])
+        self.assertEqual(schedule["rolling_duration_hours"], 24.0)
 
 
 class SchedulePermissionApiTests(unittest.TestCase):
