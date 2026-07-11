@@ -374,6 +374,7 @@ export interface ProjectTimeSeriesSet {
   created_at?: string;
   updated_at?: string;
   revision_metadata?: Record<string, unknown>;
+  staleness?: VariantStaleness;
   source: ProjectTimeSeriesSetSource | null;
   horizon: ProjectTimeSeriesSetHorizon;
   signals: ProjectTimeSeriesSetSignal[];
@@ -443,6 +444,7 @@ export interface ProjectTimeSeriesSetSummary {
   content_hash: string;
   signal_count: number;
   period_count: number;
+  stale?: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -1967,6 +1969,16 @@ export async function editTimeSeriesSetValues(
       body: JSON.stringify(payload),
     },
   );
+  return response.time_series_set;
+}
+
+export async function regenerateTimeSeriesSet(
+  projectId: number,
+  timeSeriesSetId: number,
+): Promise<ProjectTimeSeriesSet> {
+  const response = await postJsonWithCsrf<{
+    time_series_set: ProjectTimeSeriesSet;
+  }>(`/api/projects/${projectId}/time-series-sets/${timeSeriesSetId}/regenerate`);
   return response.time_series_set;
 }
 

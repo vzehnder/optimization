@@ -30,6 +30,10 @@ class VariantStaleError(ValueError):
 def _dependency_label(dependency_type: str, dependency_id: str | None) -> str:
     if dependency_type == "time_series_set":
         return f"time-series set {dependency_id}"
+    if dependency_type == "time_series_set_derived_staleness":
+        return f"stale derived time-series set {dependency_id} (requires regeneration)"
+    if dependency_type == "transformation_implementation":
+        return f"transformation implementation {dependency_id}"
     if dependency_type == "topology":
         return "case topology"
     if dependency_type == "parameters":

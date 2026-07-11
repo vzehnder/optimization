@@ -1,11 +1,13 @@
 # BESS-TS6-005: Mark Derived Sets Stale And Regenerate Them
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter6/prd.md`
 Fecha de inicio planificada: 2026-07-28
 Fecha de termino planificada: 2026-07-29
+Fecha de inicio real: 2026-07-11
+Fecha de termino real: 2026-07-11
 
 ## User stories covered
 
@@ -35,12 +37,12 @@ no longer produce the same values.
 
 ## Acceptance criteria
 
-- [ ] Creating a new revision of a source set marks every derived set produced from it stale, visibly in the catalog list and detail pages.
-- [ ] A stale derived set can be regenerated from the UI, re-executing its stored recipe against current input revisions and producing a new revision with updated lineage.
-- [ ] Runs that consumed a previous derived revision remain unchanged and reproducible after regeneration.
-- [ ] A variant bound to a stale derived set is blocked from materializing through the existing fail-closed staleness gates until resolved.
-- [ ] Bumping a transformation's implementation version marks its derived outputs stale.
-- [ ] Stale detection and regeneration live in deep modules covered by tests without the UI.
+- [x] Creating a new revision of a source set marks every derived set produced from it stale, visibly in the catalog list and detail pages.
+- [x] A stale derived set can be regenerated from the UI, re-executing its stored recipe against current input revisions and producing a new revision with updated lineage.
+- [x] Runs that consumed a previous derived revision remain unchanged and reproducible after regeneration.
+- [x] A variant bound to a stale derived set is blocked from materializing through the existing fail-closed staleness gates until resolved.
+- [x] Bumping a transformation's implementation version marks its derived outputs stale.
+- [x] Stale detection and regeneration live in deep modules covered by tests without the UI.
 
 ## Blocked by
 

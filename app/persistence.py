@@ -2513,14 +2513,11 @@ class AnalystStore:
         output_version_label: str | None,
         created_by: str,
     ) -> dict[str, Any]:
-        recipe_hash = catalog_content_hash(
-            {
-                "transformation_type": transformation_type,
-                "implementation_version": definition.implementation_version,
-                "parameter_schema_version": definition.parameter_schema_version,
-                "parameters": parameters_dict,
-                "inputs": output.lineage_inputs,
-            }
+        recipe_hash = self._derived_recipe_hash(
+            transformation_type=transformation_type,
+            definition=definition,
+            parameters_dict=parameters_dict,
+            lineage_inputs=output.lineage_inputs,
         )
         existing = self._find_derived_time_series_set_by_recipe_hash(
             project_id=project_id, recipe_hash=recipe_hash
@@ -2542,60 +2539,13 @@ class AnalystStore:
             f"{transformation_type} v{version_number}"
         )
 
-        entity_key_by_signal_key = {
-            str(signal["signal_key"]): signal.get("entity_key")
-            for signal in output.signals
-        }
-        prepared_signals = [
-            CatalogSignal(
-                signal_key=str(signal["signal_key"]),
-                unit=str(signal["unit"]),
-                source_column=str(signal.get("source_column") or ""),
-                source_unit=str(signal.get("source_unit") or signal["unit"]),
-                entity_type=signal.get("entity_type"),
-                entity_key=signal.get("entity_key"),
-            )
-            for signal in output.signals
-        ]
-        prepared_periods = [
-            CatalogPeriod(
-                period_index=int(period["period_index"]),
-                timestamp_start=str(period["timestamp_start"]),
-                timestamp_end=str(period["timestamp_end"]),
-                duration_hours=float(period["duration_hours"]),
-            )
-            for period in output.periods
-        ]
-        prepared_values = [
-            CatalogValue(
-                period_index=int(value["period_index"]),
-                signal_key=str(value["signal_key"]),
-                value_numeric=float(value["value_numeric"]),
-                source_row_number=0,
-                entity_key=entity_key_by_signal_key.get(str(value["signal_key"])),
-            )
-            for value in output.values
-        ]
-        content_hash = compute_catalog_content_hash(
+        prepared_import = self._prepare_derived_catalog_import(
+            output=output,
             set_name=resolved_name,
             version_label=resolved_version_label,
-            data_kind="derived",
             timezone=timezone,
-            signals=[signal.__dict__ for signal in prepared_signals],
-            periods=[period.__dict__ for period in prepared_periods],
-            values=[value.__dict__ for value in prepared_values],
         )
-        prepared_import = PreparedTimeSeriesCatalogImport(
-            set_name=resolved_name,
-            version_label=resolved_version_label,
-            data_kind="derived",
-            timezone=timezone,
-            signals=prepared_signals,
-            periods=prepared_periods,
-            values=prepared_values,
-            content_hash=content_hash,
-            mapping_summary={},
-        )
+        content_hash = prepared_import.content_hash
 
         now = utc_now_iso()
         existing_label = self.connection.execute(
@@ -2644,21 +2594,13 @@ class AnalystStore:
         )
         derived_set_id = int(cursor.lastrowid)
         try:
-            metadata = {
-                "transformation": {
-                    "type": transformation_type,
-                    "implementation_version": definition.implementation_version,
-                    "parameter_schema_version": definition.parameter_schema_version,
-                    "parameters": parameters_dict,
-                    "recipe_hash": recipe_hash,
-                    "inputs": output.lineage_inputs,
-                    **(
-                        {"execution": output.execution_metadata}
-                        if output.execution_metadata
-                        else {}
-                    ),
-                }
-            }
+            metadata = self._derived_transformation_metadata(
+                transformation_type=transformation_type,
+                definition=definition,
+                parameters_dict=parameters_dict,
+                recipe_hash=recipe_hash,
+                output=output,
+            )
             self.connection.execute(
                 """
                 INSERT INTO time_series_set_revisions (
@@ -2688,38 +2630,12 @@ class AnalystStore:
                 prepared_import=prepared_import,
                 now=now,
             )
-            for lineage_input in output.lineage_inputs:
-                self.connection.execute(
-                    """
-                    INSERT INTO validation_dependencies (
-                        owner_type, owner_id, dependency_type, dependency_id,
-                        recorded_hash, created_at, updated_at
-                    )
-                    VALUES ('time_series_set', ?, 'time_series_set', ?, ?, ?, ?)
-                    """,
-                    (
-                        derived_set_id,
-                        str(lineage_input["time_series_set_id"]),
-                        lineage_input["content_hash"],
-                        now,
-                        now,
-                    ),
-                )
-            self.connection.execute(
-                """
-                INSERT INTO validation_dependencies (
-                    owner_type, owner_id, dependency_type, dependency_id,
-                    recorded_hash, created_at, updated_at
-                )
-                VALUES ('time_series_set', ?, 'transformation_implementation', ?, ?, ?, ?)
-                """,
-                (
-                    derived_set_id,
-                    transformation_type,
-                    str(definition.implementation_version),
-                    now,
-                    now,
-                ),
+            self._record_derived_set_dependencies(
+                derived_set_id=derived_set_id,
+                transformation_type=transformation_type,
+                definition=definition,
+                lineage_inputs=output.lineage_inputs,
+                now=now,
             )
         except Exception:
             # PostgreSQL runs autocommit, so a mid-write failure must clean
@@ -2754,6 +2670,501 @@ class AnalystStore:
             if transformation_meta.get("recipe_hash") == recipe_hash:
                 return derived_set
         return None
+
+    @staticmethod
+    def _derived_recipe_hash(
+        *,
+        transformation_type: str,
+        definition: TransformationDefinition,
+        parameters_dict: dict[str, Any],
+        lineage_inputs: list[dict[str, Any]],
+    ) -> str:
+        return catalog_content_hash(
+            {
+                "transformation_type": transformation_type,
+                "implementation_version": definition.implementation_version,
+                "parameter_schema_version": definition.parameter_schema_version,
+                "parameters": parameters_dict,
+                "inputs": lineage_inputs,
+            }
+        )
+
+    @staticmethod
+    def _derived_transformation_metadata(
+        *,
+        transformation_type: str,
+        definition: TransformationDefinition,
+        parameters_dict: dict[str, Any],
+        recipe_hash: str,
+        output: TransformationOutput,
+    ) -> dict[str, Any]:
+        return {
+            "transformation": {
+                "type": transformation_type,
+                "implementation_version": definition.implementation_version,
+                "parameter_schema_version": definition.parameter_schema_version,
+                "parameters": parameters_dict,
+                "recipe_hash": recipe_hash,
+                "inputs": output.lineage_inputs,
+                **(
+                    {"execution": output.execution_metadata}
+                    if output.execution_metadata
+                    else {}
+                ),
+            }
+        }
+
+    @staticmethod
+    def _prepare_derived_catalog_import(
+        *,
+        output: TransformationOutput,
+        set_name: str,
+        version_label: str,
+        timezone: str,
+    ) -> PreparedTimeSeriesCatalogImport:
+        entity_key_by_signal_key = {
+            str(signal["signal_key"]): signal.get("entity_key")
+            for signal in output.signals
+        }
+        prepared_signals = [
+            CatalogSignal(
+                signal_key=str(signal["signal_key"]),
+                unit=str(signal["unit"]),
+                source_column=str(signal.get("source_column") or ""),
+                source_unit=str(signal.get("source_unit") or signal["unit"]),
+                entity_type=signal.get("entity_type"),
+                entity_key=signal.get("entity_key"),
+            )
+            for signal in output.signals
+        ]
+        prepared_periods = [
+            CatalogPeriod(
+                period_index=int(period["period_index"]),
+                timestamp_start=str(period["timestamp_start"]),
+                timestamp_end=str(period["timestamp_end"]),
+                duration_hours=float(period["duration_hours"]),
+            )
+            for period in output.periods
+        ]
+        prepared_values = [
+            CatalogValue(
+                period_index=int(value["period_index"]),
+                signal_key=str(value["signal_key"]),
+                value_numeric=float(value["value_numeric"]),
+                source_row_number=0,
+                entity_key=entity_key_by_signal_key.get(str(value["signal_key"])),
+            )
+            for value in output.values
+        ]
+        content_hash = compute_catalog_content_hash(
+            set_name=set_name,
+            version_label=version_label,
+            data_kind="derived",
+            timezone=timezone,
+            signals=[signal.__dict__ for signal in prepared_signals],
+            periods=[period.__dict__ for period in prepared_periods],
+            values=[value.__dict__ for value in prepared_values],
+        )
+        return PreparedTimeSeriesCatalogImport(
+            set_name=set_name,
+            version_label=version_label,
+            data_kind="derived",
+            timezone=timezone,
+            signals=prepared_signals,
+            periods=prepared_periods,
+            values=prepared_values,
+            content_hash=content_hash,
+            mapping_summary={},
+        )
+
+    def _record_derived_set_dependencies(
+        self,
+        *,
+        derived_set_id: int,
+        transformation_type: str,
+        definition: TransformationDefinition,
+        lineage_inputs: list[dict[str, Any]],
+        now: str,
+    ) -> None:
+        self.connection.execute(
+            "DELETE FROM validation_dependencies WHERE owner_type = 'time_series_set' AND owner_id = ?",
+            (derived_set_id,),
+        )
+        for lineage_input in lineage_inputs:
+            self.connection.execute(
+                """
+                INSERT INTO validation_dependencies (
+                    owner_type, owner_id, dependency_type, dependency_id,
+                    recorded_hash, created_at, updated_at
+                )
+                VALUES ('time_series_set', ?, 'time_series_set', ?, ?, ?, ?)
+                """,
+                (
+                    derived_set_id,
+                    str(lineage_input["time_series_set_id"]),
+                    lineage_input["content_hash"],
+                    now,
+                    now,
+                ),
+            )
+        self.connection.execute(
+            """
+            INSERT INTO validation_dependencies (
+                owner_type, owner_id, dependency_type, dependency_id,
+                recorded_hash, created_at, updated_at
+            )
+            VALUES ('time_series_set', ?, 'transformation_implementation', ?, ?, ?, ?)
+            """,
+            (
+                derived_set_id,
+                transformation_type,
+                str(definition.implementation_version),
+                now,
+                now,
+            ),
+        )
+
+    def _transformation_input_set(
+        self, project_id: int, time_series_set_id: int
+    ) -> TransformationInputSet:
+        source_set = self.get_time_series_set(project_id, time_series_set_id)
+        return TransformationInputSet(
+            time_series_set_id=time_series_set_id,
+            revision_number=source_set["revision_number"],
+            content_hash=source_set["content_hash"],
+            signals=source_set["signals"],
+            periods=source_set["periods"],
+            values=source_set["values"],
+        )
+
+    def regenerate_derived_time_series_set(
+        self,
+        *,
+        project_id: int,
+        time_series_set_id: int,
+        created_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        """Re-execute a derived set's stored recipe against current input revisions.
+
+        Produces a new revision of the same set (never a new set). Converges to
+        a no-op when the recipe hash is unchanged, so regenerating a fresh set
+        writes nothing. History stays immutable: previous revisions keep their
+        content hashes so runs that consumed them remain reproducible.
+        """
+        with self._lock:
+            derived_set = self.get_time_series_set(project_id, time_series_set_id)
+            transformation_meta = derived_set.get("revision_metadata", {}).get(
+                "transformation"
+            )
+            if derived_set["data_kind"] != "derived" or not isinstance(
+                transformation_meta, dict
+            ):
+                raise TransformationError(
+                    f"time-series set {time_series_set_id} is not a derived set "
+                    "with a stored transformation recipe"
+                )
+            transformation_type = str(transformation_meta.get("type"))
+            definition = get_transformation_definition(transformation_type)
+            raw_parameters = transformation_meta.get("parameters")
+            if not isinstance(raw_parameters, dict):
+                raise TransformationError(
+                    f"derived time-series set {time_series_set_id} has no stored "
+                    "validated parameters"
+                )
+            stored_inputs = transformation_meta.get("inputs") or []
+            if definition.multi_input:
+                input_set_ids = [
+                    int(entry["time_series_set_id"])
+                    for entry in raw_parameters.get("inputs", [])
+                    if isinstance(entry, dict)
+                ]
+            else:
+                input_set_ids = [
+                    int(entry["time_series_set_id"])
+                    for entry in stored_inputs[:1]
+                    if isinstance(entry, dict)
+                ]
+            if not input_set_ids:
+                raise TransformationError(
+                    f"derived time-series set {time_series_set_id} has no stored "
+                    "lineage inputs"
+                )
+            input_sets = [
+                self._transformation_input_set(project_id, input_set_id)
+                for input_set_id in input_set_ids
+            ]
+            validate_arg: Any = input_sets if definition.multi_input else input_sets[0]
+            parameters = definition.validate_parameters(raw_parameters, validate_arg)
+            parameters_dict = definition.parameters_to_dict(parameters)
+            output = definition.execute(validate_arg, parameters)
+
+            recipe_hash = self._derived_recipe_hash(
+                transformation_type=transformation_type,
+                definition=definition,
+                parameters_dict=parameters_dict,
+                lineage_inputs=output.lineage_inputs,
+            )
+            if recipe_hash == transformation_meta.get("recipe_hash"):
+                return derived_set
+
+            prepared_import = self._prepare_derived_catalog_import(
+                output=output,
+                set_name=derived_set["name"],
+                version_label=derived_set["version_label"],
+                timezone=derived_set["timezone"],
+            )
+            metadata = self._derived_transformation_metadata(
+                transformation_type=transformation_type,
+                definition=definition,
+                parameters_dict=parameters_dict,
+                recipe_hash=recipe_hash,
+                output=output,
+            )
+            now = utc_now_iso()
+            previous_revision_number = int(derived_set["revision_number"])
+            next_revision_number = previous_revision_number + 1
+
+            snapshot_signals = [
+                row_to_dict(row)
+                for row in self.connection.execute(
+                    """
+                    SELECT signal_key, unit, source_column, source_unit, entity_type,
+                           entity_key, signal_role, aggregation
+                    FROM time_series_signals
+                    WHERE time_series_set_id = ?
+                    ORDER BY id
+                    """,
+                    (time_series_set_id,),
+                ).fetchall()
+            ]
+            snapshot_periods = [
+                row_to_dict(row)
+                for row in self.connection.execute(
+                    """
+                    SELECT period_index, timestamp_start, timestamp_end, duration_hours
+                    FROM time_series_periods
+                    WHERE time_series_set_id = ?
+                    ORDER BY period_index
+                    """,
+                    (time_series_set_id,),
+                ).fetchall()
+            ]
+            snapshot_values = [
+                row_to_dict(row)
+                for row in self.connection.execute(
+                    """
+                    SELECT
+                        time_series_signals.signal_key AS signal_key,
+                        time_series_periods.period_index AS period_index,
+                        time_series_values.value_numeric AS value_numeric,
+                        time_series_values.source_row_number AS source_row_number
+                    FROM time_series_values
+                    JOIN time_series_signals
+                      ON time_series_signals.id = time_series_values.time_series_signal_id
+                    JOIN time_series_periods
+                      ON time_series_periods.id = time_series_values.time_series_period_id
+                    WHERE time_series_values.time_series_set_id = ?
+                    """,
+                    (time_series_set_id,),
+                ).fetchall()
+            ]
+            snapshot_dependencies = self.get_time_series_set_validation_dependencies(
+                time_series_set_id
+            )
+
+            try:
+                self.connection.execute(
+                    "DELETE FROM time_series_signals WHERE time_series_set_id = ?",
+                    (time_series_set_id,),
+                )
+                self.connection.execute(
+                    "DELETE FROM time_series_periods WHERE time_series_set_id = ?",
+                    (time_series_set_id,),
+                )
+                self._insert_time_series_signals_periods_values(
+                    time_series_set_id=time_series_set_id,
+                    prepared_import=prepared_import,
+                    now=now,
+                )
+                self.connection.execute(
+                    """
+                    INSERT INTO time_series_set_revisions (
+                        time_series_set_id,
+                        revision_number,
+                        time_series_source_id,
+                        superseded_revision_number,
+                        content_hash,
+                        change_summary,
+                        created_at,
+                        created_by,
+                        metadata_json
+                    )
+                    VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        time_series_set_id,
+                        next_revision_number,
+                        previous_revision_number,
+                        prepared_import.content_hash,
+                        f"Regenerated via {transformation_type}",
+                        now,
+                        created_by,
+                        json.dumps(metadata, sort_keys=True),
+                    ),
+                )
+                self.connection.execute(
+                    """
+                    UPDATE time_series_sets
+                    SET content_hash = ?, updated_at = ?, updated_by = ?
+                    WHERE id = ?
+                    """,
+                    (prepared_import.content_hash, now, created_by, time_series_set_id),
+                )
+                self._record_derived_set_dependencies(
+                    derived_set_id=time_series_set_id,
+                    transformation_type=transformation_type,
+                    definition=definition,
+                    lineage_inputs=output.lineage_inputs,
+                    now=now,
+                )
+            except Exception:
+                # PostgreSQL runs autocommit, so a mid-regeneration failure must
+                # undo the destructive delete by restoring the captured snapshot
+                # and the previous recipe dependencies instead of relying on
+                # rollback.
+                self.connection.rollback()
+                self.connection.execute(
+                    """
+                    DELETE FROM time_series_set_revisions
+                    WHERE time_series_set_id = ? AND revision_number = ?
+                    """,
+                    (time_series_set_id, next_revision_number),
+                )
+                self.connection.execute(
+                    "DELETE FROM time_series_signals WHERE time_series_set_id = ?",
+                    (time_series_set_id,),
+                )
+                self.connection.execute(
+                    "DELETE FROM time_series_periods WHERE time_series_set_id = ?",
+                    (time_series_set_id,),
+                )
+                self._restore_time_series_catalog_snapshot(
+                    time_series_set_id=time_series_set_id,
+                    signals=snapshot_signals,
+                    periods=snapshot_periods,
+                    values=snapshot_values,
+                    now=now,
+                )
+                self.connection.execute(
+                    "DELETE FROM validation_dependencies WHERE owner_type = 'time_series_set' AND owner_id = ?",
+                    (time_series_set_id,),
+                )
+                for dependency in snapshot_dependencies:
+                    self.connection.execute(
+                        """
+                        INSERT INTO validation_dependencies (
+                            owner_type, owner_id, dependency_type, dependency_id,
+                            recorded_hash, created_at, updated_at
+                        )
+                        VALUES ('time_series_set', ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            time_series_set_id,
+                            dependency["dependency_type"],
+                            dependency["dependency_id"] or "",
+                            dependency["hash"],
+                            now,
+                            now,
+                        ),
+                    )
+                self.connection.commit()
+                raise
+
+            self.connection.commit()
+            return self.get_time_series_set(project_id, time_series_set_id)
+
+    def get_time_series_set_validation_dependencies(
+        self, time_series_set_id: int
+    ) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            """
+            SELECT dependency_type, dependency_id, recorded_hash
+            FROM validation_dependencies
+            WHERE owner_type = 'time_series_set' AND owner_id = ?
+            ORDER BY dependency_type, dependency_id
+            """,
+            (time_series_set_id,),
+        ).fetchall()
+        return [
+            {
+                "dependency_type": row["dependency_type"],
+                "dependency_id": row["dependency_id"] or None,
+                "hash": row["recorded_hash"],
+            }
+            for row in rows
+        ]
+
+    def _latest_time_series_set_content_hash(self, time_series_set_id: int) -> str | None:
+        row = self.connection.execute(
+            """
+            SELECT content_hash
+            FROM time_series_set_revisions
+            WHERE time_series_set_id = ?
+            ORDER BY revision_number DESC, id DESC
+            LIMIT 1
+            """,
+            (time_series_set_id,),
+        ).fetchone()
+        return str(row["content_hash"]) if row is not None else None
+
+    def evaluate_time_series_set_staleness(
+        self, project_id: int, time_series_set_id: int
+    ) -> dict[str, Any]:
+        """Layer-1 derived staleness: does the stored recipe still match its inputs?
+
+        Non-derived sets have no recorded dependencies and are never stale.
+        """
+        self.get_project(project_id)
+        set_row = self.connection.execute(
+            "SELECT id FROM time_series_sets WHERE project_id = ? AND id = ?",
+            (project_id, time_series_set_id),
+        ).fetchone()
+        if set_row is None:
+            raise KeyError(f"time-series set {time_series_set_id} not found")
+
+        recorded = self.get_time_series_set_validation_dependencies(time_series_set_id)
+        current: list[dict[str, Any]] = []
+        for dependency in recorded:
+            dependency_type = dependency["dependency_type"]
+            dependency_id = dependency["dependency_id"]
+            if dependency_type == "time_series_set":
+                current_hash = self._latest_time_series_set_content_hash(int(dependency_id))
+                if current_hash is not None:
+                    current.append(
+                        {
+                            "dependency_type": dependency_type,
+                            "dependency_id": dependency_id,
+                            "hash": current_hash,
+                        }
+                    )
+            elif dependency_type == "transformation_implementation":
+                try:
+                    definition = get_transformation_definition(str(dependency_id))
+                except TransformationError:
+                    continue
+                current.append(
+                    {
+                        "dependency_type": dependency_type,
+                        "dependency_id": dependency_id,
+                        "hash": str(definition.implementation_version),
+                    }
+                )
+            else:
+                current.append(dependency)
+        result = evaluate_variant_staleness(
+            recorded_dependencies=recorded, current_dependencies=current
+        )
+        return variant_staleness_result_to_dict(result)
 
     def replace_time_series_set_source(
         self,
@@ -3240,6 +3651,8 @@ class AnalystStore:
             """,
             (project_id,),
         ).fetchall()
+        current_hash_by_set_id = {int(row["id"]): str(row["content_hash"]) for row in rows}
+        stale_by_set_id = self._derived_staleness_flags(current_hash_by_set_id)
         return [
             {
                 "id": int(row["id"]),
@@ -3254,11 +3667,52 @@ class AnalystStore:
                 "content_hash": str(row["content_hash"]),
                 "signal_count": int(row["signal_count"]),
                 "period_count": int(row["period_count"]),
+                "stale": stale_by_set_id.get(int(row["id"]), False),
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
             }
             for row in rows
         ]
+
+    def _derived_staleness_flags(
+        self, current_hash_by_set_id: dict[int, str]
+    ) -> dict[int, bool]:
+        """Batch Layer-1 staleness for one project's catalog listing.
+
+        Input hashes come from the listing itself: transformation inputs always
+        live in the same project as their derived set.
+        """
+        if not current_hash_by_set_id:
+            return {}
+        rows = self.connection.execute(
+            """
+            SELECT owner_id, dependency_type, dependency_id, recorded_hash
+            FROM validation_dependencies
+            WHERE owner_type = 'time_series_set'
+            """
+        ).fetchall()
+        stale_by_set_id: dict[int, bool] = {}
+        for row in rows:
+            owner_id = int(row["owner_id"])
+            if owner_id not in current_hash_by_set_id:
+                continue
+            if stale_by_set_id.get(owner_id):
+                continue
+            dependency_type = str(row["dependency_type"])
+            recorded_hash = str(row["recorded_hash"])
+            if dependency_type == "time_series_set":
+                current_hash = current_hash_by_set_id.get(int(row["dependency_id"]))
+                stale_by_set_id[owner_id] = current_hash != recorded_hash
+            elif dependency_type == "transformation_implementation":
+                try:
+                    definition = get_transformation_definition(str(row["dependency_id"]))
+                except TransformationError:
+                    stale_by_set_id[owner_id] = True
+                    continue
+                stale_by_set_id[owner_id] = (
+                    str(definition.implementation_version) != recorded_hash
+                )
+        return stale_by_set_id
 
     _HYDRAULIC_TIME_SERIES_CATALOG_COLUMNS = """
         hydraulic_time_series_sets.id AS id,
@@ -6098,6 +6552,21 @@ class AnalystStore:
                     "hash": time_series_set["content_hash"],
                 }
             )
+            # A bound derived set that is stale relative to its own recipe
+            # (Layer 1) surfaces as an extra current dependency, so the variant
+            # trips the existing fail-closed gate even before regeneration
+            # changes the derived set's content hash.
+            derived_staleness = self.evaluate_time_series_set_staleness(
+                int(scenario["project_id"]), time_series_set_id
+            )
+            if derived_staleness["stale"]:
+                dependencies.append(
+                    {
+                        "dependency_type": "time_series_set_derived_staleness",
+                        "dependency_id": str(time_series_set_id),
+                        "hash": "stale",
+                    }
+                )
         return dependencies
 
     def get_case_input_variant_validation_dependencies(
@@ -6169,6 +6638,32 @@ class AnalystStore:
         scenario = self.get_scenario(scenario_id)
         base_system_case = self._generate_base_system_case_for_variant(scenario_id)
         bindings = self.list_case_time_series_bindings(case_input_variant_id)
+
+        # Fail closed on bound derived sets whose sources moved: neither an
+        # unvalidated variant nor an explicit revalidation may consume derived
+        # data that no longer reflects its inputs. Regenerating (or unbinding)
+        # the derived set is the only way through.
+        stale_derived_reasons: list[dict[str, Any]] = []
+        for bound_set_id in sorted(
+            {int(binding["time_series_set_id"]) for binding in bindings}
+        ):
+            derived_staleness = self.evaluate_time_series_set_staleness(
+                int(scenario["project_id"]), bound_set_id
+            )
+            if derived_staleness["stale"]:
+                stale_derived_reasons.append(
+                    {
+                        "dependency_type": "time_series_set_derived_staleness",
+                        "dependency_id": str(bound_set_id),
+                        "detail": (
+                            f"derived time-series set {bound_set_id} is stale "
+                            "relative to its transformation inputs; regenerate "
+                            "it before validating or running"
+                        ),
+                    }
+                )
+        if stale_derived_reasons:
+            raise VariantStaleError(stale_derived_reasons)
 
         required = discover_required_signals(base_system_case)
         missing = [status for status in evaluate_variant_completeness(required, bindings) if not status.bound]

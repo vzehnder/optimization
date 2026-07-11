@@ -520,6 +520,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/time-series-sets/{time_series_set_id}/regenerate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Regenerate Project Derived Time Series Set */
+        post: operations["regenerate_project_derived_time_series_set_api_projects__project_id__time_series_sets__time_series_set_id__regenerate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/time-series-sets/{time_series_set_id}/replace": {
         parameters: {
             query?: never;
@@ -2939,6 +2956,38 @@ export interface operations {
         };
     };
     get_project_time_series_set_api_projects__project_id__time_series_sets__time_series_set_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                time_series_set_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    regenerate_project_derived_time_series_set_api_projects__project_id__time_series_sets__time_series_set_id__regenerate_post: {
         parameters: {
             query?: never;
             header?: never;

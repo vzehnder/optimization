@@ -1706,9 +1706,38 @@ def create_app(
     async def get_project_time_series_set(project_id: int, time_series_set_id: int):
         try:
             time_series_set = analyst_store.get_time_series_set(project_id, time_series_set_id)
+            time_series_set["staleness"] = analyst_store.evaluate_time_series_set_staleness(
+                project_id, time_series_set_id
+            )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"time_series_set": time_series_set}
+
+    @app.post(
+        "/api/projects/{project_id}/time-series-sets/{time_series_set_id}/regenerate"
+    )
+    async def regenerate_project_derived_time_series_set(
+        project_id: int, time_series_set_id: int, request: Request
+    ):
+        try:
+            regenerated_set = analyst_store.regenerate_derived_time_series_set(
+                project_id=project_id,
+                time_series_set_id=time_series_set_id,
+                created_by=current_user_email(request),
+            )
+            regenerated_set["staleness"] = analyst_store.evaluate_time_series_set_staleness(
+                project_id, time_series_set_id
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except (TransformationError, ValueError) as error:
+            return JSONResponse(
+                error_response_body(
+                    "time_series_regeneration", str(error), phase="python_validation"
+                ),
+                status_code=400,
+            )
+        return {"time_series_set": regenerated_set}
 
     @app.get("/api/projects/{project_id}/time-series-sets/{time_series_set_id}/revisions")
     async def list_project_time_series_set_revisions(

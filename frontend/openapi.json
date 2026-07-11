@@ -2953,6 +2953,52 @@
         "summary": "Get Project Time Series Set"
       }
     },
+    "/api/projects/{project_id}/time-series-sets/{time_series_set_id}/regenerate": {
+      "post": {
+        "operationId": "regenerate_project_derived_time_series_set_api_projects__project_id__time_series_sets__time_series_set_id__regenerate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "time_series_set_id",
+            "required": true,
+            "schema": {
+              "title": "Time Series Set Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Regenerate Project Derived Time Series Set"
+      }
+    },
     "/api/projects/{project_id}/time-series-sets/{time_series_set_id}/replace": {
       "post": {
         "operationId": "replace_project_time_series_set_api_projects__project_id__time_series_sets__time_series_set_id__replace_post",

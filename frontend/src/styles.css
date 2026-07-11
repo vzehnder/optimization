@@ -1087,6 +1087,11 @@ button:focus-visible {
   background: #ede9fe;
 }
 
+.hierarchy-stale-badge-derived {
+  color: #9a3412;
+  background: #ffedd5;
+}
+
 .json-panel {
   max-height: 24rem;
   overflow: auto;

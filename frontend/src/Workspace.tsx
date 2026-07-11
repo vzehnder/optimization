@@ -58,6 +58,7 @@ import {
   migrateHydraulicTimeSeriesSet,
   promoteHydraulicDiagram,
   publishPublication,
+  regenerateTimeSeriesSet,
   replaceTimeSeriesSetSource,
   saveHydraulicDiagram,
   unpublishPublication,
@@ -846,6 +847,14 @@ function TimeSeriesCatalogList({
           <Link to={`/projects/${projectId}/time-series-sets/${set.id}`}>
             {set.name} ({set.version_label})
           </Link>
+          {set.stale ? (
+            <span
+              className="hierarchy-stale-badge hierarchy-stale-badge-derived"
+              role="status"
+            >
+              Desactualizado
+            </span>
+          ) : null}
           <p>
             {set.data_kind} | {set.status} | {set.timezone} | revision{" "}
             {set.revision_number} | {set.signal_count} senales |{" "}
@@ -2406,6 +2415,60 @@ function TimeSeriesSetRevisionHistory({
   );
 }
 
+function TimeSeriesSetStalenessPanel({
+  projectId,
+  timeSeriesSet,
+}: {
+  projectId: number;
+  timeSeriesSet: ProjectTimeSeriesSet;
+}) {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: () => regenerateTimeSeriesSet(projectId, timeSeriesSet.id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: timeSeriesSetQueryKey(projectId, timeSeriesSet.id),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: timeSeriesSetRevisionsQueryKey(projectId, timeSeriesSet.id),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: timeSeriesCatalogQueryKey(projectId),
+      });
+    },
+  });
+  const staleness = timeSeriesSet.staleness;
+  if (!staleness || !staleness.stale) {
+    return null;
+  }
+  return (
+    <div className="stale-banner" role="alert">
+      <p>
+        <strong>Set derivado desactualizado:</strong> sus inputs cambiaron
+        desde la ultima generacion, por lo que este set ya no refleja sus
+        fuentes.
+      </p>
+      <ul>
+        {staleness.reasons.map((reason, index) => (
+          <li key={index}>{reason.detail}</li>
+        ))}
+      </ul>
+      <button
+        type="button"
+        onClick={() => mutation.mutate()}
+        disabled={mutation.isPending}
+      >
+        {mutation.isPending
+          ? "Regenerando set derivado"
+          : "Regenerar set derivado"}
+      </button>
+      {mutation.isError ? (
+        <p role="alert">{errorMessage(mutation.error)}</p>
+      ) : null}
+    </div>
+  );
+}
+
 export function TimeSeriesSetDetailView() {
   const projectId = useNumericParam("projectId");
   const timeSeriesSetId = useNumericParam("timeSeriesSetId");
@@ -2463,6 +2526,7 @@ export function TimeSeriesSetDetailView() {
         </p>
       </header>
       <div className="workspace-stack">
+        <TimeSeriesSetStalenessPanel projectId={projectId} timeSeriesSet={set} />
         <section className="workspace-section" aria-labelledby="set-revision">
           <h2 id="set-revision">Revision</h2>
           <p>Revision {set.revision_number}</p>
