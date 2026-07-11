@@ -1348,6 +1348,16 @@
             "title": "Duration Hours Column",
             "type": "string"
           },
+          "program": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimeSeriesProgramMetadataRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "set_name": {
             "minLength": 1,
             "title": "Set Name",
@@ -1432,6 +1442,38 @@
           "mapping"
         ],
         "title": "TimeSeriesMappingRequest",
+        "type": "object"
+      },
+      "TimeSeriesProgramMetadataRequest": {
+        "properties": {
+          "issued_at": {
+            "minLength": 1,
+            "title": "Issued At",
+            "type": "string"
+          },
+          "issuer": {
+            "minLength": 1,
+            "title": "Issuer",
+            "type": "string"
+          },
+          "valid_from": {
+            "minLength": 1,
+            "title": "Valid From",
+            "type": "string"
+          },
+          "valid_until": {
+            "minLength": 1,
+            "title": "Valid Until",
+            "type": "string"
+          }
+        },
+        "required": [
+          "issuer",
+          "issued_at",
+          "valid_from",
+          "valid_until"
+        ],
+        "title": "TimeSeriesProgramMetadataRequest",
         "type": "object"
       },
       "TimeSeriesRowsRequest": {

@@ -384,12 +384,20 @@ export interface ProjectTimeSeriesSet {
   values: ProjectTimeSeriesSetValue[];
 }
 
+export interface TimeSeriesProgramMetadata {
+  issuer: string;
+  issued_at: string;
+  valid_from: string;
+  valid_until: string;
+}
+
 export interface ProjectTimeSeriesSetRevision {
   revision_number: number;
   content_hash: string;
   change_summary: string;
   created_at: string;
   created_by: string;
+  program?: TimeSeriesProgramMetadata | null;
 }
 
 export interface TimeSeriesSetValueEdit {
@@ -425,6 +433,7 @@ export interface TimeSeriesConnectorIngestionPayload {
   timestamp_column: string;
   duration_hours_column: string;
   signal_mappings: TimeSeriesCatalogSignalMappingPayload[];
+  program?: TimeSeriesProgramMetadata | null;
 }
 
 export interface TimeSeriesConnectorIngestionSummary {
@@ -433,6 +442,7 @@ export interface TimeSeriesConnectorIngestionSummary {
   target: string;
   fetched_at: string;
   record_count: number;
+  program?: TimeSeriesProgramMetadata;
 }
 
 export interface TimeSeriesConnectorIngestionResult {
@@ -477,6 +487,7 @@ export interface ProjectTimeSeriesSetSummary {
   signal_count: number;
   period_count: number;
   stale?: boolean;
+  program?: TimeSeriesProgramMetadata | null;
   created_at?: string;
   updated_at?: string;
 }

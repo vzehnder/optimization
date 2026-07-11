@@ -863,6 +863,13 @@ function TimeSeriesCatalogList({
             {set.revision_number} | {set.signal_count} senales |{" "}
             {set.period_count} periodos
           </p>
+          {set.program ? (
+            <p>
+              Programa oficial: {set.program.issuer} | emitido{" "}
+              {set.program.issued_at} | vigencia {set.program.valid_from} a{" "}
+              {set.program.valid_until}
+            </p>
+          ) : null}
           <p>
             <code>{set.content_hash}</code>
           </p>
@@ -1118,6 +1125,11 @@ function TimeSeriesConnectorIngestionPanel({
   const [mappings, setMappings] = useState<ConnectorMappingState[]>([
     { source_column: "", signal_key: "" },
   ]);
+  const [isProgram, setIsProgram] = useState(false);
+  const [programIssuer, setProgramIssuer] = useState("");
+  const [programIssuedAt, setProgramIssuedAt] = useState("");
+  const [programValidFrom, setProgramValidFrom] = useState("");
+  const [programValidUntil, setProgramValidUntil] = useState("");
   const [error, setError] = useState("");
   const [summary, setSummary] =
     useState<TimeSeriesConnectorIngestionSummary | null>(null);
@@ -1141,6 +1153,14 @@ function TimeSeriesConnectorIngestionPanel({
           signal_key: mapping.signal_key,
         })),
       };
+      if (isProgram) {
+        payload.program = {
+          issuer: programIssuer.trim(),
+          issued_at: programIssuedAt.trim(),
+          valid_from: programValidFrom.trim(),
+          valid_until: programValidUntil.trim(),
+        };
+      }
       return ingestTimeSeriesConnector(projectId, payload);
     },
     onSuccess: (result) => {
@@ -1166,7 +1186,12 @@ function TimeSeriesConnectorIngestionPanel({
     mappings.length > 0 &&
     mappings.every(
       (mapping) => mapping.source_column.trim() !== "" && mapping.signal_key !== "",
-    );
+    ) &&
+    (!isProgram ||
+      (programIssuer.trim() !== "" &&
+        programIssuedAt.trim() !== "" &&
+        programValidFrom.trim() !== "" &&
+        programValidUntil.trim() !== ""));
 
   const outcomeLabel: Record<string, string> = {
     created: "Set creado desde el conector.",
@@ -1183,9 +1208,10 @@ function TimeSeriesConnectorIngestionPanel({
         Ingesta de pronostico (conector externo)
       </h2>
       <p>
-        Trae datos de pronostico desde una API HTTP+JSON externa y los ingresa
-        al catalogo como fuente + set validado (data_kind forecast), igual que
-        un archivo CSV/XLSX.
+        Trae datos desde una API HTTP+JSON externa y los ingresa al catalogo
+        como fuente + set validado, igual que un archivo CSV/XLSX. Un
+        pronostico entra como data_kind forecast; un programa oficial entra
+        como data_kind programmed con emisor y vigencia.
       </p>
       {error ? <p role="alert">{error}</p> : null}
       {summary ? (
@@ -1193,6 +1219,9 @@ function TimeSeriesConnectorIngestionPanel({
           {outcomeLabel[summary.outcome] || summary.outcome} Conector{" "}
           {summary.connector_id} | {summary.record_count} registros | fetch{" "}
           {summary.fetched_at}
+          {summary.program
+            ? ` | Programa oficial de ${summary.program.issuer}, emitido ${summary.program.issued_at}, vigencia ${summary.program.valid_from} a ${summary.program.valid_until}`
+            : ""}
         </p>
       ) : null}
       <div className="version-actions">
@@ -1258,7 +1287,59 @@ function TimeSeriesConnectorIngestionPanel({
           onChange={(event) => setDurationColumn(event.target.value)}
           disabled={mutation.isPending}
         />
+        <label htmlFor="connector-is-program">
+          <input
+            id="connector-is-program"
+            type="checkbox"
+            checked={isProgram}
+            onChange={(event) => setIsProgram(event.target.checked)}
+            disabled={mutation.isPending}
+          />{" "}
+          Programa oficial (data_kind programmed)
+        </label>
       </div>
+      {isProgram ? (
+        <div className="version-actions">
+          <label htmlFor="connector-program-issuer">Emisor del programa</label>
+          <input
+            id="connector-program-issuer"
+            value={programIssuer}
+            onChange={(event) => setProgramIssuer(event.target.value)}
+            placeholder="Coordinador Electrico Nacional"
+            disabled={mutation.isPending}
+          />
+          <label htmlFor="connector-program-issued-at">
+            Fecha de emision (ISO-8601 con zona)
+          </label>
+          <input
+            id="connector-program-issued-at"
+            value={programIssuedAt}
+            onChange={(event) => setProgramIssuedAt(event.target.value)}
+            placeholder="2026-08-01T10:00:00+00:00"
+            disabled={mutation.isPending}
+          />
+          <label htmlFor="connector-program-valid-from">
+            Vigencia desde (ISO-8601 con zona)
+          </label>
+          <input
+            id="connector-program-valid-from"
+            value={programValidFrom}
+            onChange={(event) => setProgramValidFrom(event.target.value)}
+            placeholder="2026-08-02T00:00:00+00:00"
+            disabled={mutation.isPending}
+          />
+          <label htmlFor="connector-program-valid-until">
+            Vigencia hasta (ISO-8601 con zona)
+          </label>
+          <input
+            id="connector-program-valid-until"
+            value={programValidUntil}
+            onChange={(event) => setProgramValidUntil(event.target.value)}
+            placeholder="2026-08-03T00:00:00+00:00"
+            disabled={mutation.isPending}
+          />
+        </div>
+      ) : null}
       {mappings.map((mapping, index) => (
         <div className="version-actions" key={index}>
           <label htmlFor={`connector-mapping-column-${index}`}>
@@ -2659,6 +2740,29 @@ function TimeSeriesSetOriginSummary({
   return null;
 }
 
+function TimeSeriesSetProgramSummary({
+  revisionMetadata,
+}: {
+  revisionMetadata: Record<string, unknown> | undefined;
+}) {
+  const program = revisionMetadata?.program;
+  if (!isRecord(program)) {
+    return null;
+  }
+  return (
+    <section className="workspace-section" aria-labelledby="set-program">
+      <h2 id="set-program">Programa oficial</h2>
+      <p>
+        Emisor: <strong>{String(program.issuer)}</strong>
+      </p>
+      <p>Emitido: {String(program.issued_at)}</p>
+      <p>
+        Vigencia: {String(program.valid_from)} a {String(program.valid_until)}
+      </p>
+    </section>
+  );
+}
+
 function TimeSeriesSetRevisionHistory({
   revisions,
 }: {
@@ -2676,6 +2780,13 @@ function TimeSeriesSetRevisionHistory({
             {revision.created_by} | {revision.created_at}
           </p>
           <p>{revision.change_summary}</p>
+          {revision.program ? (
+            <p>
+              Programa oficial: {revision.program.issuer} | emitido{" "}
+              {revision.program.issued_at} | vigencia{" "}
+              {revision.program.valid_from} a {revision.program.valid_until}
+            </p>
+          ) : null}
           <p>
             <code>{revision.content_hash}</code>
           </p>
@@ -2804,6 +2915,7 @@ export function TimeSeriesSetDetailView() {
             <code>{set.content_hash}</code>
           </p>
         </section>
+        <TimeSeriesSetProgramSummary revisionMetadata={set.revision_metadata} />
         <TimeSeriesSetOriginSummary revisionMetadata={set.revision_metadata} />
         <TimeSeriesSetLineageSummary
           projectId={projectId}

@@ -1826,6 +1826,7 @@ export interface components {
             connector: components["schemas"]["TimeSeriesConnectorConfigRequest"];
             /** Duration Hours Column */
             duration_hours_column: string;
+            program?: components["schemas"]["TimeSeriesProgramMetadataRequest"] | null;
             /** Set Name */
             set_name: string;
             /** Signal Key */
@@ -1849,6 +1850,17 @@ export interface components {
             mapping: {
                 [key: string]: unknown;
             };
+        };
+        /** TimeSeriesProgramMetadataRequest */
+        TimeSeriesProgramMetadataRequest: {
+            /** Issued At */
+            issued_at: string;
+            /** Issuer */
+            issuer: string;
+            /** Valid From */
+            valid_from: string;
+            /** Valid Until */
+            valid_until: string;
         };
         /** TimeSeriesRowsRequest */
         TimeSeriesRowsRequest: {

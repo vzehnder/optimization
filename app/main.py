@@ -354,6 +354,13 @@ class TimeSeriesConnectorConfigRequest(BaseModel):
     auth_token: str | None = None
 
 
+class TimeSeriesProgramMetadataRequest(BaseModel):
+    issuer: str = Field(min_length=1)
+    issued_at: str = Field(min_length=1)
+    valid_from: str = Field(min_length=1)
+    valid_until: str = Field(min_length=1)
+
+
 class TimeSeriesConnectorIngestionRequest(BaseModel):
     connector: TimeSeriesConnectorConfigRequest
     set_name: str = Field(min_length=1)
@@ -365,6 +372,7 @@ class TimeSeriesConnectorIngestionRequest(BaseModel):
     signal_key: str | None = None
     source_unit: str | None = None
     signal_mappings: list[TimeSeriesCatalogSignalMappingRequest] = Field(default_factory=list)
+    program: TimeSeriesProgramMetadataRequest | None = None
 
 
 class TimeSeriesSetReplaceRequest(BaseModel):
@@ -1711,13 +1719,14 @@ def create_app(
                 status_code=400,
             )
 
+        program = payload.program.model_dump() if payload.program is not None else None
         try:
             prepared_import = prepare_time_series_catalog_import(
                 rows=fetched.rows,
                 request=PreparedCatalogImportRequest(
                     set_name=payload.set_name,
                     version_label=payload.version_label,
-                    data_kind="forecast",
+                    data_kind="programmed" if program is not None else "forecast",
                     timezone=payload.timezone,
                     timestamp_column=payload.timestamp_column,
                     duration_hours_column=payload.duration_hours_column,
@@ -1751,6 +1760,7 @@ def create_app(
                     },
                 },
                 prepared_import=prepared_import,
+                program=program,
                 created_by=current_user_email(request),
             )
         except KeyError as error:
@@ -1766,15 +1776,18 @@ def create_app(
         ingested_set["staleness"] = analyst_store.evaluate_time_series_set_staleness(
             project_id, ingested_set["id"]
         )
+        ingestion_summary: dict = {
+            "outcome": result["outcome"],
+            "connector_id": fetched.connector_id,
+            "target": fetched.target,
+            "fetched_at": fetched.fetched_at,
+            "record_count": len(fetched.rows),
+        }
+        if program is not None:
+            ingestion_summary["program"] = program
         return {
             "time_series_set": ingested_set,
-            "ingestion": {
-                "outcome": result["outcome"],
-                "connector_id": fetched.connector_id,
-                "target": fetched.target,
-                "fetched_at": fetched.fetched_at,
-                "record_count": len(fetched.rows),
-            },
+            "ingestion": ingestion_summary,
         }
 
     @app.get("/api/projects/{project_id}/time-series-sets/hydraulic")

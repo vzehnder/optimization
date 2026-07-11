@@ -435,6 +435,57 @@ def compute_catalog_content_hash(
     )
 
 
+PROGRAM_METADATA_FIELDS = ("issuer", "issued_at", "valid_from", "valid_until")
+
+
+def _parse_program_datetime(field_name: str, value: Any) -> datetime:
+    if not isinstance(value, str) or not value.strip():
+        raise TimeSeriesCatalogError(f"program metadata: {field_name} is required")
+    text = value.strip()
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise TimeSeriesCatalogError(
+            f"program metadata: {field_name} {text!r} must be ISO-8601"
+        ) from error
+    if parsed.tzinfo is None:
+        raise TimeSeriesCatalogError(
+            f"program metadata: {field_name} {text!r} must include a timezone offset"
+        )
+    return parsed
+
+
+def validate_program_metadata(raw: Any) -> dict[str, str]:
+    """Validate issuer/validity metadata for programmed external data (TS6-007).
+
+    Issuer and validity are metadata, not a new model: the returned dict is
+    stored verbatim in the revision's ``metadata_json`` under ``program``.
+    """
+    if not isinstance(raw, dict):
+        raise TimeSeriesCatalogError("program metadata must be an object")
+    unknown = sorted(set(raw) - set(PROGRAM_METADATA_FIELDS))
+    if unknown:
+        raise TimeSeriesCatalogError(
+            f"program metadata: unknown field(s) {unknown}"
+        )
+    issuer = raw.get("issuer")
+    if not isinstance(issuer, str) or not issuer.strip():
+        raise TimeSeriesCatalogError("program metadata: issuer is required")
+    issued_at = _parse_program_datetime("issued_at", raw.get("issued_at"))
+    valid_from = _parse_program_datetime("valid_from", raw.get("valid_from"))
+    valid_until = _parse_program_datetime("valid_until", raw.get("valid_until"))
+    if valid_from >= valid_until:
+        raise TimeSeriesCatalogError(
+            "program metadata: valid_from must be before valid_until"
+        )
+    return {
+        "issuer": issuer.strip(),
+        "issued_at": str(raw["issued_at"]).strip(),
+        "valid_from": str(raw["valid_from"]).strip(),
+        "valid_until": str(raw["valid_until"]).strip(),
+    }
+
+
 def validate_catalog_value_edits(
     *,
     edits: list[CatalogValueEdit],

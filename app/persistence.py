@@ -37,6 +37,7 @@ from app.time_series_catalog import (
     compute_catalog_content_hash,
     normalize_optional_text,
     validate_catalog_value_edits,
+    validate_program_metadata,
 )
 from app.transformations import (
     TransformationDefinition,
@@ -2158,6 +2159,7 @@ class AnalystStore:
         project_id: int,
         source: dict[str, Any],
         prepared_import: PreparedTimeSeriesCatalogImport,
+        program: dict[str, Any] | None = None,
         created_by: str = "internal_analyst",
     ) -> dict[str, Any]:
         """Land connector-fetched rows through the common source/set path.
@@ -2166,12 +2168,28 @@ class AnalystStore:
         creates a validated set, an unchanged re-ingest converges without
         writing anything, and changed data advances the set one revision via
         the existing replace path.
+
+        Programmed external data (TS6-007) additionally carries issuer and
+        validity metadata, stored per revision so reissues never overwrite
+        earlier program versions.
         """
         with self._lock:
             self.get_project(project_id)
             if str(source.get("kind") or "") != "connector":
                 raise ValueError(
                     "connector ingestion requires a source with kind 'connector'"
+                )
+            validated_program: dict[str, Any] | None = None
+            if program is not None:
+                if prepared_import.data_kind != "programmed":
+                    raise ValueError(
+                        "program metadata is only allowed for data_kind 'programmed'"
+                    )
+                validated_program = validate_program_metadata(program)
+            elif prepared_import.data_kind == "programmed":
+                raise ValueError(
+                    "programmed connector data requires program metadata "
+                    "(issuer, issued_at, valid_from, valid_until)"
                 )
             existing = self.connection.execute(
                 """
@@ -2181,6 +2199,9 @@ class AnalystStore:
                 """,
                 (project_id, prepared_import.set_name, prepared_import.version_label),
             ).fetchone()
+            extra_revision_metadata = (
+                {"program": validated_program} if validated_program else None
+            )
             if existing is None:
                 created = self._create_time_series_catalog_set(
                     project_id=project_id,
@@ -2188,6 +2209,7 @@ class AnalystStore:
                     prepared_import=prepared_import,
                     created_by=created_by,
                     change_summary="Initial connector ingestion",
+                    extra_revision_metadata=extra_revision_metadata,
                 )
                 return {"time_series_set": created, "outcome": "created"}
 
@@ -2211,24 +2233,41 @@ class AnalystStore:
                     "non-connector source; pick a different set name"
                 )
             current = self.get_time_series_set(project_id, time_series_set_id)
-            if str(current["content_hash"]) == prepared_import.content_hash:
+            content_unchanged = (
+                str(current["content_hash"]) == prepared_import.content_hash
+            )
+            recorded_program = current.get("revision_metadata", {}).get("program")
+            if content_unchanged and (
+                validated_program is None or recorded_program == validated_program
+            ):
                 return {"time_series_set": current, "outcome": "converged"}
 
             fetched_at = ""
             metadata = source.get("metadata")
             if isinstance(metadata, dict):
                 fetched_at = str(metadata.get("fetched_at") or "")
+            if content_unchanged:
+                # Same values, new issuer/validity: a reissue is its own
+                # revision, never an overwrite of the earlier program.
+                change_summary = (
+                    f"Program re-issued via connector at {fetched_at}"
+                    if fetched_at
+                    else "Program re-issued via connector"
+                )
+            else:
+                change_summary = (
+                    f"Re-ingested from connector at {fetched_at}"
+                    if fetched_at
+                    else "Re-ingested from connector"
+                )
             updated = self.replace_time_series_set_source(
                 project_id=project_id,
                 time_series_set_id=time_series_set_id,
                 source=source,
                 prepared_import=prepared_import,
                 created_by=created_by,
-                change_summary=(
-                    f"Re-ingested from connector at {fetched_at}"
-                    if fetched_at
-                    else "Re-ingested from connector"
-                ),
+                change_summary=change_summary,
+                extra_revision_metadata=extra_revision_metadata,
             )
             return {"time_series_set": updated, "outcome": "new_revision"}
 
@@ -2240,6 +2279,7 @@ class AnalystStore:
         prepared_import: PreparedTimeSeriesCatalogImport,
         created_by: str = "internal_analyst",
         change_summary: str = "Initial CSV/XLSX catalog import",
+        extra_revision_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             now = utc_now_iso()
@@ -2314,6 +2354,7 @@ class AnalystStore:
                     created_by=created_by,
                     now=now,
                     change_summary=change_summary,
+                    extra_revision_metadata=extra_revision_metadata,
                 )
             except Exception:
                 # PostgreSQL runs autocommit, so a mid-import failure must clean
@@ -2339,7 +2380,14 @@ class AnalystStore:
         created_by: str,
         now: str,
         change_summary: str = "Initial CSV/XLSX catalog import",
+        extra_revision_metadata: dict[str, Any] | None = None,
     ) -> None:
+        revision_metadata: dict[str, Any] = {
+            "mapping": prepared_import.mapping_summary,
+            "source_key": source.get("id"),
+        }
+        if extra_revision_metadata:
+            revision_metadata.update(extra_revision_metadata)
         self.connection.execute(
             """
             INSERT INTO time_series_set_revisions (
@@ -2362,13 +2410,7 @@ class AnalystStore:
                 change_summary,
                 now,
                 created_by,
-                json.dumps(
-                    {
-                        "mapping": prepared_import.mapping_summary,
-                        "source_key": source.get("id"),
-                    },
-                    sort_keys=True,
-                ),
+                json.dumps(revision_metadata, sort_keys=True),
             ),
         )
 
@@ -3274,6 +3316,7 @@ class AnalystStore:
         prepared_import: PreparedTimeSeriesCatalogImport,
         created_by: str = "internal_analyst",
         change_summary: str | None = None,
+        extra_revision_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             self.get_project(project_id)
@@ -3392,6 +3435,7 @@ class AnalystStore:
                             {
                                 "mapping": prepared_import.mapping_summary,
                                 "source_key": source.get("id"),
+                                **(extra_revision_metadata or {}),
                             },
                             sort_keys=True,
                         ),
@@ -3726,6 +3770,7 @@ class AnalystStore:
                 time_series_sets.updated_at AS updated_at,
                 latest_revision.revision_number AS revision_number,
                 latest_revision.content_hash AS content_hash,
+                latest_revision.metadata_json AS metadata_json,
                 (
                     SELECT COUNT(*) FROM time_series_signals
                     WHERE time_series_signals.time_series_set_id = time_series_sets.id
@@ -3736,7 +3781,8 @@ class AnalystStore:
                 ) AS period_count
             FROM time_series_sets
             JOIN (
-                SELECT r1.time_series_set_id, r1.revision_number, r1.content_hash
+                SELECT r1.time_series_set_id, r1.revision_number, r1.content_hash,
+                       r1.metadata_json
                 FROM time_series_set_revisions AS r1
                 WHERE r1.revision_number = (
                     SELECT MAX(r2.revision_number)
@@ -3767,6 +3813,7 @@ class AnalystStore:
                 "signal_count": int(row["signal_count"]),
                 "period_count": int(row["period_count"]),
                 "stale": stale_by_set_id.get(int(row["id"]), False),
+                "program": _parse_program_from_metadata_json(row["metadata_json"]),
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
             }
@@ -4219,7 +4266,8 @@ class AnalystStore:
                 content_hash,
                 change_summary,
                 created_at,
-                created_by
+                created_by,
+                metadata_json
             FROM time_series_set_revisions
             WHERE time_series_set_id = ?
             ORDER BY revision_number DESC
@@ -4244,6 +4292,7 @@ class AnalystStore:
                     "created_at": row["created_at"],
                     "created_by": row["created_by"],
                     "source": source,
+                    "program": _parse_program_from_metadata_json(row["metadata_json"]),
                 }
             )
         return revisions
@@ -9288,6 +9337,19 @@ class AnalystStore:
 
 def row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
     return {key: row[key] for key in row.keys()}
+
+
+def _parse_program_from_metadata_json(metadata_json: Any) -> dict[str, Any] | None:
+    if not metadata_json:
+        return None
+    try:
+        parsed = json.loads(str(metadata_json))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    program = parsed.get("program")
+    return program if isinstance(program, dict) else None
 
 
 def user_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:

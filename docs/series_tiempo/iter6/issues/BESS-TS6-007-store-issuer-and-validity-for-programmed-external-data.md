@@ -1,11 +1,13 @@
 # BESS-TS6-007: Store Issuer And Validity For Programmed External Data
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter6/prd.md`
 Fecha de inicio planificada: 2026-08-04
 Fecha de termino planificada: 2026-08-05
+Fecha de inicio real: 2026-07-11
+Fecha de termino real: 2026-07-11
 
 ## User stories covered
 
@@ -33,12 +35,12 @@ metadata, not a new model.
 
 ## Acceptance criteria
 
-- [ ] Programmed external data records issuer, issue date and validity window at ingestion.
-- [ ] The catalog list and detail pages surface issuer and validity for programmed sets.
-- [ ] Reissued or corrected programs land as new revisions/versions with their own metadata; earlier versions remain readable and unchanged.
-- [ ] A run using a programmed set can be traced back to the exact issuer and validity window it consumed.
-- [ ] Existing validation, binding and staleness behavior is unchanged for programmed sets.
-- [ ] Issuer/validity handling is covered by tests with mocked external data.
+- [x] Programmed external data records issuer, issue date and validity window at ingestion.
+- [x] The catalog list and detail pages surface issuer and validity for programmed sets.
+- [x] Reissued or corrected programs land as new revisions/versions with their own metadata; earlier versions remain readable and unchanged.
+- [x] A run using a programmed set can be traced back to the exact issuer and validity window it consumed.
+- [x] Existing validation, binding and staleness behavior is unchanged for programmed sets.
+- [x] Issuer/validity handling is covered by tests with mocked external data.
 
 ## Blocked by
 
