@@ -2145,6 +2145,103 @@ class AnalystStore:
         with self._lock:
             scenario = self.get_scenario(scenario_id)
             project_id = int(scenario["project_id"])
+            return self._create_time_series_catalog_set(
+                project_id=project_id,
+                source=source,
+                prepared_import=prepared_import,
+                created_by=created_by,
+            )
+
+    def ingest_connector_time_series_set(
+        self,
+        *,
+        project_id: int,
+        source: dict[str, Any],
+        prepared_import: PreparedTimeSeriesCatalogImport,
+        created_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        """Land connector-fetched rows through the common source/set path.
+
+        Same semantics as a file import, different origin: first ingestion
+        creates a validated set, an unchanged re-ingest converges without
+        writing anything, and changed data advances the set one revision via
+        the existing replace path.
+        """
+        with self._lock:
+            self.get_project(project_id)
+            if str(source.get("kind") or "") != "connector":
+                raise ValueError(
+                    "connector ingestion requires a source with kind 'connector'"
+                )
+            existing = self.connection.execute(
+                """
+                SELECT id
+                FROM time_series_sets
+                WHERE project_id = ? AND name = ? AND version_label = ?
+                """,
+                (project_id, prepared_import.set_name, prepared_import.version_label),
+            ).fetchone()
+            if existing is None:
+                created = self._create_time_series_catalog_set(
+                    project_id=project_id,
+                    source=source,
+                    prepared_import=prepared_import,
+                    created_by=created_by,
+                    change_summary="Initial connector ingestion",
+                )
+                return {"time_series_set": created, "outcome": "created"}
+
+            time_series_set_id = int(existing["id"])
+            connector_revision = self.connection.execute(
+                """
+                SELECT 1
+                FROM time_series_set_revisions
+                JOIN time_series_sources
+                  ON time_series_sources.id = time_series_set_revisions.time_series_source_id
+                WHERE time_series_set_revisions.time_series_set_id = ?
+                  AND time_series_sources.kind = 'connector'
+                LIMIT 1
+                """,
+                (time_series_set_id,),
+            ).fetchone()
+            if connector_revision is None:
+                raise ValueError(
+                    f"time-series set {prepared_import.set_name!r} version "
+                    f"{prepared_import.version_label!r} already exists from a "
+                    "non-connector source; pick a different set name"
+                )
+            current = self.get_time_series_set(project_id, time_series_set_id)
+            if str(current["content_hash"]) == prepared_import.content_hash:
+                return {"time_series_set": current, "outcome": "converged"}
+
+            fetched_at = ""
+            metadata = source.get("metadata")
+            if isinstance(metadata, dict):
+                fetched_at = str(metadata.get("fetched_at") or "")
+            updated = self.replace_time_series_set_source(
+                project_id=project_id,
+                time_series_set_id=time_series_set_id,
+                source=source,
+                prepared_import=prepared_import,
+                created_by=created_by,
+                change_summary=(
+                    f"Re-ingested from connector at {fetched_at}"
+                    if fetched_at
+                    else "Re-ingested from connector"
+                ),
+            )
+            return {"time_series_set": updated, "outcome": "new_revision"}
+
+    def _create_time_series_catalog_set(
+        self,
+        *,
+        project_id: int,
+        source: dict[str, Any],
+        prepared_import: PreparedTimeSeriesCatalogImport,
+        created_by: str = "internal_analyst",
+        change_summary: str = "Initial CSV/XLSX catalog import",
+    ) -> dict[str, Any]:
+        with self._lock:
             now = utc_now_iso()
             source_record = self._get_or_create_time_series_source_record(
                 project_id=project_id,
@@ -2216,6 +2313,7 @@ class AnalystStore:
                     prepared_import=prepared_import,
                     created_by=created_by,
                     now=now,
+                    change_summary=change_summary,
                 )
             except Exception:
                 # PostgreSQL runs autocommit, so a mid-import failure must clean
@@ -2240,6 +2338,7 @@ class AnalystStore:
         prepared_import: PreparedTimeSeriesCatalogImport,
         created_by: str,
         now: str,
+        change_summary: str = "Initial CSV/XLSX catalog import",
     ) -> None:
         self.connection.execute(
             """
@@ -2260,7 +2359,7 @@ class AnalystStore:
                 time_series_set_id,
                 int(source_record["id"]),
                 prepared_import.content_hash,
-                "Initial CSV/XLSX catalog import",
+                change_summary,
                 now,
                 created_by,
                 json.dumps(
@@ -4417,7 +4516,12 @@ class AnalystStore:
                 source.get("selected_sheet"),
                 now,
                 created_by,
-                json.dumps({}, sort_keys=True),
+                json.dumps(
+                    source.get("metadata")
+                    if isinstance(source.get("metadata"), dict)
+                    else {},
+                    sort_keys=True,
+                ),
             ),
         )
         return {"id": int(cursor.lastrowid), "checksum": str(source.get("checksum") or "")}
@@ -4425,6 +4529,18 @@ class AnalystStore:
     def _time_series_source_public_dict(self, source_row: Mapping[str, Any] | None) -> dict[str, Any] | None:
         if source_row is None:
             return None
+        metadata: dict[str, Any] = {}
+        try:
+            raw_metadata = source_row["metadata_json"]
+        except (KeyError, IndexError):
+            raw_metadata = None
+        if raw_metadata:
+            try:
+                parsed_metadata = json.loads(str(raw_metadata))
+            except json.JSONDecodeError:
+                parsed_metadata = {}
+            if isinstance(parsed_metadata, dict):
+                metadata = parsed_metadata
         return {
             "source_key": source_row["source_key"],
             "kind": source_row["kind"],
@@ -4433,6 +4549,7 @@ class AnalystStore:
             "checksum": source_row["checksum"],
             "selected_sheet": source_row["selected_sheet"],
             "created_at": source_row["created_at"],
+            "metadata": metadata,
         }
 
     def _get_time_series_source_by_id(self, time_series_source_id: int | None) -> dict[str, Any] | None:
@@ -4447,7 +4564,8 @@ class AnalystStore:
                 media_type,
                 checksum,
                 selected_sheet,
-                created_at
+                created_at,
+                metadata_json
             FROM time_series_sources
             WHERE id = ?
             """,

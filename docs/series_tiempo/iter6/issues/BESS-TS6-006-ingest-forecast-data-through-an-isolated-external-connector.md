@@ -1,11 +1,13 @@
 # BESS-TS6-006: Ingest Forecast Data Through An Isolated External Connector
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter6/prd.md`
 Fecha de inicio planificada: 2026-07-30
 Fecha de termino planificada: 2026-08-03
+Fecha de inicio real: 2026-07-11
+Fecha de termino real: 2026-07-11
 
 ## User stories covered
 
@@ -35,12 +37,12 @@ variants like any other set.
 
 ## Acceptance criteria
 
-- [ ] A connector ingests external forecast data into the project catalog as a source plus a validated set with `forecast` data kind, without any new data-model concept.
-- [ ] The source records connector-origin metadata (connector identity, fetch time, target) sufficient to audit where the data came from.
-- [ ] Connector-specific logic is isolated behind a narrow interface, with core series logic unaware of the external API's shape.
-- [ ] Re-ingesting unchanged data converges without duplicates; changed data creates a new revision with hash and origin metadata.
-- [ ] Ingested sets are browsable, pass the existing TS-2 validation gates and are bindable in a case input variant.
-- [ ] Connector tests run against mocked external data, without network access, and assert common source/set creation.
+- [x] A connector ingests external forecast data into the project catalog as a source plus a validated set with `forecast` data kind, without any new data-model concept.
+- [x] The source records connector-origin metadata (connector identity, fetch time, target) sufficient to audit where the data came from.
+- [x] Connector-specific logic is isolated behind a narrow interface, with core series logic unaware of the external API's shape.
+- [x] Re-ingesting unchanged data converges without duplicates; changed data creates a new revision with hash and origin metadata.
+- [x] Ingested sets are browsable, pass the existing TS-2 validation gates and are bindable in a case input variant.
+- [x] Connector tests run against mocked external data, without network access, and assert common source/set creation.
 
 ## Blocked by
 

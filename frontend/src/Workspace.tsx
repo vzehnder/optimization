@@ -39,6 +39,7 @@ import {
   getPublicationPreview,
   getRun,
   getProject,
+  ingestTimeSeriesConnector,
   getScenario,
   getScenarioVersion,
   listCaseInputVariants,
@@ -111,6 +112,8 @@ import {
   type ScenarioRun,
   type ScenarioVersion,
   type ScenarioVersionDetail,
+  type TimeSeriesConnectorIngestionPayload,
+  type TimeSeriesConnectorIngestionSummary,
   type TimeSeriesSetReplacePayload,
   type TimeSeriesSource,
   type TimeSeriesTransformationPayload,
@@ -1093,6 +1096,254 @@ function TimeSeriesCombinationPanel({
   );
 }
 
+type ConnectorMappingState = {
+  source_column: string;
+  signal_key: string;
+};
+
+function TimeSeriesConnectorIngestionPanel({
+  projectId,
+}: {
+  projectId: number;
+}) {
+  const queryClient = useQueryClient();
+  const [baseUrl, setBaseUrl] = useState("");
+  const [recordsPath, setRecordsPath] = useState("");
+  const [authToken, setAuthToken] = useState("");
+  const [setName, setSetName] = useState("");
+  const [versionLabel, setVersionLabel] = useState("v1");
+  const [timezone, setTimezone] = useState("America/Santiago");
+  const [timestampColumn, setTimestampColumn] = useState("period_start");
+  const [durationColumn, setDurationColumn] = useState("hours");
+  const [mappings, setMappings] = useState<ConnectorMappingState[]>([
+    { source_column: "", signal_key: "" },
+  ]);
+  const [error, setError] = useState("");
+  const [summary, setSummary] =
+    useState<TimeSeriesConnectorIngestionSummary | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: () => {
+      const payload: TimeSeriesConnectorIngestionPayload = {
+        connector: {
+          connector_id: "http_json_forecast",
+          base_url: baseUrl.trim(),
+          records_path: recordsPath.trim() || null,
+          auth_token: authToken.trim() || null,
+        },
+        set_name: setName.trim(),
+        version_label: versionLabel.trim(),
+        timezone: timezone.trim(),
+        timestamp_column: timestampColumn.trim(),
+        duration_hours_column: durationColumn.trim(),
+        signal_mappings: mappings.map((mapping) => ({
+          source_column: mapping.source_column.trim(),
+          signal_key: mapping.signal_key,
+        })),
+      };
+      return ingestTimeSeriesConnector(projectId, payload);
+    },
+    onSuccess: (result) => {
+      setError("");
+      setSummary(result.ingestion);
+      void queryClient.invalidateQueries({
+        queryKey: timeSeriesCatalogQueryKey(projectId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: timeSeriesSetQueryKey(projectId, result.time_series_set.id),
+      });
+    },
+    onError: (mutationError) => {
+      setSummary(null);
+      setError(errorMessage(mutationError));
+    },
+  });
+
+  const canSubmit =
+    baseUrl.trim() !== "" &&
+    setName.trim() !== "" &&
+    versionLabel.trim() !== "" &&
+    mappings.length > 0 &&
+    mappings.every(
+      (mapping) => mapping.source_column.trim() !== "" && mapping.signal_key !== "",
+    );
+
+  const outcomeLabel: Record<string, string> = {
+    created: "Set creado desde el conector.",
+    converged: "Datos sin cambios: se reutilizo la revision existente.",
+    new_revision: "Datos cambiados: se creo una nueva revision.",
+  };
+
+  return (
+    <section
+      className="workspace-section"
+      aria-labelledby="time-series-connector-ingestion"
+    >
+      <h2 id="time-series-connector-ingestion">
+        Ingesta de pronostico (conector externo)
+      </h2>
+      <p>
+        Trae datos de pronostico desde una API HTTP+JSON externa y los ingresa
+        al catalogo como fuente + set validado (data_kind forecast), igual que
+        un archivo CSV/XLSX.
+      </p>
+      {error ? <p role="alert">{error}</p> : null}
+      {summary ? (
+        <p role="status">
+          {outcomeLabel[summary.outcome] || summary.outcome} Conector{" "}
+          {summary.connector_id} | {summary.record_count} registros | fetch{" "}
+          {summary.fetched_at}
+        </p>
+      ) : null}
+      <div className="version-actions">
+        <label htmlFor="connector-base-url">URL del conector</label>
+        <input
+          id="connector-base-url"
+          value={baseUrl}
+          onChange={(event) => setBaseUrl(event.target.value)}
+          placeholder="https://api.ejemplo.com/forecast"
+          disabled={mutation.isPending}
+        />
+        <label htmlFor="connector-records-path">
+          Ruta de registros en el JSON (opcional, ej. data.records)
+        </label>
+        <input
+          id="connector-records-path"
+          value={recordsPath}
+          onChange={(event) => setRecordsPath(event.target.value)}
+          disabled={mutation.isPending}
+        />
+        <label htmlFor="connector-auth-token">Token Bearer (opcional)</label>
+        <input
+          id="connector-auth-token"
+          type="password"
+          value={authToken}
+          onChange={(event) => setAuthToken(event.target.value)}
+          disabled={mutation.isPending}
+        />
+        <label htmlFor="connector-set-name">Nombre del set</label>
+        <input
+          id="connector-set-name"
+          value={setName}
+          onChange={(event) => setSetName(event.target.value)}
+          disabled={mutation.isPending}
+        />
+        <label htmlFor="connector-version-label">Version</label>
+        <input
+          id="connector-version-label"
+          value={versionLabel}
+          onChange={(event) => setVersionLabel(event.target.value)}
+          disabled={mutation.isPending}
+        />
+        <label htmlFor="connector-timezone">Zona horaria</label>
+        <input
+          id="connector-timezone"
+          value={timezone}
+          onChange={(event) => setTimezone(event.target.value)}
+          disabled={mutation.isPending}
+        />
+        <label htmlFor="connector-timestamp-column">Columna de timestamp</label>
+        <input
+          id="connector-timestamp-column"
+          value={timestampColumn}
+          onChange={(event) => setTimestampColumn(event.target.value)}
+          disabled={mutation.isPending}
+        />
+        <label htmlFor="connector-duration-column">
+          Columna de duracion (horas)
+        </label>
+        <input
+          id="connector-duration-column"
+          value={durationColumn}
+          onChange={(event) => setDurationColumn(event.target.value)}
+          disabled={mutation.isPending}
+        />
+      </div>
+      {mappings.map((mapping, index) => (
+        <div className="version-actions" key={index}>
+          <label htmlFor={`connector-mapping-column-${index}`}>
+            Columna de origen
+          </label>
+          <input
+            id={`connector-mapping-column-${index}`}
+            value={mapping.source_column}
+            onChange={(event) =>
+              setMappings((current) =>
+                current.map((item, itemIndex) =>
+                  itemIndex === index
+                    ? { ...item, source_column: event.target.value }
+                    : item,
+                ),
+              )
+            }
+            disabled={mutation.isPending}
+          />
+          <label htmlFor={`connector-mapping-signal-${index}`}>
+            Senal canonica
+          </label>
+          <select
+            id={`connector-mapping-signal-${index}`}
+            value={mapping.signal_key}
+            onChange={(event) =>
+              setMappings((current) =>
+                current.map((item, itemIndex) =>
+                  itemIndex === index
+                    ? { ...item, signal_key: event.target.value }
+                    : item,
+                ),
+              )
+            }
+            disabled={mutation.isPending}
+          >
+            <option value="">Selecciona una senal</option>
+            {timeSeriesCatalogSignalOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          {mappings.length > 1 ? (
+            <button
+              type="button"
+              onClick={() =>
+                setMappings((current) =>
+                  current.filter((_, itemIndex) => itemIndex !== index),
+                )
+              }
+              disabled={mutation.isPending}
+            >
+              Quitar senal
+            </button>
+          ) : null}
+        </div>
+      ))}
+      <div className="version-actions">
+        <button
+          type="button"
+          onClick={() =>
+            setMappings((current) => [
+              ...current,
+              { source_column: "", signal_key: "" },
+            ])
+          }
+          disabled={mutation.isPending}
+        >
+          Agregar senal
+        </button>
+        <button
+          type="button"
+          onClick={() => mutation.mutate()}
+          disabled={mutation.isPending || !canSubmit}
+        >
+          {mutation.isPending
+            ? "Ingiriendo desde conector"
+            : "Ingerir desde conector"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
 export function TimeSeriesCatalogView({
   canBulkMigrateHydraulicSeries = false,
 }: {
@@ -1179,6 +1430,7 @@ export function TimeSeriesCatalogView({
           sets={timeSeriesSets.data}
         />
       ) : null}
+      <TimeSeriesConnectorIngestionPanel projectId={projectId} />
       <section
         className="workspace-section"
         aria-labelledby="hydraulic-time-series-catalog"
@@ -1329,6 +1581,24 @@ function TimeSeriesSetSourceSummary({
 }) {
   if (!source) {
     return <EmptyState>Sin fuente registrada.</EmptyState>;
+  }
+  const metadata = source.metadata || {};
+  if (source.kind === "connector") {
+    return (
+      <div>
+        <p>
+          Conector externo {String(metadata.connector_id || "")} (
+          {source.media_type})
+        </p>
+        <p>
+          Destino: <code>{String(metadata.target || "")}</code>
+        </p>
+        <p>
+          Fetch: {String(metadata.fetched_at || "")} |{" "}
+          {String(metadata.record_count ?? "?")} registros
+        </p>
+      </div>
+    );
   }
   return (
     <p>

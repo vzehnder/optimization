@@ -349,6 +349,8 @@ export interface ProjectTimeSeriesSetSource {
   media_type: string;
   checksum: string;
   selected_sheet?: string | null;
+  kind?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ProjectTimeSeriesSetHorizon {
@@ -406,6 +408,36 @@ export interface TimeSeriesTransformationPayload {
   parameters: Record<string, unknown>;
   output_name?: string;
   output_version_label?: string;
+}
+
+export interface TimeSeriesConnectorConfigPayload {
+  connector_id?: string;
+  base_url: string;
+  records_path?: string | null;
+  auth_token?: string | null;
+}
+
+export interface TimeSeriesConnectorIngestionPayload {
+  connector: TimeSeriesConnectorConfigPayload;
+  set_name: string;
+  version_label: string;
+  timezone: string;
+  timestamp_column: string;
+  duration_hours_column: string;
+  signal_mappings: TimeSeriesCatalogSignalMappingPayload[];
+}
+
+export interface TimeSeriesConnectorIngestionSummary {
+  outcome: string;
+  connector_id: string;
+  target: string;
+  fetched_at: string;
+  record_count: number;
+}
+
+export interface TimeSeriesConnectorIngestionResult {
+  time_series_set: ProjectTimeSeriesSet;
+  ingestion: TimeSeriesConnectorIngestionSummary;
 }
 
 export interface TimeSeriesSetReplacementSource {
@@ -2019,6 +2051,24 @@ export async function applyTimeSeriesCombination(
     },
   );
   return response.time_series_set;
+}
+
+export async function ingestTimeSeriesConnector(
+  projectId: number,
+  payload: TimeSeriesConnectorIngestionPayload,
+): Promise<TimeSeriesConnectorIngestionResult> {
+  const csrfToken = await getCsrfToken();
+  return requestJson<TimeSeriesConnectorIngestionResult>(
+    `/api/projects/${projectId}/time-series-sets/connector-ingest`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrfToken,
+      },
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 export async function uploadTimeSeriesSetReplacementSource(

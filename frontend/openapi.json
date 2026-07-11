@@ -1296,6 +1296,130 @@
         "title": "TimeSeriesCatalogSignalMappingRequest",
         "type": "object"
       },
+      "TimeSeriesConnectorConfigRequest": {
+        "properties": {
+          "auth_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auth Token"
+          },
+          "base_url": {
+            "minLength": 1,
+            "title": "Base Url",
+            "type": "string"
+          },
+          "connector_id": {
+            "default": "http_json_forecast",
+            "minLength": 1,
+            "title": "Connector Id",
+            "type": "string"
+          },
+          "records_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Records Path"
+          }
+        },
+        "required": [
+          "base_url"
+        ],
+        "title": "TimeSeriesConnectorConfigRequest",
+        "type": "object"
+      },
+      "TimeSeriesConnectorIngestionRequest": {
+        "properties": {
+          "connector": {
+            "$ref": "#/components/schemas/TimeSeriesConnectorConfigRequest"
+          },
+          "duration_hours_column": {
+            "minLength": 1,
+            "title": "Duration Hours Column",
+            "type": "string"
+          },
+          "set_name": {
+            "minLength": 1,
+            "title": "Set Name",
+            "type": "string"
+          },
+          "signal_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal Key"
+          },
+          "signal_mappings": {
+            "items": {
+              "$ref": "#/components/schemas/TimeSeriesCatalogSignalMappingRequest"
+            },
+            "title": "Signal Mappings",
+            "type": "array"
+          },
+          "source_unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Unit"
+          },
+          "timestamp_column": {
+            "minLength": 1,
+            "title": "Timestamp Column",
+            "type": "string"
+          },
+          "timezone": {
+            "minLength": 1,
+            "title": "Timezone",
+            "type": "string"
+          },
+          "value_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Column"
+          },
+          "version_label": {
+            "minLength": 1,
+            "title": "Version Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "connector",
+          "set_name",
+          "version_label",
+          "timezone",
+          "timestamp_column",
+          "duration_hours_column"
+        ],
+        "title": "TimeSeriesConnectorIngestionRequest",
+        "type": "object"
+      },
       "TimeSeriesMappingRequest": {
         "properties": {
           "mapping": {
@@ -2739,6 +2863,53 @@
           }
         },
         "summary": "List Project Time Series Sets"
+      }
+    },
+    "/api/projects/{project_id}/time-series-sets/connector-ingest": {
+      "post": {
+        "operationId": "ingest_project_time_series_from_connector_api_projects__project_id__time_series_sets_connector_ingest_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TimeSeriesConnectorIngestionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ingest Project Time Series From Connector"
       }
     },
     "/api/projects/{project_id}/time-series-sets/hydraulic": {

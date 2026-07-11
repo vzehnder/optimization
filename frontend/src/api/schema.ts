@@ -435,6 +435,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/time-series-sets/connector-ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ingest Project Time Series From Connector */
+        post: operations["ingest_project_time_series_from_connector_api_projects__project_id__time_series_sets_connector_ingest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/time-series-sets/hydraulic": {
         parameters: {
             query?: never;
@@ -1790,6 +1807,42 @@ export interface components {
             /** Source Unit */
             source_unit?: string | null;
         };
+        /** TimeSeriesConnectorConfigRequest */
+        TimeSeriesConnectorConfigRequest: {
+            /** Auth Token */
+            auth_token?: string | null;
+            /** Base Url */
+            base_url: string;
+            /**
+             * Connector Id
+             * @default http_json_forecast
+             */
+            connector_id: string;
+            /** Records Path */
+            records_path?: string | null;
+        };
+        /** TimeSeriesConnectorIngestionRequest */
+        TimeSeriesConnectorIngestionRequest: {
+            connector: components["schemas"]["TimeSeriesConnectorConfigRequest"];
+            /** Duration Hours Column */
+            duration_hours_column: string;
+            /** Set Name */
+            set_name: string;
+            /** Signal Key */
+            signal_key?: string | null;
+            /** Signal Mappings */
+            signal_mappings?: components["schemas"]["TimeSeriesCatalogSignalMappingRequest"][];
+            /** Source Unit */
+            source_unit?: string | null;
+            /** Timestamp Column */
+            timestamp_column: string;
+            /** Timezone */
+            timezone: string;
+            /** Value Column */
+            value_column?: string | null;
+            /** Version Label */
+            version_label: string;
+        };
         /** TimeSeriesMappingRequest */
         TimeSeriesMappingRequest: {
             /** Mapping */
@@ -2811,6 +2864,41 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_project_time_series_from_connector_api_projects__project_id__time_series_sets_connector_ingest_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TimeSeriesConnectorIngestionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };

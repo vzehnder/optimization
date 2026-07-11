@@ -29,6 +29,12 @@ from app.draft_editor import (
     generate_system_case_from_draft,
     structured_draft_document_from_system_case,
 )
+from app.forecast_connector import (
+    ForecastConnector,
+    ForecastConnectorError,
+    HttpJsonForecastConnector,
+    HttpJsonForecastConnectorConfig,
+)
 from app.input_variants import InputVariantRangeError
 from app.legacy_series_extraction import LegacyDraftExtractionError
 from app.required_signals import MissingRequiredSignalsError
@@ -341,6 +347,26 @@ class TimeSeriesTransformationRequest(BaseModel):
     output_version_label: str | None = None
 
 
+class TimeSeriesConnectorConfigRequest(BaseModel):
+    connector_id: str = Field(min_length=1, default="http_json_forecast")
+    base_url: str = Field(min_length=1)
+    records_path: str | None = None
+    auth_token: str | None = None
+
+
+class TimeSeriesConnectorIngestionRequest(BaseModel):
+    connector: TimeSeriesConnectorConfigRequest
+    set_name: str = Field(min_length=1)
+    version_label: str = Field(min_length=1)
+    timezone: str = Field(min_length=1)
+    timestamp_column: str = Field(min_length=1)
+    duration_hours_column: str = Field(min_length=1)
+    value_column: str | None = None
+    signal_key: str | None = None
+    source_unit: str | None = None
+    signal_mappings: list[TimeSeriesCatalogSignalMappingRequest] = Field(default_factory=list)
+
+
 class TimeSeriesSetReplaceRequest(BaseModel):
     source: TimeSeriesSetReplacementSourceRequest
     data_kind: str = Field(min_length=1)
@@ -376,6 +402,7 @@ def create_app(
     csrf_cookie_name: str = "bess_csrf",
     session_hours: int = 12,
     session_cookie_secure: bool | None = None,
+    forecast_connector_factory=None,
 ) -> FastAPI:
     service = validation_service or JuliaValidationService()
     analyst_store = store or AnalystStore(database_url)
@@ -398,6 +425,13 @@ def create_app(
     local_run_queue = run_queue or LocalRunQueue(
         executor=JuliaRunExecutor(store=analyst_store, artifact_root=configured_artifact_root)
     )
+
+    def default_forecast_connector(
+        config: HttpJsonForecastConnectorConfig,
+    ) -> ForecastConnector:
+        return HttpJsonForecastConnector(config)
+
+    build_forecast_connector = forecast_connector_factory or default_forecast_connector
     cookie_secure = (
         cookie_secure_from_env(False)
         if session_cookie_secure is None
@@ -1646,6 +1680,102 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"time_series_sets": time_series_sets}
+
+    @app.post(
+        "/api/projects/{project_id}/time-series-sets/connector-ingest",
+        status_code=201,
+    )
+    async def ingest_project_time_series_from_connector(
+        project_id: int,
+        payload: TimeSeriesConnectorIngestionRequest,
+        request: Request,
+    ):
+        try:
+            analyst_store.get_project(project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+        connector = build_forecast_connector(
+            HttpJsonForecastConnectorConfig(
+                connector_id=payload.connector.connector_id,
+                base_url=payload.connector.base_url,
+                records_path=payload.connector.records_path,
+                auth_token=payload.connector.auth_token,
+            )
+        )
+        try:
+            fetched = connector.fetch()
+        except ForecastConnectorError as error:
+            return JSONResponse(
+                error_response_body("connector_fetch", str(error)),
+                status_code=400,
+            )
+
+        try:
+            prepared_import = prepare_time_series_catalog_import(
+                rows=fetched.rows,
+                request=PreparedCatalogImportRequest(
+                    set_name=payload.set_name,
+                    version_label=payload.version_label,
+                    data_kind="forecast",
+                    timezone=payload.timezone,
+                    timestamp_column=payload.timestamp_column,
+                    duration_hours_column=payload.duration_hours_column,
+                    value_column=payload.value_column,
+                    signal_key=payload.signal_key,
+                    source_unit=payload.source_unit,
+                    signal_mappings=[
+                        PreparedCatalogSignalMappingRequest(
+                            source_column=item.source_column,
+                            signal_key=item.signal_key,
+                            source_unit=item.source_unit,
+                        )
+                        for item in payload.signal_mappings
+                    ],
+                ),
+            )
+            result = analyst_store.ingest_connector_time_series_set(
+                project_id=project_id,
+                source={
+                    "id": f"connector:{fetched.connector_id}:{fetched.payload_checksum}",
+                    "kind": "connector",
+                    "original_filename": f"{fetched.connector_id}.json",
+                    "media_type": "application/json",
+                    "checksum": fetched.payload_checksum,
+                    "stored_path": "",
+                    "metadata": {
+                        "connector_id": fetched.connector_id,
+                        "target": fetched.target,
+                        "fetched_at": fetched.fetched_at,
+                        "record_count": len(fetched.rows),
+                    },
+                },
+                prepared_import=prepared_import,
+                created_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except (TimeSeriesCatalogError, ValueError) as error:
+            return JSONResponse(
+                error_response_body(
+                    "connector_ingestion", str(error), phase="python_validation"
+                ),
+                status_code=400,
+            )
+        ingested_set = result["time_series_set"]
+        ingested_set["staleness"] = analyst_store.evaluate_time_series_set_staleness(
+            project_id, ingested_set["id"]
+        )
+        return {
+            "time_series_set": ingested_set,
+            "ingestion": {
+                "outcome": result["outcome"],
+                "connector_id": fetched.connector_id,
+                "target": fetched.target,
+                "fetched_at": fetched.fetched_at,
+                "record_count": len(fetched.rows),
+            },
+        }
 
     @app.get("/api/projects/{project_id}/time-series-sets/hydraulic")
     async def list_project_hydraulic_time_series_sets(project_id: int):
