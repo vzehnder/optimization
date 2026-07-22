@@ -108,6 +108,11 @@ export interface Project {
   created_by?: string;
 }
 
+export interface ProjectDeletionResult extends Project {
+  deleted_scenario_count: number;
+  deleted_run_count: number;
+}
+
 export interface Scenario {
   id: number;
   project_id: number;
@@ -1181,6 +1186,19 @@ export async function getProject(
     { signal },
   );
   return response.project;
+}
+
+export async function deleteProject(
+  projectId: number,
+): Promise<ProjectDeletionResult> {
+  const csrfToken = await getCsrfToken();
+  const response = await requestJson<{
+    deleted_project: ProjectDeletionResult;
+  }>(`/api/projects/${projectId}`, {
+    method: "DELETE",
+    headers: { "X-CSRF-Token": csrfToken },
+  });
+  return response.deleted_project;
 }
 
 export async function listProjectClientAccess(

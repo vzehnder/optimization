@@ -1231,6 +1231,14 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"project": project}
 
+    @app.delete("/api/projects/{project_id}")
+    async def delete_project(project_id: int):
+        try:
+            deleted_project = analyst_store.delete_project(project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"deleted_project": deleted_project}
+
     @app.post("/api/projects/{project_id}/scenarios", status_code=201)
     async def create_scenario(project_id: int, payload: ScenarioCreateRequest):
         try:

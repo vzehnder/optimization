@@ -240,6 +240,41 @@ class AnalystPersistenceTests(unittest.TestCase):
         detail = detail_response.json()["scenario_version"]
         self.assertEqual(detail["system_case_json"], json.loads(sample_text))
 
+    def test_project_can_be_deleted_with_all_children_from_api(self):
+        project = self.client.post("/api/projects", json={"name": "Hybrid PMGD"}).json()
+        other = self.client.post("/api/projects", json={"name": "Keep me"}).json()
+        scenario = self.client.post(
+            f"/api/projects/{project['id']}/scenarios",
+            json={"name": "Base case"},
+        ).json()
+        sample_text = (REPO_ROOT / "data" / "cases" / "hybrid_system" / "system_case.json").read_text()
+        version = self.client.post(
+            f"/api/scenarios/{scenario['id']}/versions",
+            json={"system_case_json": sample_text},
+        ).json()
+        run = self.client.app.state.analyst_store.create_run(
+            scenario_version_id=version["id"]
+        )
+
+        delete_response = self.client.delete(f"/api/projects/{project['id']}")
+
+        self.assertEqual(delete_response.status_code, 200)
+        deleted = delete_response.json()["deleted_project"]
+        self.assertEqual(deleted["id"], project["id"])
+        self.assertEqual(deleted["deleted_scenario_count"], 1)
+        self.assertEqual(deleted["deleted_run_count"], 1)
+
+        self.assertEqual(self.client.get(f"/api/projects/{project['id']}").status_code, 404)
+        remaining = self.client.get("/api/projects").json()["projects"]
+        self.assertEqual([entry["id"] for entry in remaining], [other["id"]])
+        self.assertEqual(self.client.get(f"/api/scenarios/{scenario['id']}").status_code, 404)
+        self.assertEqual(self.client.get(f"/api/scenario-versions/{version['id']}").status_code, 404)
+        self.assertEqual(self.client.get(f"/api/runs/{run['id']}").status_code, 404)
+
+    def test_deleting_missing_project_returns_404(self):
+        delete_response = self.client.delete("/api/projects/9999")
+        self.assertEqual(delete_response.status_code, 404)
+
     def test_scenario_versions_can_be_deleted_from_api(self):
         project = self.client.post("/api/projects", json={"name": "Hybrid PMGD"}).json()
         scenario = self.client.post(

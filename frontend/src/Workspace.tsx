@@ -5,6 +5,7 @@ import {
   KeyboardEvent,
   PointerEvent,
   ReactNode,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -31,6 +32,7 @@ import {
   createRunPublicationDraft,
   createScenario,
   createScenarioVersionFromJson,
+  deleteProject,
   deleteScenarioVersion,
   editTimeSeriesSetValues,
   getHydraulicDiagram,
@@ -338,6 +340,110 @@ function Breadcrumbs({ children }: { children: ReactNode }) {
   );
 }
 
+function ProjectCard({ project }: { project: Project }) {
+  const queryClient = useQueryClient();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState("");
+  const menuRef = useRef<HTMLDivElement>(null);
+  const mutation = useMutation({
+    mutationFn: () => deleteProject(project.id),
+    onSuccess: () => {
+      setError("");
+      setConfirming(false);
+      queryClient.setQueryData<Project[]>(
+        projectsQueryKey,
+        (projects) =>
+          projects?.filter((candidate) => candidate.id !== project.id) || [],
+      );
+      void queryClient.invalidateQueries({ queryKey: projectsQueryKey });
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError)),
+  });
+
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    function closeOnOutsidePointer(event: Event) {
+      const target = event.target as Node | null;
+      if (menuRef.current && target && !menuRef.current.contains(target)) {
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () =>
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [menuOpen]);
+
+  return (
+    <li className="resource-card">
+      <div
+        className="resource-card-menu"
+        ref={menuRef}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") setMenuOpen(false);
+        }}
+      >
+        <button
+          type="button"
+          className="kebab-button"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          aria-label={`Acciones del proyecto ${project.name}`}
+          onClick={() => setMenuOpen((open) => !open)}
+        >
+          ⋮
+        </button>
+        {menuOpen ? (
+          <div className="resource-card-dropdown" role="menu">
+            <button
+              type="button"
+              role="menuitem"
+              className="dropdown-danger-item"
+              onClick={() => {
+                setMenuOpen(false);
+                setError("");
+                setConfirming(true);
+              }}
+            >
+              Eliminar proyecto {project.name}
+            </button>
+          </div>
+        ) : null}
+      </div>
+      <Link to={`/projects/${project.id}`}>{project.name}</Link>
+      <p>{project.description || "Sin descripcion."}</p>
+      {error ? <p role="alert">{error}</p> : null}
+      {confirming ? (
+        <div className="remove-confirmation">
+          <p>
+            Eliminar el proyecto {project.name} borra tambien sus escenarios,
+            versiones, corridas, series de tiempo y publicaciones. Esta accion
+            no se puede deshacer.
+          </p>
+          <button
+            type="button"
+            className="danger-button"
+            disabled={mutation.isPending}
+            onClick={() => mutation.mutate()}
+          >
+            Confirmar eliminar proyecto {project.name}
+          </button>
+          <button
+            type="button"
+            className="secondary-action"
+            onClick={() => {
+              setConfirming(false);
+              setError("");
+            }}
+          >
+            Mantener
+          </button>
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
 function ProjectList({ projects }: { projects: Project[] }) {
   if (projects.length === 0) {
     return (
@@ -349,10 +455,7 @@ function ProjectList({ projects }: { projects: Project[] }) {
   return (
     <ul className="resource-list">
       {projects.map((project) => (
-        <li key={project.id}>
-          <Link to={`/projects/${project.id}`}>{project.name}</Link>
-          <p>{project.description || "Sin descripcion."}</p>
-        </li>
+        <ProjectCard key={project.id} project={project} />
       ))}
     </ul>
   );

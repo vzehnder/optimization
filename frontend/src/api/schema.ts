@@ -411,7 +411,8 @@ export interface paths {
         get: operations["get_project_api_projects__project_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete Project */
+        delete: operations["delete_project_api_projects__project_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2853,6 +2854,37 @@ export interface operations {
         };
     };
     get_project_api_projects__project_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_project_api_projects__project_id__delete: {
         parameters: {
             query?: never;
             header?: never;

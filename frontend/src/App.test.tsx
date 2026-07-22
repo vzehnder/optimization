@@ -7561,6 +7561,106 @@ describe("application shell", () => {
     });
   });
 
+  it("lets internal users delete a project after confirmation", async () => {
+    window.history.replaceState({}, "", "/react/projects");
+    const projects = [
+      {
+        id: 1,
+        name: "Hybrid PMGD",
+        description: "Analyst workspace",
+        created_at: "2026-06-23T12:00:00Z",
+      },
+    ];
+    let deleteCalls = 0;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return new Response(
+            JSON.stringify({
+              user: {
+                id: 7,
+                email: "ada@example.local",
+                display_name: "Ada Analyst",
+                role: "analyst",
+                is_active: true,
+              },
+              bootstrap_required: false,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/api/auth/csrf") {
+          return new Response(JSON.stringify({ csrf_token: "csrf-token" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects" && method === "GET") {
+          return new Response(JSON.stringify({ projects }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/projects/1" && method === "DELETE") {
+          deleteCalls += 1;
+          expect(new Headers(init?.headers).get("X-CSRF-Token")).toBe(
+            "csrf-token",
+          );
+          const [removed] = projects.splice(0, 1);
+          return new Response(
+            JSON.stringify({
+              deleted_project: {
+                ...removed,
+                deleted_scenario_count: 2,
+                deleted_run_count: 3,
+              },
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({ detail: `unhandled ${method} ${path}` }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("link", { name: "Hybrid PMGD" }),
+    ).toBeVisible();
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Acciones del proyecto Hybrid PMGD",
+      }),
+    );
+    await user.click(
+      screen.getByRole("menuitem", { name: "Eliminar proyecto Hybrid PMGD" }),
+    );
+    await user.click(
+      screen.getByRole("button", {
+        name: "Confirmar eliminar proyecto Hybrid PMGD",
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        "Crea un proyecto para comenzar a modelar escenarios.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("link", { name: "Hybrid PMGD" }),
+    ).not.toBeInTheDocument();
+    expect(deleteCalls).toBe(1);
+  });
+
   it("lets admins manage users and project client access without a document reload", async () => {
     window.history.replaceState({}, "", "/react/admin/users");
     const project = {

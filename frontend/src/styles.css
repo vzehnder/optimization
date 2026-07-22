@@ -431,6 +431,69 @@ button:focus-visible {
   color: #486581;
 }
 
+.resource-card {
+  position: relative;
+  padding-right: 2.75rem;
+}
+
+.resource-card-menu {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+}
+
+.kebab-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #486581;
+  background: transparent;
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.kebab-button:hover,
+.kebab-button:focus-visible {
+  color: #17324d;
+  background: #eaf5fb;
+  border-color: #d8e2eb;
+}
+
+.resource-card-dropdown {
+  position: absolute;
+  top: 2.4rem;
+  right: 0;
+  z-index: 10;
+  min-width: 13rem;
+  padding: 0.35rem;
+  border: 1px solid #d8e2eb;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 40, 65, 0.16);
+}
+
+.dropdown-danger-item {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  text-align: left;
+  color: #7c2d12;
+  background: transparent;
+}
+
+.dropdown-danger-item:hover,
+.dropdown-danger-item:focus-visible {
+  color: #fff;
+  background: #c2410c;
+}
+
 .empty-state {
   margin: 0;
   padding: 0.85rem;

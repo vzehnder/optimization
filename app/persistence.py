@@ -1657,6 +1657,38 @@ class AnalystStore:
             raise KeyError(f"project {project_id} not found")
         return row_to_dict(row)
 
+    def delete_project(self, project_id: int) -> dict[str, Any]:
+        with self._lock:
+            project = self.get_project(project_id)
+            scenario_row = self.connection.execute(
+                "SELECT COUNT(*) AS scenario_count FROM scenarios WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()
+            run_row = self.connection.execute(
+                """
+                SELECT COUNT(*) AS run_count
+                FROM runs
+                JOIN scenario_versions
+                    ON scenario_versions.id = runs.scenario_version_id
+                JOIN scenarios
+                    ON scenarios.id = scenario_versions.scenario_id
+                WHERE scenarios.project_id = ?
+                """,
+                (project_id,),
+            ).fetchone()
+            scenario_count = int(scenario_row["scenario_count"])
+            run_count = int(run_row["run_count"])
+            self.connection.execute(
+                "DELETE FROM projects WHERE id = ?",
+                (project_id,),
+            )
+            self.connection.commit()
+            return {
+                **project,
+                "deleted_scenario_count": scenario_count,
+                "deleted_run_count": run_count,
+            }
+
     def assign_client_to_project(
         self,
         *,
