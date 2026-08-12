@@ -1,0 +1,141 @@
+---
+label: wayfinder:map
+slug: capa-de-configuracion
+title: "Capa de configuracion: consola de operador y portal cliente"
+created: 2026-08-01
+---
+
+# Capa de configuracion: consola de operador y portal cliente
+
+## Destination
+
+Una **especificacion lista para implementar** de una capa de configuracion por
+proyecto, editada por `analyst`/`admin`, que parametriza dos superficies de
+forma fija:
+
+1. **Consola de operador**: un usuario final entra, ajusta parametros expuestos
+   y edita en tablas preconfiguradas (pegando columnas desde Excel) las series
+   que el ingeniero habilito, ejecuta la corrida y ve resultados. Nunca ve
+   draft, catalogo, variantes, bindings ni versiones inmutables.
+2. **Portal cliente read-only**: lo que hoy hacen las `dashboard_templates`,
+   pero configurable de verdad.
+
+La forma de ambas superficies es **fija**. El ingeniero no mueve layout: decide
+que se expone, con que etiqueta, con que rango valido, con que valor por
+defecto y que paneles de resultado aparecen. Flexibilidad para quien configura,
+estabilidad para quien usa.
+
+El mapa cierra cuando existe ese spec (modelo de datos, contratos de API,
+comportamiento de ambas superficies, criterios de aceptacion), listo para
+convertirse en tickets de implementacion via `/to-tickets`.
+
+## Notes
+
+**Dominio**: aplicacion web privada de optimizacion de despacho one-bus
+(FastAPI + React + motor Julia). Ver `docs/final/objetivo_final.md`,
+`docs/tutorials/guia_analista.md` y el `README.md` (secciones TS-1 a TS-6).
+
+**Tracker**: markdown local. Convenciones en `docs/wayfinder/README.md`.
+
+**Este mapa planifica; no implementa.** Cada ticket resuelve una decision. El
+entregable es un spec, no codigo.
+
+**Skills a consultar en cada sesion**: `/grill-me` para los tickets de
+grilling; el prototipado de UI se hace con codigo desechable en el scratchpad,
+no en `frontend/src`.
+
+### Decisiones de encuadre (sesion de charting, 2026-08-01)
+
+Fijan el destino; no son tickets cerrados.
+
+- **Usuario final = dos perfiles**: cliente read-only *y* operador que ejecuta.
+- **La fachada ES la simplificacion**: la cadena interna (Draft -> Catalogo ->
+  Variante -> Rango -> Version inmutable -> Corrida) no se toca en este mapa.
+  Sus garantias (staleness fail-closed, snapshots inmutables, lineage) se
+  respetan; el trabajo consiste en esconderlas, no en debilitarlas.
+- **Mecanismo = cascaron fijo + parametrizacion**, no constructor de pantallas
+  ni documento declarativo suelto.
+- **Ambito = por proyecto**, editada por `analyst`/`admin`. Sin rol nuevo para
+  configurar (el rol de *quien usa* la consola de operador si esta abierto:
+  ver el ticket correspondiente).
+- **Extensibilidad de senales si, senal nueva no**: se disena como se agregan
+  senales canonicas nuevas al registro y a la tabla editable; no se implementa
+  `power_max_mw` variable en el tiempo ni se toca el contrato Julia.
+
+### Hallazgos de codigo verificados en el charting
+
+- `dashboard_templates` ya es un cascaron fijo pobre: 9 booleanos
+  (`show_summary`, `show_price_chart`, ... ) mas `table_preview_limit`, por
+  proyecto. Ver `app/main.py:141-152` y `app/persistence.py:66-74`. El portal
+  cliente no parte de cero.
+- La edicion manual con revision ya existe:
+  `AnalystStore.edit_time_series_set_values(edits=[CatalogValueEdit])` en
+  `app/persistence.py:4399`. Crea una revision nueva sin sobreescribir. El
+  pegado desde Excel es UI + batching sobre una primitiva existente.
+- El registro canonico de senales tiene exactamente 8 claves
+  (`app/time_series_catalog.py`): `price_usd_per_mwh`,
+  `import_price_usd_per_mwh`, `export_price_usd_per_mwh`, `load_demand_mw`,
+  `renewable_available_power_mw`, `hydro_inflow_m3s`, `natural_inflow_m3s`,
+  `minimum_flow_m3s`. **No existe** limite de potencia por unidad como serie.
+- El gate de permisos compartido es `require_authenticated_app_boundary` en
+  `app/main.py`; cualquier superficie nueva debe pasar por ahi por construccion
+  (contrato heredado de TS-5).
+
+## Decisiones tomadas
+
+<!-- una linea por ticket cerrado: gist + link -->
+
+- [Inventario de la superficie configurable existente](capa-de-configuracion/01-inventario-superficie-configurable.md)
+  — la superficie que ve un no-analista la gobiernan **tres** mecanismos, no
+  uno: los 9 booleanos (unico que el ingeniero controla), el sobre de la
+  publicacion (que no filtra nada) y el catalogo de graficos y etiquetas (~40
+  cadenas fijas repartidas entre backend y frontend). Cuatro capas a
+  parametrizar; solo una existe hoy.
+
+- [Forma del cascaron de la consola de operador](capa-de-configuracion/02-cascaron-consola-operador.md)
+  — una mesa de trabajo unica: identidad y parametros primero, series SQL
+  agrupadas con Tabla/Grafico y version nombrada por señal, guardado auditable,
+  ejecucion lateral persistente e historial comparable.
+
+## Not yet specified
+
+Niebla en alcance, aun no suficientemente nitida para ticketear:
+
+- **Navegacion global**: como conviven en la misma app la vista de analista, la
+  consola de operador y el portal cliente; que ve cada rol al entrar; si hay una
+  ruta raiz distinta por perfil. Depende de la forma de ambos cascarones. El
+  inventario midio el costo: 16 rutas React repiten `isClient ? Forbidden : X`
+  y el aterrizaje esta fijo en tres funciones independientes.
+- **Migracion de las `dashboard_templates` actuales**: si la configuracion nueva
+  las absorbe, las reemplaza o convive con ellas, y que pasa con las plantillas
+  y publicaciones ya creadas. Depende del modelo de datos de la configuracion.
+  El inventario agrego dos datos: no existe `DELETE` de plantillas ni de
+  publicaciones, y el endpoint que previsualiza una plantilla contra cualquier
+  corrida existe pero esta muerto (sin wrapper en el frontend).
+- **El editor de diagrama hidraulico dentro de este modelo**: si un caso
+  hidraulico se puede exponer a un operador y como, dado que su topologia no se
+  edita con formularios simples.
+- **Estrategia de validacion de la configuracion**: que impide que el ingeniero
+  publique una configuracion incoherente (campo expuesto que el caso no tiene,
+  rango por defecto invalido) y si eso se detecta al guardar o al publicar.
+- **Marca y multi-cliente**: si el portal cliente necesita logo, titulo o
+  dominio propio por cliente.
+- **Documentacion/onboarding del ingeniero configurador**: que necesita saber
+  para armar una configuracion sin leer el tutorial de series completo.
+
+## Out of scope
+
+Trabajo conscientemente fuera del destino de este mapa. No graduan.
+
+- **Simplificar la cadena interna** (fusionar Draft con Caso, revisar la
+  cardinalidad Escenario -> OptimizationCase 1-a-1, unificar editor
+  estructurado con diagrama hidraulico). Decidido en el charting: fachada
+  ahora, deuda interna despues, como esfuerzo separado con su propio mapa.
+- **Implementar limites de potencia por unidad variables en el tiempo**: senal
+  canonica nueva + contrato Julia v3. Aqui solo se disena la extensibilidad que
+  lo haria barato despues.
+- **Que el operador suba sus propios archivos CSV/XLSX**. Asuncion tomada del
+  charting: el mecanismo elegido fue edicion en tabla con pegado, no upload. Si
+  resulta que el operador si necesita subir archivos, esto redibuja el destino.
+- **Edicion de modelos por el cliente read-only**: sigue fuera de alcance como
+  en `docs/final/objetivo_final.md`.
