@@ -97,15 +97,33 @@ Fijan el destino; no son tickets cerrados.
   agrupadas con Tabla/Grafico y version nombrada por señal, guardado auditable,
   ejecucion lateral persistente e historial comparable.
 
+- [Forma del cascaron del portal cliente configurado](capa-de-configuracion/03-cascaron-portal-cliente.md)
+  — un informe ejecutivo read-only y lineal por publicacion, con orden fijo,
+  contenido y vocabulario configurables por proyecto, y descargas aprobadas.
+
+- [Rol y permisos del operador](capa-de-configuracion/04-rol-y-permisos-del-operador.md)
+  — usuarios `external` reciben capacidades independientes `portal_view` y
+  `operate` por proyecto; operar queda limitado a la configuracion activa,
+  con asignacion administrativa y auditoria individual completa.
+
+- [Donde aterriza la edicion de series del operador](capa-de-configuracion/05-donde-aterriza-la-edicion.md)
+  — la primera edicion crea una copia operativa del set, aislada del catalogo,
+  compartida por la consola y persistente entre versiones de configuracion;
+  usa lease exclusivo, revisiones optimistas e historial auditable sin
+  reescribir datos canonicos.
+
+- [Edicion del operador frente a la regla fail-closed](capa-de-configuracion/06-edicion-frente-a-fail-closed.md)
+  — el guardado del operador **es** la atestacion: al aceptarlo, el backend
+  refresca en la misma transaccion solo el hash de la copia operativa, asi que
+  el cambio propio nunca deja stale la variante y el ajeno si. La consola no
+  revalida nunca; ante un stale externo bloquea, traduce y escala al ingeniero.
+  La copia se materializa como set plano no derivado, sin lo cual la primera
+  edicion se autobloquearia sin salida.
+
 ## Not yet specified
 
 Niebla en alcance, aun no suficientemente nitida para ticketear:
 
-- **Navegacion global**: como conviven en la misma app la vista de analista, la
-  consola de operador y el portal cliente; que ve cada rol al entrar; si hay una
-  ruta raiz distinta por perfil. Depende de la forma de ambos cascarones. El
-  inventario midio el costo: 16 rutas React repiten `isClient ? Forbidden : X`
-  y el aterrizaje esta fijo en tres funciones independientes.
 - **Migracion de las `dashboard_templates` actuales**: si la configuracion nueva
   las absorbe, las reemplaza o convive con ellas, y que pasa con las plantillas
   y publicaciones ya creadas. Depende del modelo de datos de la configuracion.
@@ -118,8 +136,6 @@ Niebla en alcance, aun no suficientemente nitida para ticketear:
 - **Estrategia de validacion de la configuracion**: que impide que el ingeniero
   publique una configuracion incoherente (campo expuesto que el caso no tiene,
   rango por defecto invalido) y si eso se detecta al guardar o al publicar.
-- **Marca y multi-cliente**: si el portal cliente necesita logo, titulo o
-  dominio propio por cliente.
 - **Documentacion/onboarding del ingeniero configurador**: que necesita saber
   para armar una configuracion sin leer el tutorial de series completo.
 

@@ -5,7 +5,7 @@ map: capa-de-configuracion
 label: wayfinder:task
 status: open
 assignee:
-blocked_by: [01, 02, 03, 04, 05, 06, 07, 08, 09, 11]
+blocked_by: [01, 02, 03, 04, 05, 06, 07, 08, 09, 11, 12, 13, 14]
 ---
 
 ## Question
