@@ -3,8 +3,8 @@ id: 04
 title: "Rol y permisos del operador"
 map: capa-de-configuracion
 label: wayfinder:grilling
-status: open
-assignee:
+status: closed
+assignee: vzehnder
 blocked_by: []
 ---
 
@@ -48,3 +48,78 @@ suposicion de que las corridas ya identifican a quien las lanzo.
 Este ticket decide el sujeto; **Donde aterriza la edicion de series del
 operador** decide el objeto. Son independientes y pueden trabajarse en
 paralelo, pero el spec final debe cuadrarlos.
+
+## Resolucion
+
+### Identidad y asignacion
+
+- Los roles globales pasan a ser `admin`, `analyst` y `external`. No se crea un
+  rol global `operator`: la capacidad de operar depende del proyecto.
+- Los usuarios `client` existentes migran a `external` y conservan su acceso
+  actual mediante la capacidad `portal_view` en cada proyecto ya asignado. La
+  migracion no amplia permisos.
+- Cada asignacion de un usuario `external` a un proyecto contiene dos
+  capacidades independientes: `portal_view` y `operate`. Una cuenta puede
+  tener una, ambas o ninguna, y puede tener capacidades distintas en proyectos
+  distintos.
+- Las capacidades pertenecen al proyecto, no a una configuracion concreta. Si
+  cambia la configuracion activa, las asignaciones sobreviven y pasan a la
+  nueva superficie; cada accion registra que version uso.
+- Solo `admin` puede otorgar o revocar capacidades. `analyst` configura las
+  superficies, pero no administra identidades ni accesos.
+
+### Matriz de autorizacion
+
+| Sujeto | Facultades |
+| --- | --- |
+| `admin` | Administra usuarios y capacidades; configura; prueba la consola; ve la auditoria completa. |
+| `analyst` | Configura y prueba la consola; ve la auditoria completa; no administra accesos. |
+| `external` + `portal_view` | Ve exclusivamente publicaciones y descargas aprobadas del proyecto. |
+| `external` + `operate` | Usa la configuracion operativa activa, modifica solo los inputs expuestos, ejecuta y ve el historial operativo compartido. |
+
+`admin` y `analyst` pueden entrar a la consola para probarla en los proyectos a
+los que ya tienen acceso interno. Actuan con su identidad real; no requieren
+una asignacion `external` ni impersonan a un operador.
+
+`operate` no concede acceso general al proyecto ni al catalogo. Solo autoriza
+endpoints propios de la consola para:
+
+- leer las senales y versiones nombradas habilitadas por la configuracion
+  activa;
+- guardar valores de los inputs expuestos;
+- validar y ejecutar mediante el flujo operativo;
+- consultar resultados e historial de esa configuracion.
+
+Un usuario `external` nunca obtiene por `operate` acceso a drafts, catalogo,
+escenarios, variantes, bindings, versiones inmutables ni endpoints internos.
+La garantia anterior se reformula explicitamente: `portal_view` nunca ve
+inputs; `operate` ve y modifica unicamente los inputs expuestos por la
+configuracion. **Donde aterriza la edicion de series del operador** decide el
+objeto interno sobre el que se materializa esa escritura.
+
+Las capacidades se comprueban en cada request, despues del gate compartido
+`require_authenticated_app_boundary`; no se confia en el estado de la sesion
+al iniciar. Revocar una capacidad bloquea de inmediato nuevas lecturas,
+ediciones y ejecuciones. Una corrida ya iniciada no se cancela: conserva al
+actor original y sigue visible para `admin`/`analyst`, mientras que el usuario
+revocado deja de verla.
+
+### Auditoria y visibilidad
+
+Toda mutacion operativa debe registrar de forma estructurada:
+
+- `actor_user_id` como identidad estable;
+- correo o nombre como snapshot legible;
+- origen `operator_console`;
+- proyecto y version de configuracion activa;
+- timestamp;
+- para una corrida, la revision exacta de inputs materializada.
+
+La atribucion hardcodeada `triggered_by = "internal_analyst"` deja de ser
+valida: ninguna corrida autenticada puede perder quien la inicio.
+
+Quienes tengan `operate` ven el historial compartido de corridas de la
+configuracion, incluido autor, fecha y estado, pero no rutas internas,
+`stdout`, `stderr` ni detalles tecnicos sensibles. `admin` y `analyst` ven la
+auditoria completa. `portal_view` no concede acceso a informacion de
+auditoria.
