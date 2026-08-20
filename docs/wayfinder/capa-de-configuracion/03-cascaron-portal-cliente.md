@@ -3,8 +3,8 @@ id: 03
 title: "Forma del cascaron del portal cliente configurado"
 map: capa-de-configuracion
 label: wayfinder:prototype
-status: open
-assignee:
+status: closed
+assignee: vzehnder
 blocked_by: []
 ---
 
@@ -39,3 +39,46 @@ Candidatos a resolver con el prototipo:
   parte sigue siendo por publicacion?
 
 Enlazar el prototipo desde este ticket como activo.
+
+## Activo de prototipo
+
+- [Tres variantes del portal cliente configurado](../prototypes/portal-cliente/README.md)
+  — `A` informe ejecutivo, `B` tablero explorable y `C` dossier tecnico;
+  intercambiables con `?variant=` y construidas sobre la misma publicacion.
+
+El prototipo es deliberadamente read-only y usa datos simulados. Se mantuvo
+abierto hasta recibir la eleccion humana registrada en la resolucion.
+
+## Resolucion
+
+El usuario eligio la variante **A — Informe ejecutivo** el 2026-08-12.
+
+La forma fija del portal cliente sera una lectura lineal de una publicacion:
+
+1. identidad del proyecto y contexto de la publicacion;
+2. titulo, periodo, comentario y fecha de actualizacion;
+3. resumen de KPIs;
+4. bloques narrativos de resultados con graficos;
+5. tablas de detalle;
+6. descargas aprobadas para esa publicacion.
+
+El cliente puede leer, desplazarse y descargar; no cambia el orden, no arma un
+dashboard y no edita datos. La configuracion es una por proyecto y se comparte
+entre todos los usuarios cliente asignados a ese proyecto.
+
+El ingeniero configura, dentro de los lugares fijos del informe:
+
+- que KPIs, graficos, tablas y secciones aparecen;
+- las etiquetas visibles de seccion, grafico, serie, KPI y columna;
+- unidad, decimales, signo y enfasis de los KPIs;
+- el vocabulario cliente que reemplaza claves y metadatos internos.
+
+El orden macro no es configurable. La publicacion conserva la seleccion de la
+corrida, titulo publico, notas, fecha y allowlist de artefactos descargables;
+la configuracion gobierna la forma y el vocabulario reutilizables. El portal
+solo muestra el subconjunto aprobado en la publicacion y nunca expone claves,
+rutas, versiones internas o estados tecnicos crudos.
+
+Las variantes **Tablero explorable** y **Dossier tecnico** quedan descartadas
+como cascaron principal. Sus tabs por tema, indice documental y exportacion
+integral no forman parte de esta primera especificacion.
