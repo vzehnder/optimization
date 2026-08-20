@@ -66,3 +66,35 @@ solo en memoria. Lee los valores desde SQL y el gesto de guardar debe persistir
 el bloque validado de forma atomica, creando una revision auditable. El
 prototipo de este ticket debe resolver el estado sucio/guardando/guardado y el
 contrato de error sin fingir que la persistencia es instantanea.
+
+**Restricciones confirmadas por Donde aterriza la edicion de series del
+operador**:
+
+- la tabla edita una copia operativa, nunca el set canonico;
+- entrar en modo edicion requiere un lease exclusivo sobre esa copia y deja a
+  los demas usuarios en solo lectura;
+- todo guardado envia la revision base y se rechaza completo si dejo de ser la
+  vigente, sin mezcla automatica;
+- antes de confirmar se muestra el diff y el resumen estructurado del bloque;
+- el historial operativo es simplificado y solo permite al operador deshacer
+  su propio ultimo guardado mientras siga vigente.
+
+El prototipo debe hacer visibles el propietario/expiracion del lease y la
+recuperacion ante conflicto de revision.
+
+**Restricciones confirmadas por Edicion del operador frente a la regla
+fail-closed**:
+
+- el guardado es la atestacion: la misma transaccion que crea la revision
+  refresca el `recorded_hash` de la dependencia `time_series_set` de la
+  variante de la consola, y solo esa. El contrato de guardar del prototipo debe
+  incluir ese efecto, porque de el depende que ejecutar quede habilitado;
+- no hay paso de revalidar ni boton equivalente en la consola. Despues de
+  guardar, ejecutar procede directo;
+- el selector de periodo se limita al rango que la copia operativa cubre. El
+  pegado no extiende el horizonte: `validate_catalog_value_edits` rechaza todo
+  `period_index` que no este ya en el set;
+- una edicion no puede romper cobertura, huecos ni valores faltantes, asi que
+  el contrato de error del pegado solo necesita cubrir valor no numerico, no
+  finito, negativo donde la señal lo prohibe, periodo o señal desconocidos, y
+  conflicto de revision base.

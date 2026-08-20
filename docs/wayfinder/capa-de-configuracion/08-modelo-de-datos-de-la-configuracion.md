@@ -21,6 +21,19 @@ La superficie a cubrir ya esta medida: ver la seccion F de
 Son cuatro capas —visibilidad de seccion, etiquetas, contrato de payload y
 punteros al caso— y solo la primera existe hoy.
 
+**Restriccion confirmada por el portal cliente**: existe una configuracion de
+portal por proyecto, compartida por todos los usuarios cliente asignados. Esa
+configuracion guarda forma y vocabulario reutilizables; cada publicacion sigue
+eligiendo corrida, titulo, notas, fecha y artefactos permitidos.
+
+**Restriccion confirmada por Donde aterriza la edicion de series del
+operador**: la consola necesita identidad estable, separada de sus versiones
+de configuracion. Esa identidad posee copias operativas de los sets elegidos;
+cada copia registra set y revision canonicos de origen, sobrevive cambios de
+configuracion y se archiva al cambiar de base o reiniciar. El modelo debe
+representar tambien su lease de edicion y revision vigente sin exponer estos
+conceptos al usuario operador.
+
 A decidir:
 
 - **Tabla nueva o extension de `dashboard_templates`**: la tabla actual ya es
@@ -47,8 +60,24 @@ A decidir:
 - **Relacion con las variantes**: la consola del operador corre sobre una
   variante. ¿La configuracion fija cual, ofrece varias con nombre legible, o la
   deriva? Ligado a como se presentan las alternativas de datos preparadas.
-- **Una configuracion por proyecto o varias**: un proyecto con tres escenarios
-  puede necesitar tres consolas distintas. El encuadre dice "ambito por
-  proyecto" para *quien la edita*; falta decidir la cardinalidad.
+- **Cardinalidad de la consola de operador**: la del portal ya quedo fijada en
+  una por proyecto. Un proyecto con tres escenarios puede necesitar varias
+  consolas; falta decidir si son subconfiguraciones nombradas dentro del mismo
+  documento o entidades separadas.
 - **Estado publicado/borrador**: si el ingeniero puede trabajar una
   configuracion sin que el operador la vea todavia.
+
+## Restricciones confirmadas por la regla fail-closed
+
+**Edicion del operador frente a la regla fail-closed** agrega dos exigencias al
+modelo de datos:
+
+- la copia operativa se representa como **set no derivado**: sin receta de
+  transformacion ni dependencias grabadas, con el linaje al set y revision de
+  origen como metadata inerte visible para `analyst` y `admin`. Si conservara
+  la receta, la primera edicion la marcaria stale-derivada y el unico camino de
+  salida borraria las ediciones;
+- la dependencia de la variante de la consola sobre esa copia tiene que ser
+  **direccionable de forma puntual**, para refrescar su `recorded_hash` en la
+  transaccion del guardado sin tocar las dependencias `topology` ni
+  `parameters` de la misma variante.

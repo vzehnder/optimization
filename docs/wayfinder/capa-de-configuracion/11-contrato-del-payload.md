@@ -54,3 +54,22 @@ A decidir:
 
 La respuesta es una seccion del spec: el esquema del payload de cada
 superficie, con su regla de recorte y su punto de aplicacion.
+
+## Restriccion confirmada por el portal cliente
+
+El portal adopta un informe ejecutivo lineal. Su payload debe permitir solo el
+contexto publico de la publicacion, KPIs declarados, graficos y tablas
+habilitados, etiquetas cliente y descargas aprobadas. Nunca entrega claves no
+declaradas del `summary`, rutas del servidor, versiones internas, `stdout`,
+`stderr` ni estados tecnicos crudos. La configuracion decide presentacion
+dentro de esa allowlist; no amplia lo que puede cruzar la frontera.
+
+## Restriccion confirmada por la regla fail-closed
+
+La consola puede quedar bloqueada por un stale ajeno (topologia o parametros
+que movio el ingeniero). Ese estado viaja al frontend **ya traducido**: un
+estado de negocio y una frase accionable, mas a quien escalar. Nunca cruzan las
+`reasons` crudas de `VariantStaleError`, ni `dependency_type`,
+`dependency_id`, hashes ni nombres de tablas. El payload de la consola tampoco
+expone marcador de staleness como campo tecnico: la superficie solo necesita
+saber si puede ejecutar y, si no, por que en lenguaje de operador.
