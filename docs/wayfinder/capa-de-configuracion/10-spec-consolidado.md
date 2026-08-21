@@ -29,6 +29,13 @@ Debe contener:
   `require_authenticated_app_boundary`.
 - **Semantica de la edicion de series**: donde aterriza, como interactua con
   staleness y cobertura, que se audita.
+- **Superficie del ingeniero sobre las consolas de su proyecto**: la lista con
+  sus estados, los dos motivos de bloqueo con su gesto de desbloqueo distinto,
+  la advertencia sincrona al guardar un cambio de caso y el badge de copia vieja,
+  segun **Superficie del ingeniero para consolas bloqueadas**.
+- **Estrategia de validacion de la configuracion**: rechazo duro de esquema al
+  guardar mas fail-closed al cargar la consola, sin linter semantico. Va como
+  seccion propia porque es una decision de recorte, no una omision.
 - **Nota de extensibilidad** de senales: que se toca para agregar una nueva.
 - **Compatibilidad**: que pasa con `dashboard_templates`, publicaciones y
   configuraciones ya existentes.

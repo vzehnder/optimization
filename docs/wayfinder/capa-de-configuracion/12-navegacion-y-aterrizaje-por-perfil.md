@@ -56,3 +56,27 @@ tambien es superficie configurada, no una excepcion:
 - el aterrizaje que se decida aqui no puede apoyarse en campos que el sobre no
   lleva. Si el salto directo cuando hay exactamente una consola necesita algun
   dato mas, hay que declararlo como campo del sobre, no leerlo de otra ruta.
+
+## Restriccion confirmada por la superficie del ingeniero
+
+**Superficie del ingeniero para consolas bloqueadas** agrega una superficie mas
+al inventario que este ticket tiene que rutear, y decide de antemano que no es
+una raiz:
+
+- **la lista de consolas del ingeniero vive dentro del workspace de escenario**,
+  junto a las variantes, porque ahi ya viven el caso y la variante de la que la
+  consola clona la suya. No es una ruta de nivel superior y no compite con las
+  tres superficies que este ticket ordena. Si la navegacion que se decida aqui
+  la mueve a nivel de proyecto, hay que decirlo explicitamente y asumir que
+  agregar consolas pasa a ser una agregacion sobre escenarios;
+- **son dos vistas distintas del mismo objeto.** El ingeniero abre una consola
+  desde su lista para configurarla o desbloquearla; `admin`/`analyst` tambien
+  entran a la consola **con su identidad real para probarla**, que es lo que
+  fijo **Rol y permisos del operador**. La navegacion tiene que distinguir esos
+  dos destinos sin confundirlos: configurar no es operar;
+- **la ruta de detalle de corrida `runs/:runId` queda como destino compartido.**
+  El `reference` que el operador recibe cuando una corrida falla apunta ahi, y
+  es superficie exclusiva de analista. Un `external` no puede alcanzarla por
+  URL, aunque tenga el numero;
+- el flag `esperando_desde` y el estado de bloqueo son **columnas de la lista**,
+  no un destino navegable propio. No hay bandeja de avisos que rutear.
