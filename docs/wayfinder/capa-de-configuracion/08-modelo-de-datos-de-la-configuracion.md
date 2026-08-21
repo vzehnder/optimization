@@ -3,8 +3,8 @@ id: 08
 title: "Modelo de datos de la configuracion por proyecto"
 map: capa-de-configuracion
 label: wayfinder:grilling
-status: open
-assignee:
+status: closed
+assignee: vzehnder
 blocked_by: [01, 02, 03]
 ---
 
@@ -100,3 +100,188 @@ sobre el modelo y le quita una cuarta:
 - **no hace falta campo de formato numerico.** El parser deduce el separador
   decimal de la estructura del texto y rechaza el unico caso ambiguo, asi que el
   locale deja de ser configuracion.
+
+## Resolucion
+
+Decision tomada en sesion de grilling el 2026-08-21, con **corte MVP explicito**:
+lo basico completo, sin funcionalidad de mas. Cada recorte asumido queda
+nombrado abajo, porque todos son aditivos de revertir.
+
+### El hueco que este ticket destapo: los parametros del operador
+
+Los tickets 05, 06 y 07 resolvieron con detalle donde aterriza una edicion de
+**series**. Sobre los **parametros** no habia una linea en todo el mapa, y el
+cascaron de la consola los pone *antes* que los datos.
+
+No era una laguna inocente. Tres hechos verificados se cruzan en una trampa:
+
+- el caso base se genera desde el draft (`_generate_base_system_case_for_variant`
+  -> `scenario_drafts.document_json`, `app/persistence.py:7070`);
+- `derive_case_hierarchy_views` mete en la vista `parameters` un
+  `node_parameters` con **todo campo de todo nodo que no sea `id` ni `type`**
+  (`app/persistence.py:10484-10490`). El `power_max_mw` de `battery_1` esta
+  dentro del hash `parameters`;
+- el ticket 06 refresca **solo** la dependencia `time_series_set` y descarto
+  explicitamente tocar `topology` y `parameters`.
+
+Si la edicion de un parametro del operador llegara al draft, moveria el hash
+`parameters`, la variante quedaria stale, y por regla del propio ticket 06 nadie
+la refrescaria. El operador se autobloquearia al primer parametro que toca, y
+encima le habria mutado el caso al analista. Es la misma trampa que el ticket 06
+encontro con los sets derivados.
+
+### Overlay de overrides, propiedad de la consola
+
+La configuracion declara que campos son editables, con etiqueta, unidad, rango y
+default. La consola guarda un conjunto `puntero -> valor` que **no toca el
+draft**. Se aplica en la materializacion sobre el `system_case` devuelto,
+**despues** de derivar la provenance: el hash `parameters` sigue describiendo el
+caso del analista, no el override del operador.
+
+El punto de insercion es quirurgico: en `_resolve_variant_series_for_range` la
+provenance se deriva de `base_system_case` mientras el `system_case` devuelto ya
+es un dict aparte (`app/persistence.py:7285`).
+
+Es la asimetria del ticket 06 extendida a parametros: **el cambio propio del
+operador no bloquea; el ajeno si.** La trazabilidad no se pierde — el valor que
+realmente corrio queda en la `scenario_version` inmutable y en su
+`generation_metadata`, que es donde el lineage vive.
+
+Se descarta que el operador escriba en el draft (deadlock y mutacion del caso
+compartido) y se descarta limitarlo a presets nombrados, que contradiria el
+rango y default por parametro que fijo **Forma del cascaron de la consola de
+operador**.
+
+### La consola posee su propia variante
+
+Refinamiento que emergio al bajar el modelo a la mesa, y sin el cual el ticket
+05 no es implementable.
+
+El ticket 05 manda redirigir *el binding de la consola* hacia la copia
+operativa, pero los bindings viven en `case_time_series_bindings` colgando de la
+variante. Si la consola compartiera la variante del analista, la primera edicion
+del operador **le redirigiria el binding al analista** y le cambiaria lo que
+corre.
+
+Por eso la consola **posee una variante propia**, clonada de una variante del
+analista al crearse. Esa es la que se redirige, la que queda stale por un cambio
+ajeno, y la que se refresca quirurgicamente. Es lo que el ticket 06 ya
+presuponia al hablar de "la variante de la consola".
+
+No agrega motor: reutiliza variantes, bindings y `validation_dependencies` tal
+como existen. El listado de variantes del analista marca las que pertenecen a
+una consola mediante join, sin columna nueva en `case_input_variants`.
+
+### Entidades
+
+**`portal_configurations` — una por proyecto** (`UNIQUE (project_id)`).
+Reemplaza a `dashboard_templates`.
+
+**`operator_consoles` — N por proyecto, colgando del caso.** Identidad estable
+separada de su configuracion, como exigio el ticket 05. Es dueña de su variante
+propia, de sus copias operativas y de su overlay de overrides. Sin limite
+artificial por caso; se distinguen por nombre.
+
+**`operator_console_series_copies` — el linaje inerte.** `console_id`,
+`time_series_set_id` (la copia, set plano no derivado), `origin_set_id`,
+`origin_revision_number`, `created_at/by`, `archived_at`. El lease del ticket 05
+vive **como columnas de esta misma fila** —`lease_holder_user_id`,
+`lease_heartbeat_at`, `lease_expires_at`— no en tabla aparte. La revision
+vigente no se modela: ya es el `MAX(revision_number)` de
+`time_series_set_revisions`.
+
+### Documento JSON, no columnas tipadas
+
+Ambas configuraciones son un **documento JSON con `schema_version`**, validado
+contra un esquema en codigo y con rechazo duro, siguiendo el precedente exacto
+de `bess_editor_draft.v1` (`app/draft_editor.py:285`). Nueve booleanos no
+aguantan campos expuestos con etiqueta, rango y default.
+
+Versiones `portal_config.v1` y `operator_console_config.v1`. Sin migracion
+silenciosa. En columnas queda solo lo consultable: `project_id`/`case_id`,
+`status`, `revision`, `updated_at`, `updated_by`.
+
+El documento de la consola declara ademas, por exigencia del ticket 07: los
+**grupos** (nombre, orden, señales con etiqueta y condicion de editable) y las
+**granularidades de tramo** permitidas. Un grupo puede mezclar señales de copias
+operativas distintas; la relacion grupo -> copias se resuelve por las señales
+declaradas sin recorrer valores.
+
+### Puntero al campo expuesto
+
+`{"asset_id": "battery_1", "field": "power_max_mw"}`, que resuelve contra el
+`node_parameters` que `derive_case_hierarchy_views` ya construye
+(`app/persistence.py:10487`).
+
+**Puntero colgando:** se detecta **al cargar la consola**, no al guardar la
+configuracion. Si el campo ya no existe en el caso, la consola bloquea ejecutar
+y escala por el mismo camino que el ticket 06 definio para el stale ajeno.
+Fail-closed, sin validador nuevo. Un override cuyo campo dejo de estar expuesto
+queda **inerte, no se borra**.
+
+### Versionado: no lo hay
+
+La configuracion **no tiene historial**. Un contador `revision INTEGER` que sube
+en cada guardado, mas `updated_at` y `updated_by`. La auditoria que exigen los
+tickets 04 y 05 estampa ese contador.
+
+La configuracion **no entra en el snapshot inmutable de la corrida**: no afecta
+el resultado matematico, solo la interfaz. Queda dicho explicitamente para que
+nadie lo mezcle con el lineage de TS-1/TS-3.
+
+### Publicado/borrador
+
+Dos estados en la misma fila: `draft` | `active`. En `draft` no es visible ni
+operable por `external`. Sin flujo de aprobacion y sin copia paralela.
+
+### Migracion de `dashboard_templates`
+
+La tabla vieja **no se borra ni se migra destructivamente**: queda muerta, lo
+que es coherente con que hoy no exista `DELETE` de plantillas ni de
+publicaciones. La migracion crea una configuracion de portal por proyecto a
+partir de la plantilla que usa su publicacion publicada mas reciente.
+
+Esto resuelve la niebla que el mapa tenia abierta sobre este punto.
+
+### Lo que el modelo NO necesita
+
+- **Refresco quirurgico del ticket 06**: `validation_dependencies` ya es
+  direccionable por `(owner_type, owner_id, dependency_type, dependency_id)` con
+  `UNIQUE` (`app/persistence.py:740`). Es un `UPDATE` puntual, cero cambios de
+  modelo.
+- **Campo de formato numerico**: el ticket 07 lo elimino.
+- **Rango del selector de periodo**: se deriva de `time_series_periods` de la
+  copia.
+- **Marcador de no-stale para la copia**: los sets no derivados no tienen
+  dependencias grabadas y nunca estan stale (`app/persistence.py:3360-3365`).
+
+### Cortes MVP asumidos
+
+Todos aditivos de revertir. Se listan para que nadie los confunda con
+descuidos:
+
+- **La publicacion deja de elegir plantilla.** Conserva corrida, titulo, notas,
+  fecha y artefactos. Es un cambio de comportamiento visible sobre lo que hoy
+  funciona, y es lo que el ticket 03 cerro.
+- **La configuracion no es reconstruible hacia atras.** El contador dice que
+  revision corrio, no que contenia. Revertirlo es una tabla de historial
+  aditiva.
+- **Editar una consola `active` la cambia en vivo** bajo el operador. El daño es
+  de presentacion, no de calculo; la alternativa es maquinaria real.
+- **Solo escalares de nodo** como campo expuesto. Nada anidado, ni curvas, ni
+  listas.
+- **Granularidades de tramo de un enum cerrado** —dia, semana, mes, horizonte
+  completo— en vez de tramos arbitrarios.
+
+### Consecuencias para el resto del mapa
+
+- Desbloquea **Alcance de marca del portal cliente**, que esperaba este modelo.
+- **Superficie del ingeniero para consolas bloqueadas** hereda un caso nuevo: el
+  override colgando por un campo que el ingeniero borro o renombro. Y gana una
+  facilidad: listar las consolas de un proyecto pasa a ser una consulta, no una
+  derivacion.
+- **Contrato del payload de las superficies configuradas** hereda que el
+  `revision` de la configuracion y los identificadores de copia operativa son
+  internos y no cruzan la frontera.
+- **Extensibilidad del registro de senales canonicas** gana un lugar mas en su
+  mapa de costos: la etiqueta por señal vive en el documento de configuracion.

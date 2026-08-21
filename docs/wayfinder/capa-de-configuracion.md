@@ -129,22 +129,29 @@ Fijan el destino; no son tickets cerrados.
   trunca con aviso; la revision previa queda siempre disponible pero nunca
   obligatoria.
 
+- [Modelo de datos de la configuracion por proyecto](capa-de-configuracion/08-modelo-de-datos-de-la-configuracion.md)
+  — dos documentos JSON con `schema_version`: configuracion de portal una por
+  proyecto, que reemplaza a `dashboard_templates`, y consola de operador N por
+  proyecto colgando del caso, con identidad estable dueña de su **variante
+  propia**, sus copias operativas y un **overlay de overrides** de parametros
+  que nunca toca el draft. Sin historial: solo contador de revision. El ticket
+  destapo que los parametros del operador no estaban resueltos y que compartir
+  la variante del analista habria hecho inimplementable al ticket 05.
+
 ## Not yet specified
 
 Niebla en alcance, aun no suficientemente nitida para ticketear:
 
-- **Migracion de las `dashboard_templates` actuales**: si la configuracion nueva
-  las absorbe, las reemplaza o convive con ellas, y que pasa con las plantillas
-  y publicaciones ya creadas. Depende del modelo de datos de la configuracion.
-  El inventario agrego dos datos: no existe `DELETE` de plantillas ni de
-  publicaciones, y el endpoint que previsualiza una plantilla contra cualquier
-  corrida existe pero esta muerto (sin wrapper en el frontend).
 - **El editor de diagrama hidraulico dentro de este modelo**: si un caso
   hidraulico se puede exponer a un operador y como, dado que su topologia no se
   edita con formularios simples.
-- **Estrategia de validacion de la configuracion**: que impide que el ingeniero
-  publique una configuracion incoherente (campo expuesto que el caso no tiene,
-  rango por defecto invalido) y si eso se detecta al guardar o al publicar.
+- **Estrategia de validacion de la configuracion**: el modelo de datos ya
+  resolvio la mitad —el puntero colgando se detecta **al cargar la consola** y
+  bloquea fail-closed, no al guardar la configuracion. Queda en niebla la otra
+  mitad: que chequea el esquema al guardar (rango por defecto invalido, grupo
+  con señal que el caso no requiere) y como se le muestra al ingeniero antes de
+  que un operador choque con ello. Ligado a **Superficie del ingeniero para
+  consolas bloqueadas**, que podria absorberlo.
 - **Documentacion/onboarding del ingeniero configurador**: que necesita saber
   para armar una configuracion sin leer el tutorial de series completo.
 
