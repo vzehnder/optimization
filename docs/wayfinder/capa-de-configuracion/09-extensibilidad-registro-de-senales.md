@@ -85,3 +85,25 @@ costos y aclara la distincion que este ticket pedia no confundir:
   limite de potencia por unidad— es por tanto **mover un campo de un mecanismo
   al otro**, no agregar una clave mas. El mapa de costos debe contarlo asi, o
   subestimara el trabajo.
+
+## Restricciones confirmadas por el contrato del payload
+
+**Contrato del payload de las superficies configuradas** le quita dos lugares al
+mapa de costos de este ticket y le confirma uno:
+
+- **el contrato de payload no es un lugar a tocar.** Ninguna de las dos
+  superficies configuradas nombra columnas ni parametros por `signal_key` ni por
+  `{asset_id, field}`: viajan con el `id` que declara el documento de
+  configuracion, y el backend lo resuelve al recibir un guardado o una
+  ejecucion. Una señal canonica nueva no toca `portal_payload` ni
+  `console_payload`;
+- **la tabla sufijo-a-unidad duplicada entre backend y frontend deja de ser un
+  lugar a medias para estas superficies.** El payload lleva `unit` por columna y
+  por serie de grafico, derivada del registro canonico en el backend. La copia
+  del frontend sigue viva para la aplicacion del analista, pero la consola y el
+  portal ya no la consultan, asi que una señal nueva no puede quedar sin unidad
+  ahi;
+- **se confirma lo que si es por señal**: `unit`, `nonnegative`, `entity_type` y
+  la etiqueta en el documento de configuracion. El mapa de costos debe contar
+  ademas que una señal nueva que deba aparecer en una consola o portal ya
+  existentes obliga a editar ese documento a mano.

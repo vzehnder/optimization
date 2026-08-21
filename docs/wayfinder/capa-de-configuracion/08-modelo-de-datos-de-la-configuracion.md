@@ -285,3 +285,23 @@ descuidos:
   internos y no cruzan la frontera.
 - **Extensibilidad del registro de senales canonicas** gana un lugar mas en su
   mapa de costos: la etiqueta por señal vive en el documento de configuracion.
+
+## Adenda: paneles de resultado en el documento de la consola
+
+Agregada el 2026-08-21 al cerrar **Contrato del payload de las superficies
+configuradas**, que destapo el hueco.
+
+`operator_console_config.v1`, tal como quedo especificado arriba, declara
+parametros expuestos, grupos, señales y granularidades de tramo, pero **no
+declara paneles de resultado**. El cascaron de la consola exige que la consola
+muestre resultados e historial, con apertura de resultados desde el historial y
+comparacion de dos corridas.
+
+El documento gana por tanto una seccion de paneles de resultado con **la misma
+gramatica que `portal_config.v1`**: KPIs por path de hasta tres segmentos,
+graficos del catalogo fijo, tablas con columnas etiquetadas. Es la contrapartida
+natural de que el payload tenga un unico bloque de resultados compartido entre
+ambas superficies.
+
+Adicion aditiva: no cambia entidades, columnas ni ninguna otra decision de este
+ticket.

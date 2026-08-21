@@ -40,3 +40,20 @@ Dos consecuencias que acotan el alcance de este ticket:
 - editar la configuracion `active` la cambia **en vivo**, sin borrador. Un
   cambio de logo o de paleta aparece de inmediato en el portal de todos los
   clientes del proyecto.
+
+## Restriccion confirmada por el contrato del payload
+
+**Contrato del payload de las superficies configuradas** cierra el sobre por el
+que la marca tendria que viajar:
+
+- del proyecto sale **unicamente `name`**. No hay campo generico de metadatos de
+  proyecto por donde un logo, una paleta o un nombre visible puedan colarse sin
+  declararse. Todo elemento de marca que se decida aqui tiene que aparecer
+  explicitamente en `portal_config.v1` **y** como campo nombrado del sobre del
+  portal, o no llega al navegador;
+- eso convierte el alcance de este ticket en una lista finita y revisable. Si la
+  lista crece despues, crece el sobre: no hay atajo;
+- un logo obliga ademas a decidir donde vive el archivo. El sobre lleva URLs de
+  descarga solo para artefactos aprobados de la publicacion, servidos por una
+  ruta que valida la raiz de artefactos. Un logo no es un artefacto de corrida,
+  asi que necesita su propio camino, y ese camino es parte de esta decision.

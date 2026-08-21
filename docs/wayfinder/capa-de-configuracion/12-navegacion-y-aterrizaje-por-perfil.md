@@ -38,3 +38,21 @@ proyecto**. La navegacion no puede tratarlos igual:
 - `admin` y `analyst` entran a las consolas con su identidad real para probarlas
   —lo fijo **Rol y permisos del operador**—, asi que la misma ruta sirve a dos
   perfiles con navegacion de origen distinta.
+
+## Restriccion confirmada por el contrato del payload
+
+**Contrato del payload de las superficies configuradas** fija que la navegacion
+tambien es superficie configurada, no una excepcion:
+
+- **el listado de consolas de un proyecto es un sobre mas**, sujeto a la misma
+  allowlist escrita a mano. Por consola sale nombre, descripcion, quien la
+  preparo y cuando se actualizo; no salen `case_id`, la variante propia, la
+  copia operativa ni el `revision` de la configuracion;
+- las consolas en `draft` **no existen en ese sobre**. La navegacion no las
+  omite en el frontend: el backend no las incluye;
+- `console.id` si cruza, porque la ruta lo necesita. Es una clave subrogada de
+  un objeto de configuracion, no del linaje, y es el unico identificador
+  direccionable que este mapa deja del lado del operador;
+- el aterrizaje que se decida aqui no puede apoyarse en campos que el sobre no
+  lleva. Si el salto directo cuando hay exactamente una consola necesita algun
+  dato mas, hay que declararlo como campo del sobre, no leerlo de otra ruta.

@@ -70,3 +70,25 @@ ticket y le quita trabajo:
   esquema al guardar y como se le muestra al ingeniero antes de que un operador
   choque con ello. Decidir al resolverlo si lo absorbe o si merece ticket
   propio.
+
+## Restricciones confirmadas por el contrato del payload
+
+**Contrato del payload de las superficies configuradas** le da a este ticket su
+contraparte exacta:
+
+- **esta superficie es del analista y no esta sujeta a la allowlist del
+  operador.** Es el unico lugar donde vive el detalle tecnico que el operador
+  nunca ve: `stderr`, `exit_code`, `error_message`, las `reasons` crudas de
+  `VariantStaleError` y los hashes de dependencia;
+- **el puente entre ambas es `reference`.** Cuando una corrida falla por una
+  causa que el backend no sabia antes de invocar al motor, el operador recibe un
+  generico con el id de la corrida. Esa superficie tiene que poder recibir ese
+  id y llevar al ingeniero al detalle. Si no, el operador queda con un numero
+  que nadie sabe usar;
+- **el operador ve exactamente dos motivos de bloqueo**, `dependencia_movida` y
+  `campo_no_disponible`, ambos con una frase accionable y un contacto. La
+  superficie que este ticket diseña debe poder explicar los dos y desbloquear
+  los dos, porque son los dos unicos que el operador puede reportar;
+- el `contact` que el operador ve sale del sobre como **nombre de persona**. A
+  quien apunta —quien preparo la configuracion, o quien movio la dependencia—
+  es una decision de este ticket, no del payload.
