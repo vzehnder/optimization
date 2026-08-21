@@ -3,8 +3,8 @@ id: 07
 title: "Contrato de la tabla editable y del pegado desde Excel"
 map: capa-de-configuracion
 label: wayfinder:prototype
-status: open
-assignee:
+status: closed
+assignee: vzehnder
 blocked_by: [02, 05]
 ---
 
@@ -98,3 +98,135 @@ fail-closed**:
   el contrato de error del pegado solo necesita cubrir valor no numerico, no
   finito, negativo donde la señal lo prohibe, periodo o señal desconocidos, y
   conflicto de revision base.
+
+## Activo
+
+[Prototipo desechable: tabla editable y pegado desde Excel](../prototypes/tabla-editable/README.md)
+— tres formas de tabla (`?variant=A|B|C`) sobre 8760 periodos virtualizados,
+con pegado de portapapeles real, parser de locale conmutable, validacion por
+celda espejo de `validate_catalog_value_edits`, diff previo, lease ajeno y
+conflicto de revision base.
+
+## Resolucion
+
+Decision aprobada en sesion de reaccion el 2026-08-20, sobre el prototipo
+enlazado como activo.
+
+### Forma de la tabla
+
+La consola usa **una tabla por grupo del analista** (variante A). Se descartan
+la tabla unificada por caso y la tabla por copia operativa.
+
+Consecuencia estructural: un grupo puede contener señales que viven en copias
+operativas distintas —Potencia toca dos—, asi que **la forma de la tabla no
+coincide con la particion en sets**. El operador nunca ve esa particion; el
+sistema la resuelve por debajo.
+
+### Guardado transaccional entre copias
+
+Un guardado que toca N copias operativas es **una sola transaccion**: entran las
+N revisiones o no entra ninguna.
+
+- El backend necesita un **endpoint de edicion multi-set**.
+  `edit_time_series_set_values` pasa a ser la implementacion interna de un
+  guardado mas grande, no el contrato de la superficie.
+- El refresco del `recorded_hash` que el ticket 06 definio como atestacion
+  ocurre **dentro de esa misma transaccion**, una vez, al final. No existe
+  ventana en que la atestacion este fresca para una copia y vieja para otra.
+- Un conflicto de revision base en **cualquiera** de las N copias rechaza el
+  bloque completo, sin mezcla automatica, extendiendo la regla del ticket 05.
+
+Motivo del rechazo de los guardados independientes: dejarian a la consola con
+atestacion parcial, y "¿puedo ejecutar?" dejaria de tener una respuesta unica.
+
+### Formato numerico: se rechaza lo ambiguo
+
+**No hay locale configurable.** El separador decimal se deduce de la estructura
+del texto, y el unico caso que no se puede deducir se rechaza.
+
+Una cadena es ambigua cuando tiene **un unico separador seguido de exactamente
+tres digitos, precedido de un grupo de miles valido** (1 a 3 digitos, sin cero a
+la izquierda): `1.234`, `1,234`, `12,345`. Se marcan invalidas y obligan a
+corregir en el origen.
+
+Todo lo demas tiene lectura unica: con ambos separadores presentes gana el
+ultimo (`1.234,5` y `1,234.5` son 1234,5); dos separadores iguales son miles
+(`1.234.567`); cuatro digitos por delante no forman grupo de miles
+(`1234,567` = 1234,567); `0` no es grupo de miles (`0,001` = 0,001).
+
+Consecuencia para el backend: el `float()` pelado de
+`validate_catalog_value_edits` se reemplaza por este parser. Hoy `1.234` se
+acepta en silencio como 1,234 —un factor 1000 de error que ningun validador
+detecta— y `1.234,5` revienta con un error generico.
+
+Beneficio lateral: **la configuracion por proyecto no necesita campo de
+formato numerico**, que era candidato a entrar en el modelo de datos.
+
+### Validacion y contrato de error
+
+**Todo o nada.** Si alguna celda del bloque es invalida, no entra ninguna. El
+operador corrige las marcadas o descarta el bloque. Es la misma garantia que
+TS-2 da para un import fallido y que el ticket 05 da para el conflicto de
+revision.
+
+El contrato de error del pegado cubre exactamente: valor no numerico, no
+finito, negativo donde la señal lo prohibe, **formato ambiguo**, periodo
+desconocido, señal desconocida y conflicto de revision base.
+
+Exigencia nueva sobre el backend: el error debe venir **direccionado por celda**
+(indice de periodo + `signal_key`), no por posicion en la lista. Hoy
+`validate_catalog_value_edits` responde `edit 37: ... must be nonnegative`, en
+ingles y por numero de edicion, que la superficie no puede mapear a una celda.
+
+### Tramo editable y desborde
+
+El selector de tramo **acota la edicion**, no solo la vista: fuera del tramo la
+tabla se ve pero no se edita ni recibe pegado.
+
+- Un bloque mas largo que el tramo **se trunca y se avisa**, no se rechaza.
+- El pegado nunca extiende el horizonte: los periodos que la copia no cubre no
+  existen y `validate_catalog_value_edits` los rechaza.
+- **Sin tope de tamaño**: el año completo (8760 h) es un tramo editable valido.
+  Un guardado de dos señales por 8760 periodos son ~17.500 celdas, del orden de
+  840 KB en un solo PUT, que el contrato actual admite sin cota.
+
+Queda para el **Modelo de datos de la configuracion por proyecto** definir quien
+declara los tramos seleccionables y con que granularidad.
+
+### Gesto de pegado
+
+Validado en el prototipo y adoptado tal cual:
+
+- el bloque se alinea **desde la celda anclada** hacia abajo y a la derecha;
+- se aceptan **rangos rectangulares**, no solo columnas sueltas;
+- una fila de encabezado pegada por accidente se **detecta y se descarta** con
+  aviso (primera fila sin ningun digito);
+- las columnas que el ingeniero no habilito se **omiten** del pegado y se
+  informan por nombre; se distinguen visualmente con trama, candado y el motivo
+  del bloqueo en el tooltip.
+
+### Revision previa al guardado
+
+La hoja de revision —celdas, periodos, copias tocadas, rango antes/despues por
+señal, lista de rechazos— esta **siempre disponible pero nunca es obligatoria**.
+Guardar procede directo.
+
+Riesgo aceptado explicitamente: un pegado truncado puede llegar a la corrida sin
+que nadie abra la revision. El unico garante es el **aviso del pegado**, que por
+eso **persiste hasta que el bloque se guarde o se descarte** y no se limpia al
+editar otras celdas.
+
+### Escala
+
+La tabla **virtualiza** obligatoriamente: 8760 filas se renderizan por ventana,
+con encabezado y columna de periodo fijos. No se mantiene borrador en memoria
+—los valores se leen de SQL, como fijo el ticket 02— y el estado sucio vive solo
+en las celdas editadas.
+
+### Limites de esta decision
+
+Esta resolucion fija el contrato de la superficie de edicion. No decide donde se
+persiste (ticket 05), como se atesta (ticket 06), que entidad guarda los grupos,
+etiquetas, señales habilitadas y tramos (**Modelo de datos de la configuracion
+por proyecto**), ni como se representa todo eso para el frontend (**Contrato del
+payload de las superficies configuradas**).

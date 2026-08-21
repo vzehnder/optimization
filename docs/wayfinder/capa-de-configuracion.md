@@ -120,6 +120,15 @@ Fijan el destino; no son tickets cerrados.
   La copia se materializa como set plano no derivado, sin lo cual la primera
   edicion se autobloquearia sin salida.
 
+- [Contrato de la tabla editable y del pegado desde Excel](capa-de-configuracion/07-contrato-tabla-editable-y-pegado.md)
+  — una tabla por grupo del analista, con guardado transaccional unico entre
+  todas las copias operativas que el grupo toca. Se rechaza todo numero de
+  lectura ambigua (`1.234`, `12,345`), lo que elimina la necesidad de un locale
+  configurable. Validacion todo-o-nada, con el error direccionado por celda en
+  vez de por posicion. El tramo acota la edicion y el desborde del pegado
+  trunca con aviso; la revision previa queda siempre disponible pero nunca
+  obligatoria.
+
 ## Not yet specified
 
 Niebla en alcance, aun no suficientemente nitida para ticketear:
