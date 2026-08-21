@@ -174,6 +174,18 @@ Fijan el destino; no son tickets cerrados.
   configuracion. La copia vieja respecto de su receta de origen se avisa con
   badge y no bloquea. Sin caducidad y sin linter semantico.
 
+- [Navegacion y aterrizaje por perfil](capa-de-configuracion/12-navegacion-y-aterrizaje-por-perfil.md)
+  — tres raices hermanas que no comparten header (analista, `/console`, portal),
+  con la consola en ruta plana `/console/:consoleId` y una ruta distinta para
+  configurarla dentro del workspace de escenario: configurar no es operar. El
+  aterrizaje deja de ser logica de cliente y pasa a ser el campo `landing_path`
+  del sobre de identidad, con `operate` ganandole a `portal_view` y el salto
+  directo a la consola unica viviendo solo ahi. Los 19 `isClient` se reemplazan
+  por **tres** guardas de raiz, y para un `external` lo que no le pertenece
+  devuelve 404, no 403. El ticket destapo que la regla de aterrizaje esta hoy
+  **triplicada** en el codigo y que el listado que la navegacion necesita es
+  cruzado por proyecto, no por proyecto.
+
 ## Not yet specified
 
 Niebla en alcance, aun no suficientemente nitida para ticketear:
