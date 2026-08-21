@@ -65,3 +65,23 @@ de la tabla editable que este ticket dejaba pendiente:
 - lo que si es por señal, y por tanto entra en el mapa de costos: `unit`,
   `nonnegative`, `entity_type`, y la traduccion de su etiqueta en la
   configuracion.
+
+## Restricciones confirmadas por el modelo de datos
+
+**Modelo de datos de la configuracion por proyecto** agrega un lugar al mapa de
+costos y aclara la distincion que este ticket pedia no confundir:
+
+- la **etiqueta por señal** vive en el documento de configuracion de la consola
+  (`operator_console_config.v1`), dentro del grupo que la declara. Una señal
+  nueva que deba aparecer en una consola existente obliga a editar ese
+  documento; no se hereda del registro canonico;
+- los grupos declaran señales por `signal_key` mas `entity_type`/`entity_id`, no
+  por posicion, asi que agregar una clave al registro **no invalida** las
+  configuraciones existentes;
+- el parametro escalar expuesto y la señal vectorial son mecanismos **distintos**
+  en el modelo: el primero es un puntero `{asset_id, field}` con overlay de
+  override sobre el `system_case`; la segunda es una columna de la copia
+  operativa. Convertir un escalar en serie —el caso de prueba de este ticket, el
+  limite de potencia por unidad— es por tanto **mover un campo de un mecanismo
+  al otro**, no agregar una clave mas. El mapa de costos debe contarlo asi, o
+  subestimara el trabajo.

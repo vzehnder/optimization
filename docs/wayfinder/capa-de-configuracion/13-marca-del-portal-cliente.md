@@ -21,3 +21,22 @@ white-label quedan fuera de esta primera especificacion.
 La respuesta debe evitar una configuracion distinta por persona y encajar con
 el alcance por proyecto que defina **Modelo de datos de la configuracion por
 proyecto**.
+
+## Restriccion confirmada por el modelo de datos
+
+**Modelo de datos de la configuracion por proyecto** ya cerro el envase: la
+configuracion de portal es **un documento JSON `portal_config.v1`, uno por
+proyecto**, validado contra un esquema en codigo con rechazo duro. Todo elemento
+de marca que se decida aqui tiene que caber dentro de ese documento y sobrevivir
+esa validacion; no hay tabla de marca aparte ni columnas tipadas donde alojarlo.
+
+Dos consecuencias que acotan el alcance de este ticket:
+
+- la marca **no se versiona**. El documento solo lleva un contador de revision,
+  asi que no se puede reconstruir como se veia el portal en una publicacion
+  pasada. Si la marca necesitara esa reconstruibilidad —por ejemplo para que un
+  informe entregado a un cliente siga viendose igual—, eso redibuja el corte MVP
+  del modelo de datos y hay que decirlo aqui explicitamente;
+- editar la configuracion `active` la cambia **en vivo**, sin borrador. Un
+  cambio de logo o de paleta aparece de inmediato en el portal de todos los
+  clientes del proyecto.

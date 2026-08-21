@@ -87,3 +87,19 @@ interno.
 El payload de guardado tampoco expone identificadores de copia operativa, set,
 revision ni hash: la consola necesita saber a que celda apunta el error y si
 puede ejecutar, nada mas.
+
+## Restriccion confirmada por el modelo de datos
+
+**Modelo de datos de la configuracion por proyecto** fija que nunca cruzan la
+frontera: el `revision` de la configuracion, su `schema_version`, y los ids de
+consola, de variante propia, de copia operativa y de set y revision de origen.
+Del lease solo puede salir quien esta editando, nombrado como persona, nunca su
+estado tecnico ni sus timestamps.
+
+Ademas responde la pregunta de este ticket sobre si son dos filtros en serie:
+si lo son, y el segundo **es** la configuracion. La allowlist de seguridad
+decide que *puede* salir; el documento de configuracion decide que *se muestra*
+dentro de eso, y nunca amplia el primero. Como ambos documentos declaran sus
+propias etiquetas, el vocabulario del cliente y el del operador salen de ahi y
+no de las ~40 cadenas fijas que el inventario encontro repartidas entre backend
+y frontend.

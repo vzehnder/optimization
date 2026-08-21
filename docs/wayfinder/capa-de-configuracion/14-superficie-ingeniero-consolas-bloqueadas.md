@@ -46,3 +46,27 @@ Lo que hay que decidir:
 La respuesta es una seccion del spec: la superficie del ingeniero sobre las
 consolas de su proyecto, sus estados y el gesto de desbloqueo, mas la regla de
 notificacion en ambas direcciones.
+
+## Restricciones confirmadas por el modelo de datos
+
+**Modelo de datos de la configuracion por proyecto** le agrega un caso a este
+ticket y le quita trabajo:
+
+- **caso nuevo, el puntero colgando.** Un campo expuesto apunta al caso con
+  `{asset_id, field}`. Si el ingeniero borra o renombra el activo, el puntero
+  queda colgando; se detecta al cargar la consola y bloquea fail-closed, igual
+  que el stale ajeno. Este ticket debe cubrir por tanto **dos** motivos de
+  bloqueo y no uno —variante stale y puntero roto— con la misma superficie de
+  aviso y desbloqueo. El override no se borra: queda inerte, y vuelve a aplicar
+  si el campo reaparece con el mismo nombre;
+- **facilidad nueva.** Listar las consolas de un proyecto pasa a ser una
+  consulta sobre `operator_consoles`, no una derivacion. La superficie que este
+  ticket diseña ya tiene de donde leer, incluido el estado `draft`/`active`;
+- la consola tiene **variante propia**, clonada de la del analista, asi que el
+  aviso puede nombrar exactamente que consola quedo bloqueada sin confundirla
+  con las variantes de trabajo del analista;
+- este ticket es candidato natural a **absorber** la mitad de niebla que quedo
+  abierta en *Estrategia de validacion de la configuracion*: que chequea el
+  esquema al guardar y como se le muestra al ingeniero antes de que un operador
+  choque con ello. Decidir al resolverlo si lo absorbe o si merece ticket
+  propio.
