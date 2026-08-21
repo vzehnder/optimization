@@ -138,6 +138,18 @@ Fijan el destino; no son tickets cerrados.
   destapo que los parametros del operador no estaban resueltos y que compartir
   la variante del analista habria hecho inimplementable al ticket 05.
 
+- [Contrato del payload de las superficies configuradas](capa-de-configuracion/11-contrato-del-payload.md)
+  — dos sobres de nivel superior con **un** bloque de resultados compartido,
+  armados por allowlist escrita a mano: ninguna fila de la base cruza entera y
+  una columna nueva no se filtra sola. Los KPIs se declaran por path y salen
+  solo con etiqueta y valor, lo que cierra la fuga de la ruta absoluta del caso;
+  parametros y columnas viajan con id de configuracion, nunca con
+  `{asset_id, field}` ni `signal_key`. El operador no ve `stdout`/`stderr`:
+  recibe causa traducida cuando el backend la sabe antes de invocar al motor, y
+  un generico con id de referencia cuando viene de Julia. El preview del
+  analista pasa a usar el mismo constructor. El ticket destapo que el documento
+  de la consola no declara paneles de resultado.
+
 ## Not yet specified
 
 Niebla en alcance, aun no suficientemente nitida para ticketear:
