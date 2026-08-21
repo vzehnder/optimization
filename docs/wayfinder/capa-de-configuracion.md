@@ -150,6 +150,18 @@ Fijan el destino; no son tickets cerrados.
   analista pasa a usar el mismo constructor. El ticket destapo que el documento
   de la consola no declara paneles de resultado.
 
+- [Superficie del ingeniero para consolas bloqueadas](capa-de-configuracion/14-superficie-ingeniero-consolas-bloqueadas.md)
+  — no se crea superficie: el bloqueo es una **columna de estado** en la lista de
+  consolas que ya habia que construir. El ingeniero se entera por advertencia
+  sincrona al guardar un cambio de caso y por un flag `esperando_desde` en la
+  fila; ningun inbox. Los dos motivos de bloqueo **no se desbloquean igual**:
+  `dependencia_movida` es un boton sobre el endpoint de validar que ya existe,
+  `campo_no_disponible` se arregla editando la configuracion. El ticket destapo
+  que "quien movio la dependencia" no es contestable —`validation_dependencies`
+  no tiene actor—, lo que forzo que el `contact` apunte a quien preparo la
+  configuracion. La copia vieja respecto de su receta de origen se avisa con
+  badge y no bloquea. Sin caducidad y sin linter semantico.
+
 ## Not yet specified
 
 Niebla en alcance, aun no suficientemente nitida para ticketear:
@@ -157,15 +169,13 @@ Niebla en alcance, aun no suficientemente nitida para ticketear:
 - **El editor de diagrama hidraulico dentro de este modelo**: si un caso
   hidraulico se puede exponer a un operador y como, dado que su topologia no se
   edita con formularios simples.
-- **Estrategia de validacion de la configuracion**: el modelo de datos ya
-  resolvio la mitad —el puntero colgando se detecta **al cargar la consola** y
-  bloquea fail-closed, no al guardar la configuracion. Queda en niebla la otra
-  mitad: que chequea el esquema al guardar (rango por defecto invalido, grupo
-  con señal que el caso no requiere) y como se le muestra al ingeniero antes de
-  que un operador choque con ello. Ligado a **Superficie del ingeniero para
-  consolas bloqueadas**, que podria absorberlo.
 - **Documentacion/onboarding del ingeniero configurador**: que necesita saber
   para armar una configuracion sin leer el tutorial de series completo.
+
+*Retirado de esta seccion*: **Estrategia de validacion de la configuracion**, que
+[Superficie del ingeniero para consolas bloqueadas](capa-de-configuracion/14-superficie-ingeniero-consolas-bloqueadas.md)
+absorbio y cerro por decision — rechazo duro de esquema al guardar mas
+fail-closed al cargar, sin linter semantico, como corte MVP asumido.
 
 ## Out of scope
 
