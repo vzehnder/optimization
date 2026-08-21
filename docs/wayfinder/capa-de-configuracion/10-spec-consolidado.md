@@ -36,7 +36,14 @@ Debe contener:
 - **Estrategia de validacion de la configuracion**: rechazo duro de esquema al
   guardar mas fail-closed al cargar la consola, sin linter semantico. Va como
   seccion propia porque es una decision de recorte, no una omision.
-- **Nota de extensibilidad** de senales: que se toca para agregar una nueva.
+- **Nota de extensibilidad** de senales: la receta ordenada de siete pasos que
+  fija **Extensibilidad del registro de senales canonicas**, marcando cual es
+  declarativo y cual irreducible. Debe separar explicitamente el costo de
+  **agregar una señal vectorial** del de **convertir un escalar en serie**, y
+  declarar la dependencia del motor como v4 o ampliacion de v3 —nunca "v3", que
+  ya existe—. Incluye el endpoint de lectura del registro canonico que reemplaza
+  la copia a mano del frontend, y que entra en la matriz de permisos como
+  cualquier superficie nueva.
 - **Compatibilidad**: que pasa con `dashboard_templates`, publicaciones y
   configuraciones ya existentes.
 - **Criterios de aceptacion** verificables, en el estilo de los acceptance
