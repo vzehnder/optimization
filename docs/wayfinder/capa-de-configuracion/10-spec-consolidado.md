@@ -25,6 +25,16 @@ Debe contener:
   recorte que fija **Contrato del payload de las superficies configuradas**.
 - **Comportamiento de ambas superficies**: que ve cada perfil, en que orden,
   con que estados de carga y error.
+- **Navegacion global y aterrizaje por perfil**: las tres raices que no comparten
+  header, la ruta plana `/console/:consoleId`, la ruta separada de configuracion
+  dentro del workspace de escenario, la regla unica de `landing_path` como campo
+  del sobre de identidad, las tres guardas de raiz que reemplazan los 19
+  `isClient` y la politica 403/404, segun **Navegacion y aterrizaje por perfil**.
+  Debe registrar explicitamente que hoy la regla de aterrizaje esta **triplicada**
+  en el codigo (`app/main.py:585`, `app/main.py:589`, `frontend/src/App.tsx:66`)
+  y que el spec la unifica en una sola implementacion de backend. Debe fijar
+  tambien que para un `external` la respuesta a lo que no le pertenece es **404**,
+  incluido `runs/:runId` con el numero de referencia en la mano.
 - **Matriz de permisos** actualizada, y como pasa por
   `require_authenticated_app_boundary`.
 - **Semantica de la edicion de series**: donde aterriza, como interactua con

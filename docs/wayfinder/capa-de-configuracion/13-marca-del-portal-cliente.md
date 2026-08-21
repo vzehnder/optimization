@@ -57,3 +57,26 @@ que la marca tendria que viajar:
   descarga solo para artefactos aprobados de la publicacion, servidos por una
   ruta que valida la raiz de artefactos. Un logo no es un artefacto de corrida,
   asi que necesita su propio camino, y ese camino es parte de esta decision.
+
+## Restriccion confirmada por la navegacion
+
+**Navegacion y aterrizaje por perfil** le dio al portal un **layout propio**: tres
+raices hermanas que no comparten header, asi que el portal ya no cuelga del shell
+"BESS Workspace" del analista. Eso es precisamente lo que vuelve posible una marca
+por proyecto —con header compartido la marca seria global o no existiria—, y
+convierte a este ticket en quien llena ese layout. Tres consecuencias:
+
+- **Un usuario con `operate` no aterriza en el portal.** La regla de
+  `landing_path` hace que `operate` le gane a `portal_view`, de modo que quien
+  tiene ambas capacidades ve primero el layout de la consola. Hay que decidir aqui
+  si la marca del proyecto es **exclusiva del portal** o si el layout minimo de la
+  consola tambien la lleva. La respuesta por defecto, coherente con el corte MVP,
+  es exclusiva del portal: la consola es superficie de trabajo, no de entrega.
+- **El archivo del logo se sirve bajo `/api/`, no bajo la ruta SPA.** El prefijo
+  `/react/*` esta exento del gate de rol (`app/main.py:636-638`): sirve el shell,
+  no datos, y no autoriza nada. El camino propio que este ticket tiene que definir
+  para el logo es un endpoint de API con su propia comprobacion de acceso, igual
+  que cualquier otra superficie nueva.
+- **La ruta sigue llamandose `/client`.** No se renombro a `/portal` pese a que el
+  rol pasa a `external` y la capacidad se llama `portal_view`; es deuda de nombres
+  asumida. La marca que se decida aqui no depende del nombre de la ruta.
