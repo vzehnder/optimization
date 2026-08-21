@@ -50,3 +50,18 @@ donde una senal nueva puede quedar a medias.
 
 El entregable es la parte del spec que dice: "para agregar la senal X, se toca
 esto, en este orden, y esto ya no hay que tocarlo".
+
+## Restricciones confirmadas por el contrato de la tabla editable
+
+**Contrato de la tabla editable y del pegado desde Excel** ya resolvio el punto
+de la tabla editable que este ticket dejaba pendiente:
+
+- la tabla **no conoce señales por nombre**. Las columnas se derivan del grupo
+  configurado, y de cada señal solo consume su `unit` y su `nonnegative` del
+  registro canonico. Una señal nueva entra sin tocar la superficie de edicion,
+  siempre que el registro la declare;
+- el parser numerico es unico para todas las señales y no depende de la señal ni
+  del locale, asi que tampoco es un lugar a tocar;
+- lo que si es por señal, y por tanto entra en el mapa de costos: `unit`,
+  `nonnegative`, `entity_type`, y la traduccion de su etiqueta en la
+  configuracion.

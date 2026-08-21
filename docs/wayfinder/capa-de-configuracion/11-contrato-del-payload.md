@@ -73,3 +73,17 @@ estado de negocio y una frase accionable, mas a quien escalar. Nunca cruzan las
 `dependency_id`, hashes ni nombres de tablas. El payload de la consola tampoco
 expone marcador de staleness como campo tecnico: la superficie solo necesita
 saber si puede ejecutar y, si no, por que en lenguaje de operador.
+
+## Restriccion confirmada por el contrato de la tabla editable
+
+El error de validacion de una edicion debe cruzar la frontera **direccionado por
+celda** —indice de periodo y `signal_key`— y ya traducido a lenguaje de
+operador. Hoy `validate_catalog_value_edits` responde
+`edit 37: load_demand_mw at period 5305 must be nonnegative`: en ingles, por
+numero de edicion dentro de la lista, y nombrando la clave canonica. Ninguna de
+esas tres cosas sirve en la superficie, y la ultima ademas filtra vocabulario
+interno.
+
+El payload de guardado tampoco expone identificadores de copia operativa, set,
+revision ni hash: la consola necesita saber a que celda apunta el error y si
+puede ejecutar, nada mas.

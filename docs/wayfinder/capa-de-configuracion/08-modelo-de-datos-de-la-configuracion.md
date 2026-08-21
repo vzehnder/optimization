@@ -81,3 +81,22 @@ modelo de datos:
   **direccionable de forma puntual**, para refrescar su `recorded_hash` en la
   transaccion del guardado sin tocar las dependencias `topology` ni
   `parameters` de la misma variante.
+
+## Restricciones confirmadas por el contrato de la tabla editable
+
+**Contrato de la tabla editable y del pegado desde Excel** deja tres exigencias
+sobre el modelo y le quita una cuarta:
+
+- la configuracion declara los **grupos** del analista: nombre, orden, y las
+  señales que contiene cada uno, con su etiqueta y su condicion de editable o
+  solo lectura. Un grupo puede mezclar señales de copias operativas distintas,
+  asi que el modelo debe poder resolver, desde un grupo, el conjunto de copias
+  que un guardado va a tocar;
+- la configuracion declara los **tramos seleccionables** por el operador y su
+  granularidad. El tramo acota la edicion, no solo la vista, asi que es parte
+  del contrato y no una preferencia de UI;
+- el guardado es transaccional entre copias, de modo que la relacion
+  grupo → copias operativas tiene que ser consultable sin recorrer los valores;
+- **no hace falta campo de formato numerico.** El parser deduce el separador
+  decimal de la estructura del texto y rechaza el unico caso ambiguo, asi que el
+  locale deja de ser configuracion.
