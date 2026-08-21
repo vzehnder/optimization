@@ -138,6 +138,18 @@ Fijan el destino; no son tickets cerrados.
   destapo que los parametros del operador no estaban resueltos y que compartir
   la variante del analista habria hecho inimplementable al ticket 05.
 
+- [Extensibilidad del registro de senales canonicas](capa-de-configuracion/09-extensibilidad-registro-de-senales.md)
+  — el caso de prueba no es caro sino **inexpresable**: la derivacion one-bus
+  admite una sola señal por tipo de nodo, y la lista "declarativa" del camino
+  hidraulico es forma de transporte con allowlist de una clave detras. Se
+  especifica volverla lista, exponer el registro por API para matar la copia a
+  mano del frontend, y separar el costo de **agregar una señal vectorial** del de
+  **convertir un escalar en serie**, que es cambio de cota JuMP y no de parseo.
+  El ticket destapo que **el contrato Julia v3 ya existe** —es el esquema
+  hidraulico actual, no una version futura—, asi que la dependencia declarada es
+  v4 o una ampliacion de v3. Recorte MVP: no se unifican los dos mecanismos de
+  derivacion ni se hace declarativa la ingesta.
+
 - [Contrato del payload de las superficies configuradas](capa-de-configuracion/11-contrato-del-payload.md)
   — dos sobres de nivel superior con **un** bloque de resultados compartido,
   armados por allowlist escrita a mano: ninguna fila de la base cruza entera y
@@ -186,8 +198,20 @@ Trabajo conscientemente fuera del destino de este mapa. No graduan.
   estructurado con diagrama hidraulico). Decidido en el charting: fachada
   ahora, deuda interna despues, como esfuerzo separado con su propio mapa.
 - **Implementar limites de potencia por unidad variables en el tiempo**: senal
-  canonica nueva + contrato Julia v3. Aqui solo se disena la extensibilidad que
-  lo haria barato despues.
+  canonica nueva + version de contrato Julia nueva. Aqui solo se disena la
+  extensibilidad que lo haria barato despues. Corregido por
+  [Extensibilidad del registro de senales canonicas](capa-de-configuracion/09-extensibilidad-registro-de-senales.md):
+  **v3 ya existe** —es el esquema hidraulico actual—, asi que la version futura
+  es v4 o una ampliacion de v3; y el trabajo no es agregar una clave sino mover
+  un campo escalar de struct de activo a matriz por periodo, cambiando la cota de
+  la variable JuMP.
+- **Unificar los dos mecanismos de derivacion de senales requeridas** (one-bus
+  hardcodeado por tipo de nodo, hidraulico por lista declarativa) en uno solo.
+  Recorte MVP de
+  [Extensibilidad del registro de senales canonicas](capa-de-configuracion/09-extensibilidad-registro-de-senales.md):
+  obliga a tocar dos esquemas Julia con validadores y runners separados, que es
+  refactor de la cadena interna. Ambos quedan produciendo la misma forma de
+  salida; fundirlos es deuda nombrada del esfuerzo separado.
 - **Que el operador suba sus propios archivos CSV/XLSX**. Asuncion tomada del
   charting: el mecanismo elegido fue edicion en tabla con pegado, no upload. Si
   resulta que el operador si necesita subir archivos, esto redibuja el destino.
