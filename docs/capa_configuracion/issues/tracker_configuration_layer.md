@@ -24,7 +24,7 @@ reopen or weaken decisions from the completed Wayfinder map.
 
 | ID | Title | Type | Triage | Status | Blocked by | Issue file |
 | --- | --- | --- | --- | --- | --- | --- |
-| BESS-CONFIG-001 | Expand External Project Capabilities Beside Legacy Client Access | AFK | ready-for-agent | Todo | None | [BESS-CONFIG-001-expand-external-project-capabilities-beside-legacy-client-access.md](BESS-CONFIG-001-expand-external-project-capabilities-beside-legacy-client-access.md) |
+| BESS-CONFIG-001 | Expand External Project Capabilities Beside Legacy Client Access | AFK | ready-for-agent | In Review | None | [BESS-CONFIG-001-expand-external-project-capabilities-beside-legacy-client-access.md](BESS-CONFIG-001-expand-external-project-capabilities-beside-legacy-client-access.md) |
 | BESS-CONFIG-002 | Cut Over The Portal To External Capabilities And Retire Legacy Client Access | AFK | ready-for-agent | Todo | BESS-CONFIG-001 | [BESS-CONFIG-002-cut-over-the-portal-to-external-capabilities-and-retire-legacy-client-access.md](BESS-CONFIG-002-cut-over-the-portal-to-external-capabilities-and-retire-legacy-client-access.md) |
 | BESS-CONFIG-003 | Configure One Portal Result End To End | AFK | ready-for-agent | Todo | BESS-CONFIG-002 | [BESS-CONFIG-003-configure-one-portal-result-end-to-end.md](BESS-CONFIG-003-configure-one-portal-result-end-to-end.md) |
 | BESS-CONFIG-004 | Cut Over All Portal Results To Safe Shared Payloads | AFK | ready-for-agent | Todo | BESS-CONFIG-003 | [BESS-CONFIG-004-cut-over-all-portal-results-to-safe-shared-payloads.md](BESS-CONFIG-004-cut-over-all-portal-results-to-safe-shared-payloads.md) |
@@ -67,6 +67,7 @@ graph and may be implemented in parallel.
 | Date | Issue | Status change | Notes |
 | --- | --- | --- | --- |
 | 2026-08-23 | All | Created | Seventeen AFK tracer-bullet issues published from the accepted configuration-layer architecture after explicit approval of granularity, dependency relationships and AFK classification. BESS-CONFIG-001 is the initial frontier. |
+| 2026-08-23 | BESS-CONFIG-001 | Todo -> In Review | Added the transitional external identity, independent audited project capabilities, safe SQLite/PostgreSQL migration, admin API/UI management and portal compatibility under TDD. |
 
 ## Regression Guard
 

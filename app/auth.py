@@ -8,8 +8,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 
-VALID_USER_ROLES = {"admin", "analyst", "client"}
+VALID_USER_ROLES = {"admin", "analyst", "client", "external"}
 INTERNAL_USER_ROLES = {"admin", "analyst"}
+EXTERNAL_USER_ROLES = {"client", "external"}
 
 
 class AuthorizationService:
@@ -30,7 +31,7 @@ class AuthorizationService:
         return user
 
     def require_client(self, user: dict[str, Any] | None) -> dict[str, Any]:
-        if user is None or user["role"] != "client":
+        if user is None or user["role"] not in EXTERNAL_USER_ROLES:
             raise PermissionError("forbidden")
         return user
 

@@ -916,7 +916,7 @@ class AnalystStore:
                 updated_at TEXT NOT NULL,
                 created_by TEXT NOT NULL,
                 deactivated_at TEXT,
-                CHECK (role IN ('admin', 'analyst', 'client'))
+                CHECK (role IN ('admin', 'analyst', 'client', 'external'))
             );
 
             CREATE TABLE IF NOT EXISTS auth_sessions (
@@ -934,6 +934,10 @@ class AnalystStore:
                 user_id INTEGER NOT NULL,
                 assigned_at TEXT NOT NULL,
                 assigned_by TEXT NOT NULL,
+                portal_view INTEGER NOT NULL DEFAULT 1,
+                operate INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
                 PRIMARY KEY (project_id, user_id),
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -990,6 +994,16 @@ class AnalystStore:
         if self.database_backend == "postgresql":
             schema = postgres_schema_from_sqlite(schema)
         self.connection.executescript(schema)
+        self._ensure_external_user_role_constraint()
+        self._ensure_column(
+            "project_client_access", "portal_view", "INTEGER NOT NULL DEFAULT 1"
+        )
+        self._ensure_column(
+            "project_client_access", "operate", "INTEGER NOT NULL DEFAULT 0"
+        )
+        self._ensure_column("project_client_access", "updated_at", "TEXT")
+        self._ensure_column("project_client_access", "updated_by", "TEXT")
+        self._migrate_legacy_external_access()
         self._ensure_column("runs", "stdout_log_path", "TEXT")
         self._ensure_column("runs", "stderr_log_path", "TEXT")
         self._ensure_column("runs", "error_message", "TEXT NOT NULL DEFAULT ''")
@@ -1021,6 +1035,72 @@ class AnalystStore:
         self._ensure_column("run_schedules", "rolling_duration_hours", "REAL")
         self._ensure_query_shape_indexes()
         self.connection.commit()
+
+    def _ensure_external_user_role_constraint(self) -> None:
+        if self.database_backend == "postgresql":
+            self.connection.execute(
+                "ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check"
+            )
+            self.connection.execute(
+                "ALTER TABLE users ADD CONSTRAINT users_role_check "
+                "CHECK (role IN ('admin', 'analyst', 'client', 'external'))"
+            )
+            return
+
+        row = self.connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'"
+        ).fetchone()
+        if row is None or "'external'" in str(row["sql"]):
+            return
+
+        self.connection.commit()
+        self.connection.execute("PRAGMA foreign_keys = OFF")
+        try:
+            self.connection.executescript(
+                """
+                CREATE TABLE users_with_external_role (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    display_name TEXT NOT NULL DEFAULT '',
+                    role TEXT NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    created_by TEXT NOT NULL,
+                    deactivated_at TEXT,
+                    CHECK (role IN ('admin', 'analyst', 'client', 'external'))
+                );
+                INSERT INTO users_with_external_role (
+                    id, email, display_name, role, password_hash, is_active,
+                    created_at, updated_at, created_by, deactivated_at
+                )
+                SELECT id, email, display_name, role, password_hash, is_active,
+                       created_at, updated_at, created_by, deactivated_at
+                FROM users;
+                DROP TABLE users;
+                ALTER TABLE users_with_external_role RENAME TO users;
+                """
+            )
+        finally:
+            self.connection.execute("PRAGMA foreign_keys = ON")
+
+    def _migrate_legacy_external_access(self) -> None:
+        self.connection.execute(
+            """
+            UPDATE project_client_access
+            SET updated_at = assigned_at
+            WHERE updated_at IS NULL OR updated_at = ''
+            """
+        )
+        self.connection.execute(
+            """
+            UPDATE project_client_access
+            SET updated_by = assigned_by
+            WHERE updated_by IS NULL OR updated_by = ''
+            """
+        )
+        self.connection.execute("UPDATE users SET role = 'external' WHERE role = 'client'")
 
     def _ensure_column(self, table_name: str, column_name: str, definition: str) -> None:
         if self.database_backend == "postgresql":
@@ -1698,7 +1778,7 @@ class AnalystStore:
     ) -> dict[str, Any]:
         self.get_project(project_id)
         user = self.get_user(user_id)
-        if user["role"] != "client":
+        if user["role"] not in {"client", "external"}:
             raise ValueError("project access can only be assigned to client users")
         now = utc_now_iso()
         with self._lock:
@@ -1708,22 +1788,72 @@ class AnalystStore:
                     project_id,
                     user_id,
                     assigned_at,
-                    assigned_by
+                    assigned_by,
+                    portal_view,
+                    operate,
+                    updated_at,
+                    updated_by
                 )
-                VALUES (?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, 1, 0, ?, ?)
                 """,
-                (project_id, user_id, now, assigned_by),
+                (project_id, user_id, now, assigned_by, now, assigned_by),
             )
             self.connection.commit()
         return self.get_project_client_access(project_id, user_id)
 
-    def get_project_client_access(self, project_id: int, user_id: int) -> dict[str, Any]:
+    def set_external_project_access(
+        self,
+        *,
+        project_id: int,
+        user_id: int,
+        portal_view: bool,
+        operate: bool,
+        updated_by: str,
+    ) -> dict[str, Any]:
+        self.get_project(project_id)
+        user = self.get_user(user_id)
+        if user["role"] != "external":
+            raise ValueError("project capabilities can only be assigned to external users")
+        now = utc_now_iso()
+        with self._lock:
+            self.connection.execute(
+                """
+                INSERT INTO project_client_access (
+                    project_id, user_id, assigned_at, assigned_by,
+                    portal_view, operate, updated_at, updated_by
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(project_id, user_id) DO UPDATE SET
+                    portal_view = excluded.portal_view,
+                    operate = excluded.operate,
+                    updated_at = excluded.updated_at,
+                    updated_by = excluded.updated_by
+                """,
+                (
+                    project_id,
+                    user_id,
+                    now,
+                    updated_by,
+                    1 if portal_view else 0,
+                    1 if operate else 0,
+                    now,
+                    updated_by,
+                ),
+            )
+            self.connection.commit()
+        return self.get_project_external_access(project_id, user_id)
+
+    def get_project_external_access(self, project_id: int, user_id: int) -> dict[str, Any]:
         row = self.connection.execute(
             """
             SELECT project_client_access.project_id,
                    project_client_access.user_id,
+                   project_client_access.portal_view,
+                   project_client_access.operate,
                    project_client_access.assigned_at,
                    project_client_access.assigned_by,
+                   project_client_access.updated_at,
+                   project_client_access.updated_by,
                    users.email,
                    users.display_name,
                    users.role,
@@ -1736,19 +1866,21 @@ class AnalystStore:
             (project_id, user_id),
         ).fetchone()
         if row is None:
-            raise KeyError(f"client {user_id} is not assigned to project {project_id}")
-        value = row_to_dict(row)
-        value["is_active"] = bool(value["is_active"])
-        return value
+            raise KeyError(f"external user {user_id} is not assigned to project {project_id}")
+        return external_access_row_to_dict(row)
 
-    def list_project_client_access(self, project_id: int) -> list[dict[str, Any]]:
+    def list_project_external_access(self, project_id: int) -> list[dict[str, Any]]:
         self.get_project(project_id)
         rows = self.connection.execute(
             """
             SELECT project_client_access.project_id,
                    project_client_access.user_id,
+                   project_client_access.portal_view,
+                   project_client_access.operate,
                    project_client_access.assigned_at,
                    project_client_access.assigned_by,
+                   project_client_access.updated_at,
+                   project_client_access.updated_by,
                    users.email,
                    users.display_name,
                    users.role,
@@ -1760,14 +1892,46 @@ class AnalystStore:
             """,
             (project_id,),
         ).fetchall()
-        values = [row_to_dict(row) for row in rows]
-        for value in values:
-            value["is_active"] = bool(value["is_active"])
-        return values
+        return [external_access_row_to_dict(row) for row in rows]
+
+    def external_has_project_capability(
+        self,
+        *,
+        user_id: int,
+        project_id: int,
+        capability: str,
+    ) -> bool:
+        if capability not in {"portal_view", "operate"}:
+            raise ValueError(f"unsupported external capability: {capability}")
+        row = self.connection.execute(
+            f"""
+            SELECT 1
+            FROM project_client_access
+            JOIN users ON users.id = project_client_access.user_id
+            WHERE project_client_access.user_id = ?
+              AND project_client_access.project_id = ?
+              AND users.role IN ('client', 'external')
+              AND users.is_active = 1
+              AND project_client_access.{capability} = 1
+            """,
+            (user_id, project_id),
+        ).fetchone()
+        return row is not None
+
+    def get_project_client_access(self, project_id: int, user_id: int) -> dict[str, Any]:
+        try:
+            return self.get_project_external_access(project_id, user_id)
+        except KeyError as error:
+            raise KeyError(
+                f"client {user_id} is not assigned to project {project_id}"
+            ) from error
+
+    def list_project_client_access(self, project_id: int) -> list[dict[str, Any]]:
+        return self.list_project_external_access(project_id)
 
     def list_client_projects(self, user_id: int) -> list[dict[str, Any]]:
         user = self.get_user(user_id)
-        if user["role"] != "client" or not user["is_active"]:
+        if user["role"] not in {"client", "external"} or not user["is_active"]:
             return []
         rows = self.connection.execute(
             """
@@ -1775,6 +1939,7 @@ class AnalystStore:
             FROM project_client_access
             JOIN projects ON projects.id = project_client_access.project_id
             WHERE project_client_access.user_id = ?
+              AND project_client_access.portal_view = 1
             ORDER BY projects.id
             """,
             (user_id,),
@@ -1782,21 +1947,13 @@ class AnalystStore:
         return [row_to_dict(row) for row in rows]
 
     def client_has_project_access(self, *, user_id: int, project_id: int) -> bool:
-        row = self.connection.execute(
-            """
-            SELECT 1
-            FROM project_client_access
-            JOIN users ON users.id = project_client_access.user_id
-            WHERE project_client_access.user_id = ?
-              AND project_client_access.project_id = ?
-              AND users.role = 'client'
-              AND users.is_active = 1
-            """,
-            (user_id, project_id),
-        ).fetchone()
-        return row is not None
+        return self.external_has_project_capability(
+            user_id=user_id,
+            project_id=project_id,
+            capability="portal_view",
+        )
 
-    def remove_client_project_access(self, *, project_id: int, user_id: int) -> None:
+    def remove_external_project_access(self, *, project_id: int, user_id: int) -> None:
         with self._lock:
             cursor = self.connection.execute(
                 """
@@ -1806,8 +1963,41 @@ class AnalystStore:
                 (project_id, user_id),
             )
             if cursor.rowcount == 0:
-                raise KeyError(f"client {user_id} is not assigned to project {project_id}")
+                raise KeyError(
+                    f"external user {user_id} is not assigned to project {project_id}"
+                )
             self.connection.commit()
+
+    def revoke_external_project_access(
+        self,
+        *,
+        project_id: int,
+        user_id: int,
+        updated_by: str,
+    ) -> dict[str, Any]:
+        self.get_project_external_access(project_id, user_id)
+        with self._lock:
+            self.connection.execute(
+                """
+                UPDATE project_client_access
+                SET portal_view = 0,
+                    operate = 0,
+                    updated_at = ?,
+                    updated_by = ?
+                WHERE project_id = ? AND user_id = ?
+                """,
+                (utc_now_iso(), updated_by, project_id, user_id),
+            )
+            self.connection.commit()
+        return self.get_project_external_access(project_id, user_id)
+
+    def remove_client_project_access(self, *, project_id: int, user_id: int) -> None:
+        try:
+            self.remove_external_project_access(project_id=project_id, user_id=user_id)
+        except KeyError as error:
+            raise KeyError(
+                f"client {user_id} is not assigned to project {project_id}"
+            ) from error
 
     def create_dashboard_template(
         self,
@@ -9743,6 +9933,16 @@ class AnalystStore:
 
 def row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
     return {key: row[key] for key in row.keys()}
+
+
+def external_access_row_to_dict(
+    row: Mapping[str, Any] | sqlite3.Row,
+) -> dict[str, Any]:
+    value = row_to_dict(row)
+    value["portal_view"] = bool(value["portal_view"])
+    value["operate"] = bool(value["operate"])
+    value["is_active"] = bool(value["is_active"])
+    return value
 
 
 def _parse_program_from_metadata_json(metadata_json: Any) -> dict[str, Any] | None:

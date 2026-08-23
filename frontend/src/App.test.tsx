@@ -7661,7 +7661,7 @@ describe("application shell", () => {
     expect(deleteCalls).toBe(1);
   });
 
-  it("lets admins manage users and project client access without a document reload", async () => {
+  it("lets admins manage users and external project capabilities without a document reload", async () => {
     window.history.replaceState({}, "", "/react/admin/users");
     const project = {
       id: 1,
@@ -7689,8 +7689,12 @@ describe("application shell", () => {
       display_name: string;
       role: string;
       is_active: boolean;
+      portal_view: boolean;
+      operate: boolean;
       assigned_at: string;
       assigned_by: string;
+      updated_at: string;
+      updated_by: string;
     }> = [];
     const schedules = [
       {
@@ -7871,22 +7875,21 @@ describe("application shell", () => {
           });
         }
         if (
-          path === "/api/admin/projects/1/client-access" &&
+          path === "/api/admin/projects/1/external-access" &&
           method === "GET"
         ) {
-          return new Response(JSON.stringify({ client_access: assignments }), {
-            headers: { "Content-Type": "application/json" },
-          });
+          return new Response(
+            JSON.stringify({ external_access: assignments }),
+            { headers: { "Content-Type": "application/json" } },
+          );
         }
         if (
-          path === "/api/admin/projects/1/client-access" &&
-          method === "POST"
+          path === "/api/admin/projects/1/external-access/8" &&
+          method === "PUT"
         ) {
           const body = JSON.parse(String(init?.body));
-          const client = users.find(
-            (candidate) => candidate.id === body.user_id,
-          );
-          if (!client) {
+          const externalUser = users.find((candidate) => candidate.id === 8);
+          if (!externalUser) {
             return new Response(JSON.stringify({ detail: "user not found" }), {
               status: 404,
               headers: { "Content-Type": "application/json" },
@@ -7894,26 +7897,36 @@ describe("application shell", () => {
           }
           const assignment = {
             project_id: 1,
-            user_id: client.id,
-            email: client.email,
-            display_name: client.display_name,
-            role: client.role,
-            is_active: client.is_active,
+            user_id: externalUser.id,
+            email: externalUser.email,
+            display_name: externalUser.display_name,
+            role: externalUser.role,
+            is_active: externalUser.is_active,
+            portal_view: body.portal_view,
+            operate: body.operate,
             assigned_at: "2026-06-24T12:06:00Z",
             assigned_by: "admin@example.local",
+            updated_at: "2026-06-24T12:06:00Z",
+            updated_by: "admin@example.local",
           };
           assignments.push(assignment);
-          return new Response(JSON.stringify({ client_access: assignment }), {
-            status: 201,
+          return new Response(JSON.stringify({ external_access: assignment }), {
             headers: { "Content-Type": "application/json" },
           });
         }
         if (
-          path === "/api/admin/projects/1/client-access/8" &&
+          path === "/api/admin/projects/1/external-access/8" &&
           method === "DELETE"
         ) {
-          assignments.splice(0, assignments.length);
-          return new Response(JSON.stringify({ removed: true }), {
+          const revoked = {
+            ...assignments[0],
+            portal_view: false,
+            operate: false,
+            updated_at: "2026-06-24T12:07:00Z",
+            updated_by: "admin@example.local",
+          };
+          assignments.splice(0, assignments.length, revoked);
+          return new Response(JSON.stringify({ external_access: revoked }), {
             headers: { "Content-Type": "application/json" },
           });
         }
@@ -7973,13 +7986,13 @@ describe("application shell", () => {
       await screen.findByText(/rolling \| offset 0h \| duracion 24h/),
     ).toBeVisible();
 
-    await user.type(screen.getByLabelText("Email"), "client@example.local");
-    await user.type(screen.getByLabelText("Nombre"), "Client User");
-    await user.type(screen.getByLabelText("Password"), "client pass");
-    await user.selectOptions(screen.getByLabelText("Rol"), "client");
+    await user.type(screen.getByLabelText("Email"), "external@example.local");
+    await user.type(screen.getByLabelText("Nombre"), "External User");
+    await user.type(screen.getByLabelText("Password"), "external pass");
+    await user.selectOptions(screen.getByLabelText("Rol"), "external");
     await user.click(screen.getByRole("button", { name: "Crear usuario" }));
-    expect(await screen.findByText("client@example.local")).toBeVisible();
-    expect(screen.getByText("client@example.local creado.")).toBeVisible();
+    expect(await screen.findByText("external@example.local")).toBeVisible();
+    expect(screen.getByText("external@example.local creado.")).toBeVisible();
     expect(screen.getByLabelText("Email")).toHaveFocus();
 
     await user.click(screen.getByRole("link", { name: "Analista" }));
@@ -7988,52 +8001,67 @@ describe("application shell", () => {
       await screen.findByRole("heading", { name: "Hybrid PMGD" }),
     ).toBeVisible();
     expect(
-      screen.getByRole("heading", { name: "Acceso cliente" }),
+      screen.getByRole("heading", { name: "Capacidades externas" }),
     ).toBeVisible();
 
-    await user.selectOptions(screen.getByLabelText("Cliente elegible"), "8");
-    await user.click(screen.getByRole("button", { name: "Asignar cliente" }));
-    expect(
-      await screen.findByText("client@example.local asignado a Hybrid PMGD."),
-    ).toBeVisible();
-    expect(
-      screen.getByRole("button", { name: "Quitar client@example.local" }),
-    ).toBeVisible();
-
+    await user.selectOptions(screen.getByLabelText("Usuario externo"), "8");
+    await user.click(screen.getByLabelText("Portal al otorgar"));
+    await user.click(screen.getByLabelText("Operar al otorgar"));
     await user.click(
-      screen.getByRole("button", { name: "Quitar client@example.local" }),
+      screen.getByRole("button", { name: "Otorgar capacidades" }),
     );
     expect(
-      screen.getByText("Confirma quitar client@example.local"),
+      await screen.findByText(
+        "Capacidades de external@example.local otorgadas en Hybrid PMGD.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Revocar external@example.local" }),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Portal external@example.local")).toBeChecked();
+    expect(screen.getByLabelText("Operar external@example.local")).toBeChecked();
+
+    await user.click(
+      screen.getByRole("button", { name: "Revocar external@example.local" }),
+    );
+    expect(
+      screen.getByText(
+        "Confirma revocar a external@example.local de Hybrid PMGD",
+      ),
     ).toBeVisible();
     await user.click(
       screen.getByRole("button", {
-        name: "Confirmar quitar client@example.local",
+        name: "Confirmar revocar external@example.local",
       }),
     );
     expect(
-      await screen.findByText("client@example.local sin acceso a Hybrid PMGD."),
+      await screen.findByText(
+        "Capacidades de external@example.local revocadas en Hybrid PMGD.",
+      ),
     ).toBeVisible();
     expect(
-      screen.queryByRole("button", { name: "Quitar client@example.local" }),
-    ).not.toBeInTheDocument();
+      screen.getByLabelText("Portal external@example.local"),
+    ).not.toBeChecked();
+    expect(
+      screen.getByLabelText("Operar external@example.local"),
+    ).not.toBeChecked();
 
     await user.click(screen.getByRole("link", { name: "Admin" }));
     await user.click(
       await screen.findByRole("button", {
-        name: "Desactivar client@example.local",
+        name: "Desactivar external@example.local",
       }),
     );
     expect(
-      screen.getByText("Confirma desactivar client@example.local"),
+      screen.getByText("Confirma desactivar external@example.local"),
     ).toBeVisible();
     await user.click(
       screen.getByRole("button", {
-        name: "Confirmar desactivar client@example.local",
+        name: "Confirmar desactivar external@example.local",
       }),
     );
     expect(
-      await screen.findByText("client@example.local desactivado."),
+      await screen.findByText("external@example.local desactivado."),
     ).toHaveFocus();
     expect(screen.getByText("deactivated")).toBeVisible();
   });

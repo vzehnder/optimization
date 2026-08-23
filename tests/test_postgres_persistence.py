@@ -79,6 +79,42 @@ class DatabaseEnvironmentTests(unittest.TestCase):
     "POSTGRES_TEST_DATABASE_URL is required for PostgreSQL integration tests",
 )
 class PostgresPersistenceTests(unittest.TestCase):
+    def test_configuration_access_migration_is_idempotent(self):
+        suffix = uuid.uuid4().hex
+        store = AnalystStore(POSTGRES_TEST_DATABASE_URL)
+        project_id = 0
+        client_id = 0
+        try:
+            project = store.create_project(name=f"External access {suffix}")
+            legacy_client = store.create_user(
+                email=f"legacy-client-{suffix}@example.com",
+                password_hash="test-hash",
+                role="client",
+            )
+            store.assign_client_to_project(
+                project_id=project["id"],
+                user_id=legacy_client["id"],
+                assigned_by=f"admin-{suffix}@example.com",
+            )
+            project_id = project["id"]
+            client_id = legacy_client["id"]
+        finally:
+            store.close()
+
+        reopened_store = AnalystStore(POSTGRES_TEST_DATABASE_URL)
+        try:
+            self.assertEqual(reopened_store.get_user(client_id)["role"], "external")
+            assignment = reopened_store.get_project_external_access(
+                project_id, client_id
+            )
+            self.assertTrue(assignment["portal_view"])
+            self.assertFalse(assignment["operate"])
+            self.assertEqual(
+                assignment["updated_by"], f"admin-{suffix}@example.com"
+            )
+        finally:
+            reopened_store.close()
+
     def test_core_workflow_uses_postgresql(self):
         store = AnalystStore(POSTGRES_TEST_DATABASE_URL)
         suffix = uuid.uuid4().hex

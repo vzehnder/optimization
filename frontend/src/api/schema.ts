@@ -73,6 +73,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/projects/{project_id}/external-access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin List Project External Access */
+        get: operations["admin_list_project_external_access_api_admin_projects__project_id__external_access_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/projects/{project_id}/external-access/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Admin Set Project External Access */
+        put: operations["admin_set_project_external_access_api_admin_projects__project_id__external_access__user_id__put"];
+        post?: never;
+        /** Admin Remove Project External Access */
+        delete: operations["admin_remove_project_external_access_api_admin_projects__project_id__external_access__user_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/runs/rebuild-results": {
         parameters: {
             query?: never;
@@ -1447,7 +1482,7 @@ export interface components {
              * Role
              * @enum {string}
              */
-            role: "admin" | "analyst" | "client";
+            role: "admin" | "analyst" | "client" | "external";
         };
         /** CurrentUserResponse */
         CurrentUserResponse: {
@@ -1523,6 +1558,13 @@ export interface components {
             timezone: string;
             /** Version Label */
             version_label: string;
+        };
+        /** ExternalProjectAccessRequest */
+        ExternalProjectAccessRequest: {
+            /** Operate */
+            operate: boolean;
+            /** Portal View */
+            portal_view: boolean;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -2162,6 +2204,105 @@ export interface operations {
         };
     };
     admin_remove_project_client_access_api_admin_projects__project_id__client_access__user_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                user_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_list_project_external_access_api_admin_projects__project_id__external_access_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_set_project_external_access_api_admin_projects__project_id__external_access__user_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                user_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExternalProjectAccessRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_remove_project_external_access_api_admin_projects__project_id__external_access__user_id__delete: {
         parameters: {
             query?: never;
             header?: never;

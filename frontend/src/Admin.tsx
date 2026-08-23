@@ -3,17 +3,17 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ApiError,
-  assignProjectClientAccess,
   createAdminUser,
   createRunSchedule,
   deactivateAdminUser,
   listAdminUsers,
-  listProjectClientAccess,
+  listProjectExternalAccess,
   listRunSchedules,
-  removeProjectClientAccess,
+  revokeProjectExternalAccess,
   runDueSchedules,
+  setProjectExternalAccess,
   type AdminUser,
-  type ProjectClientAccess,
+  type ExternalProjectAccess,
   type RunSchedule,
   type RunScheduleCreatePayload,
   type RunScheduleTick,
@@ -22,8 +22,8 @@ import {
 
 const adminUsersQueryKey = ["admin-users"] as const;
 const runSchedulesQueryKey = ["run-schedules"] as const;
-const projectClientAccessQueryKey = (projectId: number) =>
-  ["project-client-access", projectId] as const;
+const projectExternalAccessQueryKey = (projectId: number) =>
+  ["project-external-access", projectId] as const;
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
@@ -43,22 +43,17 @@ function replaceUser(users: AdminUser[] | undefined, user: AdminUser) {
   );
 }
 
-function appendAssignment(
-  assignments: ProjectClientAccess[] | undefined,
-  assignment: ProjectClientAccess,
+function replaceAssignment(
+  assignments: ExternalProjectAccess[] | undefined,
+  assignment: ExternalProjectAccess,
 ) {
   if (!assignments) return [assignment];
-  if (assignments.some((candidate) => candidate.user_id === assignment.user_id))
-    return assignments;
-  return [...assignments, assignment];
-}
-
-function removeAssignment(
-  assignments: ProjectClientAccess[] | undefined,
-  userId: number,
-) {
-  return (assignments || []).filter(
-    (assignment) => assignment.user_id !== userId,
+  if (
+    !assignments.some((candidate) => candidate.user_id === assignment.user_id)
+  )
+    return [...assignments, assignment];
+  return assignments.map((candidate) =>
+    candidate.user_id === assignment.user_id ? assignment : candidate,
   );
 }
 
@@ -125,8 +120,8 @@ function RunScheduleList({
                   <ul aria-label={`Historial ${schedule.display_name}`}>
                     {ticksBySchedule.get(schedule.id)?.map((tick) => (
                       <li key={tick.id}>
-                        tick {tick.id} {tick.status} | rango {tick.range_start} -{" "}
-                        {tick.range_end}
+                        tick {tick.id} {tick.status} | rango {tick.range_start}{" "}
+                        - {tick.range_end}
                         {tick.run_id ? ` | run ${tick.run_id}` : ""}
                         {tick.error_message ? ` | ${tick.error_message}` : ""}
                       </li>
@@ -374,6 +369,7 @@ function CreateUserForm() {
       <label htmlFor="admin-user-role">Rol</label>
       <select id="admin-user-role" name="role" defaultValue="analyst" required>
         <option value="analyst">analyst</option>
+        <option value="external">external</option>
         <option value="client">client</option>
         <option value="admin">admin</option>
       </select>
@@ -539,66 +535,112 @@ export function AdminUsersView() {
   );
 }
 
-function RemoveProjectAccessControl({
+function ExternalCapabilityEditor({
   assignment,
   projectId,
   projectName,
-  onRemoved,
+  onChanged,
 }: {
-  assignment: ProjectClientAccess;
+  assignment: ExternalProjectAccess;
   projectId: number;
   projectName: string;
-  onRemoved: (assignment: ProjectClientAccess) => void;
+  onChanged: (assignment: ExternalProjectAccess) => void;
 }) {
-  const [confirming, setConfirming] = useState(false);
+  const [portalView, setPortalView] = useState(assignment.portal_view);
+  const [operate, setOperate] = useState(assignment.operate);
+  const [confirmingRemoval, setConfirmingRemoval] = useState(false);
   const [error, setError] = useState("");
-  const mutation = useMutation({
-    mutationFn: () => removeProjectClientAccess(projectId, assignment.user_id),
-    onSuccess: () => {
-      setConfirming(false);
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      setProjectExternalAccess(projectId, assignment.user_id, {
+        portal_view: portalView,
+        operate,
+      }),
+    onSuccess: (updated) => {
       setError("");
-      onRemoved(assignment);
+      onChanged(updated);
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError)),
+  });
+  const removeMutation = useMutation({
+    mutationFn: () =>
+      revokeProjectExternalAccess(projectId, assignment.user_id),
+    onSuccess: (revoked) => {
+      setError("");
+      setConfirmingRemoval(false);
+      onChanged(revoked);
     },
     onError: (mutationError) => setError(errorMessage(mutationError)),
   });
 
-  if (!confirming) {
-    return (
-      <button
-        type="button"
-        className="danger-button"
-        onClick={() => setConfirming(true)}
-      >
-        Quitar {assignment.email}
-      </button>
-    );
-  }
-
   return (
-    <div className="remove-confirmation">
-      <p>Confirma quitar {assignment.email}</p>
-      <p className="source-note">
-        Esto revoca acceso a {projectName} de inmediato.
-      </p>
+    <div>
+      <div className="admin-resource-row">
+        <div>
+          <strong>{assignment.email}</strong>
+          <p>
+            {assignment.display_name || "Sin nombre"} |{" "}
+            {assignment.is_active ? "active" : "deactivated"} | actualizado por{" "}
+            {assignment.updated_by}
+          </p>
+        </div>
+        <div>
+          <label>
+            <input
+              type="checkbox"
+              checked={portalView}
+              onChange={(event) => setPortalView(event.target.checked)}
+            />
+            Portal {assignment.email}
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={operate}
+              onChange={(event) => setOperate(event.target.checked)}
+            />
+            Operar {assignment.email}
+          </label>
+        </div>
+      </div>
       {error ? <p role="alert">{error}</p> : null}
       <button
         type="button"
-        className="danger-button"
-        disabled={mutation.isPending}
-        onClick={() => mutation.mutate()}
+        disabled={saveMutation.isPending}
+        onClick={() => saveMutation.mutate()}
       >
-        Confirmar quitar {assignment.email}
+        Guardar capacidades de {assignment.email}
       </button>
-      <button
-        type="button"
-        className="secondary-action"
-        onClick={() => {
-          setConfirming(false);
-          setError("");
-        }}
-      >
-        Cancelar
-      </button>
+      {!confirmingRemoval ? (
+        <button
+          type="button"
+          className="danger-button"
+          onClick={() => setConfirmingRemoval(true)}
+        >
+          Revocar {assignment.email}
+        </button>
+      ) : (
+        <div className="remove-confirmation">
+          <p>
+            Confirma revocar a {assignment.email} de {projectName}
+          </p>
+          <button
+            type="button"
+            className="danger-button"
+            disabled={removeMutation.isPending}
+            onClick={() => removeMutation.mutate()}
+          >
+            Confirmar revocar {assignment.email}
+          </button>
+          <button
+            type="button"
+            className="secondary-action"
+            onClick={() => setConfirmingRemoval(false)}
+          >
+            Cancelar
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -607,37 +649,27 @@ function AssignmentList({
   assignments,
   projectId,
   projectName,
-  onRemoved,
+  onChanged,
 }: {
-  assignments: ProjectClientAccess[];
+  assignments: ExternalProjectAccess[];
   projectId: number;
   projectName: string;
-  onRemoved: (assignment: ProjectClientAccess) => void;
+  onChanged: (assignment: ExternalProjectAccess) => void;
 }) {
   if (!assignments.length) {
-    return <p className="empty-state">No hay clientes asignados.</p>;
+    return <p className="empty-state">No hay usuarios externos asignados.</p>;
   }
 
   return (
     <ul className="resource-list">
       {assignments.map((assignment) => (
-        <li key={assignment.user_id}>
-          <div className="admin-resource-row">
-            <div>
-              <strong>{assignment.email}</strong>
-              <p>
-                {assignment.display_name || "Sin nombre"} |{" "}
-                {assignment.is_active ? "active" : "deactivated"} | assigned by{" "}
-                {assignment.assigned_by}
-              </p>
-            </div>
-            <RemoveProjectAccessControl
-              assignment={assignment}
-              projectId={projectId}
-              projectName={projectName}
-              onRemoved={onRemoved}
-            />
-          </div>
+        <li key={`${assignment.user_id}:${assignment.updated_at}`}>
+          <ExternalCapabilityEditor
+            assignment={assignment}
+            projectId={projectId}
+            projectName={projectName}
+            onChanged={onChanged}
+          />
         </li>
       ))}
     </ul>
@@ -654,6 +686,8 @@ export function ProjectClientAccessSection({
   const queryClient = useQueryClient();
   const statusRef = useRef<HTMLParagraphElement>(null);
   const [selectedUserId, setSelectedUserId] = useState("");
+  const [grantPortalView, setGrantPortalView] = useState(false);
+  const [grantOperate, setGrantOperate] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const users = useQuery({
@@ -662,42 +696,51 @@ export function ProjectClientAccessSection({
     retry: false,
   });
   const access = useQuery({
-    queryKey: projectClientAccessQueryKey(projectId),
-    queryFn: ({ signal }) => listProjectClientAccess(projectId, signal),
+    queryKey: projectExternalAccessQueryKey(projectId),
+    queryFn: ({ signal }) => listProjectExternalAccess(projectId, signal),
     retry: false,
   });
   const assignedIds = useMemo(
     () => new Set((access.data || []).map((assignment) => assignment.user_id)),
     [access.data],
   );
-  const eligibleClients = useMemo(
+  const eligibleExternalUsers = useMemo(
     () =>
       (users.data || []).filter(
         (user) =>
-          user.role === "client" && user.is_active && !assignedIds.has(user.id),
+          user.role === "external" &&
+          user.is_active &&
+          !assignedIds.has(user.id),
       ),
     [assignedIds, users.data],
   );
-  const selectedClientAvailable = eligibleClients.some(
-    (client) => String(client.id) === selectedUserId,
+  const selectedUserAvailable = eligibleExternalUsers.some(
+    (user) => String(user.id) === selectedUserId,
   );
-  const effectiveSelectedUserId = selectedClientAvailable
+  const effectiveSelectedUserId = selectedUserAvailable
     ? selectedUserId
-    : eligibleClients[0]
-      ? String(eligibleClients[0].id)
+    : eligibleExternalUsers[0]
+      ? String(eligibleExternalUsers[0].id)
       : "";
   const assignMutation = useMutation({
     mutationFn: (userId: number) =>
-      assignProjectClientAccess(projectId, userId),
+      setProjectExternalAccess(projectId, userId, {
+        portal_view: grantPortalView,
+        operate: grantOperate,
+      }),
     onSuccess: (assignment) => {
       setError("");
-      setStatus(`${assignment.email} asignado a ${projectName}.`);
-      queryClient.setQueryData<ProjectClientAccess[]>(
-        projectClientAccessQueryKey(projectId),
-        (assignments) => appendAssignment(assignments, assignment),
+      setStatus(
+        `Capacidades de ${assignment.email} otorgadas en ${projectName}.`,
+      );
+      setGrantPortalView(false);
+      setGrantOperate(false);
+      queryClient.setQueryData<ExternalProjectAccess[]>(
+        projectExternalAccessQueryKey(projectId),
+        (assignments) => replaceAssignment(assignments, assignment),
       );
       void queryClient.invalidateQueries({
-        queryKey: projectClientAccessQueryKey(projectId),
+        queryKey: projectExternalAccessQueryKey(projectId),
       });
     },
     onError: (mutationError) => setError(errorMessage(mutationError)),
@@ -707,30 +750,27 @@ export function ProjectClientAccessSection({
     if (status) statusRef.current?.focus();
   }, [status]);
 
-  function removeAccepted(assignment: ProjectClientAccess) {
-    queryClient.setQueryData<ProjectClientAccess[]>(
-      projectClientAccessQueryKey(projectId),
-      (assignments) => removeAssignment(assignments, assignment.user_id),
+  function changeAccepted(assignment: ExternalProjectAccess) {
+    queryClient.setQueryData<ExternalProjectAccess[]>(
+      projectExternalAccessQueryKey(projectId),
+      (assignments) => replaceAssignment(assignments, assignment),
     );
-    void queryClient.invalidateQueries({
-      queryKey: projectClientAccessQueryKey(projectId),
-    });
     setError("");
-    setStatus(`${assignment.email} sin acceso a ${projectName}.`);
+    setStatus(`Capacidades de ${assignment.email} actualizadas.`);
   }
 
   if (users.isPending || access.isPending) {
     return (
       <section className="workspace-section" aria-labelledby="project-access">
-        <h2 id="project-access">Acceso cliente</h2>
-        <p role="status">Cargando acceso cliente</p>
+        <h2 id="project-access">Capacidades externas</h2>
+        <p role="status">Cargando capacidades externas</p>
       </section>
     );
   }
   if (users.isError || access.isError) {
     return (
       <section className="workspace-section" aria-labelledby="project-access">
-        <h2 id="project-access">Acceso cliente</h2>
+        <h2 id="project-access">Capacidades externas</h2>
         <p role="alert">{errorMessage(users.error || access.error)}</p>
       </section>
     );
@@ -738,7 +778,7 @@ export function ProjectClientAccessSection({
 
   return (
     <section className="workspace-section" aria-labelledby="project-access">
-      <h2 id="project-access">Acceso cliente</h2>
+      <h2 id="project-access">Capacidades externas</h2>
       {status ? (
         <p
           ref={statusRef}
@@ -753,7 +793,14 @@ export function ProjectClientAccessSection({
         assignments={access.data}
         projectId={projectId}
         projectName={projectName}
-        onRemoved={removeAccepted}
+        onChanged={(assignment) => {
+          changeAccepted(assignment);
+          if (!assignment.portal_view && !assignment.operate) {
+            setStatus(
+              `Capacidades de ${assignment.email} revocadas en ${projectName}.`,
+            );
+          }
+        }}
       />
       <form
         className="workspace-form nested-form"
@@ -765,30 +812,46 @@ export function ProjectClientAccessSection({
             assignMutation.mutate(Number(effectiveSelectedUserId));
         }}
       >
-        <h3>Asignar cliente</h3>
+        <h3>Otorgar capacidades</h3>
         {error ? <p role="alert">{error}</p> : null}
-        <label htmlFor="eligible-client">Cliente elegible</label>
+        <label htmlFor="eligible-external-user">Usuario externo</label>
         <select
-          id="eligible-client"
+          id="eligible-external-user"
           value={effectiveSelectedUserId}
-          disabled={!eligibleClients.length}
+          disabled={!eligibleExternalUsers.length}
           onChange={(event) => setSelectedUserId(event.target.value)}
         >
-          {eligibleClients.length ? (
-            eligibleClients.map((client) => (
-              <option key={client.id} value={client.id}>
-                {client.email}
+          {eligibleExternalUsers.length ? (
+            eligibleExternalUsers.map((externalUser) => (
+              <option key={externalUser.id} value={externalUser.id}>
+                {externalUser.email}
               </option>
             ))
           ) : (
-            <option value="">Sin clientes elegibles</option>
+            <option value="">Sin usuarios externos elegibles</option>
           )}
         </select>
+        <label>
+          <input
+            type="checkbox"
+            checked={grantPortalView}
+            onChange={(event) => setGrantPortalView(event.target.checked)}
+          />
+          Portal al otorgar
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={grantOperate}
+            onChange={(event) => setGrantOperate(event.target.checked)}
+          />
+          Operar al otorgar
+        </label>
         <button
           type="submit"
           disabled={!effectiveSelectedUserId || assignMutation.isPending}
         >
-          Asignar cliente
+          Otorgar capacidades
         </button>
       </form>
     </section>

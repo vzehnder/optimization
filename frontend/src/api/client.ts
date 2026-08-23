@@ -44,6 +44,18 @@ export interface ProjectClientAccess {
   assigned_by: string;
 }
 
+export interface ExternalProjectAccess extends ProjectClientAccess {
+  portal_view: boolean;
+  operate: boolean;
+  updated_at: string;
+  updated_by: string;
+}
+
+export interface ExternalProjectCapabilities {
+  portal_view: boolean;
+  operate: boolean;
+}
+
 export interface RunSchedule {
   id: number;
   scenario_id: number;
@@ -1235,6 +1247,49 @@ export async function removeProjectClientAccess(
   );
 }
 
+export async function listProjectExternalAccess(
+  projectId: number,
+  signal?: AbortSignal,
+): Promise<ExternalProjectAccess[]> {
+  const response = await requestJson<{
+    external_access: ExternalProjectAccess[];
+  }>(`/api/admin/projects/${projectId}/external-access`, { signal });
+  return response.external_access;
+}
+
+export async function setProjectExternalAccess(
+  projectId: number,
+  userId: number,
+  capabilities: ExternalProjectCapabilities,
+): Promise<ExternalProjectAccess> {
+  const csrfToken = await getCsrfToken();
+  const response = await requestJson<{
+    external_access: ExternalProjectAccess;
+  }>(`/api/admin/projects/${projectId}/external-access/${userId}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrfToken,
+    },
+    body: JSON.stringify(capabilities),
+  });
+  return response.external_access;
+}
+
+export async function revokeProjectExternalAccess(
+  projectId: number,
+  userId: number,
+): Promise<ExternalProjectAccess> {
+  const csrfToken = await getCsrfToken();
+  const response = await requestJson<{
+    external_access: ExternalProjectAccess;
+  }>(`/api/admin/projects/${projectId}/external-access/${userId}`, {
+    method: "DELETE",
+    headers: { "X-CSRF-Token": csrfToken },
+  });
+  return response.external_access;
+}
+
 export async function listRunSchedules(signal?: AbortSignal): Promise<{
   schedules: RunSchedule[];
   ticks: RunScheduleTick[];
@@ -2129,7 +2184,9 @@ export async function regenerateTimeSeriesSet(
 ): Promise<ProjectTimeSeriesSet> {
   const response = await postJsonWithCsrf<{
     time_series_set: ProjectTimeSeriesSet;
-  }>(`/api/projects/${projectId}/time-series-sets/${timeSeriesSetId}/regenerate`);
+  }>(
+    `/api/projects/${projectId}/time-series-sets/${timeSeriesSetId}/regenerate`,
+  );
   return response.time_series_set;
 }
 

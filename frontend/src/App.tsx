@@ -64,7 +64,11 @@ function currentReactPath(location: ReturnType<typeof useLocation>): string {
 }
 
 function landingRoute(user: CurrentUser): string {
-  return user.role === "client" ? "/client" : "/projects";
+  return isExternalIdentity(user) ? "/client" : "/projects";
+}
+
+function isExternalIdentity(user: CurrentUser): boolean {
+  return user.role === "client" || user.role === "external";
 }
 
 function errorMessage(error: unknown): string {
@@ -246,7 +250,7 @@ function ShellHeader({ user }: { user: CurrentUser }) {
         </div>
       </header>
       <nav className="primary-nav" aria-label="Navegacion principal">
-        {user.role !== "client" ? (
+        {!isExternalIdentity(user) ? (
           <>
             <Link to="/projects">Analista</Link>
             {user.role === "admin" ? (
@@ -263,7 +267,7 @@ function ShellHeader({ user }: { user: CurrentUser }) {
 }
 
 function AuthenticatedRoutes({ user }: { user: CurrentUser }) {
-  const isClient = user.role === "client";
+  const isClient = isExternalIdentity(user);
   return (
     <div className="app-frame">
       <ShellHeader user={user} />
@@ -310,9 +314,7 @@ function AuthenticatedRoutes({ user }: { user: CurrentUser }) {
           />
           <Route
             path="projects/:projectId/time-series-sets/:timeSeriesSetId"
-            element={
-              isClient ? <ForbiddenView /> : <TimeSeriesSetDetailView />
-            }
+            element={isClient ? <ForbiddenView /> : <TimeSeriesSetDetailView />}
           />
           <Route
             path="scenarios/:scenarioId"

@@ -116,7 +116,7 @@ class CurrentUser(BaseModel):
     id: int
     email: str
     display_name: str
-    role: Literal["admin", "analyst", "client"]
+    role: Literal["admin", "analyst", "client", "external"]
     is_active: bool
 
 
@@ -136,6 +136,11 @@ class CsrfTokenResponse(BaseModel):
 
 class ProjectClientAccessRequest(BaseModel):
     user_id: int
+
+
+class ExternalProjectAccessRequest(BaseModel):
+    portal_view: bool
+    operate: bool
 
 
 class DashboardTemplateWriteRequest(BaseModel):
@@ -580,7 +585,7 @@ def create_app(
 
     def authenticated_landing_path(user: dict[str, Any], next_path: str = "") -> str:
         safe_next = safe_internal_next_path(next_path)
-        if user["role"] == "client":
+        if user["role"] in {"client", "external"}:
             return safe_next if safe_next.startswith("/client") else "/client"
         if safe_next and not safe_next.startswith("/client"):
             return safe_next
@@ -588,7 +593,7 @@ def create_app(
 
     def react_authenticated_landing_path(user: dict[str, Any], next_path: str = "") -> str:
         safe_next = safe_react_next_path(next_path)
-        if user["role"] == "client":
+        if user["role"] in {"client", "external"}:
             return safe_next if safe_next.startswith("/react/client") else "/react/client"
         if safe_next and not safe_next.startswith("/react/client"):
             return safe_next
@@ -1106,6 +1111,54 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"removed": True}
+
+    @app.get("/api/admin/projects/{project_id}/external-access")
+    async def admin_list_project_external_access(project_id: int, request: Request):
+        require_admin_user(request)
+        try:
+            assignments = analyst_store.list_project_external_access(project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"external_access": assignments}
+
+    @app.put("/api/admin/projects/{project_id}/external-access/{user_id}")
+    async def admin_set_project_external_access(
+        project_id: int,
+        user_id: int,
+        request: Request,
+        payload: ExternalProjectAccessRequest,
+    ):
+        require_admin_user(request)
+        try:
+            assignment = analyst_store.set_external_project_access(
+                project_id=project_id,
+                user_id=user_id,
+                portal_view=payload.portal_view,
+                operate=payload.operate,
+                updated_by=(request.state.current_user or {}).get("email", "admin"),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return {"external_access": assignment}
+
+    @app.delete("/api/admin/projects/{project_id}/external-access/{user_id}")
+    async def admin_remove_project_external_access(
+        project_id: int,
+        user_id: int,
+        request: Request,
+    ):
+        require_admin_user(request)
+        try:
+            assignment = analyst_store.revoke_external_project_access(
+                project_id=project_id,
+                user_id=user_id,
+                updated_by=(request.state.current_user or {}).get("email", "admin"),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"external_access": assignment}
 
     @app.get("/api/projects/{project_id}/dashboard-templates")
     async def list_dashboard_templates(project_id: int):
