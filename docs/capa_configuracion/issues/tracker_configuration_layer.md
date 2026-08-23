@@ -24,8 +24,8 @@ reopen or weaken decisions from the completed Wayfinder map.
 
 | ID | Title | Type | Triage | Status | Blocked by | Issue file |
 | --- | --- | --- | --- | --- | --- | --- |
-| BESS-CONFIG-001 | Expand External Project Capabilities Beside Legacy Client Access | AFK | ready-for-agent | In Review | None | [BESS-CONFIG-001-expand-external-project-capabilities-beside-legacy-client-access.md](BESS-CONFIG-001-expand-external-project-capabilities-beside-legacy-client-access.md) |
-| BESS-CONFIG-002 | Cut Over The Portal To External Capabilities And Retire Legacy Client Access | AFK | ready-for-agent | Todo | BESS-CONFIG-001 | [BESS-CONFIG-002-cut-over-the-portal-to-external-capabilities-and-retire-legacy-client-access.md](BESS-CONFIG-002-cut-over-the-portal-to-external-capabilities-and-retire-legacy-client-access.md) |
+| BESS-CONFIG-001 | Expand External Project Capabilities Beside Legacy Client Access | AFK | ready-for-agent | Done | None | [BESS-CONFIG-001-expand-external-project-capabilities-beside-legacy-client-access.md](BESS-CONFIG-001-expand-external-project-capabilities-beside-legacy-client-access.md) |
+| BESS-CONFIG-002 | Cut Over The Portal To External Capabilities And Retire Legacy Client Access | AFK | ready-for-agent | In Review | BESS-CONFIG-001 | [BESS-CONFIG-002-cut-over-the-portal-to-external-capabilities-and-retire-legacy-client-access.md](BESS-CONFIG-002-cut-over-the-portal-to-external-capabilities-and-retire-legacy-client-access.md) |
 | BESS-CONFIG-003 | Configure One Portal Result End To End | AFK | ready-for-agent | Todo | BESS-CONFIG-002 | [BESS-CONFIG-003-configure-one-portal-result-end-to-end.md](BESS-CONFIG-003-configure-one-portal-result-end-to-end.md) |
 | BESS-CONFIG-004 | Cut Over All Portal Results To Safe Shared Payloads | AFK | ready-for-agent | Todo | BESS-CONFIG-003 | [BESS-CONFIG-004-cut-over-all-portal-results-to-safe-shared-payloads.md](BESS-CONFIG-004-cut-over-all-portal-results-to-safe-shared-payloads.md) |
 | BESS-CONFIG-005 | Brand The Client Portal With A Project Name And Logo | AFK | ready-for-agent | Todo | BESS-CONFIG-003 | [BESS-CONFIG-005-brand-the-client-portal-with-a-project-name-and-logo.md](BESS-CONFIG-005-brand-the-client-portal-with-a-project-name-and-logo.md) |
@@ -68,6 +68,8 @@ graph and may be implemented in parallel.
 | --- | --- | --- | --- |
 | 2026-08-23 | All | Created | Seventeen AFK tracer-bullet issues published from the accepted configuration-layer architecture after explicit approval of granularity, dependency relationships and AFK classification. BESS-CONFIG-001 is the initial frontier. |
 | 2026-08-23 | BESS-CONFIG-001 | Todo -> In Review | Added the transitional external identity, independent audited project capabilities, safe SQLite/PostgreSQL migration, admin API/UI management and portal compatibility under TDD. |
+| 2026-08-23 | BESS-CONFIG-001 | In Review -> Done | Accepted as the prerequisite for the contract cutover. |
+| 2026-08-23 | BESS-CONFIG-002 | Todo -> In Review | Retired the legacy client role and client-access contract, enforced portal_view on portal entry and every project resource, preserved revocation semantics and regenerated the React/OpenAPI contract under TDD. |
 
 ## Regression Guard
 

@@ -24,10 +24,15 @@ const adminUsersQueryKey = ["admin-users"] as const;
 const runSchedulesQueryKey = ["run-schedules"] as const;
 const projectExternalAccessQueryKey = (projectId: number) =>
   ["project-external-access", projectId] as const;
+const userRoles: UserCreatePayload["role"][] = ["admin", "analyst", "external"];
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
   return "No se pudo completar la accion.";
+}
+
+function isUserRole(value: string): value is UserCreatePayload["role"] {
+  return userRoles.includes(value as UserCreatePayload["role"]);
 }
 
 function appendUser(users: AdminUser[] | undefined, user: AdminUser) {
@@ -325,11 +330,16 @@ function CreateUserForm() {
     setStatus("");
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
+    const role = String(form.get("role") || "");
+    if (!isUserRole(role)) {
+      setError("Rol de usuario no soportado.");
+      return;
+    }
     const payload: UserCreatePayload = {
       email: String(form.get("email") || ""),
       display_name: String(form.get("display_name") || ""),
       password: String(form.get("password") || ""),
-      role: String(form.get("role") || ""),
+      role,
     };
     mutation.mutate(payload, {
       onSuccess: () => formElement.reset(),
@@ -676,7 +686,7 @@ function AssignmentList({
   );
 }
 
-export function ProjectClientAccessSection({
+export function ProjectExternalAccessSection({
   projectId,
   projectName,
 }: {

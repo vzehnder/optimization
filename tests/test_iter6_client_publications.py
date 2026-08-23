@@ -15,7 +15,9 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
     def setUp(self):
         self.store = AnalystStore("sqlite:///:memory:")
         self.create_user("analyst@example.local", role="analyst", password="analyst pass")
-        self.client_user = self.create_user("client@example.local", role="client", password="client pass")
+        self.client_user = self.create_user(
+            "client@example.local", role="external", password="client pass"
+        )
 
     def tearDown(self):
         self.store.close()
@@ -34,10 +36,12 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
                 display_name="model_metadata.json",
                 media_type="application/json",
             )
-            self.store.assign_client_to_project(
+            self.store.set_external_project_access(
                 project_id=project_id,
                 user_id=self.client_user["id"],
-                assigned_by="analyst@example.local",
+                portal_view=True,
+                operate=False,
+                updated_by="analyst@example.local",
             )
             template = self.store.create_dashboard_template(
                 project_id=project_id,
@@ -90,7 +94,11 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
                 404,
             )
 
-            self.create_user("other-client@example.local", role="client", password="client pass")
+            self.create_user(
+                "other-client@example.local",
+                role="external",
+                password="client pass",
+            )
             unassigned = TestClient(create_app(store=self.store, artifact_root=artifact_root, auth_enabled=True))
             self.login(unassigned, "other-client@example.local", "client pass")
             self.assertEqual(
@@ -129,10 +137,12 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
             artifact_root = Path(temp_dir) / "artifacts"
             run = create_completed_run_with_result_artifacts(self.store, artifact_root)
             project_id = self.store.get_run_lineage(run["id"])["project_id"]
-            self.store.assign_client_to_project(
+            self.store.set_external_project_access(
                 project_id=project_id,
                 user_id=self.client_user["id"],
-                assigned_by="analyst@example.local",
+                portal_view=True,
+                operate=False,
+                updated_by="analyst@example.local",
             )
             template = self.store.create_dashboard_template(
                 project_id=project_id,
@@ -205,10 +215,12 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
             artifact_root = Path(temp_dir) / "artifacts"
             run = create_completed_run_with_result_artifacts(self.store, artifact_root)
             project_id = self.store.get_run_lineage(run["id"])["project_id"]
-            self.store.assign_client_to_project(
+            self.store.set_external_project_access(
                 project_id=project_id,
                 user_id=self.client_user["id"],
-                assigned_by="analyst@example.local",
+                portal_view=True,
+                operate=False,
+                updated_by="analyst@example.local",
             )
             template = self.store.create_dashboard_template(
                 project_id=project_id,
@@ -254,10 +266,12 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
             artifact_root = Path(temp_dir) / "artifacts"
             run = create_completed_run_with_result_artifacts(self.store, artifact_root)
             project_id = self.store.get_run_lineage(run["id"])["project_id"]
-            self.store.assign_client_to_project(
+            self.store.set_external_project_access(
                 project_id=project_id,
                 user_id=self.client_user["id"],
-                assigned_by="analyst@example.local",
+                portal_view=True,
+                operate=False,
+                updated_by="analyst@example.local",
             )
             template = self.store.create_dashboard_template(
                 project_id=project_id,

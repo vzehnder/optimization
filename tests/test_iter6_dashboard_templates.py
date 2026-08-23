@@ -273,14 +273,16 @@ class Iteration6DashboardTemplateTests(unittest.TestCase):
             scoped_response = client.get(f"/api/dashboard-templates/{template['id']}/runs/{run['id']}/results")
             self.assertEqual(scoped_response.status_code, 404)
 
-        client_user = self.create_user("client@example.local", role="client", password="client pass")
+        client_user = self.create_user(
+            "client@example.local", role="external", password="client pass"
+        )
         client_session = TestClient(create_app(store=self.store, auth_enabled=True))
         self.login(client_session, "client@example.local", "client pass")
         self.assertEqual(
             client_session.get(f"/api/projects/{first_project['id']}/dashboard-templates").status_code,
             403,
         )
-        self.assertEqual(client_user["role"], "client")
+        self.assertEqual(client_user["role"], "external")
 
     def project_id_for_run(self, run_id):
         run = self.store.get_run(run_id)

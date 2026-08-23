@@ -15,6 +15,7 @@ from tests.auth_test_helpers import (
     delete_with_csrf,
     login_json_with_csrf,
     post_json_with_csrf,
+    put_json_with_csrf,
 )
 
 
@@ -22,7 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class Iteration6AcceptanceTests(unittest.TestCase):
-    def test_client_publication_flow_auth_downloads_and_revocation(self):
+    def test_external_portal_publication_flow_auth_downloads_and_revocation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             artifact_root = Path(temp_dir) / "artifacts"
             store = AnalystStore("sqlite:///:memory:")
@@ -73,12 +74,12 @@ class Iteration6AcceptanceTests(unittest.TestCase):
                     {
                         "email": "client@example.local",
                         "display_name": "Client",
-                        "role": "client",
+                        "role": "external",
                         "password": "client pass",
                     },
                 ).json()["user"]
                 self.assertEqual(analyst_user["role"], "analyst")
-                self.assertEqual(client_user["role"], "client")
+                self.assertEqual(client_user["role"], "external")
 
                 project = post_json_with_csrf(
                     client,
@@ -90,12 +91,12 @@ class Iteration6AcceptanceTests(unittest.TestCase):
                     "/api/projects",
                     {"name": "Unassigned Internal Project", "description": ""},
                 ).json()
-                assign = post_json_with_csrf(
+                assign = put_json_with_csrf(
                     client,
-                    f"/api/admin/projects/{project['id']}/client-access",
-                    {"user_id": client_user["id"]},
+                    f"/api/admin/projects/{project['id']}/external-access/{client_user['id']}",
+                    {"portal_view": True, "operate": False},
                 )
-                self.assertEqual(assign.status_code, 201)
+                self.assertEqual(assign.status_code, 200)
 
                 post_json_with_csrf(client, "/api/auth/logout")
                 self.login(client, "analyst@example.local", "analyst pass")
@@ -262,21 +263,21 @@ class Iteration6AcceptanceTests(unittest.TestCase):
                 self.login(client, "admin@example.local", "admin pass")
                 remove = delete_with_csrf(
                     client,
-                    f"/api/admin/projects/{project['id']}/client-access/{client_user['id']}",
+                    f"/api/admin/projects/{project['id']}/external-access/{client_user['id']}",
                 )
                 self.assertEqual(remove.status_code, 200)
 
                 post_json_with_csrf(client, "/api/auth/logout")
                 self.login(client, "client@example.local", "client pass")
-                self.assertEqual(client.get("/api/client/projects").json()["projects"], [])
+                self.assertEqual(client.get("/api/client/projects").status_code, 404)
                 self.assertEqual(client.get(download_path).status_code, 404)
 
                 post_json_with_csrf(client, "/api/auth/logout")
                 self.login(client, "admin@example.local", "admin pass")
-                post_json_with_csrf(
+                put_json_with_csrf(
                     client,
-                    f"/api/admin/projects/{project['id']}/client-access",
-                    {"user_id": client_user["id"]},
+                    f"/api/admin/projects/{project['id']}/external-access/{client_user['id']}",
+                    {"portal_view": True, "operate": False},
                 )
                 post_json_with_csrf(client, "/api/auth/logout")
                 self.login(client, "client@example.local", "client pass")

@@ -21,12 +21,12 @@ class ReactClientPortalApiTests(unittest.TestCase):
         )
         self.client_user = self.create_user(
             "client@example.local",
-            role="client",
+            role="external",
             password="client pass",
         )
         self.other_client = self.create_user(
             "other-client@example.local",
-            role="client",
+            role="external",
             password="client pass",
         )
 
@@ -42,15 +42,19 @@ class ReactClientPortalApiTests(unittest.TestCase):
             name="Unassigned Project",
             description="Hidden from client",
         )
-        self.store.assign_client_to_project(
+        self.store.set_external_project_access(
             project_id=assigned["id"],
             user_id=self.client_user["id"],
-            assigned_by="analyst@example.local",
+            portal_view=True,
+            operate=False,
+            updated_by="analyst@example.local",
         )
-        self.store.assign_client_to_project(
+        self.store.set_external_project_access(
             project_id=unassigned["id"],
             user_id=self.other_client["id"],
-            assigned_by="analyst@example.local",
+            portal_view=True,
+            operate=False,
+            updated_by="analyst@example.local",
         )
         client = TestClient(create_app(store=self.store, auth_enabled=True))
         self.login(client, "client@example.local", "client pass")
@@ -87,10 +91,12 @@ class ReactClientPortalApiTests(unittest.TestCase):
                 display_name="model_metadata.json",
                 media_type="application/json",
             )
-            self.store.assign_client_to_project(
+            self.store.set_external_project_access(
                 project_id=project_id,
                 user_id=self.client_user["id"],
-                assigned_by="analyst@example.local",
+                portal_view=True,
+                operate=False,
+                updated_by="analyst@example.local",
             )
             template = self.store.create_dashboard_template(
                 project_id=project_id,
@@ -196,9 +202,10 @@ class ReactClientPortalApiTests(unittest.TestCase):
                 404,
             )
 
-            self.store.remove_client_project_access(
+            self.store.revoke_external_project_access(
                 project_id=project_id,
                 user_id=self.client_user["id"],
+                updated_by="analyst@example.local",
             )
             self.assertEqual(client.get(f"/api/client/projects/{project_id}/publications").status_code, 404)
             self.assertEqual(
@@ -209,10 +216,12 @@ class ReactClientPortalApiTests(unittest.TestCase):
             )
             self.assertEqual(client.get(detail["downloads"][0]["download_url"]).status_code, 404)
 
-            self.store.assign_client_to_project(
+            self.store.set_external_project_access(
                 project_id=project_id,
                 user_id=self.client_user["id"],
-                assigned_by="analyst@example.local",
+                portal_view=True,
+                operate=False,
+                updated_by="analyst@example.local",
             )
             post_json_with_csrf(analyst, f"/api/publications/{publication['id']}/unpublish")
             self.assertEqual(

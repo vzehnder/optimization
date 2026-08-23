@@ -1,6 +1,6 @@
 # BESS-CONFIG-002: Cut Over The Portal To External Capabilities And Retire Legacy Client Access
 
-Status: Todo
+Status: In Review
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/capa_configuracion/architecture_configuration_layer_final.md`
@@ -20,15 +20,15 @@ administration vocabulary.
 
 ## Acceptance criteria
 
-- [ ] Every persisted legacy client is migrated to `external` with `portal_view` enabled only for the projects previously assigned.
-- [ ] Portal lists, publication details, previews intended for external users, logos and downloads check `portal_view` on every request.
-- [ ] `operate` alone grants no portal, project, scenario, run, catalog, publication or download access.
-- [ ] Revoking `portal_view` prevents the same authenticated session from using the portal on its next request.
-- [ ] An external user receives 404 for an unassigned project or publication, while an internal non-admin receives 403 for admin-only operations.
-- [ ] The new external-access administration contract replaces the legacy client-access contract in backend and frontend together.
-- [ ] No runtime authorization or React routing branch depends on the legacy client role after the cutover.
-- [ ] Existing publications and artifact allowlists remain unchanged by the identity migration.
-- [ ] Regression tests prove that migration preserves access exactly and never widens it.
+- [x] Every persisted legacy client is migrated to `external` with `portal_view` enabled only for the projects previously assigned.
+- [x] Portal lists, publication details, previews intended for external users, logos and downloads check `portal_view` on every request.
+- [x] `operate` alone grants no portal, project, scenario, run, catalog, publication or download access.
+- [x] Revoking `portal_view` prevents the same authenticated session from using the portal on its next request.
+- [x] An external user receives 404 for an unassigned project or publication, while an internal non-admin receives 403 for admin-only operations.
+- [x] The new external-access administration contract replaces the legacy client-access contract in backend and frontend together.
+- [x] No runtime authorization or React routing branch depends on the legacy client role after the cutover.
+- [x] Existing publications and artifact allowlists remain unchanged by the identity migration.
+- [x] Regression tests prove that migration preserves access exactly and never widens it.
 
 ## Blocked by
 

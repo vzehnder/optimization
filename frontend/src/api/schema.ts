@@ -38,41 +38,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/admin/projects/{project_id}/client-access": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Admin List Project Client Access */
-        get: operations["admin_list_project_client_access_api_admin_projects__project_id__client_access_get"];
-        put?: never;
-        /** Admin Assign Project Client */
-        post: operations["admin_assign_project_client_api_admin_projects__project_id__client_access_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/admin/projects/{project_id}/client-access/{user_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Admin Remove Project Client Access */
-        delete: operations["admin_remove_project_client_access_api_admin_projects__project_id__client_access__user_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/admin/projects/{project_id}/external-access": {
         parameters: {
             query?: never;
@@ -1482,7 +1447,7 @@ export interface components {
              * Role
              * @enum {string}
              */
-            role: "admin" | "analyst" | "client" | "external";
+            role: "admin" | "analyst" | "external";
         };
         /** CurrentUserResponse */
         CurrentUserResponse: {
@@ -1790,11 +1755,6 @@ export interface components {
             /** Password */
             password: string;
         };
-        /** ProjectClientAccessRequest */
-        ProjectClientAccessRequest: {
-            /** User Id */
-            user_id: number;
-        };
         /** ProjectCreateRequest */
         ProjectCreateRequest: {
             /**
@@ -2057,8 +2017,11 @@ export interface components {
             email: string;
             /** Password */
             password: string;
-            /** Role */
-            role: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "admin" | "analyst" | "external";
         };
         /** ValidationError */
         ValidationError: {
@@ -2116,104 +2079,6 @@ export interface operations {
                 "application/json": components["schemas"]["ResultCleanupRequest"];
             };
         };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    admin_list_project_client_access_api_admin_projects__project_id__client_access_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                project_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    admin_assign_project_client_api_admin_projects__project_id__client_access_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                project_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProjectClientAccessRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    admin_remove_project_client_access_api_admin_projects__project_id__client_access__user_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                project_id: number;
-                user_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

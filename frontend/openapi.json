@@ -217,7 +217,6 @@
             "enum": [
               "admin",
               "analyst",
-              "client",
               "external"
             ],
             "title": "Role",
@@ -1041,19 +1040,6 @@
         "title": "LoginRequest",
         "type": "object"
       },
-      "ProjectClientAccessRequest": {
-        "properties": {
-          "user_id": {
-            "title": "User Id",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "user_id"
-        ],
-        "title": "ProjectClientAccessRequest",
-        "type": "object"
-      },
       "ProjectCreateRequest": {
         "properties": {
           "description": {
@@ -1854,7 +1840,11 @@
             "type": "string"
           },
           "role": {
-            "minLength": 1,
+            "enum": [
+              "admin",
+              "analyst",
+              "external"
+            ],
             "title": "Role",
             "type": "string"
           }
@@ -1976,134 +1966,6 @@
           }
         },
         "summary": "Admin Cleanup Project Results"
-      }
-    },
-    "/api/admin/projects/{project_id}/client-access": {
-      "get": {
-        "operationId": "admin_list_project_client_access_api_admin_projects__project_id__client_access_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "title": "Project Id",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Admin List Project Client Access"
-      },
-      "post": {
-        "operationId": "admin_assign_project_client_api_admin_projects__project_id__client_access_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "title": "Project Id",
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProjectClientAccessRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Admin Assign Project Client"
-      }
-    },
-    "/api/admin/projects/{project_id}/client-access/{user_id}": {
-      "delete": {
-        "operationId": "admin_remove_project_client_access_api_admin_projects__project_id__client_access__user_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "title": "Project Id",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "path",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "title": "User Id",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Admin Remove Project Client Access"
       }
     },
     "/api/admin/projects/{project_id}/external-access": {

@@ -96,7 +96,7 @@ class ScenarioCreateRequest(BaseModel):
 class UserCreateRequest(BaseModel):
     email: str = Field(min_length=1)
     password: str = Field(min_length=1)
-    role: str = Field(min_length=1)
+    role: Literal["admin", "analyst", "external"]
     display_name: str = ""
 
 
@@ -116,7 +116,7 @@ class CurrentUser(BaseModel):
     id: int
     email: str
     display_name: str
-    role: Literal["admin", "analyst", "client", "external"]
+    role: Literal["admin", "analyst", "external"]
     is_active: bool
 
 
@@ -132,10 +132,6 @@ class AuthSessionResponse(BaseModel):
 
 class CsrfTokenResponse(BaseModel):
     csrf_token: str
-
-
-class ProjectClientAccessRequest(BaseModel):
-    user_id: int
 
 
 class ExternalProjectAccessRequest(BaseModel):
@@ -585,7 +581,7 @@ def create_app(
 
     def authenticated_landing_path(user: dict[str, Any], next_path: str = "") -> str:
         safe_next = safe_internal_next_path(next_path)
-        if user["role"] in {"client", "external"}:
+        if user["role"] == "external":
             return safe_next if safe_next.startswith("/client") else "/client"
         if safe_next and not safe_next.startswith("/client"):
             return safe_next
@@ -593,7 +589,7 @@ def create_app(
 
     def react_authenticated_landing_path(user: dict[str, Any], next_path: str = "") -> str:
         safe_next = safe_react_next_path(next_path)
-        if user["role"] in {"client", "external"}:
+        if user["role"] == "external":
             return safe_next if safe_next.startswith("/react/client") else "/react/client"
         if safe_next and not safe_next.startswith("/react/client"):
             return safe_next
@@ -953,11 +949,12 @@ def create_app(
     @app.get("/api/client/projects")
     async def api_client_projects(request: Request):
         user = request.state.current_user
-        projects = (
-            analyst_store.list_client_projects(user["id"])
-            if user is not None
-            else analyst_store.list_projects()
-        )
+        if user is not None:
+            projects = analyst_store.list_client_projects(user["id"])
+            if not projects:
+                raise HTTPException(status_code=404, detail="portal not found")
+        else:
+            projects = analyst_store.list_projects()
         return {"projects": projects}
 
     @app.get("/api/client/projects/{project_id}/publications")
@@ -1074,43 +1071,6 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"user": public_user_dict(user)}
-
-    @app.get("/api/admin/projects/{project_id}/client-access")
-    async def admin_list_project_client_access(project_id: int, request: Request):
-        require_admin_user(request)
-        try:
-            assignments = analyst_store.list_project_client_access(project_id)
-        except KeyError as error:
-            raise HTTPException(status_code=404, detail=str(error)) from error
-        return {"client_access": assignments}
-
-    @app.post("/api/admin/projects/{project_id}/client-access", status_code=201)
-    async def admin_assign_project_client(
-        project_id: int,
-        request: Request,
-        payload: ProjectClientAccessRequest,
-    ):
-        require_admin_user(request)
-        try:
-            assignment = analyst_store.assign_client_to_project(
-                project_id=project_id,
-                user_id=payload.user_id,
-                assigned_by=(request.state.current_user or {}).get("email", "admin"),
-            )
-        except KeyError as error:
-            raise HTTPException(status_code=404, detail=str(error)) from error
-        except ValueError as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
-        return {"client_access": assignment}
-
-    @app.delete("/api/admin/projects/{project_id}/client-access/{user_id}")
-    async def admin_remove_project_client_access(project_id: int, user_id: int, request: Request):
-        require_admin_user(request)
-        try:
-            analyst_store.remove_client_project_access(project_id=project_id, user_id=user_id)
-        except KeyError as error:
-            raise HTTPException(status_code=404, detail=str(error)) from error
-        return {"removed": True}
 
     @app.get("/api/admin/projects/{project_id}/external-access")
     async def admin_list_project_external_access(project_id: int, request: Request):

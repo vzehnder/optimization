@@ -540,7 +540,7 @@ class TS5AcceptanceTests(unittest.TestCase):
             password_hash=hash_password("analyst pass"), created_by="test",
         )
         store.create_user(
-            email="client@example.local", display_name="Client", role="client",
+            email="client@example.local", display_name="Client", role="external",
             password_hash=hash_password("client pass"), created_by="test",
         )
 

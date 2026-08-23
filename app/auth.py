@@ -8,9 +8,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 
-VALID_USER_ROLES = {"admin", "analyst", "client", "external"}
+VALID_USER_ROLES = {"admin", "analyst", "external"}
 INTERNAL_USER_ROLES = {"admin", "analyst"}
-EXTERNAL_USER_ROLES = {"client", "external"}
+EXTERNAL_USER_ROLES = {"external"}
 
 
 class AuthorizationService:

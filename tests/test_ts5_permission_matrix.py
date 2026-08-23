@@ -81,7 +81,9 @@ class PermissionMatrixFixture(unittest.TestCase):
         self.addCleanup(self.store.close)
         self.admin_user = self.create_user("admin@example.local", role="admin", password="admin pass")
         self.analyst_user = self.create_user("analyst@example.local", role="analyst", password="analyst pass")
-        self.client_user = self.create_user("client@example.local", role="client", password="client pass")
+        self.client_user = self.create_user(
+            "client@example.local", role="external", password="client pass"
+        )
 
         self.admin = TestClient(create_app(store=self.store, auth_enabled=True))
         self.login(self.admin, "admin@example.local", "admin pass")
@@ -366,8 +368,12 @@ class ClientOnlySeesPublishedOutputsTests(PermissionMatrixFixture):
             artifact_root = Path(temp_dir) / "artifacts"
             run = create_completed_run_with_result_artifacts(self.store, artifact_root)
             project_id = self.store.get_run_lineage(run["id"])["project_id"]
-            self.store.assign_client_to_project(
-                project_id=project_id, user_id=self.client_user["id"], assigned_by="admin@example.local"
+            self.store.set_external_project_access(
+                project_id=project_id,
+                user_id=self.client_user["id"],
+                portal_view=True,
+                operate=False,
+                updated_by="admin@example.local",
             )
             template = self.store.create_dashboard_template(
                 project_id=project_id, name="Client Template", created_by="analyst@example.local"

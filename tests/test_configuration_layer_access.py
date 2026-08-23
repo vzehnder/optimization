@@ -17,6 +17,19 @@ from tests.auth_test_helpers import (
 
 
 class ConfigurationLayerAccessMigrationTests(unittest.TestCase):
+    def test_legacy_client_role_is_rejected_after_cutover(self):
+        store = AnalystStore("sqlite:///:memory:")
+        try:
+            with self.assertRaisesRegex(ValueError, "unsupported user role: client"):
+                store.create_user(
+                    email="legacy-client@example.local",
+                    display_name="Legacy Client",
+                    role="client",
+                    password_hash="test-hash",
+                )
+        finally:
+            store.close()
+
     def test_legacy_client_assignment_migrates_without_expanding_access(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             database_path = Path(temporary_directory) / "configuration-layer.sqlite3"
@@ -147,6 +160,20 @@ class ConfigurationLayerAccessApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["user"]["role"], "external")
 
+    def test_admin_api_rejects_the_legacy_client_role(self):
+        response = post_json_with_csrf(
+            self.client,
+            "/api/admin/users",
+            {
+                "email": "legacy-client@example.local",
+                "display_name": "Legacy Client",
+                "role": "client",
+                "password": "client pass",
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+
     def test_admin_can_manage_independent_project_capabilities(self):
         project = post_json_with_csrf(
             self.client,
@@ -225,6 +252,19 @@ class ConfigurationLayerAccessApiTests(unittest.TestCase):
             },
         )
 
+    def test_legacy_client_access_admin_endpoint_is_retired(self):
+        project = post_json_with_csrf(
+            self.client,
+            "/api/projects",
+            {"name": "Configured Project", "description": ""},
+        ).json()
+
+        response = self.client.get(
+            f"/api/admin/projects/{project['id']}/client-access"
+        )
+
+        self.assertEqual(response.status_code, 404)
+
     def test_portal_view_changes_apply_on_the_next_external_request(self):
         project = post_json_with_csrf(
             self.client,
@@ -260,7 +300,8 @@ class ConfigurationLayerAccessApiTests(unittest.TestCase):
         self.assertEqual(login.status_code, 200)
         self.assertEqual(login.json()["redirect_path"], "/react/client")
         self.assertEqual(
-            external_session.get("/api/client/projects").json()["projects"], []
+            external_session.get("/api/client/projects").status_code,
+            404,
         )
 
         put_json_with_csrf(
@@ -287,7 +328,8 @@ class ConfigurationLayerAccessApiTests(unittest.TestCase):
             {"portal_view": False, "operate": False},
         )
         self.assertEqual(
-            external_session.get("/api/client/projects").json()["projects"], []
+            external_session.get("/api/client/projects").status_code,
+            404,
         )
         self.assertEqual(
             external_session.get(
@@ -295,6 +337,43 @@ class ConfigurationLayerAccessApiTests(unittest.TestCase):
             ).status_code,
             404,
         )
+
+    def test_operate_only_external_cannot_enter_the_portal_api(self):
+        project = post_json_with_csrf(
+            self.client,
+            "/api/projects",
+            {"name": "Operate only", "description": ""},
+        ).json()
+        external_user = post_json_with_csrf(
+            self.client,
+            "/api/admin/users",
+            {
+                "email": "operator@example.local",
+                "display_name": "Operator",
+                "role": "external",
+                "password": "operator pass",
+            },
+        ).json()["user"]
+        put_json_with_csrf(
+            self.client,
+            (
+                f"/api/admin/projects/{project['id']}/external-access/"
+                f"{external_user['id']}"
+            ),
+            {"portal_view": False, "operate": True},
+        )
+        external_session = TestClient(
+            create_app(store=self.store, auth_enabled=True)
+        )
+        login_json_with_csrf(
+            external_session,
+            "operator@example.local",
+            "operator pass",
+        )
+
+        response = external_session.get("/api/client/projects")
+
+        self.assertEqual(response.status_code, 404)
 
     def test_analyst_cannot_administer_external_capabilities(self):
         project = post_json_with_csrf(

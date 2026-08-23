@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { AdminUsersView, ProjectClientAccessSection } from "./Admin";
+import { AdminUsersView, ProjectExternalAccessSection } from "./Admin";
 
 describe("external project capabilities", () => {
   it("offers external as an identity role in administration", async () => {
@@ -152,7 +152,7 @@ describe("external project capabilities", () => {
 
     render(
       <QueryClientProvider client={queryClient}>
-        <ProjectClientAccessSection projectId={1} projectName="Hybrid PMGD" />
+        <ProjectExternalAccessSection projectId={1} projectName="Hybrid PMGD" />
       </QueryClientProvider>,
     );
 

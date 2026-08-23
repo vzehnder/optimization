@@ -5,7 +5,12 @@ from fastapi.testclient import TestClient
 from app.auth import hash_password
 from app.main import create_app
 from app.persistence import AnalystStore
-from tests.auth_test_helpers import delete_with_csrf, login_json_with_csrf, post_json_with_csrf
+from tests.auth_test_helpers import (
+    delete_with_csrf,
+    login_json_with_csrf,
+    post_json_with_csrf,
+    put_json_with_csrf,
+)
 
 
 class Iteration6ProjectAccessTests(unittest.TestCase):
@@ -25,7 +30,7 @@ class Iteration6ProjectAccessTests(unittest.TestCase):
             {
                 "email": "client@example.local",
                 "display_name": "Client User",
-                "role": "client",
+                "role": "external",
                 "password": "client pass",
             },
         )
@@ -34,7 +39,7 @@ class Iteration6ProjectAccessTests(unittest.TestCase):
         created_user = create_response.json()["user"]
         self.assertEqual(created_user["email"], "client@example.local")
         self.assertEqual(created_user["display_name"], "Client User")
-        self.assertEqual(created_user["role"], "client")
+        self.assertEqual(created_user["role"], "external")
         self.assertTrue(created_user["is_active"])
         self.assertNotIn("password_hash", created_user)
         stored_user = self.store.get_user(created_user["id"])
@@ -73,7 +78,7 @@ class Iteration6ProjectAccessTests(unittest.TestCase):
             [(user["email"], user["role"], user["is_active"]) for user in listed_users],
             [
                 ("admin@example.local", "admin", True),
-                ("client@example.local", "client", True),
+                ("client@example.local", "external", True),
                 ("analyst@example.local", "analyst", True),
                 ("second-admin@example.local", "admin", True),
             ],
@@ -104,7 +109,7 @@ class Iteration6ProjectAccessTests(unittest.TestCase):
             {
                 "email": "not-an-email",
                 "display_name": "Invalid User",
-                "role": "client",
+                "role": "external",
                 "password": "client pass",
             },
         )
@@ -117,7 +122,7 @@ class Iteration6ProjectAccessTests(unittest.TestCase):
             {
                 "email": "client@example.local",
                 "display_name": "Client User",
-                "role": "client",
+                "role": "external",
                 "password": "client pass",
             },
         )
@@ -129,14 +134,14 @@ class Iteration6ProjectAccessTests(unittest.TestCase):
             {
                 "email": "CLIENT@example.local",
                 "display_name": "Duplicate User",
-                "role": "client",
+                "role": "external",
                 "password": "client pass",
             },
         )
         self.assertEqual(duplicate.status_code, 400)
         self.assertEqual(duplicate.json()["detail"], "email already exists")
 
-    def test_admin_assigns_clients_to_projects_and_client_portal_filters_access(self):
+    def test_admin_assigns_external_portal_view_and_portal_filters_access(self):
         first_project = post_json_with_csrf(
             self.client,
             "/api/projects",
@@ -152,32 +157,34 @@ class Iteration6ProjectAccessTests(unittest.TestCase):
             "/api/projects",
             {"name": "Private Project", "description": "Client must not see this"},
         ).json()
-        first_client = self.create_client_user("client@example.local")
-        second_client = self.create_client_user("other-client@example.local")
+        first_client = self.create_external_user("client@example.local")
+        second_client = self.create_external_user("other-client@example.local")
 
-        assign_first = post_json_with_csrf(
+        assign_first = put_json_with_csrf(
             self.client,
-            f"/api/admin/projects/{first_project['id']}/client-access",
-            {"user_id": first_client["id"]},
+            f"/api/admin/projects/{first_project['id']}/external-access/{first_client['id']}",
+            {"portal_view": True, "operate": False},
         )
-        self.assertEqual(assign_first.status_code, 201)
-        assign_second = post_json_with_csrf(
+        self.assertEqual(assign_first.status_code, 200)
+        assign_second = put_json_with_csrf(
             self.client,
-            f"/api/admin/projects/{second_project['id']}/client-access",
-            {"user_id": first_client["id"]},
+            f"/api/admin/projects/{second_project['id']}/external-access/{first_client['id']}",
+            {"portal_view": True, "operate": False},
         )
-        self.assertEqual(assign_second.status_code, 201)
-        assign_shared = post_json_with_csrf(
+        self.assertEqual(assign_second.status_code, 200)
+        assign_shared = put_json_with_csrf(
             self.client,
-            f"/api/admin/projects/{first_project['id']}/client-access",
-            {"user_id": second_client["id"]},
+            f"/api/admin/projects/{first_project['id']}/external-access/{second_client['id']}",
+            {"portal_view": True, "operate": False},
         )
-        self.assertEqual(assign_shared.status_code, 201)
+        self.assertEqual(assign_shared.status_code, 200)
 
-        access_response = self.client.get(f"/api/admin/projects/{first_project['id']}/client-access")
+        access_response = self.client.get(
+            f"/api/admin/projects/{first_project['id']}/external-access"
+        )
         self.assertEqual(access_response.status_code, 200)
         self.assertEqual(
-            [assignment["email"] for assignment in access_response.json()["client_access"]],
+            [assignment["email"] for assignment in access_response.json()["external_access"]],
             ["client@example.local", "other-client@example.local"],
         )
 
@@ -199,20 +206,20 @@ class Iteration6ProjectAccessTests(unittest.TestCase):
 
         remove_response = delete_with_csrf(
             self.client,
-            f"/api/admin/projects/{first_project['id']}/client-access/{first_client['id']}"
+            f"/api/admin/projects/{first_project['id']}/external-access/{first_client['id']}"
         )
         self.assertEqual(remove_response.status_code, 200)
         revoked_portal = client_session.get("/api/client/projects")
         self.assertNotIn("Assigned Project", [project["name"] for project in revoked_portal.json()["projects"]])
         self.assertEqual(client_session.get(f"/api/client/projects/{first_project['id']}/publications").status_code, 404)
 
-    def test_analysts_cannot_manage_users_or_client_project_access(self):
+    def test_analysts_cannot_manage_users_or_external_project_access(self):
         project = post_json_with_csrf(
             self.client,
             "/api/projects",
             {"name": "Restricted Access Project", "description": ""},
         ).json()
-        client_user = self.create_client_user("client@example.local")
+        client_user = self.create_external_user("client@example.local")
         self.create_user("analyst@example.local", role="analyst", password="analyst pass")
         analyst_session = TestClient(create_app(store=self.store, auth_enabled=True))
         login_response = login_json_with_csrf(analyst_session, "analyst@example.local", "analyst pass")
@@ -226,17 +233,17 @@ class Iteration6ProjectAccessTests(unittest.TestCase):
                 {
                     "email": "blocked@example.local",
                     "display_name": "Blocked",
-                    "role": "client",
+                    "role": "external",
                     "password": "blocked pass",
                 },
             ).status_code,
             403,
         )
         self.assertEqual(
-            post_json_with_csrf(
+            put_json_with_csrf(
                 analyst_session,
-                f"/api/admin/projects/{project['id']}/client-access",
-                {"user_id": client_user["id"]},
+                f"/api/admin/projects/{project['id']}/external-access/{client_user['id']}",
+                {"portal_view": True, "operate": False},
             ).status_code,
             403,
         )
@@ -245,14 +252,14 @@ class Iteration6ProjectAccessTests(unittest.TestCase):
             403,
         )
 
-    def create_client_user(self, email):
+    def create_external_user(self, email):
         response = post_json_with_csrf(
             self.client,
             "/api/admin/users",
             {
                 "email": email,
                 "display_name": email,
-                "role": "client",
+                "role": "external",
                 "password": "client pass",
             },
         )

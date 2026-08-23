@@ -8190,7 +8190,7 @@ describe("application shell", () => {
                 id: 8,
                 email: "client@example.local",
                 display_name: "Client User",
-                role: "client",
+                role: "external",
                 is_active: true,
               },
               bootstrap_required: false,
@@ -8199,8 +8199,8 @@ describe("application shell", () => {
           );
         }
         if (revoked && path.startsWith("/api/client")) {
-          return new Response(JSON.stringify({ detail: "forbidden" }), {
-            status: 403,
+          return new Response(JSON.stringify({ detail: "portal not found" }), {
+            status: 404,
             headers: { "Content-Type": "application/json" },
           });
         }
@@ -8284,7 +8284,7 @@ describe("application shell", () => {
     await user.click(screen.getByRole("link", { name: "Cliente" }));
 
     expect(
-      await screen.findByRole("heading", { name: "No se pudo cargar" }),
+      await screen.findByRole("heading", { name: "No encontrado" }),
     ).toBeVisible();
     expect(
       screen.queryByText("Client Dispatch Review"),
@@ -8427,7 +8427,7 @@ describe("application shell", () => {
     expect(logoutHeaders.get("X-CSRF-Token")).toBe("csrf-logout");
   });
 
-  it("lands clients in the client area and blocks internal routes", async () => {
+  it("lands external users in the client area and blocks internal routes", async () => {
     window.history.replaceState({}, "", "/react/projects");
     vi.stubGlobal(
       "fetch",
@@ -8439,7 +8439,7 @@ describe("application shell", () => {
                 id: 8,
                 email: "client@example.local",
                 display_name: "Client User",
-                role: "client",
+                role: "external",
                 is_active: true,
               },
               bootstrap_required: false,

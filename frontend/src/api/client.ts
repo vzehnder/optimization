@@ -33,7 +33,7 @@ export interface AdminUser extends CurrentUser {
   deactivated_at?: string | null;
 }
 
-export interface ProjectClientAccess {
+export interface ExternalProjectAccess {
   project_id: number;
   user_id: number;
   email: string;
@@ -42,9 +42,6 @@ export interface ProjectClientAccess {
   is_active: boolean;
   assigned_at: string;
   assigned_by: string;
-}
-
-export interface ExternalProjectAccess extends ProjectClientAccess {
   portal_view: boolean;
   operate: boolean;
   updated_at: string;
@@ -1211,40 +1208,6 @@ export async function deleteProject(
     headers: { "X-CSRF-Token": csrfToken },
   });
   return response.deleted_project;
-}
-
-export async function listProjectClientAccess(
-  projectId: number,
-  signal?: AbortSignal,
-): Promise<ProjectClientAccess[]> {
-  const response = await requestJson<{
-    client_access: ProjectClientAccess[];
-  }>(`/api/admin/projects/${projectId}/client-access`, { signal });
-  return response.client_access;
-}
-
-export async function assignProjectClientAccess(
-  projectId: number,
-  userId: number,
-): Promise<ProjectClientAccess> {
-  const response = await postJsonWithCsrf<{
-    client_access: ProjectClientAccess;
-  }>(`/api/admin/projects/${projectId}/client-access`, { user_id: userId });
-  return response.client_access;
-}
-
-export async function removeProjectClientAccess(
-  projectId: number,
-  userId: number,
-): Promise<void> {
-  const csrfToken = await getCsrfToken();
-  await requestJson<{ removed: boolean }>(
-    `/api/admin/projects/${projectId}/client-access/${userId}`,
-    {
-      method: "DELETE",
-      headers: { "X-CSRF-Token": csrfToken },
-    },
-  );
 }
 
 export async function listProjectExternalAccess(

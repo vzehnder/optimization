@@ -12,7 +12,7 @@ import {
 } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
-import { ProjectClientAccessSection } from "./Admin";
+import { ProjectExternalAccessSection } from "./Admin";
 import {
   CaseHierarchyProvenanceSummary,
   HierarchyStaleBadges,
@@ -852,9 +852,9 @@ function DashboardTemplatesSection({ projectId }: { projectId: number }) {
 }
 
 export function ProjectDetailView({
-  canManageClientAccess = false,
+  canManageExternalAccess = false,
 }: {
-  canManageClientAccess?: boolean;
+  canManageExternalAccess?: boolean;
 }) {
   const projectId = useNumericParam("projectId");
   const project = useQuery({
@@ -924,8 +924,8 @@ export function ProjectDetailView({
             Ver catalogo de series de tiempo
           </Link>
         </section>
-        {canManageClientAccess ? (
-          <ProjectClientAccessSection
+        {canManageExternalAccess ? (
+          <ProjectExternalAccessSection
             projectId={projectId}
             projectName={project.data.name}
           />

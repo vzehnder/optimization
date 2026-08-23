@@ -916,7 +916,7 @@ class AnalystStore:
                 updated_at TEXT NOT NULL,
                 created_by TEXT NOT NULL,
                 deactivated_at TEXT,
-                CHECK (role IN ('admin', 'analyst', 'client', 'external'))
+                CHECK (role IN ('admin', 'analyst', 'external'))
             );
 
             CREATE TABLE IF NOT EXISTS auth_sessions (
@@ -1042,15 +1042,18 @@ class AnalystStore:
                 "ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check"
             )
             self.connection.execute(
+                "UPDATE users SET role = 'external' WHERE role = 'client'"
+            )
+            self.connection.execute(
                 "ALTER TABLE users ADD CONSTRAINT users_role_check "
-                "CHECK (role IN ('admin', 'analyst', 'client', 'external'))"
+                "CHECK (role IN ('admin', 'analyst', 'external'))"
             )
             return
 
         row = self.connection.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'"
         ).fetchone()
-        if row is None or "'external'" in str(row["sql"]):
+        if row is None or "'client'" not in str(row["sql"]):
             return
 
         self.connection.commit()
@@ -1058,7 +1061,7 @@ class AnalystStore:
         try:
             self.connection.executescript(
                 """
-                CREATE TABLE users_with_external_role (
+                CREATE TABLE users_without_legacy_client_role (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     email TEXT NOT NULL UNIQUE COLLATE NOCASE,
                     display_name TEXT NOT NULL DEFAULT '',
@@ -1069,17 +1072,19 @@ class AnalystStore:
                     updated_at TEXT NOT NULL,
                     created_by TEXT NOT NULL,
                     deactivated_at TEXT,
-                    CHECK (role IN ('admin', 'analyst', 'client', 'external'))
+                    CHECK (role IN ('admin', 'analyst', 'external'))
                 );
-                INSERT INTO users_with_external_role (
+                INSERT INTO users_without_legacy_client_role (
                     id, email, display_name, role, password_hash, is_active,
                     created_at, updated_at, created_by, deactivated_at
                 )
-                SELECT id, email, display_name, role, password_hash, is_active,
+                SELECT id, email, display_name,
+                       CASE WHEN role = 'client' THEN 'external' ELSE role END,
+                       password_hash, is_active,
                        created_at, updated_at, created_by, deactivated_at
                 FROM users;
                 DROP TABLE users;
-                ALTER TABLE users_with_external_role RENAME TO users;
+                ALTER TABLE users_without_legacy_client_role RENAME TO users;
                 """
             )
         finally:
@@ -1769,38 +1774,6 @@ class AnalystStore:
                 "deleted_run_count": run_count,
             }
 
-    def assign_client_to_project(
-        self,
-        *,
-        project_id: int,
-        user_id: int,
-        assigned_by: str = "system",
-    ) -> dict[str, Any]:
-        self.get_project(project_id)
-        user = self.get_user(user_id)
-        if user["role"] not in {"client", "external"}:
-            raise ValueError("project access can only be assigned to client users")
-        now = utc_now_iso()
-        with self._lock:
-            self.connection.execute(
-                """
-                INSERT OR IGNORE INTO project_client_access (
-                    project_id,
-                    user_id,
-                    assigned_at,
-                    assigned_by,
-                    portal_view,
-                    operate,
-                    updated_at,
-                    updated_by
-                )
-                VALUES (?, ?, ?, ?, 1, 0, ?, ?)
-                """,
-                (project_id, user_id, now, assigned_by, now, assigned_by),
-            )
-            self.connection.commit()
-        return self.get_project_client_access(project_id, user_id)
-
     def set_external_project_access(
         self,
         *,
@@ -1910,7 +1883,7 @@ class AnalystStore:
             JOIN users ON users.id = project_client_access.user_id
             WHERE project_client_access.user_id = ?
               AND project_client_access.project_id = ?
-              AND users.role IN ('client', 'external')
+              AND users.role = 'external'
               AND users.is_active = 1
               AND project_client_access.{capability} = 1
             """,
@@ -1918,20 +1891,9 @@ class AnalystStore:
         ).fetchone()
         return row is not None
 
-    def get_project_client_access(self, project_id: int, user_id: int) -> dict[str, Any]:
-        try:
-            return self.get_project_external_access(project_id, user_id)
-        except KeyError as error:
-            raise KeyError(
-                f"client {user_id} is not assigned to project {project_id}"
-            ) from error
-
-    def list_project_client_access(self, project_id: int) -> list[dict[str, Any]]:
-        return self.list_project_external_access(project_id)
-
     def list_client_projects(self, user_id: int) -> list[dict[str, Any]]:
         user = self.get_user(user_id)
-        if user["role"] not in {"client", "external"} or not user["is_active"]:
+        if user["role"] != "external" or not user["is_active"]:
             return []
         rows = self.connection.execute(
             """
@@ -1952,21 +1914,6 @@ class AnalystStore:
             project_id=project_id,
             capability="portal_view",
         )
-
-    def remove_external_project_access(self, *, project_id: int, user_id: int) -> None:
-        with self._lock:
-            cursor = self.connection.execute(
-                """
-                DELETE FROM project_client_access
-                WHERE project_id = ? AND user_id = ?
-                """,
-                (project_id, user_id),
-            )
-            if cursor.rowcount == 0:
-                raise KeyError(
-                    f"external user {user_id} is not assigned to project {project_id}"
-                )
-            self.connection.commit()
 
     def revoke_external_project_access(
         self,
@@ -1990,14 +1937,6 @@ class AnalystStore:
             )
             self.connection.commit()
         return self.get_project_external_access(project_id, user_id)
-
-    def remove_client_project_access(self, *, project_id: int, user_id: int) -> None:
-        try:
-            self.remove_external_project_access(project_id=project_id, user_id=user_id)
-        except KeyError as error:
-            raise KeyError(
-                f"client {user_id} is not assigned to project {project_id}"
-            ) from error
 
     def create_dashboard_template(
         self,

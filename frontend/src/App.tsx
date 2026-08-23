@@ -68,7 +68,7 @@ function landingRoute(user: CurrentUser): string {
 }
 
 function isExternalIdentity(user: CurrentUser): boolean {
-  return user.role === "client" || user.role === "external";
+  return user.role === "external";
 }
 
 function errorMessage(error: unknown): string {
@@ -285,7 +285,7 @@ function AuthenticatedRoutes({ user }: { user: CurrentUser }) {
                 <ForbiddenView />
               ) : (
                 <ProjectDetailView
-                  canManageClientAccess={user.role === "admin"}
+                  canManageExternalAccess={user.role === "admin"}
                 />
               )
             }

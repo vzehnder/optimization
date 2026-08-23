@@ -206,7 +206,9 @@ class Iteration6PublicationDraftTests(unittest.TestCase):
         )
         self.assertEqual(scoped_response.status_code, 404)
 
-        self.create_user("client@example.local", role="client", password="client pass")
+        self.create_user(
+            "client@example.local", role="external", password="client pass"
+        )
         client_session = TestClient(create_app(store=self.store, auth_enabled=True))
         self.login(client_session, "client@example.local", "client pass")
         client_response = post_json_with_csrf(

@@ -89,13 +89,23 @@ class PostgresPersistenceTests(unittest.TestCase):
             legacy_client = store.create_user(
                 email=f"legacy-client-{suffix}@example.com",
                 password_hash="test-hash",
-                role="client",
+                role="external",
             )
-            store.assign_client_to_project(
+            store.set_external_project_access(
                 project_id=project["id"],
                 user_id=legacy_client["id"],
-                assigned_by=f"admin-{suffix}@example.com",
+                portal_view=True,
+                operate=False,
+                updated_by=f"admin-{suffix}@example.com",
             )
+            store.connection.execute(
+                "ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check"
+            )
+            store.connection.execute(
+                "UPDATE users SET role = 'client' WHERE id = ?",
+                (legacy_client["id"],),
+            )
+            store.connection.commit()
             project_id = project["id"]
             client_id = legacy_client["id"]
         finally:
@@ -134,11 +144,23 @@ class PostgresPersistenceTests(unittest.TestCase):
             client = store.create_user(
                 email=f"client-{suffix}@example.com",
                 password_hash="test-hash",
-                role="client",
+                role="external",
             )
             project = store.create_project(name=f"PostgreSQL {suffix}")
-            store.assign_client_to_project(project_id=project["id"], user_id=client["id"])
-            store.assign_client_to_project(project_id=project["id"], user_id=client["id"])
+            store.set_external_project_access(
+                project_id=project["id"],
+                user_id=client["id"],
+                portal_view=True,
+                operate=False,
+                updated_by="test",
+            )
+            store.set_external_project_access(
+                project_id=project["id"],
+                user_id=client["id"],
+                portal_view=True,
+                operate=False,
+                updated_by="test",
+            )
             self.assertTrue(
                 store.client_has_project_access(
                     project_id=project["id"],

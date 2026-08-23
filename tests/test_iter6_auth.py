@@ -63,7 +63,9 @@ class Iteration6AuthTests(unittest.TestCase):
         self.assertEqual(after_logout.status_code, 401)
 
     def test_invalid_credentials_and_deactivated_users_do_not_create_sessions(self):
-        inactive = self.create_user("client@example.local", role="client", password="client pass")
+        inactive = self.create_user(
+            "client@example.local", role="external", password="client pass"
+        )
         self.store.set_user_active(inactive["id"], False)
 
         wrong_password = login_json_with_csrf(self.client, "client@example.local", "wrong")
@@ -74,8 +76,18 @@ class Iteration6AuthTests(unittest.TestCase):
         self.assertEqual(inactive_login.status_code, 401)
         self.assertEqual(self.client.get("/api/projects").status_code, 401)
 
-    def test_client_users_land_in_portal_and_cannot_access_analyst_routes(self):
-        self.create_user("client@example.local", role="client", password="client pass")
+    def test_external_portal_view_users_land_in_portal_and_cannot_access_analyst_routes(self):
+        external = self.create_user(
+            "client@example.local", role="external", password="client pass"
+        )
+        project = self.store.create_project(name="Visible portal")
+        self.store.set_external_project_access(
+            project_id=project["id"],
+            user_id=external["id"],
+            portal_view=True,
+            operate=False,
+            updated_by="test",
+        )
 
         login_response = login_json_with_csrf(
             self.client,
@@ -88,7 +100,10 @@ class Iteration6AuthTests(unittest.TestCase):
 
         portal_response = self.client.get("/api/client/projects")
         self.assertEqual(portal_response.status_code, 200)
-        self.assertEqual(portal_response.json()["projects"], [])
+        self.assertEqual(
+            [project["name"] for project in portal_response.json()["projects"]],
+            ["Visible portal"],
+        )
 
         analyst_page = self.client.get("/projects", follow_redirects=False)
         self.assertEqual(analyst_page.status_code, 303)

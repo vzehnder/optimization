@@ -97,7 +97,7 @@ class ReactFoundationTests(unittest.TestCase):
         user_schema = schema["components"]["schemas"]["CurrentUser"]
         self.assertEqual(
             user_schema["properties"]["role"]["enum"],
-            ["admin", "analyst", "client", "external"],
+            ["admin", "analyst", "external"],
         )
 
     def test_legacy_html_routes_are_absent_from_openapi(self):

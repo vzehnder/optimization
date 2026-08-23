@@ -15,20 +15,22 @@ class Iteration6AuthorizationHardeningTests(unittest.TestCase):
     def setUp(self):
         self.store = AnalystStore("sqlite:///:memory:")
         self.create_user("analyst@example.local", role="analyst", password="analyst pass")
-        self.client_user = self.create_user("client@example.local", role="client", password="client pass")
+        self.client_user = self.create_user(
+            "client@example.local", role="external", password="client pass"
+        )
         self.client = TestClient(create_app(store=self.store, auth_enabled=True))
 
     def tearDown(self):
         self.store.close()
 
-    def test_client_can_read_own_session_but_not_analyst_apis(self):
+    def test_external_can_read_own_session_but_not_analyst_apis(self):
         self.login(self.client, "client@example.local", "client pass")
 
         me_response = self.client.get("/api/auth/me")
 
         self.assertEqual(me_response.status_code, 200)
         self.assertEqual(me_response.json()["user"]["email"], "client@example.local")
-        self.assertEqual(me_response.json()["user"]["role"], "client")
+        self.assertEqual(me_response.json()["user"]["role"], "external")
         self.assertEqual(self.client.get("/api/projects").status_code, 403)
         self.assertEqual(
             self.client.post(
@@ -38,7 +40,7 @@ class Iteration6AuthorizationHardeningTests(unittest.TestCase):
             403,
         )
 
-    def test_client_is_redirected_from_legacy_bookmarks_and_blocked_from_mutation_apis(self):
+    def test_external_is_redirected_from_legacy_bookmarks_and_blocked_from_mutation_apis(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             artifact_root = Path(temp_dir) / "artifacts"
             run = create_completed_run_with_result_artifacts(self.store, artifact_root)
@@ -95,10 +97,12 @@ class Iteration6AuthorizationHardeningTests(unittest.TestCase):
             artifact_root = Path(temp_dir) / "artifacts"
             run = create_completed_run_with_result_artifacts(self.store, artifact_root)
             project_id = self.store.get_run_lineage(run["id"])["project_id"]
-            self.store.assign_client_to_project(
+            self.store.set_external_project_access(
                 project_id=project_id,
                 user_id=self.client_user["id"],
-                assigned_by="analyst@example.local",
+                portal_view=True,
+                operate=False,
+                updated_by="analyst@example.local",
             )
             template = self.store.create_dashboard_template(
                 project_id=project_id,
@@ -122,13 +126,19 @@ class Iteration6AuthorizationHardeningTests(unittest.TestCase):
             self.login(client, "client@example.local", "client pass")
             self.assertEqual(client.get(download_path).status_code, 200)
 
-            self.store.remove_client_project_access(project_id=project_id, user_id=self.client_user["id"])
-            self.assertEqual(client.get(download_path).status_code, 404)
-
-            self.store.assign_client_to_project(
+            self.store.revoke_external_project_access(
                 project_id=project_id,
                 user_id=self.client_user["id"],
-                assigned_by="analyst@example.local",
+                updated_by="analyst@example.local",
+            )
+            self.assertEqual(client.get(download_path).status_code, 404)
+
+            self.store.set_external_project_access(
+                project_id=project_id,
+                user_id=self.client_user["id"],
+                portal_view=True,
+                operate=False,
+                updated_by="analyst@example.local",
             )
             self.assertEqual(client.get(download_path).status_code, 200)
 

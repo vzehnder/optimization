@@ -1,6 +1,6 @@
 # BESS-CONFIG-001: Expand External Project Capabilities Beside Legacy Client Access
 
-Status: In Review
+Status: Done
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/capa_configuracion/architecture_configuration_layer_final.md`
