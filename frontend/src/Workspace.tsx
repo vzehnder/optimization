@@ -18,6 +18,7 @@ import {
   HierarchyStaleBadges,
 } from "./CaseHierarchyProvenance";
 import { hierarchyProvenanceHashLabel } from "./caseHierarchy";
+import { OperatorConsolePanel } from "./OperatorConsole";
 import {
   ApiError,
   applyTimeSeriesCombination,
@@ -8271,6 +8272,7 @@ export function ScenarioDetailView() {
           scenarioId={scenario.data.id}
           projectId={scenario.data.project_id}
         />
+        <OperatorConsolePanel scenarioId={scenario.data.id} />
         <section className="workspace-section" aria-labelledby="version-list">
           <h2 id="version-list">Versiones inmutables</h2>
           <VersionList scenarioId={scenario.data.id} versions={versions.data} />

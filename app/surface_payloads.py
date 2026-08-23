@@ -66,6 +66,46 @@ def build_portal_branding(
     }
 
 
+def build_console_payload(
+    *,
+    console: Mapping[str, Any],
+    prepared_by: str | None,
+) -> dict[str, Any]:
+    """Build the console envelope an operator receives.
+
+    Only the public identity the analyst declared crosses the boundary: no
+    scenario, case, variant, binding, set revision or configuration document.
+    """
+
+    identity = console["document"].get("public_identity") or {}
+    return {
+        "console": {
+            "id": console["id"],
+            "name": identity.get("name") or "",
+            "description": identity.get("description") or "",
+            "prepared_by": prepared_by,
+            "updated_at": console["updated_at"],
+        }
+    }
+
+
+def build_console_list_entry(
+    *,
+    console: Mapping[str, Any],
+    project_name: str,
+) -> dict[str, Any]:
+    identity = console["document"].get("public_identity") or {}
+    return {
+        "console": {
+            "id": console["id"],
+            "name": identity.get("name") or "",
+            "description": identity.get("description") or "",
+        },
+        "project": {"name": project_name},
+        "state": console["status"],
+    }
+
+
 def build_portal_downloads(
     download_section: Mapping[str, Any],
     downloads: list[Mapping[str, Any]],

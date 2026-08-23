@@ -393,6 +393,108 @@ export interface PortalCatalogs {
   tables: PortalCatalogTable[];
 }
 
+export type OperatorConsoleStatus = "draft" | "active";
+
+export interface OperatorConsoleSignal {
+  entity_type: string;
+  entity_id: string;
+  signal_key: string;
+}
+
+export interface OperatorConsoleSourceOption {
+  id: string;
+  label: string;
+  time_series_set_id: number;
+}
+
+export interface OperatorConsoleColumn {
+  id: string;
+  signal: OperatorConsoleSignal;
+  label: string;
+  editable: boolean;
+  source_options: OperatorConsoleSourceOption[];
+  default_source_option_id: string;
+}
+
+export interface OperatorConsoleGroup {
+  id: string;
+  label: string;
+  granularities: string[];
+  columns: OperatorConsoleColumn[];
+}
+
+export interface OperatorConsoleParameter {
+  id: string;
+  pointer: { asset_id: string; field: string };
+  label: string;
+  unit: string | null;
+  min: number;
+  max: number;
+  default: number;
+}
+
+export interface OperatorConsoleDocument {
+  schema_version: "operator_console_config.v1";
+  public_identity: { name: string; description: string };
+  parameters: OperatorConsoleParameter[];
+  groups: OperatorConsoleGroup[];
+  results: { kpis: unknown[]; charts: unknown[]; tables: unknown[] };
+}
+
+export interface OperatorConsoleBlocking {
+  reason: string | null;
+  reasons: Array<{
+    dependency_type: string;
+    dependency_id: string | null;
+    detail: string;
+  }>;
+}
+
+export interface OperatorConsole {
+  id: number;
+  scenario_id: number;
+  case_id: number;
+  status: OperatorConsoleStatus;
+  revision: number;
+  document: OperatorConsoleDocument;
+  owned_variant: { id: number; display_name: string };
+  prepared_by: string | null;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+  updated_by: string | null;
+  waiting_since: string | null;
+  blocking: OperatorConsoleBlocking;
+}
+
+export interface OperatorConsoleCreatePayload {
+  source_variant_id: number;
+  document: OperatorConsoleDocument;
+}
+
+export interface OperatorConsoleSavePayload {
+  document: OperatorConsoleDocument;
+  status: OperatorConsoleStatus;
+  expected_revision: number;
+}
+
+export interface ConsoleListEntry {
+  console: { id: number; name: string; description: string };
+  project: { name: string };
+  state: string;
+}
+
+export interface ConsoleShell {
+  console: {
+    id: number;
+    name: string;
+    description: string;
+    prepared_by: string | null;
+    updated_at: string;
+  };
+  internal_test?: { return_path: string; tester: string };
+}
+
 export type PortalConfigurationStatus = "draft" | "active";
 
 export interface PortalConfiguration {
@@ -1303,6 +1405,18 @@ async function postJsonWithCsrf<T>(path: string, body?: unknown): Promise<T> {
   });
 }
 
+async function putJsonWithCsrf<T>(path: string, body?: unknown): Promise<T> {
+  const csrfToken = await getCsrfToken();
+  return requestJson<T>(path, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrfToken,
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
 async function patchJsonWithCsrf<T>(path: string, body?: unknown): Promise<T> {
   const csrfToken = await getCsrfToken();
   return requestJson<T>(path, {
@@ -1928,6 +2042,69 @@ export async function getPortalCatalogs(
   signal?: AbortSignal,
 ): Promise<PortalCatalogs> {
   return requestJson<PortalCatalogs>("/api/portal-catalogs", { signal });
+}
+
+export async function listOperatorConsoles(
+  scenarioId: number,
+  signal?: AbortSignal,
+): Promise<OperatorConsole[]> {
+  const response = await requestJson<{ operator_consoles: OperatorConsole[] }>(
+    `/api/scenarios/${scenarioId}/consoles`,
+    { signal },
+  );
+  return response.operator_consoles;
+}
+
+export async function createOperatorConsole(
+  scenarioId: number,
+  payload: OperatorConsoleCreatePayload,
+): Promise<OperatorConsole> {
+  const response = await postJsonWithCsrf<{ operator_console: OperatorConsole }>(
+    `/api/scenarios/${scenarioId}/consoles`,
+    payload,
+  );
+  return response.operator_console;
+}
+
+export async function getOperatorConsole(
+  scenarioId: number,
+  consoleId: number,
+  signal?: AbortSignal,
+): Promise<OperatorConsole> {
+  const response = await requestJson<{ operator_console: OperatorConsole }>(
+    `/api/scenarios/${scenarioId}/consoles/${consoleId}`,
+    { signal },
+  );
+  return response.operator_console;
+}
+
+export async function saveOperatorConsole(
+  scenarioId: number,
+  consoleId: number,
+  payload: OperatorConsoleSavePayload,
+): Promise<OperatorConsole> {
+  const response = await putJsonWithCsrf<{ operator_console: OperatorConsole }>(
+    `/api/scenarios/${scenarioId}/consoles/${consoleId}`,
+    payload,
+  );
+  return response.operator_console;
+}
+
+export async function listOperableConsoles(
+  signal?: AbortSignal,
+): Promise<ConsoleListEntry[]> {
+  const response = await requestJson<{ consoles: ConsoleListEntry[] }>(
+    "/api/console",
+    { signal },
+  );
+  return response.consoles;
+}
+
+export async function getConsoleShell(
+  consoleId: number,
+  signal?: AbortSignal,
+): Promise<ConsoleShell> {
+  return requestJson<ConsoleShell>(`/api/console/${consoleId}`, { signal });
 }
 
 export async function getPortalConfiguration(

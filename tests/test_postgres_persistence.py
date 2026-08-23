@@ -110,6 +110,64 @@ class PostgresPersistenceTests(unittest.TestCase):
                 store.delete_project(project_id)
             store.close()
 
+    def test_an_operator_console_round_trips_with_its_own_cloned_variant(self):
+        suffix = uuid.uuid4().hex
+        store = AnalystStore(POSTGRES_TEST_DATABASE_URL)
+        project_id = 0
+        try:
+            project = store.create_project(name=f"Console {suffix}")
+            project_id = project["id"]
+            scenario = store.create_scenario(
+                project_id=project_id, name=f"Scenario {suffix}"
+            )
+            case = store.get_or_create_case_for_scenario(scenario["id"])
+            variant = store.get_or_create_default_input_variant(case["id"])
+            document = {
+                "schema_version": "operator_console_config.v1",
+                "public_identity": {"name": "Plan diario", "description": ""},
+                "parameters": [],
+                "groups": [],
+                "results": {"kpis": [], "charts": [], "tables": []},
+            }
+
+            console = store.create_operator_console(
+                case_id=case["id"],
+                source_variant_id=variant["id"],
+                document=document,
+                created_by_user_id=None,
+            )
+            activated = store.save_operator_console(
+                console["id"],
+                document=document,
+                status="active",
+                expected_revision=1,
+                updated_by_user_id=None,
+            )
+
+            self.assertNotEqual(console["owned_variant_id"], variant["id"])
+            self.assertEqual(
+                {
+                    "id": activated["id"],
+                    "owned_variant_id": activated["owned_variant_id"],
+                    "status": activated["status"],
+                    "revision": activated["revision"],
+                },
+                {
+                    "id": console["id"],
+                    "owned_variant_id": console["owned_variant_id"],
+                    "status": "active",
+                    "revision": 2,
+                },
+            )
+            self.assertEqual(
+                store.get_operator_console_location(console["id"])["project_id"],
+                project_id,
+            )
+        finally:
+            if project_id:
+                store.delete_project(project_id)
+            store.close()
+
     def test_configuration_access_migration_is_idempotent(self):
         suffix = uuid.uuid4().hex
         store = AnalystStore(POSTGRES_TEST_DATABASE_URL)

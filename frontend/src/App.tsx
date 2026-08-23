@@ -34,6 +34,11 @@ import {
 } from "./ClientPortal";
 import { ScenarioDraftEditorView } from "./DraftEditor";
 import { ErrorBoundary } from "./ErrorBoundary";
+import {
+  ConsoleListView,
+  ConsoleShellView,
+  OperatorConsoleEditorView,
+} from "./OperatorConsole";
 import "./styles.css";
 import {
   ForbiddenView,
@@ -331,6 +336,14 @@ function AuthenticatedRoutes({ user }: { user: CurrentUser }) {
             path="scenarios/:scenarioId/draft"
             element={isClient ? <ForbiddenView /> : <ScenarioDraftEditorView />}
           />
+          <Route
+            path="scenarios/:scenarioId/consoles/:consoleId"
+            element={
+              isClient ? <ForbiddenView /> : <OperatorConsoleEditorView />
+            }
+          />
+          <Route path="console" element={<ConsoleListView />} />
+          <Route path="console/:consoleId" element={<ConsoleShellView />} />
           <Route
             path="scenarios/:scenarioId/runs/compare"
             element={isClient ? <ForbiddenView /> : <RunComparisonView />}

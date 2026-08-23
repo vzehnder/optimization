@@ -53,6 +53,11 @@ from app.result_comparison import ComparisonError, compare_runs
 from app.result_indexing import rebuild_all_run_results, rebuild_run_results
 from app.result_retention import cleanup_project_result_data, cleanup_run_result_data
 from app.results import ResultReadError, apply_dashboard_template, read_run_results
+from app.operator_console import (
+    OperatorConsoleConfigurationError,
+    validate_operator_console_config_document,
+    validate_operator_console_status,
+)
 from app.portal_configuration import (
     portal_catalogs,
     PortalConfigurationError,
@@ -60,7 +65,12 @@ from app.portal_configuration import (
     validate_portal_config_document,
     validate_portal_configuration_status,
 )
-from app.surface_payloads import build_portal_branding, build_portal_publication_payload
+from app.surface_payloads import (
+    build_console_list_entry,
+    build_console_payload,
+    build_portal_branding,
+    build_portal_publication_payload,
+)
 from app.schedules import (
     ScheduleError,
     due_fixed_range_schedules,
@@ -165,6 +175,17 @@ class PortalConfigurationWriteRequest(BaseModel):
 
 
 class PortalLogoDeleteRequest(BaseModel):
+    expected_revision: int
+
+
+class OperatorConsoleCreateRequest(BaseModel):
+    source_variant_id: int
+    document: dict[str, Any]
+
+
+class OperatorConsoleWriteRequest(BaseModel):
+    document: dict[str, Any]
+    status: str
     expected_revision: int
 
 
@@ -682,6 +703,13 @@ def create_app(
                 return JSONResponse({"detail": error.detail}, status_code=error.status_code)
 
         if path == "/" or path == "/api/auth/me":
+            return await call_next(request)
+        if path.startswith("/api/console"):
+            # Operators reach their consoles here and internal users test them
+            # with their real identity; per-console `operate` is enforced by the
+            # endpoint, which answers 404 so ids stay unguessable.
+            if user["role"] not in {"admin", "analyst", "external"}:
+                return forbidden_response(request)
             return await call_next(request)
         if path.startswith("/api/client"):
             try:
@@ -2544,6 +2572,190 @@ def create_app(
             return JSONResponse(validation_response_body(error), status_code=400)
         run = create_and_enqueue_run(scenario_version["id"])
         return run
+
+    def operator_console_blocking(scenario_id: int, console: dict[str, Any]) -> dict[str, Any]:
+        """Translate the console's own variant state into a fail-closed reason.
+
+        Structural validation of the document never resolves pointers, so a
+        dependency that moved under the console shows up here instead.
+        """
+
+        try:
+            staleness = analyst_store.evaluate_case_input_variant_staleness(
+                scenario_id=scenario_id,
+                case_input_variant_id=int(console["owned_variant_id"]),
+            )
+        except (KeyError, DraftGenerationError):
+            return {"reason": None, "reasons": []}
+        if not staleness["stale"]:
+            return {"reason": None, "reasons": []}
+        return {"reason": "dependencia_movida", "reasons": staleness["reasons"]}
+
+    def operator_console_detail(scenario_id: int, console: dict[str, Any]) -> dict[str, Any]:
+        owned_variant = analyst_store.get_case_input_variant(int(console["owned_variant_id"]))
+        return {
+            "id": console["id"],
+            "scenario_id": scenario_id,
+            "case_id": console["case_id"],
+            "status": console["status"],
+            "revision": console["revision"],
+            "document": console["document"],
+            "owned_variant": {
+                "id": owned_variant["id"],
+                "display_name": owned_variant["display_name"],
+            },
+            "prepared_by": portal_configuration_editor_email(console["prepared_by_user_id"]),
+            "created_at": console["created_at"],
+            "created_by": portal_configuration_editor_email(console["created_by_user_id"]),
+            "updated_at": console["updated_at"],
+            "updated_by": portal_configuration_editor_email(console["updated_by_user_id"]),
+            "waiting_since": console["waiting_since"],
+            "blocking": operator_console_blocking(scenario_id, console),
+        }
+
+    def get_console_for_scenario(scenario_id: int, console_id: int) -> dict[str, Any]:
+        case = analyst_store.get_or_create_case_for_scenario(scenario_id)
+        console = analyst_store.get_operator_console(console_id)
+        if int(console["case_id"]) != int(case["id"]):
+            raise KeyError(f"operator console {console_id} not found in scenario {scenario_id}")
+        return console
+
+    @app.get("/api/scenarios/{scenario_id}/consoles")
+    async def list_operator_consoles(scenario_id: int):
+        try:
+            case = analyst_store.get_or_create_case_for_scenario(scenario_id)
+            consoles = analyst_store.list_operator_consoles(case["id"])
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {
+            "operator_consoles": [
+                operator_console_detail(scenario_id, console) for console in consoles
+            ]
+        }
+
+    @app.post("/api/scenarios/{scenario_id}/consoles", status_code=201)
+    async def create_operator_console(
+        scenario_id: int,
+        payload: OperatorConsoleCreateRequest,
+        request: Request,
+    ):
+        try:
+            document = validate_operator_console_config_document(payload.document)
+            case = analyst_store.get_or_create_case_for_scenario(scenario_id)
+            console = analyst_store.create_operator_console(
+                case_id=case["id"],
+                source_variant_id=payload.source_variant_id,
+                document=document,
+                created_by_user_id=current_user_id(request),
+                created_by=current_user_email(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except OperatorConsoleConfigurationError as error:
+            raise HTTPException(status_code=error.status_code, detail=error.message) from error
+        return {"operator_console": operator_console_detail(scenario_id, console)}
+
+    @app.get("/api/scenarios/{scenario_id}/consoles/{console_id}")
+    async def get_operator_console(scenario_id: int, console_id: int):
+        try:
+            console = get_console_for_scenario(scenario_id, console_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"operator_console": operator_console_detail(scenario_id, console)}
+
+    @app.put("/api/scenarios/{scenario_id}/consoles/{console_id}")
+    async def save_operator_console(
+        scenario_id: int,
+        console_id: int,
+        payload: OperatorConsoleWriteRequest,
+        request: Request,
+    ):
+        try:
+            get_console_for_scenario(scenario_id, console_id)
+            document = validate_operator_console_config_document(payload.document)
+            status = validate_operator_console_status(payload.status)
+            console = analyst_store.save_operator_console(
+                console_id,
+                document=document,
+                status=status,
+                expected_revision=payload.expected_revision,
+                updated_by_user_id=current_user_id(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except OperatorConsoleConfigurationError as error:
+            raise HTTPException(status_code=error.status_code, detail=error.message) from error
+        return {"operator_console": operator_console_detail(scenario_id, console)}
+
+    def console_preparer_name(user_id: int | None) -> str | None:
+        if user_id is None:
+            return None
+        try:
+            user = analyst_store.get_user(int(user_id))
+        except KeyError:
+            return None
+        return str(user["display_name"] or user["email"])
+
+    def operator_console_for_viewer(request: Request, console_id: int) -> dict[str, Any]:
+        """Resolve a console for whoever is asking, or refuse to admit it exists."""
+
+        try:
+            console = analyst_store.get_operator_console(console_id)
+            location = analyst_store.get_operator_console_location(console_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="console not found") from error
+
+        user = getattr(request.state, "current_user", None)
+        if user is None or user.get("role") in {"admin", "analyst"}:
+            return {"console": console, "location": location, "internal": True}
+        if console["status"] != "active" or not analyst_store.external_has_project_capability(
+            user_id=int(user["id"]),
+            project_id=int(location["project_id"]),
+            capability="operate",
+        ):
+            raise HTTPException(status_code=404, detail="console not found")
+        return {"console": console, "location": location, "internal": False}
+
+    @app.get("/api/console")
+    async def list_operable_consoles(request: Request):
+        user = getattr(request.state, "current_user", None)
+        if user is None or user.get("role") in {"admin", "analyst"}:
+            # Internal users see every active console so they can test them.
+            consoles = []
+            for console in analyst_store.list_all_operator_consoles():
+                if console["status"] != "active":
+                    continue
+                location = analyst_store.get_operator_console_location(console["id"])
+                consoles.append(
+                    {**console, "project_name": location["project_name"]}
+                )
+        else:
+            consoles = analyst_store.list_operable_operator_consoles(int(user["id"]))
+        return {
+            "consoles": [
+                build_console_list_entry(
+                    console=console, project_name=console["project_name"]
+                )
+                for console in consoles
+            ]
+        }
+
+    @app.get("/api/console/{console_id}")
+    async def get_console_shell(console_id: int, request: Request):
+        resolved = operator_console_for_viewer(request, console_id)
+        payload = build_console_payload(
+            console=resolved["console"],
+            prepared_by=console_preparer_name(resolved["console"]["prepared_by_user_id"]),
+        )
+        if resolved["internal"]:
+            payload["internal_test"] = {
+                "return_path": (
+                    f"/scenarios/{resolved['location']['scenario_id']}"
+                    f"/consoles/{console_id}"
+                ),
+                "tester": current_user_email(request),
+            }
+        return payload
 
     @app.post("/api/scenarios/{scenario_id}/versions", status_code=201)
     async def create_scenario_version(scenario_id: int, payload: ScenarioVersionCreateRequest):

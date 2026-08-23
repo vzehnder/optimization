@@ -1569,3 +1569,55 @@ button:focus-visible {
     grid-template-columns: 1fr;
   }
 }
+
+.console-create-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.console-create-form label {
+  font-weight: 600;
+  align-self: center;
+}
+
+.console-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.console-table th,
+.console-table td {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border-subtle, #d9dee5);
+}
+
+.console-document-form textarea {
+  font-family: var(--mono-font, monospace);
+}
+
+.console-detail-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.35rem 1rem;
+  margin: 0 0 1rem;
+}
+
+.console-detail-list dt {
+  font-weight: 600;
+}
+
+.console-detail-list dd {
+  margin: 0;
+}
+
+.internal-test-strip {
+  margin: 0;
+  padding: 0.5rem 1rem;
+  background: #fff6e0;
+  border-bottom: 1px solid #e0c98a;
+  font-size: 0.9rem;
+}

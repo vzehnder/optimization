@@ -1,6 +1,6 @@
 # BESS-CONFIG-006: Create And Activate An Operator Console End To End
 
-Status: Todo
+Status: In Review
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/capa_configuracion/architecture_configuration_layer_final.md`
@@ -20,16 +20,16 @@ internal variant to the operator.
 
 ## Acceptance criteria
 
-- [ ] An analyst can create a draft console for a case by choosing a source variant and providing a structurally valid operator-console configuration.
-- [ ] Creation clones a variant exclusively owned by the console and records creator, preparer, timestamps, status and revision.
-- [ ] The scenario workspace lists its consoles and lets an internal user read, edit, activate, deactivate and test them.
-- [ ] Configuration saves use expected revision control, increment revision and preserve the console identity and owned variant.
-- [ ] Unknown schema versions, malformed documents, duplicate ids and invalid enum values are rejected without partial persistence.
-- [ ] Structural validation does not pretend to resolve current pointers, signals, sources or ranges; semantic problems appear as a fail-closed console state.
-- [ ] An external user with `operate` can list consoles across assigned projects and open an active console shell with public identity and prepared-by information.
-- [ ] A draft console, a console outside the user's capabilities and a guessed console id return 404 to an external user.
-- [ ] Admin and analyst test using their real identity with a visible return-to-workspace affordance, never impersonation.
-- [ ] No consoles are created automatically during migration.
+- [x] An analyst can create a draft console for a case by choosing a source variant and providing a structurally valid operator-console configuration.
+- [x] Creation clones a variant exclusively owned by the console and records creator, preparer, timestamps, status and revision.
+- [x] The scenario workspace lists its consoles and lets an internal user read, edit, activate, deactivate and test them.
+- [x] Configuration saves use expected revision control, increment revision and preserve the console identity and owned variant.
+- [x] Unknown schema versions, malformed documents, duplicate ids and invalid enum values are rejected without partial persistence.
+- [x] Structural validation does not pretend to resolve current pointers, signals, sources or ranges; semantic problems appear as a fail-closed console state.
+- [x] An external user with `operate` can list consoles across assigned projects and open an active console shell with public identity and prepared-by information.
+- [x] A draft console, a console outside the user's capabilities and a guessed console id return 404 to an external user.
+- [x] Admin and analyst test using their real identity with a visible return-to-workspace affordance, never impersonation.
+- [x] No consoles are created automatically during migration.
 
 ## Blocked by
 

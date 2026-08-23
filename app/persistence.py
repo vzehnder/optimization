@@ -60,6 +60,7 @@ from app.hydraulic_time_series_adapter import (
     build_hydraulic_catalog_summary,
 )
 from app.time_series_ingestion import find_source
+from app.operator_console import StaleOperatorConsoleError
 from app.portal_configuration import (
     StalePortalConfigurationError,
     default_portal_config_document,
@@ -966,6 +967,27 @@ class AnalystStore:
                 updated_at TEXT NOT NULL,
                 updated_by_user_id INTEGER,
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+                CHECK (status IN ('draft', 'active'))
+            );
+
+            CREATE TABLE IF NOT EXISTS operator_consoles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id INTEGER NOT NULL,
+                owned_variant_id INTEGER NOT NULL UNIQUE,
+                status TEXT NOT NULL DEFAULT 'draft',
+                document_json TEXT NOT NULL,
+                revision INTEGER NOT NULL DEFAULT 1,
+                prepared_by_user_id INTEGER,
+                waiting_since TEXT,
+                created_at TEXT NOT NULL,
+                created_by_user_id INTEGER,
+                updated_at TEXT NOT NULL,
+                updated_by_user_id INTEGER,
+                FOREIGN KEY (case_id) REFERENCES optimization_cases(id) ON DELETE CASCADE,
+                FOREIGN KEY (owned_variant_id) REFERENCES case_input_variants(id) ON DELETE CASCADE,
+                FOREIGN KEY (prepared_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+                FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
                 FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
                 CHECK (status IN ('draft', 'active'))
             );
@@ -7321,6 +7343,200 @@ class AnalystStore:
             )
         return clone
 
+    def create_operator_console(
+        self,
+        *,
+        case_id: int,
+        source_variant_id: int,
+        document: Mapping[str, Any],
+        created_by_user_id: int | None,
+        created_by: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        """Create the console identity together with its own cloned variant.
+
+        The clone is exclusive: the operator edits it through the console API
+        and never sees or shares the analyst's variant.
+        """
+
+        self.get_case_input_variant_for_case(case_id, source_variant_id)
+        console_name = str(
+            (document.get("public_identity") or {}).get("name") or "Consola"
+        )
+        now = utc_now_iso()
+        with self._lock:
+            owned_variant = self.clone_case_input_variant(
+                case_id=case_id,
+                source_variant_id=source_variant_id,
+                display_name=f"Consola {console_name}",
+                created_by=created_by,
+            )
+            cursor = self.connection.execute(
+                """
+                INSERT INTO operator_consoles (
+                    case_id, owned_variant_id, status, document_json, revision,
+                    prepared_by_user_id, waiting_since,
+                    created_at, created_by_user_id, updated_at, updated_by_user_id
+                )
+                VALUES (?, ?, 'draft', ?, 1, ?, NULL, ?, ?, ?, ?)
+                """,
+                (
+                    case_id,
+                    owned_variant["id"],
+                    json.dumps(document, sort_keys=True),
+                    created_by_user_id,
+                    now,
+                    created_by_user_id,
+                    now,
+                    created_by_user_id,
+                ),
+            )
+            self.connection.commit()
+        return self.get_operator_console(int(cursor.lastrowid))
+
+    def get_operator_console(self, console_id: int) -> dict[str, Any]:
+        row = self.connection.execute(
+            """
+            SELECT id, case_id, owned_variant_id, status, document_json, revision,
+                   prepared_by_user_id, waiting_since,
+                   created_at, created_by_user_id, updated_at, updated_by_user_id
+            FROM operator_consoles
+            WHERE id = ?
+            """,
+            (console_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"operator console {console_id} not found")
+        return operator_console_row_to_dict(row)
+
+    def list_operator_consoles(self, case_id: int) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            """
+            SELECT id, case_id, owned_variant_id, status, document_json, revision,
+                   prepared_by_user_id, waiting_since,
+                   created_at, created_by_user_id, updated_at, updated_by_user_id
+            FROM operator_consoles
+            WHERE case_id = ?
+            ORDER BY id
+            """,
+            (case_id,),
+        ).fetchall()
+        return [operator_console_row_to_dict(row) for row in rows]
+
+    def list_all_operator_consoles(self) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            """
+            SELECT id, case_id, owned_variant_id, status, document_json, revision,
+                   prepared_by_user_id, waiting_since,
+                   created_at, created_by_user_id, updated_at, updated_by_user_id
+            FROM operator_consoles
+            ORDER BY id
+            """
+        ).fetchall()
+        return [operator_console_row_to_dict(row) for row in rows]
+
+    def get_operator_console_location(self, console_id: int) -> dict[str, Any]:
+        """Where a console lives, for authorization and internal navigation."""
+
+        row = self.connection.execute(
+            """
+            SELECT operator_consoles.id AS console_id,
+                   optimization_cases.scenario_id AS scenario_id,
+                   scenarios.project_id AS project_id,
+                   projects.name AS project_name
+            FROM operator_consoles
+            JOIN optimization_cases ON optimization_cases.id = operator_consoles.case_id
+            JOIN scenarios ON scenarios.id = optimization_cases.scenario_id
+            JOIN projects ON projects.id = scenarios.project_id
+            WHERE operator_consoles.id = ?
+            """,
+            (console_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"operator console {console_id} not found")
+        return {
+            "console_id": row["console_id"],
+            "scenario_id": row["scenario_id"],
+            "project_id": row["project_id"],
+            "project_name": row["project_name"],
+        }
+
+    def list_operable_operator_consoles(self, user_id: int) -> list[dict[str, Any]]:
+        """Active consoles across every project where the user may operate."""
+
+        rows = self.connection.execute(
+            """
+            SELECT operator_consoles.id, operator_consoles.case_id,
+                   operator_consoles.owned_variant_id, operator_consoles.status,
+                   operator_consoles.document_json, operator_consoles.revision,
+                   operator_consoles.prepared_by_user_id, operator_consoles.waiting_since,
+                   operator_consoles.created_at, operator_consoles.created_by_user_id,
+                   operator_consoles.updated_at, operator_consoles.updated_by_user_id,
+                   projects.name AS project_name
+            FROM operator_consoles
+            JOIN optimization_cases ON optimization_cases.id = operator_consoles.case_id
+            JOIN scenarios ON scenarios.id = optimization_cases.scenario_id
+            JOIN projects ON projects.id = scenarios.project_id
+            JOIN project_client_access
+              ON project_client_access.project_id = projects.id
+             AND project_client_access.user_id = ?
+            JOIN users ON users.id = project_client_access.user_id
+            WHERE operator_consoles.status = 'active'
+              AND project_client_access.operate = 1
+              AND users.role = 'external'
+              AND users.is_active = 1
+            ORDER BY projects.name, operator_consoles.id
+            """,
+            (user_id,),
+        ).fetchall()
+        return [
+            {**operator_console_row_to_dict(row), "project_name": row["project_name"]}
+            for row in rows
+        ]
+
+    def save_operator_console(
+        self,
+        console_id: int,
+        *,
+        document: Mapping[str, Any],
+        status: str,
+        expected_revision: int,
+        updated_by_user_id: int | None,
+    ) -> dict[str, Any]:
+        """Replace the document and status of one existing console.
+
+        Identity and owned variant are deliberately untouched: configuring a
+        console never forks another console or another variant.
+        """
+
+        now = utc_now_iso()
+        with self._lock:
+            current = self.get_operator_console(console_id)
+            if int(expected_revision) != int(current["revision"]):
+                raise StaleOperatorConsoleError(
+                    "stale operator console revision",
+                    current_revision=int(current["revision"]),
+                )
+            self.connection.execute(
+                """
+                UPDATE operator_consoles
+                SET status = ?,
+                    document_json = ?,
+                    revision = revision + 1,
+                    updated_at = ?,
+                    updated_by_user_id = ?
+                WHERE id = ?
+                """,
+                (
+                    status,
+                    json.dumps(document, sort_keys=True),
+                    now,
+                    updated_by_user_id,
+                    console_id,
+                ),
+            )
+            self.connection.commit()
+        return self.get_operator_console(console_id)
+
     def upsert_case_time_series_binding(
         self,
         *,
@@ -10166,6 +10382,23 @@ def case_input_variant_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict
     value = row_to_dict(row)
     value["is_default"] = bool(value["is_default"])
     return value
+
+
+def operator_console_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "case_id": row["case_id"],
+        "owned_variant_id": row["owned_variant_id"],
+        "status": row["status"],
+        "document": json.loads(row["document_json"]),
+        "revision": int(row["revision"]),
+        "prepared_by_user_id": row["prepared_by_user_id"],
+        "waiting_since": row["waiting_since"],
+        "created_at": row["created_at"],
+        "created_by_user_id": row["created_by_user_id"],
+        "updated_at": row["updated_at"],
+        "updated_by_user_id": row["updated_by_user_id"],
+    }
 
 
 def portal_configuration_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:

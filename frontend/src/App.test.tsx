@@ -998,6 +998,11 @@ describe("application shell", () => {
             headers: { "Content-Type": "application/json" },
           });
         }
+        if (path === "/api/scenarios/10/consoles") {
+          return new Response(JSON.stringify({ operator_consoles: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
         if (path === "/api/scenarios/10/case/variants") {
           return new Response(
             JSON.stringify({
@@ -1449,6 +1454,11 @@ describe("application shell", () => {
             headers: { "Content-Type": "application/json" },
           });
         }
+        if (path === "/api/scenarios/10/consoles") {
+          return new Response(JSON.stringify({ operator_consoles: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
         if (path === "/api/scenarios/10/case/variants") {
           return new Response(
             JSON.stringify({
@@ -1820,6 +1830,11 @@ describe("application shell", () => {
             headers: { "Content-Type": "application/json" },
           });
         }
+        if (path === "/api/scenarios/10/consoles") {
+          return new Response(JSON.stringify({ operator_consoles: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
         if (path === "/api/scenarios/10/case/variants" && method === "GET") {
           return new Response(
             JSON.stringify({
@@ -2122,6 +2137,11 @@ describe("application shell", () => {
             headers: { "Content-Type": "application/json" },
           });
         }
+        if (path === "/api/scenarios/10/consoles") {
+          return new Response(JSON.stringify({ operator_consoles: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
         if (path === "/api/scenarios/10/case/variants") {
           return new Response(
             JSON.stringify({
@@ -2322,6 +2342,11 @@ describe("application shell", () => {
             headers: { "Content-Type": "application/json" },
           });
         }
+        if (path === "/api/scenarios/10/consoles") {
+          return new Response(JSON.stringify({ operator_consoles: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
         if (path === "/api/scenarios/10/case/variants") {
           return new Response(
             JSON.stringify({
@@ -2515,6 +2540,11 @@ describe("application shell", () => {
         }
         if (path === "/api/scenarios/10/runs") {
           return new Response(JSON.stringify({ runs: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/consoles") {
+          return new Response(JSON.stringify({ operator_consoles: [] }), {
             headers: { "Content-Type": "application/json" },
           });
         }
@@ -6624,6 +6654,11 @@ describe("application shell", () => {
             headers: { "Content-Type": "application/json" },
           });
         }
+        if (path === "/api/scenarios/10/consoles") {
+          return new Response(JSON.stringify({ operator_consoles: [] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
         if (path === "/api/scenarios/10/runs") {
           return new Response(JSON.stringify({ runs }), {
             headers: { "Content-Type": "application/json" },
@@ -7043,6 +7078,11 @@ describe("application shell", () => {
         }
         if (path === "/api/scenarios/10/runs") {
           return new Response(JSON.stringify({ runs }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/api/scenarios/10/consoles") {
+          return new Response(JSON.stringify({ operator_consoles: [] }), {
             headers: { "Content-Type": "application/json" },
           });
         }

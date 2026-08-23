@@ -1059,6 +1059,49 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "OperatorConsoleCreateRequest": {
+        "properties": {
+          "document": {
+            "additionalProperties": true,
+            "title": "Document",
+            "type": "object"
+          },
+          "source_variant_id": {
+            "title": "Source Variant Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source_variant_id",
+          "document"
+        ],
+        "title": "OperatorConsoleCreateRequest",
+        "type": "object"
+      },
+      "OperatorConsoleWriteRequest": {
+        "properties": {
+          "document": {
+            "additionalProperties": true,
+            "title": "Document",
+            "type": "object"
+          },
+          "expected_revision": {
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document",
+          "status",
+          "expected_revision"
+        ],
+        "title": "OperatorConsoleWriteRequest",
+        "type": "object"
+      },
       "PortalConfigurationWriteRequest": {
         "properties": {
           "document": {
@@ -2778,6 +2821,59 @@
           }
         },
         "summary": "Api Download Client Publication Artifact"
+      }
+    },
+    "/api/console": {
+      "get": {
+        "operationId": "list_operable_consoles_api_console_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Operable Consoles"
+      }
+    },
+    "/api/console/{console_id}": {
+      "get": {
+        "operationId": "get_console_shell_api_console__console_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "console_id",
+            "required": true,
+            "schema": {
+              "title": "Console Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Console Shell"
       }
     },
     "/api/dashboard-templates/{template_id}": {
@@ -5108,6 +5204,188 @@
           }
         },
         "summary": "Validate Case Input Variant"
+      }
+    },
+    "/api/scenarios/{scenario_id}/consoles": {
+      "get": {
+        "operationId": "list_operator_consoles_api_scenarios__scenario_id__consoles_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Operator Consoles"
+      },
+      "post": {
+        "operationId": "create_operator_console_api_scenarios__scenario_id__consoles_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorConsoleCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Operator Console"
+      }
+    },
+    "/api/scenarios/{scenario_id}/consoles/{console_id}": {
+      "get": {
+        "operationId": "get_operator_console_api_scenarios__scenario_id__consoles__console_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "console_id",
+            "required": true,
+            "schema": {
+              "title": "Console Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Operator Console"
+      },
+      "put": {
+        "operationId": "save_operator_console_api_scenarios__scenario_id__consoles__console_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "console_id",
+            "required": true,
+            "schema": {
+              "title": "Console Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorConsoleWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Operator Console"
       }
     },
     "/api/scenarios/{scenario_id}/draft": {
