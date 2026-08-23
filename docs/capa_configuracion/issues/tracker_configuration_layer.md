@@ -1,0 +1,81 @@
+# BESS Configuration Layer Issue Tracker
+
+This document is the local implementation tracker for the configuration layer,
+operator console and configured client portal defined by
+`docs/capa_configuracion/architecture_configuration_layer_final.md`.
+
+External issue tracker integration has not been configured, so each issue is
+stored as a Markdown file in this folder. All issues are AFK tracer-bullet
+slices and carry the `ready-for-agent` triage label.
+
+The accepted architecture document is normative. Implementation issues may
+surface evidence that a contract is impossible, but they must not silently
+reopen or weaken decisions from the completed Wayfinder map.
+
+## Status Vocabulary
+
+- `Todo`: not started.
+- `In Progress`: actively being implemented.
+- `Blocked`: waiting on a dependency or newly discovered impossibility.
+- `In Review`: implementation is ready for review.
+- `Done`: merged or accepted.
+
+## Issue Register
+
+| ID | Title | Type | Triage | Status | Blocked by | Issue file |
+| --- | --- | --- | --- | --- | --- | --- |
+| BESS-CONFIG-001 | Expand External Project Capabilities Beside Legacy Client Access | AFK | ready-for-agent | Todo | None | [BESS-CONFIG-001-expand-external-project-capabilities-beside-legacy-client-access.md](BESS-CONFIG-001-expand-external-project-capabilities-beside-legacy-client-access.md) |
+| BESS-CONFIG-002 | Cut Over The Portal To External Capabilities And Retire Legacy Client Access | AFK | ready-for-agent | Todo | BESS-CONFIG-001 | [BESS-CONFIG-002-cut-over-the-portal-to-external-capabilities-and-retire-legacy-client-access.md](BESS-CONFIG-002-cut-over-the-portal-to-external-capabilities-and-retire-legacy-client-access.md) |
+| BESS-CONFIG-003 | Configure One Portal Result End To End | AFK | ready-for-agent | Todo | BESS-CONFIG-002 | [BESS-CONFIG-003-configure-one-portal-result-end-to-end.md](BESS-CONFIG-003-configure-one-portal-result-end-to-end.md) |
+| BESS-CONFIG-004 | Cut Over All Portal Results To Safe Shared Payloads | AFK | ready-for-agent | Todo | BESS-CONFIG-003 | [BESS-CONFIG-004-cut-over-all-portal-results-to-safe-shared-payloads.md](BESS-CONFIG-004-cut-over-all-portal-results-to-safe-shared-payloads.md) |
+| BESS-CONFIG-005 | Brand The Client Portal With A Project Name And Logo | AFK | ready-for-agent | Todo | BESS-CONFIG-003 | [BESS-CONFIG-005-brand-the-client-portal-with-a-project-name-and-logo.md](BESS-CONFIG-005-brand-the-client-portal-with-a-project-name-and-logo.md) |
+| BESS-CONFIG-006 | Create And Activate An Operator Console End To End | AFK | ready-for-agent | Todo | BESS-CONFIG-002 | [BESS-CONFIG-006-create-and-activate-an-operator-console-end-to-end.md](BESS-CONFIG-006-create-and-activate-an-operator-console-end-to-end.md) |
+| BESS-CONFIG-007 | Drive Console Signal Choices From The Canonical Catalog | AFK | ready-for-agent | Todo | BESS-CONFIG-006 | [BESS-CONFIG-007-drive-console-signal-choices-from-the-canonical-catalog.md](BESS-CONFIG-007-drive-console-signal-choices-from-the-canonical-catalog.md) |
+| BESS-CONFIG-008 | Land Users In Separate Analyst, Console And Portal Roots | AFK | ready-for-agent | Todo | BESS-CONFIG-002, BESS-CONFIG-006 | [BESS-CONFIG-008-land-users-in-separate-analyst-console-and-portal-roots.md](BESS-CONFIG-008-land-users-in-separate-analyst-console-and-portal-roots.md) |
+| BESS-CONFIG-009 | Run A Configured Console With Parameter Overrides | AFK | ready-for-agent | Todo | BESS-CONFIG-004, BESS-CONFIG-006 | [BESS-CONFIG-009-run-a-configured-console-with-parameter-overrides.md](BESS-CONFIG-009-run-a-configured-console-with-parameter-overrides.md) |
+| BESS-CONFIG-010 | Edit One Exposed Series Without Changing Canonical Data | AFK | ready-for-agent | Todo | BESS-CONFIG-007, BESS-CONFIG-009 | [BESS-CONFIG-010-edit-one-exposed-series-without-changing-canonical-data.md](BESS-CONFIG-010-edit-one-exposed-series-without-changing-canonical-data.md) |
+| BESS-CONFIG-011 | Paste And Save Multi-Set Groups Atomically | AFK | ready-for-agent | Todo | BESS-CONFIG-010 | [BESS-CONFIG-011-paste-and-save-multi-set-groups-atomically.md](BESS-CONFIG-011-paste-and-save-multi-set-groups-atomically.md) |
+| BESS-CONFIG-012 | Switch Named Series Sources Safely | AFK | ready-for-agent | Todo | BESS-CONFIG-010 | [BESS-CONFIG-012-switch-named-series-sources-safely.md](BESS-CONFIG-012-switch-named-series-sources-safely.md) |
+| BESS-CONFIG-013 | Coordinate Editors And Preserve Auditable Series History | AFK | ready-for-agent | Todo | BESS-CONFIG-011 | [BESS-CONFIG-013-coordinate-editors-and-preserve-auditable-series-history.md](BESS-CONFIG-013-coordinate-editors-and-preserve-auditable-series-history.md) |
+| BESS-CONFIG-014 | Fail Closed And Request Engineer Review After External Changes | AFK | ready-for-agent | Todo | BESS-CONFIG-009, BESS-CONFIG-010 | [BESS-CONFIG-014-fail-closed-and-request-engineer-review-after-external-changes.md](BESS-CONFIG-014-fail-closed-and-request-engineer-review-after-external-changes.md) |
+| BESS-CONFIG-015 | Resolve Console Blocks With The Correct Engineer Action | AFK | ready-for-agent | Todo | BESS-CONFIG-012, BESS-CONFIG-014 | [BESS-CONFIG-015-resolve-console-blocks-with-the-correct-engineer-action.md](BESS-CONFIG-015-resolve-console-blocks-with-the-correct-engineer-action.md) |
+| BESS-CONFIG-016 | Compare Two Configured Console Runs Safely | AFK | ready-for-agent | Todo | BESS-CONFIG-009, BESS-CONFIG-010 | [BESS-CONFIG-016-compare-two-configured-console-runs-safely.md](BESS-CONFIG-016-compare-two-configured-console-runs-safely.md) |
+| BESS-CONFIG-017 | Prove The Configuration Layer End To End | AFK | ready-for-agent | Todo | BESS-CONFIG-001 through BESS-CONFIG-016 | [BESS-CONFIG-017-prove-the-configuration-layer-end-to-end.md](BESS-CONFIG-017-prove-the-configuration-layer-end-to-end.md) |
+
+## Initial Frontier
+
+Only [Expand External Project Capabilities Beside Legacy Client Access](BESS-CONFIG-001-expand-external-project-capabilities-beside-legacy-client-access.md)
+can start immediately. Every other issue has at least one open blocker.
+
+## Dependency Waves
+
+1. BESS-CONFIG-001.
+2. BESS-CONFIG-002.
+3. BESS-CONFIG-003 and BESS-CONFIG-006.
+4. BESS-CONFIG-004, BESS-CONFIG-005, BESS-CONFIG-007 and BESS-CONFIG-008.
+5. BESS-CONFIG-009.
+6. BESS-CONFIG-010.
+7. BESS-CONFIG-011, BESS-CONFIG-012, BESS-CONFIG-014 and BESS-CONFIG-016.
+8. BESS-CONFIG-013 and BESS-CONFIG-015.
+9. BESS-CONFIG-017.
+
+Issues in the same wave are independent according to the accepted dependency
+graph and may be implemented in parallel.
+
+## Progress Log
+
+| Date | Issue | Status change | Notes |
+| --- | --- | --- | --- |
+| 2026-08-23 | All | Created | Seventeen AFK tracer-bullet issues published from the accepted configuration-layer architecture after explicit approval of granularity, dependency relationships and AFK classification. BESS-CONFIG-001 is the initial frontier. |
+
+## Regression Guard
+
+Every slice must preserve the existing immutable scenario-version and run
+history, TS-1 through TS-6 contracts, hydraulic behavior, publication artifact
+allowlists and both supported database engines where persistence changes.
+
+Backend changes run the relevant focused tests and the full Python suite.
+Frontend changes run Vitest, TypeScript, ESLint, API schema checks and the
+production build. Julia tests are required when a slice changes generated case
+payloads, artifact contracts or optimizer behavior. BESS-CONFIG-017 closes the
+effort only after the full acceptance and browser narratives pass.
