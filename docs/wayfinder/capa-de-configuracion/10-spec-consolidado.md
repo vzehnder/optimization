@@ -3,8 +3,8 @@ id: 10
 title: "Especificacion consolidada de la capa de configuracion"
 map: capa-de-configuracion
 label: wayfinder:task
-status: open
-assignee:
+status: closed
+assignee: vzehnder
 blocked_by: [01, 02, 03, 04, 05, 06, 07, 08, 09, 11, 12, 13, 14]
 ---
 
@@ -78,3 +78,28 @@ Debe contener:
 
 Al cerrar este ticket el mapa esta completo. El paso siguiente ya no es
 wayfinding: es `/to-tickets` sobre el spec.
+
+## Resolucion
+
+Tarea completada el 2026-08-23.
+
+Se consolido el destino del mapa en
+[`architecture_configuration_layer_final.md`](../../capa_configuracion/architecture_configuration_layer_final.md).
+El documento fija como contratos implementables:
+
+- entidades, documentos JSON v1 y politica de revision;
+- roles, capacidades por proyecto y matriz de autorizacion;
+- endpoints internos, de consola y de portal;
+- allowlists de `portal_payload`, `console_payload` y `results_block`;
+- edicion multi-set transaccional, lease, control optimista, parser numerico,
+  auditoria y regla fail-closed;
+- comportamiento y navegacion de las tres raices;
+- marca, migracion, extensibilidad de senales y 25 criterios de aceptacion.
+
+La auditoria final de niebla confirmo que los dos temas restantes no son pasos
+hacia este destino: exponer el editor hidraulico excede la fachada one-bus, y
+el onboarding se redacta despues de estabilizar la implementacion. Ambos quedan
+en `Out of scope` del mapa y `Not yet specified` queda vacio.
+
+No se implemento codigo de producto. El handoff siguiente es `/to-tickets`
+sobre el spec aceptado.

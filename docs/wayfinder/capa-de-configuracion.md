@@ -199,25 +199,26 @@ Fijan el destino; no son tickets cerrados.
   del producto" nunca fue la opcion conservadora, y que `project.description` se
   cae del portal como regresion consciente. Sin versionado y con edicion en vivo.
 
+- [Especificacion consolidada de la capa de configuracion](capa-de-configuracion/10-spec-consolidado.md)
+  — el spec aceptado consolida modelo, documentos JSON, APIs, payloads,
+  permisos, edicion, fail-closed, navegacion, marca, migracion, extensibilidad y
+  criterios de aceptacion; el mapa queda listo para `/to-tickets`.
+
 ## Not yet specified
 
-Niebla en alcance, aun no suficientemente nitida para ticketear:
-
-- **El editor de diagrama hidraulico dentro de este modelo**: si un caso
-  hidraulico se puede exponer a un operador y como, dado que su topologia no se
-  edita con formularios simples.
-- **Documentacion/onboarding del ingeniero configurador**: que necesita saber
-  para armar una configuracion sin leer el tutorial de series completo.
-
-*Retirado de esta seccion*: **Estrategia de validacion de la configuracion**, que
-[Superficie del ingeniero para consolas bloqueadas](capa-de-configuracion/14-superficie-ingeniero-consolas-bloqueadas.md)
-absorbio y cerro por decision — rechazo duro de esquema al guardar mas
-fail-closed al cargar, sin linter semantico, como corte MVP asumido.
+Ninguno. La ruta al destino esta especificada y no queda niebla dentro del
+alcance.
 
 ## Out of scope
 
 Trabajo conscientemente fuera del destino de este mapa. No graduan.
 
+- **Exponer o editar el diagrama hidraulico desde la consola de operador**.
+  El destino de este mapa es la fachada del editor estructurado one-bus; la
+  topologia hidraulica exige otro cascaron y un esfuerzo separado.
+- **Documentacion/onboarding del ingeniero configurador**. Es un entregable de
+  producto posterior a implementar y estabilizar el spec, no una decision que
+  impida convertirlo en tickets.
 - **Simplificar la cadena interna** (fusionar Draft con Caso, revisar la
   cardinalidad Escenario -> OptimizationCase 1-a-1, unificar editor
   estructurado con diagrama hidraulico). Decidido en el charting: fachada
