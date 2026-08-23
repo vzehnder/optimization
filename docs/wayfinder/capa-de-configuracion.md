@@ -186,6 +186,19 @@ Fijan el destino; no son tickets cerrados.
   **triplicada** en el codigo y que el listado que la navegacion necesita es
   cruzado por proyecto, no por proyecto.
 
+- [Alcance de marca del portal cliente](capa-de-configuracion/13-marca-del-portal-cliente.md)
+  — marca por proyecto de **dos campos**, nombre visible y logo, sin colores. El
+  logo es el **primer binario del sistema**, y por eso queda acotado con llave:
+  un slot, PNG/JPEG —excluir SVG mata la rama de XSS—, tope de 256 KB, bytes en
+  columnas de `portal_configurations` y endpoint propio bajo `/api/`, porque
+  `/react/*` esta exento del gate de rol. El fallback nunca cae en la marca del
+  producto. Enmienda declarada al sobre: `project { name }` pasa a
+  `branding { display_name, logo_url }` con el fallback ya resuelto en backend,
+  como `landing_path`. El ticket destapo que la marca del producto **no es un
+  activo sino el header del analista** (`Z` + "BESS Workspace"), asi que "usar la
+  del producto" nunca fue la opcion conservadora, y que `project.description` se
+  cae del portal como regresion consciente. Sin versionado y con edicion en vivo.
+
 ## Not yet specified
 
 Niebla en alcance, aun no suficientemente nitida para ticketear:
@@ -229,3 +242,13 @@ Trabajo conscientemente fuera del destino de este mapa. No graduan.
   resulta que el operador si necesita subir archivos, esto redibuja el destino.
 - **Edicion de modelos por el cliente read-only**: sigue fuera de alcance como
   en `docs/final/objetivo_final.md`.
+- **Colores, tipografia y tema configurables por proyecto**, y **favicon por
+  proyecto**. Recorte MVP de
+  [Alcance de marca del portal cliente](capa-de-configuracion/13-marca-del-portal-cliente.md):
+  una paleta no es un campo sino una superficie —toca cada color de grafico, de
+  estado y todo el contraste— y como ya se decidio que no hay linter semantico,
+  nada atajaria una paleta ilegible antes de que la vea el cliente. La marca del
+  portal se resuelve con nombre visible y logo.
+- **Dominio propio y white-label del portal**. Decidido en
+  [Alcance de marca del portal cliente](capa-de-configuracion/13-marca-del-portal-cliente.md):
+  el portal es "el informe de este proyecto", no "un producto del cliente".
