@@ -1291,9 +1291,7 @@ describe("application shell", () => {
     expect(
       await screen.findByRole("heading", { name: "Run 99" }),
     ).toBeVisible();
-    expect(
-      await screen.findByText(/import_price_usd_per_mwh/),
-    ).toBeVisible();
+    expect(await screen.findByText(/import_price_usd_per_mwh/)).toBeVisible();
     expect(screen.getByText(/revision 3/)).toBeVisible();
     expect(screen.getByText(/sha256:abcde/)).toBeVisible();
   });
@@ -2573,7 +2571,8 @@ describe("application shell", () => {
                           {
                             dependency_type: "time_series_set",
                             dependency_id: "5",
-                            detail: "time-series set 5 changed since last validation",
+                            detail:
+                              "time-series set 5 changed since last validation",
                           },
                         ],
                       }
@@ -2622,9 +2621,7 @@ describe("application shell", () => {
 
     render(<App />);
 
-    expect(
-      await screen.findByText(/Variante desactualizada/),
-    ).toBeVisible();
+    expect(await screen.findByText(/Variante desactualizada/)).toBeVisible();
     expect(screen.getByText(/time-series set 5 changed/)).toBeVisible();
     expect(
       screen.getByRole("button", { name: "Vincular y correr variante" }),
@@ -5901,9 +5898,7 @@ describe("application shell", () => {
       await screen.findByRole("heading", { name: "Draft estructurado" }),
     ).toBeVisible();
     expect(
-      screen.getByText(
-        /embedded time series is this draft's legacy storage/,
-      ),
+      screen.getByText(/embedded time series is this draft's legacy storage/),
     ).toBeVisible();
     await user.upload(
       screen.getByLabelText("Source file"),
@@ -5919,9 +5914,7 @@ describe("application shell", () => {
     expect(
       screen.getByRole("heading", { name: "Import mapped columns to catalog" }),
     ).toBeVisible();
-    expect(
-      screen.queryByText("TS-2 catalog import"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("TS-2 catalog import")).not.toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Extract legacy series to catalog" }),
     ).toBeVisible();
@@ -7974,14 +7967,19 @@ describe("application shell", () => {
       "2020-01-02T00:00:00+00:00",
     );
     await user.selectOptions(screen.getByLabelText("Modo de rango"), "rolling");
-    await user.type(screen.getByLabelText("Offset inicio rolling (horas)"), "0");
+    await user.type(
+      screen.getByLabelText("Offset inicio rolling (horas)"),
+      "0",
+    );
     await user.type(screen.getByLabelText("Duracion rolling (horas)"), "24");
     await user.type(
       screen.getByLabelText("Proxima ejecucion"),
       "2026-08-11T09:00:00+00:00",
     );
     await user.click(screen.getByRole("button", { name: "Crear schedule" }));
-    expect(await screen.findByText("Rolling API schedule creado.")).toBeVisible();
+    expect(
+      await screen.findByText("Rolling API schedule creado."),
+    ).toBeVisible();
     expect(
       await screen.findByText(/rolling \| offset 0h \| duracion 24h/),
     ).toBeVisible();
@@ -8018,8 +8016,12 @@ describe("application shell", () => {
     expect(
       screen.getByRole("button", { name: "Revocar external@example.local" }),
     ).toBeVisible();
-    expect(screen.getByLabelText("Portal external@example.local")).toBeChecked();
-    expect(screen.getByLabelText("Operar external@example.local")).toBeChecked();
+    expect(
+      screen.getByLabelText("Portal external@example.local"),
+    ).toBeChecked();
+    expect(
+      screen.getByLabelText("Operar external@example.local"),
+    ).toBeChecked();
 
     await user.click(
       screen.getByRole("button", { name: "Revocar external@example.local" }),
@@ -8074,6 +8076,8 @@ describe("application shell", () => {
       description: "Client assignment workspace",
       created_at: "2026-06-24T12:00:00Z",
     };
+    const branding = { display_name: project.name, logo_url: null };
+    const portalProject = { id: project.id, branding };
     const publication = {
       id: 9,
       project_id: 1,
@@ -8166,20 +8170,20 @@ describe("application shell", () => {
           });
         }
         if (path === "/api/client/projects") {
-          return new Response(JSON.stringify({ projects: [project] }), {
+          return new Response(JSON.stringify({ projects: [portalProject] }), {
             headers: { "Content-Type": "application/json" },
           });
         }
         if (path === "/api/client/projects/1/publications") {
           return new Response(
-            JSON.stringify({ project, publications: [publication] }),
+            JSON.stringify({ branding, publications: [publication] }),
             { headers: { "Content-Type": "application/json" } },
           );
         }
         if (path === "/api/client/projects/1/publications/9") {
           return new Response(
             JSON.stringify({
-              project: { id: project.id, name: project.name },
+              branding,
               publication,
               period: {
                 start: "2026-01-01T00:00:00",
@@ -8847,9 +8851,7 @@ describe("application shell", () => {
       screen.getByRole("heading", { name: "Origen legacy" }),
     ).toBeVisible();
     expect(screen.getByRole("heading", { name: "Origen" })).toBeVisible();
-    expect(
-      screen.getByText(/Extraido desde borrador legacy/),
-    ).toBeVisible();
+    expect(screen.getByText(/Extraido desde borrador legacy/)).toBeVisible();
     expect(screen.getByText(/price\.csv \(text\/csv\)/)).toBeVisible();
   });
 
@@ -9028,7 +9030,11 @@ describe("application shell", () => {
         },
       ],
       values: [
-        { period_index: 0, signal_key: "natural_inflow_m3s", value_numeric: 5.0 },
+        {
+          period_index: 0,
+          signal_key: "natural_inflow_m3s",
+          value_numeric: 5.0,
+        },
       ],
       horizon: {
         period_count: 1,
@@ -9135,7 +9141,9 @@ describe("application shell", () => {
       "/react/projects/1/time-series-sets/hydraulic/77",
     );
     expect(screen.getByText("natural_inflow_m3s")).toBeVisible();
-    expect(screen.getByText(/m3\/s \| hydraulic_node:reservoir_alpha/)).toBeVisible();
+    expect(
+      screen.getByText(/m3\/s \| hydraulic_node:reservoir_alpha/),
+    ).toBeVisible();
     expect(
       screen.getByText(/Laja System \/ Reservoir Alpha \(hydraulic_node\)/),
     ).toBeVisible();
@@ -9201,7 +9209,11 @@ describe("application shell", () => {
         },
       ],
       values: [
-        { period_index: 0, signal_key: "natural_inflow_m3s", value_numeric: 5.0 },
+        {
+          period_index: 0,
+          signal_key: "natural_inflow_m3s",
+          value_numeric: 5.0,
+        },
       ],
       horizon: {
         period_count: 1,

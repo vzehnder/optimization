@@ -19,6 +19,7 @@ const emptyConfiguration = {
       },
     },
     revision: 0,
+    has_logo: false,
     updated_at: null,
     updated_by: null,
   },
@@ -65,7 +66,12 @@ function stubProjectWorkspace(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       const method = init?.method || "GET";
-      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      const body =
+        init?.body instanceof FormData
+          ? init.body
+          : init?.body
+            ? JSON.parse(String(init.body))
+            : undefined;
       const handled = handler(path, method, body);
       if (handled) return handled;
       if (path === "/api/auth/me") {
@@ -117,6 +123,94 @@ function stubProjectWorkspace(
 }
 
 describe("portal configuration workspace", () => {
+  it("lets an analyst upload a PNG logo at the current revision", async () => {
+    window.history.replaceState({}, "", "/react/projects/1");
+    const uploads: FormData[] = [];
+    stubProjectWorkspace((path, method, body) => {
+      if (
+        path === "/api/projects/1/portal-configuration/logo" &&
+        method === "PUT" &&
+        body instanceof FormData
+      ) {
+        uploads.push(body);
+        return Response.json({
+          portal_configuration: {
+            ...emptyConfiguration.portal_configuration,
+            revision: 1,
+            has_logo: true,
+            updated_by: "analyst@example.local",
+          },
+        });
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+    const logo = new File(["png-bytes"], "cliente.png", {
+      type: "image/png",
+    });
+
+    render(<App />);
+
+    const section = await screen.findByRole("region", {
+      name: "Portal del cliente",
+    });
+    await user.upload(
+      await within(section).findByLabelText("Logo del portal"),
+      logo,
+    );
+    await user.click(
+      within(section).getByRole("button", { name: "Subir logo" }),
+    );
+
+    expect(await within(section).findByText("Logo configurado")).toBeVisible();
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0].get("expected_revision")).toBe("0");
+    expect(uploads[0].get("logo")).toEqual(logo);
+  });
+
+  it("lets an analyst remove the current logo at the current revision", async () => {
+    window.history.replaceState({}, "", "/react/projects/1");
+    const removals: unknown[] = [];
+    stubProjectWorkspace((path, method, body) => {
+      if (path === "/api/projects/1/portal-configuration" && method === "GET") {
+        return Response.json({
+          portal_configuration: {
+            ...emptyConfiguration.portal_configuration,
+            revision: 3,
+            has_logo: true,
+          },
+        });
+      }
+      if (
+        path === "/api/projects/1/portal-configuration/logo" &&
+        method === "DELETE"
+      ) {
+        removals.push(body);
+        return Response.json({
+          portal_configuration: {
+            ...emptyConfiguration.portal_configuration,
+            revision: 4,
+            has_logo: false,
+          },
+        });
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    const section = await screen.findByRole("region", {
+      name: "Portal del cliente",
+    });
+    await user.click(
+      await within(section).findByRole("button", { name: "Quitar logo" }),
+    );
+
+    expect(await within(section).findByText("Sin logo")).toBeVisible();
+    expect(removals).toEqual([{ expected_revision: 3 }]);
+  });
+
   it("lets an analyst declare a display name, a KPI label and one KPI", async () => {
     window.history.replaceState({}, "", "/react/projects/1");
     const saved: unknown[] = [];

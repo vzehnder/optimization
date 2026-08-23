@@ -43,6 +43,25 @@
         "title": "Body_upload_draft_time_series_source_api_scenarios__scenario_id__draft_time_series_sources_upload_post",
         "type": "object"
       },
+      "Body_upload_portal_logo_api_projects__project_id__portal_configuration_logo_put": {
+        "properties": {
+          "expected_revision": {
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "logo": {
+            "contentMediaType": "application/octet-stream",
+            "title": "Logo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "logo",
+          "expected_revision"
+        ],
+        "title": "Body_upload_portal_logo_api_projects__project_id__portal_configuration_logo_put",
+        "type": "object"
+      },
       "Body_upload_scenario_version_api_scenarios__scenario_id__versions_upload_post": {
         "properties": {
           "system_case_file": {
@@ -1062,6 +1081,19 @@
           "expected_revision"
         ],
         "title": "PortalConfigurationWriteRequest",
+        "type": "object"
+      },
+      "PortalLogoDeleteRequest": {
+        "properties": {
+          "expected_revision": {
+            "title": "Expected Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_revision"
+        ],
+        "title": "PortalLogoDeleteRequest",
         "type": "object"
       },
       "ProjectCreateRequest": {
@@ -2573,6 +2605,43 @@
         "summary": "Api Client Projects"
       }
     },
+    "/api/client/projects/{project_id}/branding/logo": {
+      "get": {
+        "operationId": "api_client_project_branding_logo_api_client_projects__project_id__branding_logo_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Client Project Branding Logo"
+      }
+    },
     "/api/client/projects/{project_id}/publications": {
       "get": {
         "operationId": "api_client_project_publications_api_client_projects__project_id__publications_get",
@@ -3139,6 +3208,133 @@
           }
         },
         "summary": "Save Portal Configuration"
+      }
+    },
+    "/api/projects/{project_id}/portal-configuration/logo": {
+      "delete": {
+        "operationId": "remove_portal_logo_api_projects__project_id__portal_configuration_logo_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortalLogoDeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Portal Logo"
+      },
+      "get": {
+        "operationId": "get_portal_logo_for_preview_api_projects__project_id__portal_configuration_logo_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Portal Logo For Preview"
+      },
+      "put": {
+        "operationId": "upload_portal_logo_api_projects__project_id__portal_configuration_logo_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_portal_logo_api_projects__project_id__portal_configuration_logo_put"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Portal Logo"
       }
     },
     "/api/projects/{project_id}/scenarios": {

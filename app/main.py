@@ -60,7 +60,7 @@ from app.portal_configuration import (
     validate_portal_config_document,
     validate_portal_configuration_status,
 )
-from app.surface_payloads import build_portal_publication_payload
+from app.surface_payloads import build_portal_branding, build_portal_publication_payload
 from app.schedules import (
     ScheduleError,
     due_fixed_range_schedules,
@@ -85,6 +85,17 @@ from app.time_series_ingestion import (
     update_time_series_source_rows,
 )
 from app.validation import JuliaValidationService, ValidationResult
+
+
+PORTAL_LOGO_MAX_BYTES = 256 * 1024
+
+
+def portal_logo_signature_matches(media_type: str, payload: bytes) -> bool:
+    if media_type == "image/png":
+        return payload.startswith(b"\x89PNG\r\n\x1a\n")
+    if media_type == "image/jpeg":
+        return payload.startswith(b"\xff\xd8\xff")
+    return False
 
 
 class SystemCaseValidationRequest(BaseModel):
@@ -150,6 +161,10 @@ class ExternalProjectAccessRequest(BaseModel):
 class PortalConfigurationWriteRequest(BaseModel):
     document: dict[str, Any]
     status: str
+    expected_revision: int
+
+
+class PortalLogoDeleteRequest(BaseModel):
     expected_revision: int
 
 
@@ -795,6 +810,9 @@ def create_app(
             publication=publication,
             results=canonical_results,
             downloads=downloads,
+            logo_url=(
+                f"/api/client/projects/{project_id}/branding/logo"
+            ),
         )
 
     def configured_portal_payload(
@@ -803,17 +821,37 @@ def create_app(
         publication: dict[str, Any],
         results: dict[str, Any] | None,
         downloads: list[dict[str, Any]],
+        logo_url: str,
     ) -> dict[str, Any]:
-        document = active_portal_configuration_document(project["id"])
-        if document is None:
+        configuration = analyst_store.get_portal_configuration(project["id"])
+        if configuration is None or configuration["status"] != "active":
             document = default_portal_config_document()
+            resolved_logo_url = None
+        else:
+            document = configuration["document"]
+            resolved_logo_url = logo_url if configuration["logo_bytes"] is not None else None
         return build_portal_publication_payload(
             project=project,
             publication=publication,
             document=document,
             results=results,
             downloads=downloads,
+            logo_url=resolved_logo_url,
         )
+
+    def resolved_external_portal_branding(project: dict[str, Any]) -> dict[str, Any]:
+        configuration = analyst_store.get_portal_configuration(project["id"])
+        if configuration is None or configuration["status"] != "active":
+            document = default_portal_config_document()
+            logo_url = None
+        else:
+            document = configuration["document"]
+            logo_url = (
+                f"/api/client/projects/{project['id']}/branding/logo"
+                if configuration["logo_bytes"] is not None
+                else None
+            )
+        return build_portal_branding(project, document, logo_url)
 
     def get_or_create_scenario_draft(scenario_id: int) -> dict:
         try:
@@ -975,7 +1013,15 @@ def create_app(
                 raise HTTPException(status_code=404, detail="portal not found")
         else:
             projects = analyst_store.list_projects()
-        return {"projects": projects}
+        return {
+            "projects": [
+                {
+                    "id": project["id"],
+                    "branding": resolved_external_portal_branding(project),
+                }
+                for project in projects
+            ]
+        }
 
     @app.get("/api/client/projects/{project_id}/publications")
     async def api_client_project_publications(project_id: int, request: Request):
@@ -985,7 +1031,35 @@ def create_app(
             publications = analyst_store.list_published_project_publications(project_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        return {"project": project, "publications": publications}
+        return {
+            "branding": resolved_external_portal_branding(project),
+            "publications": publications,
+        }
+
+    @app.get("/api/client/projects/{project_id}/branding/logo")
+    async def api_client_project_branding_logo(project_id: int, request: Request):
+        require_client_project_access(request, project_id)
+        configuration = analyst_store.get_portal_configuration(project_id)
+        if (
+            configuration is None
+            or configuration["status"] != "active"
+            or configuration["logo_bytes"] is None
+            or configuration["logo_media_type"] is None
+        ):
+            raise HTTPException(status_code=404, detail="logo not found")
+        etag = f'"portal-logo-r{configuration["revision"]}"'
+        response_headers = {
+            "ETag": etag,
+            "Cache-Control": "private, must-revalidate",
+            "X-Content-Type-Options": "nosniff",
+        }
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers=response_headers)
+        return Response(
+            content=configuration["logo_bytes"],
+            media_type=configuration["logo_media_type"],
+            headers=response_headers,
+        )
 
     @app.get("/api/client/projects/{project_id}/publications/{publication_id}")
     async def api_client_publication_detail(project_id: int, publication_id: int, request: Request):
@@ -1148,6 +1222,7 @@ def create_app(
                 "status": "draft",
                 "document": default_portal_config_document(),
                 "revision": 0,
+                "has_logo": False,
                 "updated_at": None,
                 "updated_by": None,
             }
@@ -1156,6 +1231,7 @@ def create_app(
             "status": configuration["status"],
             "document": configuration["document"],
             "revision": configuration["revision"],
+            "has_logo": configuration["logo_bytes"] is not None,
             "updated_at": configuration["updated_at"],
             "updated_by": portal_configuration_editor_email(
                 configuration["updated_by_user_id"]
@@ -1169,12 +1245,6 @@ def create_app(
             return str(analyst_store.get_user(int(user_id))["email"])
         except KeyError:
             return None
-
-    def active_portal_configuration_document(project_id: int) -> dict[str, Any] | None:
-        configuration = analyst_store.get_portal_configuration(project_id)
-        if configuration is None or configuration["status"] != "active":
-            return None
-        return configuration["document"]
 
     @app.get("/api/portal-catalogs")
     async def get_portal_catalogs():
@@ -1201,6 +1271,89 @@ def create_app(
                 project_id,
                 document=document,
                 status=status,
+                expected_revision=payload.expected_revision,
+                updated_by_user_id=current_user_id(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except PortalConfigurationError as error:
+            raise HTTPException(
+                status_code=error.status_code, detail=error.message
+            ) from error
+        return {"portal_configuration": portal_configuration_response_body(project_id)}
+
+    @app.put("/api/projects/{project_id}/portal-configuration/logo")
+    async def upload_portal_logo(
+        project_id: int,
+        request: Request,
+        logo: UploadFile = File(...),
+        expected_revision: int = Form(...),
+    ):
+        if logo.content_type not in {"image/png", "image/jpeg"}:
+            raise HTTPException(
+                status_code=415, detail="portal logo must be a PNG or JPEG image"
+            )
+        logo_bytes = await logo.read(PORTAL_LOGO_MAX_BYTES + 1)
+        if len(logo_bytes) > PORTAL_LOGO_MAX_BYTES:
+            raise HTTPException(
+                status_code=413, detail="portal logo must not exceed 256 KiB"
+            )
+        if not portal_logo_signature_matches(str(logo.content_type), logo_bytes):
+            raise HTTPException(
+                status_code=415,
+                detail="portal logo content must match its PNG or JPEG media type",
+            )
+        try:
+            analyst_store.save_portal_logo(
+                project_id,
+                logo_bytes=logo_bytes,
+                logo_media_type=logo.content_type,
+                expected_revision=expected_revision,
+                updated_by_user_id=current_user_id(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except PortalConfigurationError as error:
+            raise HTTPException(
+                status_code=error.status_code, detail=error.message
+            ) from error
+        return {"portal_configuration": portal_configuration_response_body(project_id)}
+
+    @app.get("/api/projects/{project_id}/portal-configuration/logo")
+    async def get_portal_logo_for_preview(project_id: int, request: Request):
+        configuration = analyst_store.get_portal_configuration(project_id)
+        if (
+            configuration is None
+            or configuration["status"] != "active"
+            or configuration["logo_bytes"] is None
+            or configuration["logo_media_type"] is None
+        ):
+            raise HTTPException(status_code=404, detail="logo not found")
+        etag = f'"portal-logo-r{configuration["revision"]}"'
+        response_headers = {
+            "ETag": etag,
+            "Cache-Control": "private, must-revalidate",
+            "X-Content-Type-Options": "nosniff",
+        }
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers=response_headers)
+        return Response(
+            content=configuration["logo_bytes"],
+            media_type=configuration["logo_media_type"],
+            headers=response_headers,
+        )
+
+    @app.delete("/api/projects/{project_id}/portal-configuration/logo")
+    async def remove_portal_logo(
+        project_id: int,
+        request: Request,
+        payload: PortalLogoDeleteRequest,
+    ):
+        try:
+            analyst_store.save_portal_logo(
+                project_id,
+                logo_bytes=None,
+                logo_media_type=None,
                 expected_revision=payload.expected_revision,
                 updated_by_user_id=current_user_id(request),
             )
@@ -2652,6 +2805,9 @@ def create_app(
             publication=publication,
             results=canonical_results,
             downloads=downloads,
+            logo_url=(
+                f"/api/projects/{project['id']}/portal-configuration/logo"
+            ),
         )
         # The preview shows the client surface verbatim; navigation and the
         # technical reason for an unavailable result stay in this internal block.

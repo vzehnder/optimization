@@ -101,7 +101,10 @@ class Iteration6AuthTests(unittest.TestCase):
         portal_response = self.client.get("/api/client/projects")
         self.assertEqual(portal_response.status_code, 200)
         self.assertEqual(
-            [project["name"] for project in portal_response.json()["projects"]],
+            [
+                project["branding"]["display_name"]
+                for project in portal_response.json()["projects"]
+            ],
             ["Visible portal"],
         )
 

@@ -296,6 +296,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/client/projects/{project_id}/branding/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Api Client Project Branding Logo */
+        get: operations["api_client_project_branding_logo_api_client_projects__project_id__branding_logo_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/client/projects/{project_id}/publications": {
         parameters: {
             query?: never;
@@ -466,6 +483,25 @@ export interface paths {
         put: operations["save_portal_configuration_api_projects__project_id__portal_configuration_put"];
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/portal-configuration/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Portal Logo For Preview */
+        get: operations["get_portal_logo_for_preview_api_projects__project_id__portal_configuration_logo_get"];
+        /** Upload Portal Logo */
+        put: operations["upload_portal_logo_api_projects__project_id__portal_configuration_logo_put"];
+        post?: never;
+        /** Remove Portal Logo */
+        delete: operations["remove_portal_logo_api_projects__project_id__portal_configuration_logo_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1416,6 +1452,13 @@ export interface components {
             /** Source File */
             source_file: string;
         };
+        /** Body_upload_portal_logo_api_projects__project_id__portal_configuration_logo_put */
+        Body_upload_portal_logo_api_projects__project_id__portal_configuration_logo_put: {
+            /** Expected Revision */
+            expected_revision: number;
+            /** Logo */
+            logo: string;
+        };
         /** Body_upload_scenario_version_api_scenarios__scenario_id__versions_upload_post */
         Body_upload_scenario_version_api_scenarios__scenario_id__versions_upload_post: {
             /** System Case File */
@@ -1800,6 +1843,11 @@ export interface components {
             expected_revision: number;
             /** Status */
             status: string;
+        };
+        /** PortalLogoDeleteRequest */
+        PortalLogoDeleteRequest: {
+            /** Expected Revision */
+            expected_revision: number;
         };
         /** ProjectCreateRequest */
         ProjectCreateRequest: {
@@ -2658,6 +2706,37 @@ export interface operations {
             };
         };
     };
+    api_client_project_branding_logo_api_client_projects__project_id__branding_logo_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     api_client_project_publications_api_client_projects__project_id__publications_get: {
         parameters: {
             query?: never;
@@ -3096,6 +3175,107 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["PortalConfigurationWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_portal_logo_for_preview_api_projects__project_id__portal_configuration_logo_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_portal_logo_api_projects__project_id__portal_configuration_logo_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_portal_logo_api_projects__project_id__portal_configuration_logo_put"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_portal_logo_api_projects__project_id__portal_configuration_logo_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalLogoDeleteRequest"];
             };
         };
         responses: {

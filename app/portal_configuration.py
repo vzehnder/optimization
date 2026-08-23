@@ -449,7 +449,10 @@ def validate_portal_config_document(document: Any) -> dict[str, Any]:
             f"unknown portal configuration schema version: {schema_version!r}"
         )
 
-    display_name = _require_text(mapping.get("display_name"), "display_name")
+    display_name_value = mapping.get("display_name")
+    if not isinstance(display_name_value, str):
+        raise PortalConfigurationError("display_name must be a string")
+    display_name = display_name_value.strip()
 
     sections = _require_mapping(mapping.get("sections"), "sections")
     _reject_unknown_keys(sections, set(SECTION_NAMES), "sections")

@@ -70,6 +70,8 @@ import {
   uploadScenarioVersion,
   uploadTimeSeriesSetReplacementSource,
   savePortalConfiguration,
+  uploadPortalLogo,
+  removePortalLogo,
   updateDashboardTemplate,
   updatePublicationDraft,
   validateHydraulicDiagram,
@@ -1211,6 +1213,7 @@ function PortalConfigurationForm({
     configuration.status,
   );
   const [error, setError] = useState("");
+  const [logoFile, setLogoFile] = useState<File | null>(null);
   const mutation = useMutation({
     mutationFn: () =>
       savePortalConfiguration(projectId, {
@@ -1220,6 +1223,27 @@ function PortalConfigurationForm({
       }),
     onSuccess: (saved) => {
       setError("");
+      queryClient.setQueryData(portalConfigurationQueryKey(projectId), saved);
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError)),
+  });
+  const logoMutation = useMutation({
+    mutationFn: () => {
+      if (!logoFile) throw new Error("Selecciona un logo PNG o JPEG.");
+      return uploadPortalLogo(projectId, logoFile, configuration.revision);
+    },
+    onSuccess: (saved) => {
+      setError("");
+      setLogoFile(null);
+      queryClient.setQueryData(portalConfigurationQueryKey(projectId), saved);
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError)),
+  });
+  const removeLogoMutation = useMutation({
+    mutationFn: () => removePortalLogo(projectId, configuration.revision),
+    onSuccess: (saved) => {
+      setError("");
+      setLogoFile(null);
       queryClient.setQueryData(portalConfigurationQueryKey(projectId), saved);
     },
     onError: (mutationError) => setError(errorMessage(mutationError)),
@@ -1278,6 +1302,43 @@ function PortalConfigurationForm({
           setDocument({ ...document, display_name: event.target.value })
         }
       />
+      <fieldset className="portal-logo-editor">
+        <legend>Logo</legend>
+        <p>{configuration.has_logo ? "Logo configurado" : "Sin logo"}</p>
+        <label htmlFor="portal-logo">Logo del portal</label>
+        <input
+          id="portal-logo"
+          type="file"
+          accept="image/png,image/jpeg"
+          onChange={(event) => setLogoFile(event.target.files?.[0] || null)}
+        />
+        <p className="field-hint">PNG o JPEG, hasta 256 KiB.</p>
+        <div className="button-row">
+          <button
+            type="button"
+            disabled={!logoFile || logoMutation.isPending}
+            onClick={() => {
+              setError("");
+              logoMutation.mutate();
+            }}
+          >
+            {configuration.has_logo ? "Reemplazar logo" : "Subir logo"}
+          </button>
+          {configuration.has_logo ? (
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={removeLogoMutation.isPending}
+              onClick={() => {
+                setError("");
+                removeLogoMutation.mutate();
+              }}
+            >
+              Quitar logo
+            </button>
+          ) : null}
+        </div>
+      </fieldset>
       <label className="checkbox-row">
         <input
           type="checkbox"
@@ -1700,9 +1761,7 @@ function CombinationInputRow({
 
   return (
     <div className="version-actions">
-      <label htmlFor={`combination-input-set-${index}`}>
-        Set de entrada
-      </label>
+      <label htmlFor={`combination-input-set-${index}`}>Set de entrada</label>
       <select
         id={`combination-input-set-${index}`}
         value={input.time_series_set_id}
@@ -1963,7 +2022,8 @@ function TimeSeriesConnectorIngestionPanel({
     versionLabel.trim() !== "" &&
     mappings.length > 0 &&
     mappings.every(
-      (mapping) => mapping.source_column.trim() !== "" && mapping.signal_key !== "",
+      (mapping) =>
+        mapping.source_column.trim() !== "" && mapping.signal_key !== "",
     ) &&
     (!isProgram ||
       (programIssuer.trim() !== "" &&
@@ -1987,9 +2047,9 @@ function TimeSeriesConnectorIngestionPanel({
       </h2>
       <p>
         Trae datos desde una API HTTP+JSON externa y los ingresa al catalogo
-        como fuente + set validado, igual que un archivo CSV/XLSX. Un
-        pronostico entra como data_kind forecast; un programa oficial entra
-        como data_kind programmed con emisor y vigencia.
+        como fuente + set validado, igual que un archivo CSV/XLSX. Un pronostico
+        entra como data_kind forecast; un programa oficial entra como data_kind
+        programmed con emisor y vigencia.
       </p>
       {error ? <p role="alert">{error}</p> : null}
       {summary ? (
@@ -2232,7 +2292,11 @@ export function TimeSeriesCatalogView({
   if (projectId === null) {
     return <NotFoundView>El proyecto solicitado no existe.</NotFoundView>;
   }
-  if (project.isPending || timeSeriesSets.isPending || hydraulicTimeSeriesSets.isPending) {
+  if (
+    project.isPending ||
+    timeSeriesSets.isPending ||
+    hydraulicTimeSeriesSets.isPending
+  ) {
     return <LoadingView label="Cargando catalogo de series" />;
   }
   if (project.isError) {
@@ -2298,8 +2362,8 @@ export function TimeSeriesCatalogView({
           Series hidraulicas (origen legacy)
         </h2>
         <p>
-          Sets creados desde el editor de diagramas hidraulicos, expuestos
-          con la misma semantica del catalogo general sin migrar filas.
+          Sets creados desde el editor de diagramas hidraulicos, expuestos con
+          la misma semantica del catalogo general sin migrar filas.
         </p>
         <HydraulicTimeSeriesCatalogList
           projectId={projectId}
@@ -2378,7 +2442,9 @@ function HydraulicTimeSeriesCatalogList({
     <ul className="resource-list">
       {sets.map((set) => (
         <li key={set.id}>
-          <Link to={`/projects/${projectId}/time-series-sets/hydraulic/${set.id}`}>
+          <Link
+            to={`/projects/${projectId}/time-series-sets/hydraulic/${set.id}`}
+          >
             {set.name}
           </Link>
           <p>
@@ -2510,8 +2576,12 @@ function TimeSeriesSetValuesEditor({
 
   const filledPeriodIndexes = useMemo(() => {
     const transformation = timeSeriesSet.revision_metadata?.transformation;
-    const execution = isRecord(transformation) ? transformation.execution : undefined;
-    const filled = isRecord(execution) ? execution.filled_period_indexes : undefined;
+    const execution = isRecord(transformation)
+      ? transformation.execution
+      : undefined;
+    const filled = isRecord(execution)
+      ? execution.filled_period_indexes
+      : undefined;
     return new Set(
       Array.isArray(filled) ? filled.map((index) => Number(index)) : [],
     );
@@ -2590,7 +2660,9 @@ function TimeSeriesSetValuesEditor({
                   <th scope="row">
                     {period.timestamp_start}
                     {filledPeriodIndexes.has(period.period_index) ? (
-                      <span className="value-row-filled-badge">interpolado</span>
+                      <span className="value-row-filled-badge">
+                        interpolado
+                      </span>
                     ) : null}
                   </th>
                   {timeSeriesSet.signals.map((signal) => (
@@ -3182,7 +3254,11 @@ function TimeSeriesTransformationPanel({
           output_version_label: outputVersionLabel,
         };
       }
-      return applyTimeSeriesTransformation(projectId, timeSeriesSet.id, payload);
+      return applyTimeSeriesTransformation(
+        projectId,
+        timeSeriesSet.id,
+        payload,
+      );
     },
     onSuccess: (derivedSet) => {
       setError("");
@@ -3203,7 +3279,8 @@ function TimeSeriesTransformationPanel({
   }
 
   const scaleFactorIsValid =
-    form.scale_factor.trim() !== "" && Number.isFinite(Number(form.scale_factor));
+    form.scale_factor.trim() !== "" &&
+    Number.isFinite(Number(form.scale_factor));
   const targetResolutionIsValid =
     form.target_resolution_hours.trim() !== "" &&
     Number.isFinite(Number(form.target_resolution_hours)) &&
@@ -3226,8 +3303,8 @@ function TimeSeriesTransformationPanel({
     >
       <h2 id="set-transformations">Transformaciones</h2>
       <p>
-        Aplica una transformacion allowlisted sobre este set para crear un
-        nuevo set derivado. El set origen no se modifica.
+        Aplica una transformacion allowlisted sobre este set para crear un nuevo
+        set derivado. El set origen no se modifica.
       </p>
       {error ? <p role="alert">{error}</p> : null}
       <div className="version-actions">
@@ -3268,7 +3345,9 @@ function TimeSeriesTransformationPanel({
                 </option>
               ))}
             </select>
-            <label htmlFor="transformation-scale-factor">Factor de escala</label>
+            <label htmlFor="transformation-scale-factor">
+              Factor de escala
+            </label>
             <input
               id="transformation-scale-factor"
               type="number"
@@ -3425,7 +3504,9 @@ function TimeSeriesSetLineageSummary({
   if (!isRecord(transformation)) {
     return null;
   }
-  const inputs = Array.isArray(transformation.inputs) ? transformation.inputs : [];
+  const inputs = Array.isArray(transformation.inputs)
+    ? transformation.inputs
+    : [];
   const parameters = isRecord(transformation.parameters)
     ? transformation.parameters
     : {};
@@ -3434,8 +3515,8 @@ function TimeSeriesSetLineageSummary({
       <h2 id="set-lineage">Lineage de transformacion</h2>
       <p>
         Derivado con <strong>{String(transformation.type)}</strong> (impl v
-        {String(transformation.implementation_version)}, esquema de
-        parametros v{String(transformation.parameter_schema_version)}).
+        {String(transformation.implementation_version)}, esquema de parametros v
+        {String(transformation.parameter_schema_version)}).
       </p>
       <p>
         Parametros:{" "}
@@ -3465,7 +3546,10 @@ function TimeSeriesSetLineageSummary({
               <code>{String(input.content_hash)}</code>
             </p>
             {Array.isArray(input.signals) ? (
-              <p>senales: {input.signals.map((signal) => String(signal)).join(", ")}</p>
+              <p>
+                senales:{" "}
+                {input.signals.map((signal) => String(signal)).join(", ")}
+              </p>
             ) : null}
           </li>
         ))}
@@ -3603,9 +3687,8 @@ function TimeSeriesSetStalenessPanel({
   return (
     <div className="stale-banner" role="alert">
       <p>
-        <strong>Set derivado desactualizado:</strong> sus inputs cambiaron
-        desde la ultima generacion, por lo que este set ya no refleja sus
-        fuentes.
+        <strong>Set derivado desactualizado:</strong> sus inputs cambiaron desde
+        la ultima generacion, por lo que este set ya no refleja sus fuentes.
       </p>
       <ul>
         {staleness.reasons.map((reason, index) => (
@@ -3685,7 +3768,10 @@ export function TimeSeriesSetDetailView() {
         </p>
       </header>
       <div className="workspace-stack">
-        <TimeSeriesSetStalenessPanel projectId={projectId} timeSeriesSet={set} />
+        <TimeSeriesSetStalenessPanel
+          projectId={projectId}
+          timeSeriesSet={set}
+        />
         <section className="workspace-section" aria-labelledby="set-revision">
           <h2 id="set-revision">Revision</h2>
           <p>Revision {set.revision_number}</p>
@@ -3896,9 +3982,9 @@ function HydraulicTimeSeriesSetMigrationSection({
     >
       <h2 id="hydraulic-set-migration">Migracion</h2>
       <p>
-        Convierte este set legacy en un set del catalogo generico,
-        preservando origen y trazabilidad de contenido. El set legacy y los
-        runs historicos que lo referencian no se modifican.
+        Convierte este set legacy en un set del catalogo generico, preservando
+        origen y trazabilidad de contenido. El set legacy y los runs historicos
+        que lo referencian no se modifican.
       </p>
       {migratedTo ? null : (
         <button
@@ -3917,9 +4003,7 @@ function HydraulicTimeSeriesSetMigrationSection({
       {migratedTo ? (
         <p>
           Ya migrado a{" "}
-          <Link
-            to={`/projects/${projectId}/time-series-sets/${migratedTo.id}`}
-          >
+          <Link to={`/projects/${projectId}/time-series-sets/${migratedTo.id}`}>
             {migratedTo.name} ({migratedTo.versionLabel})
           </Link>
         </p>
@@ -4153,7 +4237,9 @@ function RunList({
   if (runs.length === 0) {
     return <EmptyState>Aun no hay corridas para este escenario.</EmptyState>;
   }
-  const versionsById = new Map(versions.map((version) => [version.id, version]));
+  const versionsById = new Map(
+    versions.map((version) => [version.id, version]),
+  );
   return (
     <ul className="resource-list">
       {runs.map((run) => {
@@ -4204,7 +4290,8 @@ export function RunComparisonView() {
     [runs.data],
   );
   const versionsById = useMemo(
-    () => new Map((versions.data || []).map((version) => [version.id, version])),
+    () =>
+      new Map((versions.data || []).map((version) => [version.id, version])),
     [versions.data],
   );
 
@@ -4299,8 +4386,14 @@ export function RunComparisonView() {
               <label>
                 Corrida base{" "}
                 <select
-                  value={effectiveBaselineId === null ? "" : String(effectiveBaselineId)}
-                  onChange={(event) => setBaselineRunId(Number(event.target.value))}
+                  value={
+                    effectiveBaselineId === null
+                      ? ""
+                      : String(effectiveBaselineId)
+                  }
+                  onChange={(event) =>
+                    setBaselineRunId(Number(event.target.value))
+                  }
                 >
                   {succeededRuns.map((run) => (
                     <option key={run.id} value={run.id}>
@@ -4313,9 +4406,13 @@ export function RunComparisonView() {
                 Corrida candidata{" "}
                 <select
                   value={
-                    effectiveCandidateId === null ? "" : String(effectiveCandidateId)
+                    effectiveCandidateId === null
+                      ? ""
+                      : String(effectiveCandidateId)
                   }
-                  onChange={(event) => setCandidateRunId(Number(event.target.value))}
+                  onChange={(event) =>
+                    setCandidateRunId(Number(event.target.value))
+                  }
                 >
                   {succeededRuns.map((run) => (
                     <option key={run.id} value={run.id}>
@@ -4376,7 +4473,9 @@ function RunComparisonSideSummary({
           <dt>Variante</dt>
           <dd>
             {side.input_variant?.display_name ||
-              (side.input_variant ? `ID ${side.input_variant.id}` : "Sin variante")}
+              (side.input_variant
+                ? `ID ${side.input_variant.id}`
+                : "Sin variante")}
           </dd>
         </div>
         <div>
@@ -4428,7 +4527,10 @@ function RunComparisonResult({
         {comparison.kpis.length === 0 ? (
           <EmptyState>No hay KPIs escalares para comparar.</EmptyState>
         ) : (
-          <div className="time-series-table-scroll result-table-scroll" tabIndex={0}>
+          <div
+            className="time-series-table-scroll result-table-scroll"
+            tabIndex={0}
+          >
             <table>
               <thead>
                 <tr>
@@ -4458,7 +4560,9 @@ function RunComparisonResult({
       >
         <h2 id="run-comparison-series">Diferencias por periodo</h2>
         {comparison.available_signal_keys.length === 0 ? (
-          <EmptyState>Ninguna serie de resultado en comun para comparar.</EmptyState>
+          <EmptyState>
+            Ninguna serie de resultado en comun para comparar.
+          </EmptyState>
         ) : (
           <>
             <label>
@@ -4474,8 +4578,12 @@ function RunComparisonResult({
                 ))}
               </select>
             </label>
-            {comparison.series_periods && comparison.series_periods.length > 0 ? (
-              <div className="time-series-table-scroll result-table-scroll" tabIndex={0}>
+            {comparison.series_periods &&
+            comparison.series_periods.length > 0 ? (
+              <div
+                className="time-series-table-scroll result-table-scroll"
+                tabIndex={0}
+              >
                 <table>
                   <thead>
                     <tr>
@@ -7496,7 +7604,11 @@ function validateSingleInputVariantRange(
     return { kind: "idle", message: "" };
   }
 
-  const periods = selectedPeriodsForInputVariantRange(set, rangeStart, rangeEnd);
+  const periods = selectedPeriodsForInputVariantRange(
+    set,
+    rangeStart,
+    rangeEnd,
+  );
   if (periods.length === 0) {
     return {
       kind: "incomplete_coverage",
@@ -7577,14 +7689,22 @@ function validateInputVariantRange(
   );
 
   for (const set of sets.slice(1)) {
-    const setValidation = validateSingleInputVariantRange(set, rangeStart, rangeEnd);
+    const setValidation = validateSingleInputVariantRange(
+      set,
+      rangeStart,
+      rangeEnd,
+    );
     if (setValidation.kind !== "valid") {
       return {
         kind: setValidation.kind,
         message: `Set #${set.id}: ${setValidation.message}`,
       };
     }
-    const periods = selectedPeriodsForInputVariantRange(set, rangeStart, rangeEnd);
+    const periods = selectedPeriodsForInputVariantRange(
+      set,
+      rangeStart,
+      rangeEnd,
+    );
     if (periods.length !== referencePeriods.length) {
       return {
         kind: "horizon_mismatch",
@@ -7620,8 +7740,9 @@ function resolveRequiredSignalBindingKey(
     return signal.signal_key;
   }
   const candidateSignalKeys = candidateSignalKeysForRequiredSignal(signal);
-  const matchingSignal = set.signals.find((setSignal: ProjectTimeSeriesSetSignal) =>
-    candidateSignalKeys.includes(setSignal.signal_key),
+  const matchingSignal = set.signals.find(
+    (setSignal: ProjectTimeSeriesSetSignal) =>
+      candidateSignalKeys.includes(setSignal.signal_key),
   );
   return matchingSignal?.signal_key ?? signal.signal_key;
 }
@@ -7762,7 +7883,8 @@ function CaseInputVariantBindingEditor({
   const runMutation = useMutation({
     mutationFn: async () => {
       for (const signal of requiredSignals) {
-        const selectedSetId = selectedSetIds[inputVariantRequirementKey(signal)];
+        const selectedSetId =
+          selectedSetIds[inputVariantRequirementKey(signal)];
         if (typeof selectedSetId !== "number") {
           throw new Error(`Falta vincular ${signal.signal_key}.`);
         }
@@ -7801,7 +7923,9 @@ function CaseInputVariantBindingEditor({
           <ul aria-label="Motivos de desactualizacion">
             {variantDetail.staleness.reasons.map(
               (reason: VariantStalenessReason, index: number) => (
-                <li key={`${reason.dependency_type}:${reason.dependency_id ?? ""}:${index}`}>
+                <li
+                  key={`${reason.dependency_type}:${reason.dependency_id ?? ""}:${index}`}
+                >
                   {reason.detail}
                 </li>
               ),
@@ -7828,17 +7952,15 @@ function CaseInputVariantBindingEditor({
         </p>
       ) : null}
       <ul aria-label="Senales requeridas">
-        {requiredSignals.map(
-          (signal: RequiredSignalStatus) => (
-            <li
-              key={`${signal.entity_type}:${signal.entity_id}:${signal.signal_key}`}
-            >
-              {signal.bound
-                ? `${signal.signal_key} (${signal.entity_id}): vinculada (set #${signal.time_series_set_id})`
-                : `${signal.signal_key} (${signal.entity_id}): falta vincular`}
-            </li>
-          ),
-        )}
+        {requiredSignals.map((signal: RequiredSignalStatus) => (
+          <li
+            key={`${signal.entity_type}:${signal.entity_id}:${signal.signal_key}`}
+          >
+            {signal.bound
+              ? `${signal.signal_key} (${signal.entity_id}): vinculada (set #${signal.time_series_set_id})`
+              : `${signal.signal_key} (${signal.entity_id}): falta vincular`}
+          </li>
+        ))}
       </ul>
       {requiredSignals.map((signal: RequiredSignalStatus) => (
         <div
@@ -8225,9 +8347,7 @@ function VersionExecutableSnapshot({
     >
       <summary>Ver snapshot tecnico</summary>
       {open ? (
-        <pre className="json-panel">
-          {prettyJson(version.system_case_json)}
-        </pre>
+        <pre className="json-panel">{prettyJson(version.system_case_json)}</pre>
       ) : null}
     </details>
   );
@@ -8349,8 +8469,8 @@ export function ScenarioVersionDetailView() {
         <section className="workspace-section" aria-labelledby="version-input">
           <h2 id="version-input">Snapshot ejecutable</h2>
           <p className="source-note">
-            Input tecnico congelado que usan las corridas de esta version, no
-            el objeto de edicion principal del analista.
+            Input tecnico congelado que usan las corridas de esta version, no el
+            objeto de edicion principal del analista.
           </p>
           <VersionExecutableSnapshot version={version.data} />
         </section>
@@ -8473,8 +8593,7 @@ function RunLineage({
         <div>
           <dt>Automatizacion</dt>
           <dd>
-            {version.generation_metadata.automation.schedule_name ||
-              "Schedule"}{" "}
+            {version.generation_metadata.automation.schedule_name || "Schedule"}{" "}
             | schedule {version.generation_metadata.automation.schedule_id} |
             tick {version.generation_metadata.automation.schedule_tick_id}
           </dd>
@@ -8512,9 +8631,7 @@ function RunSeriesBindingsLineage({
   return (
     <ul aria-label="Series vinculadas" className="resource-list">
       {bindings.map((binding, index) => (
-        <li
-          key={`${binding.signal_key}:${binding.entity_id ?? ""}:${index}`}
-        >
+        <li key={`${binding.signal_key}:${binding.entity_id ?? ""}:${index}`}>
           {binding.signal_key}
           {binding.entity_id ? ` (${binding.entity_id})` : ""}: set #
           {binding.time_series_set_id} - {binding.version_label} (v
@@ -9072,7 +9189,9 @@ export function PublicationPreviewView() {
       <Breadcrumbs>
         <Link to="/projects">Proyectos</Link>
         <span aria-hidden="true">/</span>
-        <Link to={`/projects/${data.project.id}`}>{data.project.name}</Link>
+        <Link to={`/projects/${data.publication.project_id}`}>
+          {data.branding.display_name}
+        </Link>
         <span aria-hidden="true">/</span>
         <Link to={`/runs/${context.run_id}`}>Run {context.run_id}</Link>
         <span aria-hidden="true">/</span>

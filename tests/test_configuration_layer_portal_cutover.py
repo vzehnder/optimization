@@ -446,7 +446,10 @@ class PortalPublicationPayloadTests(unittest.TestCase):
                 "status": "published",
             },
         )
-        self.assertEqual(payload["project"], {"id": 3, "name": "Cliente Norte"})
+        self.assertEqual(
+            payload["branding"],
+            {"display_name": "Plan operativo Cliente Norte", "logo_url": None},
+        )
 
     def test_internal_publication_and_project_fields_never_cross_the_boundary(self):
         serialized = json.dumps(portal_payload(deepcopy(BASE_DOCUMENT)))
@@ -817,7 +820,6 @@ FULL_PORTAL_DOCUMENT = {
 }
 
 PORTAL_PAYLOAD_KEYS = (
-    "project",
     "publication",
     "period",
     "results_state",
@@ -959,6 +961,10 @@ class PortalCutoverApiTests(unittest.TestCase):
         self.assertEqual(
             {key: preview[key] for key in PORTAL_PAYLOAD_KEYS},
             {key: detail[key] for key in PORTAL_PAYLOAD_KEYS},
+        )
+        self.assertEqual(
+            preview["branding"]["display_name"],
+            detail["branding"]["display_name"],
         )
         self.assertEqual(
             [download["label"] for download in preview["downloads"]],

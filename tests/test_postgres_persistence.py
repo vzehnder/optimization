@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app.auth import session_expires_at
-from app.database import ID_TABLES, database_url_from_env
+from app.database import ID_TABLES, database_url_from_env, postgres_schema_from_sqlite
 from app.persistence import AnalystStore
 from app.time_series_catalog import (
     CatalogImportRequest,
@@ -42,6 +42,14 @@ class IdTableRegistrationTests(unittest.TestCase):
 
 
 class DatabaseEnvironmentTests(unittest.TestCase):
+    def test_sqlite_blob_columns_translate_to_postgresql_bytea(self):
+        schema = postgres_schema_from_sqlite(
+            "CREATE TABLE portal_configurations (logo_bytes BLOB);"
+        )
+
+        self.assertIn("logo_bytes BYTEA", schema)
+        self.assertNotIn("logo_bytes BLOB", schema)
+
     def test_postgresql_url_is_built_from_separate_components(self):
         environment = {
             "DB_HOST": "127.0.0.1",
@@ -79,6 +87,29 @@ class DatabaseEnvironmentTests(unittest.TestCase):
     "POSTGRES_TEST_DATABASE_URL is required for PostgreSQL integration tests",
 )
 class PostgresPersistenceTests(unittest.TestCase):
+    def test_portal_logo_round_trips_as_bytea(self):
+        store = AnalystStore(POSTGRES_TEST_DATABASE_URL)
+        project_id = 0
+        try:
+            project = store.create_project(name=f"Portal brand {uuid.uuid4().hex}")
+            project_id = project["id"]
+
+            saved = store.save_portal_logo(
+                project_id,
+                logo_bytes=b"\x89PNG\r\n\x1a\npostgres-logo",
+                logo_media_type="image/png",
+                expected_revision=0,
+                updated_by_user_id=None,
+            )
+
+            self.assertEqual(saved["logo_bytes"], b"\x89PNG\r\n\x1a\npostgres-logo")
+            self.assertEqual(saved["logo_media_type"], "image/png")
+            self.assertEqual(saved["revision"], 1)
+        finally:
+            if project_id:
+                store.delete_project(project_id)
+            store.close()
+
     def test_configuration_access_migration_is_idempotent(self):
         suffix = uuid.uuid4().hex
         store = AnalystStore(POSTGRES_TEST_DATABASE_URL)

@@ -295,7 +295,10 @@ function publicationDetail(
   overrides: Partial<ClientPublicationDetail> = {},
 ): ClientPublicationDetail {
   return {
-    project: { id: 1, name: "Hybrid PMGD" },
+    branding: {
+      display_name: "Plan operativo Cliente Norte",
+      logo_url: "/api/client/projects/1/branding/logo",
+    },
     publication: {
       id: 9,
       project_id: 1,
@@ -392,6 +395,33 @@ function stubPortalFetch(path: string, detail: ClientPublicationDetail) {
 }
 
 describe("client portal publication", () => {
+  it("uses the project brand without rendering the analyst product mark", async () => {
+    stubPlotly();
+    window.history.replaceState(
+      {},
+      "",
+      "/react/client/projects/1/publications/9",
+    );
+    stubPortalFetch(
+      "/api/client/projects/1/publications/9",
+      publicationDetail(),
+    );
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("img", {
+        name: "Logo de Plan operativo Cliente Norte",
+      }),
+    ).toHaveAttribute("src", "/api/client/projects/1/branding/logo");
+    expect(
+      screen.getByRole("link", { name: "Plan operativo Cliente Norte" }),
+    ).toBeVisible();
+    expect(screen.queryByText("BESS Workspace")).toBeNull();
+    expect(screen.queryByText("Z")).toBeNull();
+    expect(document.title).toBe("Plan operativo Cliente Norte");
+  });
+
   it("shows the whole configured report to the external viewer", async () => {
     stubPlotly();
     window.history.replaceState(

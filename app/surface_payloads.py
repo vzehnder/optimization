@@ -25,6 +25,7 @@ def build_portal_publication_payload(
     document: Mapping[str, Any],
     results: Mapping[str, Any] | None,
     downloads: list[Mapping[str, Any]],
+    logo_url: str | None = None,
 ) -> dict[str, Any]:
     """Build the whole external publication payload from a fixed allowlist.
 
@@ -34,7 +35,7 @@ def build_portal_publication_payload(
 
     sections = document.get("sections") or {}
     return {
-        "project": {"id": project["id"], "name": project["name"]},
+        "branding": build_portal_branding(project, document, logo_url),
         "publication": {
             "id": publication["id"],
             "project_id": publication["project_id"],
@@ -51,6 +52,17 @@ def build_portal_publication_payload(
         "downloads": build_portal_downloads(
             sections.get("downloads") or {}, downloads
         ),
+    }
+
+
+def build_portal_branding(
+    project: Mapping[str, Any],
+    document: Mapping[str, Any],
+    logo_url: str | None,
+) -> dict[str, Any]:
+    return {
+        "display_name": document.get("display_name") or project["name"],
+        "logo_url": logo_url,
     }
 
 

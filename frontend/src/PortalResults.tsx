@@ -308,6 +308,16 @@ export function PortalPublicationHeader({
   const { start, end } = detail.period;
   return (
     <header className="workspace-heading">
+      <div className="portal-branding">
+        {detail.branding.logo_url ? (
+          <img
+            className="portal-logo"
+            src={detail.branding.logo_url}
+            alt={`Logo de ${detail.branding.display_name}`}
+          />
+        ) : null}
+        <p className="portal-display-name">{detail.branding.display_name}</p>
+      </div>
       <p className="eyebrow">Publicacion</p>
       <h1>{detail.publication.public_title}</h1>
       <p>{detail.publication.analyst_notes || "Sin notas."}</p>

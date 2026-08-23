@@ -227,7 +227,13 @@ class Iteration6AcceptanceTests(unittest.TestCase):
 
                 portal = client.get("/api/client/projects")
                 self.assertEqual(portal.status_code, 200)
-                self.assertEqual([project["name"] for project in portal.json()["projects"]], ["Iter6 Client Publication"])
+                self.assertEqual(
+                    [
+                        project["branding"]["display_name"]
+                        for project in portal.json()["projects"]
+                    ],
+                    ["Portal cliente"],
+                )
                 self.assertEqual(client.get(f"/api/client/projects/{private_project['id']}/publications").status_code, 404)
 
                 project_page = client.get(f"/api/client/projects/{project['id']}/publications")

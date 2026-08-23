@@ -400,6 +400,7 @@ export interface PortalConfiguration {
   status: PortalConfigurationStatus;
   document: PortalConfigDocument;
   revision: number;
+  has_logo: boolean;
   updated_at: string | null;
   updated_by: string | null;
 }
@@ -450,8 +451,13 @@ export interface PortalResultsBlockPayload {
 }
 
 export interface PortalBranding {
+  display_name: string;
+  logo_url: string | null;
+}
+
+export interface ClientPortalProject {
   id: number;
-  name: string;
+  branding: PortalBranding;
 }
 
 export interface PortalPublicationIdentity {
@@ -469,7 +475,7 @@ export interface PortalPeriod {
 }
 
 export interface PortalPublicationPayload {
-  project: PortalBranding;
+  branding: PortalBranding;
   publication: PortalPublicationIdentity;
   period: PortalPeriod;
   results_state: "available" | "unavailable";
@@ -488,7 +494,7 @@ export interface PublicationPreview extends PortalPublicationPayload {
 }
 
 export interface ClientProjectPublications {
-  project: Project;
+  branding: PortalBranding;
   publications: Publication[];
 }
 
@@ -1952,6 +1958,43 @@ export async function savePortalConfiguration(
   return response.portal_configuration;
 }
 
+export async function uploadPortalLogo(
+  projectId: number,
+  logo: File,
+  expectedRevision: number,
+): Promise<PortalConfiguration> {
+  const csrfToken = await getCsrfToken();
+  const body = new FormData();
+  body.append("logo", logo);
+  body.append("expected_revision", String(expectedRevision));
+  const response = await requestJson<{
+    portal_configuration: PortalConfiguration;
+  }>(`/api/projects/${projectId}/portal-configuration/logo`, {
+    method: "PUT",
+    headers: { "X-CSRF-Token": csrfToken },
+    body,
+  });
+  return response.portal_configuration;
+}
+
+export async function removePortalLogo(
+  projectId: number,
+  expectedRevision: number,
+): Promise<PortalConfiguration> {
+  const csrfToken = await getCsrfToken();
+  const response = await requestJson<{
+    portal_configuration: PortalConfiguration;
+  }>(`/api/projects/${projectId}/portal-configuration/logo`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrfToken,
+    },
+    body: JSON.stringify({ expected_revision: expectedRevision }),
+  });
+  return response.portal_configuration;
+}
+
 export async function getPublicationPreview(
   publicationId: number,
   signal?: AbortSignal,
@@ -1964,8 +2007,8 @@ export async function getPublicationPreview(
 
 export async function listClientProjects(
   signal?: AbortSignal,
-): Promise<Project[]> {
-  const response = await requestJson<{ projects: Project[] }>(
+): Promise<ClientPortalProject[]> {
+  const response = await requestJson<{ projects: ClientPortalProject[] }>(
     "/api/client/projects",
     { signal },
   );

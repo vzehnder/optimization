@@ -312,7 +312,10 @@ class ConfigurationLayerAccessApiTests(unittest.TestCase):
         visible_projects = external_session.get("/api/client/projects")
         self.assertEqual(visible_projects.status_code, 200)
         self.assertEqual(
-            [item["name"] for item in visible_projects.json()["projects"]],
+            [
+                item["branding"]["display_name"]
+                for item in visible_projects.json()["projects"]
+            ],
             ["Visible only with portal capability"],
         )
         self.assertEqual(

@@ -7,7 +7,8 @@ import {
   getClientPublication,
   listClientProjectPublications,
   listClientProjects,
-  type Project,
+  type ClientPortalProject,
+  type PortalBranding,
   type Publication,
 } from "./api/client";
 import {
@@ -68,6 +69,32 @@ function Breadcrumbs({ children }: { children: ReactNode }) {
   );
 }
 
+function usePortalDocumentTitle(displayName?: string) {
+  useEffect(() => {
+    if (!displayName) return undefined;
+    const previousTitle = document.title;
+    document.title = displayName;
+    return () => {
+      document.title = previousTitle;
+    };
+  }, [displayName]);
+}
+
+function PortalProjectBrand({ branding }: { branding: PortalBranding }) {
+  return (
+    <>
+      {branding.logo_url ? (
+        <img
+          className="portal-logo"
+          src={branding.logo_url}
+          alt={`Logo de ${branding.display_name}`}
+        />
+      ) : null}
+      <h1>{branding.display_name}</h1>
+    </>
+  );
+}
+
 function ClientErrorView({
   error,
   retry,
@@ -99,7 +126,7 @@ function ClientErrorView({
   );
 }
 
-function ClientProjectList({ projects }: { projects: Project[] }) {
+function ClientProjectList({ projects }: { projects: ClientPortalProject[] }) {
   if (!projects.length) {
     return <EmptyState>No hay proyectos asignados.</EmptyState>;
   }
@@ -107,8 +134,16 @@ function ClientProjectList({ projects }: { projects: Project[] }) {
     <ul className="resource-list">
       {projects.map((project) => (
         <li key={project.id}>
-          <Link to={`/client/projects/${project.id}`}>{project.name}</Link>
-          <p>{project.description || "Sin descripcion."}</p>
+          {project.branding.logo_url ? (
+            <img
+              className="portal-logo portal-logo-list"
+              src={project.branding.logo_url}
+              alt=""
+            />
+          ) : null}
+          <Link to={`/client/projects/${project.id}`}>
+            {project.branding.display_name}
+          </Link>
         </li>
       ))}
     </ul>
@@ -141,6 +176,7 @@ function ClientPublicationList({
 }
 
 export function ClientPortalHomeView() {
+  usePortalDocumentTitle("Portal cliente");
   const projects = useQuery({
     queryKey: clientProjectsQueryKey,
     queryFn: ({ signal }) => listClientProjects(signal),
@@ -188,6 +224,7 @@ export function ClientProjectView() {
     retry: false,
   });
   useClearClientCacheOnAuthorizationFailure(publications.error);
+  usePortalDocumentTitle(publications.data?.branding.display_name);
 
   if (projectId === null) {
     return (
@@ -214,12 +251,11 @@ export function ClientProjectView() {
       <Breadcrumbs>
         <Link to="/client">Portal cliente</Link>
         <span aria-hidden="true">/</span>
-        <span>{publications.data.project.name}</span>
+        <span>{publications.data.branding.display_name}</span>
       </Breadcrumbs>
       <header className="workspace-heading">
         <p className="eyebrow">Proyecto</p>
-        <h1>{publications.data.project.name}</h1>
-        <p>{publications.data.project.description || "Sin descripcion."}</p>
+        <PortalProjectBrand branding={publications.data.branding} />
       </header>
       <section
         className="workspace-section"
@@ -245,6 +281,7 @@ export function ClientPublicationView() {
     retry: false,
   });
   useClearClientCacheOnAuthorizationFailure(publication.error);
+  usePortalDocumentTitle(publication.data?.branding.display_name);
 
   if (projectId === null || publicationId === null) {
     return (
@@ -269,8 +306,8 @@ export function ClientPublicationView() {
       <Breadcrumbs>
         <Link to="/client">Portal cliente</Link>
         <span aria-hidden="true">/</span>
-        <Link to={`/client/projects/${detail.project.id}`}>
-          {detail.project.name}
+        <Link to={`/client/projects/${detail.publication.project_id}`}>
+          {detail.branding.display_name}
         </Link>
         <span aria-hidden="true">/</span>
         <span>{detail.publication.public_title}</span>

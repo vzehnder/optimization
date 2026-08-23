@@ -961,6 +961,8 @@ class AnalystStore:
                 status TEXT NOT NULL DEFAULT 'draft',
                 document_json TEXT NOT NULL,
                 revision INTEGER NOT NULL DEFAULT 1,
+                logo_bytes BLOB,
+                logo_media_type TEXT,
                 updated_at TEXT NOT NULL,
                 updated_by_user_id INTEGER,
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
@@ -1028,6 +1030,12 @@ class AnalystStore:
         )
         self._ensure_column("project_client_access", "updated_at", "TEXT")
         self._ensure_column("project_client_access", "updated_by", "TEXT")
+        self._ensure_column(
+            "portal_configurations",
+            "logo_bytes",
+            "BYTEA" if self.database_backend == "postgresql" else "BLOB",
+        )
+        self._ensure_column("portal_configurations", "logo_media_type", "TEXT")
         self._migrate_legacy_external_access()
         self._ensure_column("runs", "stdout_log_path", "TEXT")
         self._ensure_column("runs", "stderr_log_path", "TEXT")
@@ -1992,6 +2000,7 @@ class AnalystStore:
         row = self.connection.execute(
             """
             SELECT id, project_id, status, document_json, revision,
+                   logo_bytes, logo_media_type,
                    updated_at, updated_by_user_id
             FROM portal_configurations
             WHERE project_id = ?
@@ -2045,6 +2054,65 @@ class AnalystStore:
                     WHERE project_id = ?
                     """,
                     (status, document_json, now, updated_by_user_id, project_id),
+                )
+            self.connection.commit()
+        return self.get_portal_configuration(project_id)
+
+    def save_portal_logo(
+        self,
+        project_id: int,
+        *,
+        logo_bytes: bytes | None,
+        logo_media_type: str | None,
+        expected_revision: int,
+        updated_by_user_id: int | None,
+    ) -> dict[str, Any]:
+        self.get_project(project_id)
+        now = utc_now_iso()
+        with self._lock:
+            current = self.get_portal_configuration(project_id)
+            current_revision = 0 if current is None else int(current["revision"])
+            if int(expected_revision) != current_revision:
+                raise StalePortalConfigurationError(
+                    "stale portal configuration revision",
+                    current_revision=current_revision,
+                )
+            if current is None:
+                self.connection.execute(
+                    """
+                    INSERT INTO portal_configurations (
+                        project_id, status, document_json, revision,
+                        logo_bytes, logo_media_type, updated_at, updated_by_user_id
+                    )
+                    VALUES (?, 'draft', ?, 1, ?, ?, ?, ?)
+                    """,
+                    (
+                        project_id,
+                        json.dumps(default_portal_config_document(), sort_keys=True),
+                        logo_bytes,
+                        logo_media_type,
+                        now,
+                        updated_by_user_id,
+                    ),
+                )
+            else:
+                self.connection.execute(
+                    """
+                    UPDATE portal_configurations
+                    SET logo_bytes = ?,
+                        logo_media_type = ?,
+                        revision = revision + 1,
+                        updated_at = ?,
+                        updated_by_user_id = ?
+                    WHERE project_id = ?
+                    """,
+                    (
+                        logo_bytes,
+                        logo_media_type,
+                        now,
+                        updated_by_user_id,
+                        project_id,
+                    ),
                 )
             self.connection.commit()
         return self.get_portal_configuration(project_id)
@@ -10101,12 +10169,15 @@ def case_input_variant_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict
 
 
 def portal_configuration_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
+    logo_bytes = row["logo_bytes"]
     return {
         "id": row["id"],
         "project_id": row["project_id"],
         "status": row["status"],
         "document": json.loads(row["document_json"]),
         "revision": int(row["revision"]),
+        "logo_bytes": bytes(logo_bytes) if logo_bytes is not None else None,
+        "logo_media_type": row["logo_media_type"],
         "updated_at": row["updated_at"],
         "updated_by_user_id": row["updated_by_user_id"],
     }

@@ -194,12 +194,17 @@ class Iteration6ProjectAccessTests(unittest.TestCase):
 
         portal_response = client_session.get("/api/client/projects")
         self.assertEqual(portal_response.status_code, 200)
-        portal_projects = [project["name"] for project in portal_response.json()["projects"]]
+        portal_projects = [
+            project["branding"]["display_name"]
+            for project in portal_response.json()["projects"]
+        ]
         self.assertEqual(portal_projects, ["Assigned Project", "Portfolio Project"])
 
         assigned_detail = client_session.get(f"/api/client/projects/{first_project['id']}/publications")
         self.assertEqual(assigned_detail.status_code, 200)
-        self.assertEqual(assigned_detail.json()["project"]["name"], "Assigned Project")
+        self.assertEqual(
+            assigned_detail.json()["branding"]["display_name"], "Assigned Project"
+        )
 
         guessed_detail = client_session.get(f"/api/client/projects/{unassigned_project['id']}/publications")
         self.assertEqual(guessed_detail.status_code, 404)
@@ -210,7 +215,13 @@ class Iteration6ProjectAccessTests(unittest.TestCase):
         )
         self.assertEqual(remove_response.status_code, 200)
         revoked_portal = client_session.get("/api/client/projects")
-        self.assertNotIn("Assigned Project", [project["name"] for project in revoked_portal.json()["projects"]])
+        self.assertNotIn(
+            "Assigned Project",
+            [
+                project["branding"]["display_name"]
+                for project in revoked_portal.json()["projects"]
+            ],
+        )
         self.assertEqual(client_session.get(f"/api/client/projects/{first_project['id']}/publications").status_code, 404)
 
     def test_analysts_cannot_manage_users_or_external_project_access(self):

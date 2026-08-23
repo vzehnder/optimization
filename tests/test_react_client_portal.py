@@ -67,7 +67,10 @@ class ReactClientPortalApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            [project["name"] for project in response.json()["projects"]],
+            [
+                project["branding"]["display_name"]
+                for project in response.json()["projects"]
+            ],
             ["Assigned Project"],
         )
 
@@ -184,7 +187,10 @@ class ReactClientPortalApiTests(unittest.TestCase):
 
             self.assertEqual(publications_response.status_code, 200)
             publications_payload = publications_response.json()
-            self.assertEqual(publications_payload["project"]["id"], project_id)
+            self.assertEqual(
+                publications_payload["branding"],
+                {"display_name": "Portal cliente", "logo_url": None},
+            )
             self.assertEqual(
                 [item["public_title"] for item in publications_payload["publications"]],
                 ["Client Dispatch Review"],

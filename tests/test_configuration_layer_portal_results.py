@@ -664,6 +664,92 @@ class ConfiguredPortalResultEndToEndTests(unittest.TestCase):
         for forbidden in ["objective_value_usd", "solver_status", "path", "run_id"]:
             self.assertNotIn(forbidden, serialized)
 
+    def test_the_portal_and_preview_expose_only_the_resolved_current_branding(self):
+        self.configure_active_portal()
+        self.store.save_portal_logo(
+            self.project_id,
+            logo_bytes=b"\x89PNG\r\n\x1a\ncurrent-logo",
+            logo_media_type="image/png",
+            expected_revision=1,
+            updated_by_user_id=None,
+        )
+        external = self.logged_in_client("external@example.local", "external pass")
+
+        detail = external.get(
+            f"/api/client/projects/{self.project_id}"
+            f"/publications/{self.publication['id']}"
+        ).json()
+        preview = self.analyst.get(
+            f"/api/publications/{self.publication['id']}/preview"
+        ).json()
+
+        self.assertEqual(
+            detail["branding"],
+            {
+                "display_name": "Plan operativo Cliente Norte",
+                "logo_url": f"/api/client/projects/{self.project_id}/branding/logo",
+            },
+        )
+        self.assertEqual(
+            preview["branding"],
+            {
+                "display_name": "Plan operativo Cliente Norte",
+                "logo_url": f"/api/projects/{self.project_id}/portal-configuration/logo",
+            },
+        )
+        for payload in (detail, preview):
+            self.assertNotIn("project", payload)
+            serialized = json.dumps(payload)
+            self.assertNotIn("logo_bytes", serialized)
+            self.assertNotIn("Interno", serialized)
+
+    def test_project_portal_routes_use_resolved_branding_without_project_metadata(self):
+        self.configure_active_portal()
+        self.store.save_portal_logo(
+            self.project_id,
+            logo_bytes=b"\x89PNG\r\n\x1a\ncurrent-logo",
+            logo_media_type="image/png",
+            expected_revision=1,
+            updated_by_user_id=None,
+        )
+        external = self.logged_in_client("external@example.local", "external pass")
+        expected_branding = {
+            "display_name": "Plan operativo Cliente Norte",
+            "logo_url": f"/api/client/projects/{self.project_id}/branding/logo",
+        }
+
+        projects = external.get("/api/client/projects").json()["projects"]
+        publications = external.get(
+            f"/api/client/projects/{self.project_id}/publications"
+        ).json()
+
+        self.assertEqual(
+            projects,
+            [{"id": self.project_id, "branding": expected_branding}],
+        )
+        self.assertEqual(publications["branding"], expected_branding)
+        self.assertNotIn("project", publications)
+        for payload in (projects, publications):
+            serialized = json.dumps(payload)
+            self.assertNotIn("description", serialized)
+            self.assertNotIn('"name"', serialized)
+
+    def test_missing_brand_fields_fall_back_to_the_project_name_and_no_logo(self):
+        unbranded = deepcopy(PORTAL_CONFIG_WITH_ONE_KPI)
+        unbranded["display_name"] = ""
+        self.configure_active_portal(unbranded)
+        external = self.logged_in_client("external@example.local", "external pass")
+
+        detail = external.get(
+            f"/api/client/projects/{self.project_id}"
+            f"/publications/{self.publication['id']}"
+        ).json()
+
+        self.assertEqual(
+            detail["branding"],
+            {"display_name": "Hybrid PMGD", "logo_url": None},
+        )
+
 
 
 if __name__ == "__main__":

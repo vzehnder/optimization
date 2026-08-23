@@ -226,16 +226,23 @@ function ShellHeader({ user }: { user: CurrentUser }) {
       navigate("/", { replace: true });
     },
   });
+  const external = isExternalIdentity(user);
 
   return (
     <>
       <header className="topbar">
-        <Link className="brand" to="/">
-          <span className="brand-mark" aria-hidden="true">
-            Z
-          </span>
-          <span>BESS Workspace</span>
-        </Link>
+        {external ? (
+          <Link className="portal-shell-link" to="/client">
+            Portal cliente
+          </Link>
+        ) : (
+          <Link className="brand" to="/">
+            <span className="brand-mark" aria-hidden="true">
+              Z
+            </span>
+            <span>BESS Workspace</span>
+          </Link>
+        )}
         <div className="identity">
           <strong>{user.display_name || user.email}</strong>
           <span className="role-badge">{user.role}</span>
@@ -250,7 +257,7 @@ function ShellHeader({ user }: { user: CurrentUser }) {
         </div>
       </header>
       <nav className="primary-nav" aria-label="Navegacion principal">
-        {!isExternalIdentity(user) ? (
+        {!external ? (
           <>
             <Link to="/projects">Analista</Link>
             {user.role === "admin" ? (
