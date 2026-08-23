@@ -1040,6 +1040,30 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "PortalConfigurationWriteRequest": {
+        "properties": {
+          "document": {
+            "additionalProperties": true,
+            "title": "Document",
+            "type": "object"
+          },
+          "expected_revision": {
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document",
+          "status",
+          "expected_revision"
+        ],
+        "title": "PortalConfigurationWriteRequest",
+        "type": "object"
+      },
       "ProjectCreateRequest": {
         "properties": {
           "description": {
@@ -2815,6 +2839,22 @@
         "summary": "Get Dashboard Template Run Results"
       }
     },
+    "/api/portal-catalogs": {
+      "get": {
+        "operationId": "get_portal_catalogs_api_portal_catalogs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Portal Catalogs"
+      }
+    },
     "/api/projects": {
       "get": {
         "operationId": "list_projects_api_projects_get",
@@ -3017,6 +3057,88 @@
           }
         },
         "summary": "Create Dashboard Template"
+      }
+    },
+    "/api/projects/{project_id}/portal-configuration": {
+      "get": {
+        "operationId": "get_portal_configuration_api_projects__project_id__portal_configuration_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Portal Configuration"
+      },
+      "put": {
+        "operationId": "save_portal_configuration_api_projects__project_id__portal_configuration_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortalConfigurationWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Portal Configuration"
       }
     },
     "/api/projects/{project_id}/scenarios": {

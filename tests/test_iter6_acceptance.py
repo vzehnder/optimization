@@ -172,15 +172,51 @@ class Iteration6AcceptanceTests(unittest.TestCase):
                     },
                 ).json()["publication"]
 
+                configure_portal = put_json_with_csrf(
+                    client,
+                    f"/api/projects/{project['id']}/portal-configuration",
+                    {
+                        "document": {
+    "schema_version": "portal_config.v1",
+    "display_name": "Portal cliente",
+    "sections": {
+        "kpis": {
+            "enabled": True,
+            "label": "Resumen",
+            "items": [
+                {
+                    "id": "beneficio_total",
+                    "path": "objective_value_usd",
+                    "label": "Beneficio total",
+                    "unit": "USD",
+                    "decimals": 0,
+                    "sign": "auto",
+                    "emphasis": "strong",
+                }
+            ],
+        },
+        "charts": {"enabled": False, "label": "Resultados", "items": []},
+        "tables": {"enabled": False, "label": "Detalle", "items": []},
+        "downloads": {"enabled": True, "label": "Descargas"},
+    },
+},
+                        "status": "active",
+                        "expected_revision": 0,
+                    },
+                )
+                self.assertEqual(configure_portal.status_code, 200)
+
                 preview = client.get(f"/api/publications/{publication['id']}/preview")
                 self.assertEqual(preview.status_code, 200)
                 preview_body = preview.json()
                 self.assertEqual(preview_body["publication"]["public_title"], "January Hybrid Dispatch Results")
                 self.assertEqual(preview_body["publication"]["analyst_notes"], "Approved assumptions for client review.")
-                self.assertEqual(preview_body["run"]["status"], "succeeded")
-                self.assertIsNotNone(preview_body["results"]["dispatch_table"])
-                self.assertIsNone(preview_body["results"]["asset_dispatch_table"])
-                self.assertEqual([download["display_name"] for download in preview_body["downloads"]], ["summary.json"])
+                self.assertEqual(preview_body["results_state"], "available")
+                self.assertEqual(
+                    [kpi["label"] for kpi in preview_body["results_block"]["kpis"]],
+                    ["Beneficio total"],
+                )
+                self.assertEqual([download["label"] for download in preview_body["downloads"]], ["summary.json"])
 
                 publish = post_json_with_csrf(client, f"/api/publications/{publication['id']}/publish")
                 self.assertEqual(publish.status_code, 200)
@@ -206,10 +242,11 @@ class Iteration6AcceptanceTests(unittest.TestCase):
                 live_body = live.json()
                 self.assertEqual(live_body["publication"]["public_title"], "January Hybrid Dispatch Results")
                 self.assertEqual(live_body["publication"]["analyst_notes"], "Approved assumptions for client review.")
-                self.assertEqual(live_body["run"]["status"], "succeeded")
-                self.assertIsNotNone(live_body["results"]["dispatch_table"])
-                self.assertIsNone(live_body["results"]["asset_dispatch_table"])
-                self.assertEqual([download["display_name"] for download in live_body["downloads"]], ["summary.json"])
+                self.assertEqual(live_body["results_state"], "available")
+                self.assertEqual(
+                    live_body["results_block"], preview_body["results_block"]
+                )
+                self.assertEqual([download["label"] for download in live_body["downloads"]], ["summary.json"])
                 self.assertEqual(
                     client.get(f"/api/client/projects/{project['id']}/publications/{hidden_draft['id']}").status_code,
                     404,

@@ -8074,36 +8074,6 @@ describe("application shell", () => {
       description: "Client assignment workspace",
       created_at: "2026-06-24T12:00:00Z",
     };
-    const scenario = {
-      id: 10,
-      project_id: 1,
-      name: "Base case",
-      description: "Published scenario",
-      created_at: "2026-06-24T12:01:00Z",
-    };
-    const version = {
-      id: 41,
-      scenario_id: 10,
-      version_number: 3,
-      case_name: "dispatch_case",
-      schema_version: "bess_system_dispatch.v2",
-      period_count: 1,
-      asset_counts: { battery: 1 },
-      created_at: "2026-06-24T12:02:00Z",
-    };
-    const run = {
-      id: 99,
-      scenario_version_id: 41,
-      status: "succeeded",
-      created_at: "2026-06-24T12:03:00Z",
-      started_at: "2026-06-24T12:03:01Z",
-      finished_at: "2026-06-24T12:03:03Z",
-      duration_seconds: 2,
-      exit_code: 0,
-      error_message: "",
-      stdout: "",
-      stderr: "",
-    };
     const publication = {
       id: 9,
       project_id: 1,
@@ -8119,60 +8089,51 @@ describe("application shell", () => {
       updated_at: "2026-06-24T12:05:00Z",
       published_at: "2026-06-24T12:05:00Z",
     };
-    const template = {
-      id: 5,
-      project_id: 1,
-      name: "Client Summary",
-      show_summary: true,
-      show_price_chart: true,
-      show_grid_chart: true,
-      show_renewable_chart: false,
-      show_bess_chart: false,
-      show_hydro_chart: false,
-      show_profit_chart: false,
-      show_system_dispatch_table: true,
-      show_asset_dispatch_table: false,
-      table_preview_limit: 1,
-      created_at: "2026-06-24T12:04:00Z",
-      updated_at: "2026-06-24T12:04:00Z",
-    };
-    const results = {
-      summary: {
-        case_name: "hybrid_system",
-        objective_value_usd: 1250.5,
-      },
-      dispatch_table: {
-        columns: ["timestamp", "grid_import_mw"],
-        rows: [{ timestamp: "2026-01-01T00:00:00", grid_import_mw: "2.5" }],
-      },
-      asset_dispatch_table: null,
-      charts: {
-        price: {
-          id: "price",
-          title: "Energy Price",
-          available: true,
-          labels: ["2026-01-01T00:00:00"],
-          series: [
-            {
-              key: "price_usd_per_mwh",
-              label: "Price USD/MWh",
-              unit: "USD/MWh",
-              values: [45],
-            },
-          ],
-        },
-      },
-    };
     const downloads = [
       {
-        artifact_type: "summary_json",
-        display_name: "summary.json",
+        label: "summary.json",
         media_type: "application/json",
         byte_size: 92,
         download_url:
           "/api/client/projects/1/publications/9/artifacts/summary_json/download",
       },
     ];
+    const resultsBlock = {
+      labels: {
+        kpis: "Resumen",
+        charts: "Resultados",
+        tables: "Detalle",
+        downloads: "Descargas",
+      },
+      kpis: [
+        {
+          id: "beneficio_total",
+          label: "Beneficio total",
+          value: 1250.5,
+          unit: "USD",
+          decimals: 1,
+          sign: "auto",
+          emphasis: "strong",
+        },
+      ],
+      charts: [
+        {
+          id: "energy_price",
+          label: "Energy Price",
+          x_labels: ["2026-01-01T00:00:00"],
+          series: [{ label: "Precio", unit: "USD/MWh", values: [45] }],
+        },
+      ],
+      tables: [
+        {
+          id: "system_dispatch",
+          label: "System Dispatch",
+          row_limit: 24,
+          columns: [{ id: "periodo", label: "Periodo", unit: null }],
+          rows: [{ periodo: "2026-01-01T00:00:00" }],
+        },
+      ],
+    };
     const plotlyMock = {
       react: vi.fn().mockResolvedValue(undefined),
       purge: vi.fn(),
@@ -8218,14 +8179,14 @@ describe("application shell", () => {
         if (path === "/api/client/projects/1/publications/9") {
           return new Response(
             JSON.stringify({
-              project,
-              scenario,
-              scenario_version: version,
-              run,
+              project: { id: project.id, name: project.name },
               publication,
-              template,
-              results,
-              results_error: "",
+              period: {
+                start: "2026-01-01T00:00:00",
+                end: "2026-01-01T00:00:00",
+              },
+              results_state: "available",
+              results_block: resultsBlock,
               downloads,
             }),
             { headers: { "Content-Type": "application/json" } },
@@ -8262,7 +8223,7 @@ describe("application shell", () => {
       await screen.findByRole("heading", { name: "Client Dispatch Review" }),
     ).toBeVisible();
     expect(screen.getByText("Approved for client.")).toBeVisible();
-    expect(screen.getByText("succeeded")).toBeVisible();
+    expect(screen.getByText("Beneficio total")).toBeVisible();
     expect(screen.getByText("1250.5")).toBeVisible();
     expect(
       screen.getByRole("heading", { name: "System Dispatch" }),
@@ -8271,6 +8232,7 @@ describe("application shell", () => {
     expect(
       screen.queryByRole("heading", { name: "Asset Dispatch" }),
     ).toBeNull();
+    expect(screen.queryByText("succeeded")).toBeNull();
     const downloadLink = screen.getByRole("link", { name: "summary.json" });
     expect(downloadLink).toHaveAttribute(
       "href",

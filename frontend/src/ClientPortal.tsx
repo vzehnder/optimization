@@ -7,12 +7,13 @@ import {
   getClientPublication,
   listClientProjectPublications,
   listClientProjects,
-  type ClientPublicationDetail,
   type Project,
   type Publication,
-  type PublicationDownload,
 } from "./api/client";
-import { DashboardResultsContent } from "./RunResults";
+import {
+  PortalPublicationHeader,
+  PortalPublicationReport,
+} from "./PortalResults";
 
 const clientProjectsQueryKey = ["client-projects"] as const;
 const clientProjectPublicationsQueryKey = (projectId: number) =>
@@ -136,64 +137,6 @@ function ClientPublicationList({
         </li>
       ))}
     </ul>
-  );
-}
-
-function PublicationMetadata({ detail }: { detail: ClientPublicationDetail }) {
-  return (
-    <section className="workspace-section" aria-labelledby="client-meta">
-      <h2 id="client-meta">Publication</h2>
-      <dl className="source-metadata version-metadata">
-        <div>
-          <dt>Template</dt>
-          <dd>{detail.template.name}</dd>
-        </div>
-        <div>
-          <dt>Published at</dt>
-          <dd>{detail.publication.published_at || "Pendiente"}</dd>
-        </div>
-        <div>
-          <dt>Run Status</dt>
-          <dd>{detail.run.status}</dd>
-        </div>
-        <div>
-          <dt>Scenario Version</dt>
-          <dd>{detail.scenario_version.version_number}</dd>
-        </div>
-      </dl>
-    </section>
-  );
-}
-
-function PublicationDownloads({
-  downloads,
-}: {
-  downloads: PublicationDownload[];
-}) {
-  return (
-    <section
-      className="workspace-section"
-      aria-labelledby="client-publication-downloads"
-    >
-      <h2 id="client-publication-downloads">Downloads</h2>
-      {downloads.length ? (
-        <ul className="resource-list artifact-list">
-          {downloads.map((download) => (
-            <li key={download.artifact_type}>
-              <a href={download.download_url} download={download.display_name}>
-                {download.display_name}
-              </a>
-              <p>
-                {download.artifact_type} | {download.media_type} |{" "}
-                {download.byte_size} bytes
-              </p>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <EmptyState>No hay downloads habilitados.</EmptyState>
-      )}
-    </section>
   );
 }
 
@@ -332,19 +275,8 @@ export function ClientPublicationView() {
         <span aria-hidden="true">/</span>
         <span>{detail.publication.public_title}</span>
       </Breadcrumbs>
-      <header className="workspace-heading">
-        <p className="eyebrow">Publicacion</p>
-        <h1>{detail.publication.public_title}</h1>
-        <p>{detail.publication.analyst_notes || "Sin notas."}</p>
-      </header>
-      <div className="workspace-stack">
-        <PublicationMetadata detail={detail} />
-        <DashboardResultsContent
-          results={detail.results}
-          resultsError={detail.results_error}
-        />
-        <PublicationDownloads downloads={detail.downloads} />
-      </div>
+      <PortalPublicationHeader detail={detail} />
+      <PortalPublicationReport detail={detail} />
     </section>
   );
 }

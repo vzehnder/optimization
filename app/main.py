@@ -53,6 +53,14 @@ from app.result_comparison import ComparisonError, compare_runs
 from app.result_indexing import rebuild_all_run_results, rebuild_run_results
 from app.result_retention import cleanup_project_result_data, cleanup_run_result_data
 from app.results import ResultReadError, apply_dashboard_template, read_run_results
+from app.portal_configuration import (
+    portal_catalogs,
+    PortalConfigurationError,
+    default_portal_config_document,
+    validate_portal_config_document,
+    validate_portal_configuration_status,
+)
+from app.surface_payloads import build_portal_publication_payload
 from app.schedules import (
     ScheduleError,
     due_fixed_range_schedules,
@@ -137,6 +145,12 @@ class CsrfTokenResponse(BaseModel):
 class ExternalProjectAccessRequest(BaseModel):
     portal_view: bool
     operate: bool
+
+
+class PortalConfigurationWriteRequest(BaseModel):
+    document: dict[str, Any]
+    status: str
+    expected_revision: int
 
 
 class DashboardTemplateWriteRequest(BaseModel):
@@ -757,13 +771,7 @@ def create_app(
                 publication = analyst_store.get_publication(publication_id)
                 if publication["project_id"] != project_id or publication["status"] != "published":
                     raise KeyError(f"publication {publication_id} not found")
-            scenario = analyst_store.get_scenario(publication["scenario_id"])
-            version = analyst_store.get_scenario_version(
-                publication["scenario_version_id"],
-                include_document=False,
-            )
             run = analyst_store.get_run(publication["run_id"])
-            template = analyst_store.get_dashboard_template(publication["dashboard_template_id"])
             artifacts = analyst_store.list_run_artifacts(run["id"])
             downloads = publication_download_artifacts(
                 publication,
@@ -773,27 +781,39 @@ def create_app(
                     f"{quote(artifact['artifact_type'], safe='')}/download"
                 ),
             )
-            results = apply_dashboard_template(
-                read_run_results(run, artifacts, configured_artifact_root, store=analyst_store),
-                template,
+            canonical_results = read_run_results(
+                run, artifacts, configured_artifact_root, store=analyst_store
             )
-            results_error = ""
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        except ResultReadError as error:
-            results = None
-            results_error = error.message
-        return {
-            "project": project,
-            "scenario": scenario,
-            "scenario_version": version,
-            "run": run,
-            "publication": publication,
-            "template": template,
-            "results": results,
-            "results_error": results_error,
-            "downloads": downloads,
-        }
+        except ResultReadError:
+            # The technical reason stays internal: the portal only learns that
+            # the results are unavailable.
+            canonical_results = None
+        return configured_portal_payload(
+            project=project,
+            publication=publication,
+            results=canonical_results,
+            downloads=downloads,
+        )
+
+    def configured_portal_payload(
+        *,
+        project: dict[str, Any],
+        publication: dict[str, Any],
+        results: dict[str, Any] | None,
+        downloads: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        document = active_portal_configuration_document(project["id"])
+        if document is None:
+            document = default_portal_config_document()
+        return build_portal_publication_payload(
+            project=project,
+            publication=publication,
+            document=document,
+            results=results,
+            downloads=downloads,
+        )
 
     def get_or_create_scenario_draft(scenario_id: int) -> dict:
         try:
@@ -1119,6 +1139,78 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"external_access": assignment}
+
+    def portal_configuration_response_body(project_id: int) -> dict[str, Any]:
+        configuration = analyst_store.get_portal_configuration(project_id)
+        if configuration is None:
+            return {
+                "project_id": project_id,
+                "status": "draft",
+                "document": default_portal_config_document(),
+                "revision": 0,
+                "updated_at": None,
+                "updated_by": None,
+            }
+        return {
+            "project_id": configuration["project_id"],
+            "status": configuration["status"],
+            "document": configuration["document"],
+            "revision": configuration["revision"],
+            "updated_at": configuration["updated_at"],
+            "updated_by": portal_configuration_editor_email(
+                configuration["updated_by_user_id"]
+            ),
+        }
+
+    def portal_configuration_editor_email(user_id: int | None) -> str | None:
+        if user_id is None:
+            return None
+        try:
+            return str(analyst_store.get_user(int(user_id))["email"])
+        except KeyError:
+            return None
+
+    def active_portal_configuration_document(project_id: int) -> dict[str, Any] | None:
+        configuration = analyst_store.get_portal_configuration(project_id)
+        if configuration is None or configuration["status"] != "active":
+            return None
+        return configuration["document"]
+
+    @app.get("/api/portal-catalogs")
+    async def get_portal_catalogs():
+        return portal_catalogs()
+
+    @app.get("/api/projects/{project_id}/portal-configuration")
+    async def get_portal_configuration(project_id: int):
+        try:
+            analyst_store.get_project(project_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"portal_configuration": portal_configuration_response_body(project_id)}
+
+    @app.put("/api/projects/{project_id}/portal-configuration")
+    async def save_portal_configuration(
+        project_id: int,
+        request: Request,
+        payload: PortalConfigurationWriteRequest,
+    ):
+        try:
+            document = validate_portal_config_document(payload.document)
+            status = validate_portal_configuration_status(payload.status)
+            analyst_store.save_portal_configuration(
+                project_id,
+                document=document,
+                status=status,
+                expected_revision=payload.expected_revision,
+                updated_by_user_id=current_user_id(request),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except PortalConfigurationError as error:
+            raise HTTPException(
+                status_code=error.status_code, detail=error.message
+            ) from error
+        return {"portal_configuration": portal_configuration_response_body(project_id)}
 
     @app.get("/api/projects/{project_id}/dashboard-templates")
     async def list_dashboard_templates(project_id: int):
@@ -2535,42 +2627,40 @@ def create_app(
         try:
             publication = analyst_store.get_publication(publication_id)
             project = analyst_store.get_project(publication["project_id"])
-            scenario = analyst_store.get_scenario(publication["scenario_id"])
             version = analyst_store.get_scenario_version(
                 publication["scenario_version_id"],
                 include_document=False,
             )
             run = analyst_store.get_run(publication["run_id"])
-            template = analyst_store.get_dashboard_template(
-                publication["dashboard_template_id"]
-            )
             artifacts = analyst_store.list_run_artifacts(run["id"])
             downloads = publication_download_artifacts(
                 publication,
                 artifacts,
                 lambda artifact: f"/api/run-artifacts/{artifact['id']}/download",
             )
-            results = apply_dashboard_template(
-                read_run_results(run, artifacts, configured_artifact_root, store=analyst_store),
-                template,
+            canonical_results = read_run_results(
+                run, artifacts, configured_artifact_root, store=analyst_store
             )
             results_error = ""
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         except ResultReadError as error:
-            results = None
+            canonical_results = None
             results_error = error.message
-        return {
-            "project": project,
-            "scenario": scenario,
-            "scenario_version": version,
-            "run": run,
-            "publication": publication,
-            "template": template,
-            "results": results,
+        payload = configured_portal_payload(
+            project=project,
+            publication=publication,
+            results=canonical_results,
+            downloads=downloads,
+        )
+        # The preview shows the client surface verbatim; navigation and the
+        # technical reason for an unavailable result stay in this internal block.
+        payload["preview_context"] = {
+            "run_id": run["id"],
+            "scenario_version_number": version["version_number"],
             "results_error": results_error,
-            "downloads": downloads,
         }
+        return payload
 
     @app.post("/api/runs/{run_id}/publications", status_code=201)
     async def create_run_publication_draft(
@@ -2940,6 +3030,13 @@ def legacy_path_to_react_path(path: str) -> str:
     if safe_path == "/react" or safe_path.startswith("/react/"):
         return safe_path
     return f"/react{safe_path}"
+
+
+def current_user_id(request: Request) -> int | None:
+    user = getattr(request.state, "current_user", None)
+    if isinstance(user, dict) and user.get("id") is not None:
+        return int(user["id"])
+    return None
 
 
 def current_user_email(request: Request) -> str:

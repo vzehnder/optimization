@@ -290,23 +290,201 @@ export interface Publication {
 }
 
 export interface PublicationDownload {
-  artifact_type: string;
-  display_name: string;
+  label: string;
   media_type: string;
   byte_size: number;
   download_url: string;
 }
 
-export interface PublicationPreview {
-  project: Project;
-  scenario: Scenario;
-  scenario_version: ScenarioVersion;
-  run: ScenarioRun;
-  publication: Publication;
-  template: DashboardTemplate;
-  results: DashboardResults | null;
-  results_error: string;
+export type PortalKpiSign = "auto" | "always" | "never";
+
+export type PortalKpiEmphasis = "normal" | "strong";
+
+export interface PortalKpi {
+  id: string;
+  label: string;
+  value: number | string;
+  unit: string | null;
+  decimals: number;
+  sign: PortalKpiSign;
+  emphasis: PortalKpiEmphasis;
+}
+
+export interface PortalConfigKpiItem {
+  id: string;
+  path: string;
+  label: string;
+  unit: string | null;
+  decimals: number;
+  sign: PortalKpiSign;
+  emphasis: PortalKpiEmphasis;
+}
+
+export interface PortalConfigChartSeries {
+  key: string;
+  label: string;
+}
+
+export interface PortalConfigChartItem {
+  id: string;
+  chart_key: string;
+  label: string;
+  series: PortalConfigChartSeries[];
+}
+
+export interface PortalConfigTableColumn {
+  key: string;
+  id: string;
+  label: string;
+  unit: string | null;
+}
+
+export interface PortalConfigTableItem {
+  id: string;
+  table_key: string;
+  label: string;
+  row_limit: number;
+  columns: PortalConfigTableColumn[];
+}
+
+export interface PortalConfigSection<TItem> {
+  enabled: boolean;
+  label: string;
+  items: TItem[];
+}
+
+export interface PortalConfigDocument {
+  schema_version: string;
+  display_name: string;
+  sections: {
+    kpis: PortalConfigSection<PortalConfigKpiItem>;
+    charts: PortalConfigSection<PortalConfigChartItem>;
+    tables: PortalConfigSection<PortalConfigTableItem>;
+    downloads: { enabled: boolean; label: string };
+  };
+}
+
+export interface PortalCatalogSeries {
+  key: string;
+  label: string;
+  unit: string;
+}
+
+export interface PortalCatalogChart {
+  key: string;
+  label: string;
+  series: PortalCatalogSeries[];
+}
+
+export interface PortalCatalogColumn {
+  key: string;
+  label: string;
+  unit: string | null;
+}
+
+export interface PortalCatalogTable {
+  key: string;
+  label: string;
+  columns: PortalCatalogColumn[];
+}
+
+export interface PortalCatalogs {
+  charts: PortalCatalogChart[];
+  tables: PortalCatalogTable[];
+}
+
+export type PortalConfigurationStatus = "draft" | "active";
+
+export interface PortalConfiguration {
+  project_id: number;
+  status: PortalConfigurationStatus;
+  document: PortalConfigDocument;
+  revision: number;
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+export interface PortalConfigurationSavePayload {
+  document: PortalConfigDocument;
+  status: PortalConfigurationStatus;
+  expected_revision: number;
+}
+
+export interface PortalChartSeries {
+  label: string;
+  unit: string;
+  values: Array<number | null>;
+}
+
+export interface PortalChart {
+  id: string;
+  label: string;
+  x_labels: string[];
+  series: PortalChartSeries[];
+}
+
+export interface PortalTableColumn {
+  id: string;
+  label: string;
+  unit: string | null;
+}
+
+export interface PortalTable {
+  id: string;
+  label: string;
+  row_limit: number;
+  columns: PortalTableColumn[];
+  rows: Array<Record<string, number | string | null>>;
+}
+
+export interface PortalResultsBlockPayload {
+  labels: {
+    kpis: string;
+    charts: string;
+    tables: string;
+    downloads: string;
+  };
+  kpis: PortalKpi[];
+  charts: PortalChart[];
+  tables: PortalTable[];
+}
+
+export interface PortalBranding {
+  id: number;
+  name: string;
+}
+
+export interface PortalPublicationIdentity {
+  id: number;
+  project_id: number;
+  public_title: string;
+  analyst_notes: string;
+  published_at: string | null;
+  status: string;
+}
+
+export interface PortalPeriod {
+  start: string | null;
+  end: string | null;
+}
+
+export interface PortalPublicationPayload {
+  project: PortalBranding;
+  publication: PortalPublicationIdentity;
+  period: PortalPeriod;
+  results_state: "available" | "unavailable";
+  results_block: PortalResultsBlockPayload | null;
   downloads: PublicationDownload[];
+}
+
+export interface PublicationPreviewContext {
+  run_id: number;
+  scenario_version_number: number;
+  results_error: string;
+}
+
+export interface PublicationPreview extends PortalPublicationPayload {
+  preview_context: PublicationPreviewContext;
 }
 
 export interface ClientProjectPublications {
@@ -314,7 +492,8 @@ export interface ClientProjectPublications {
   publications: Publication[];
 }
 
-export type ClientPublicationDetail = PublicationPreview;
+export type ClientPublicationDetail = PortalPublicationPayload &
+  Partial<Pick<PublicationPreview, "preview_context">>;
 
 export type DraftAssetType = "battery" | "load" | "renewable" | "hydro";
 
@@ -1737,6 +1916,40 @@ export async function unpublishPublication(
     `/api/publications/${publicationId}/unpublish`,
   );
   return response.publication;
+}
+
+export async function getPortalCatalogs(
+  signal?: AbortSignal,
+): Promise<PortalCatalogs> {
+  return requestJson<PortalCatalogs>("/api/portal-catalogs", { signal });
+}
+
+export async function getPortalConfiguration(
+  projectId: number,
+  signal?: AbortSignal,
+): Promise<PortalConfiguration> {
+  const response = await requestJson<{
+    portal_configuration: PortalConfiguration;
+  }>(`/api/projects/${projectId}/portal-configuration`, { signal });
+  return response.portal_configuration;
+}
+
+export async function savePortalConfiguration(
+  projectId: number,
+  payload: PortalConfigurationSavePayload,
+): Promise<PortalConfiguration> {
+  const csrfToken = await getCsrfToken();
+  const response = await requestJson<{
+    portal_configuration: PortalConfiguration;
+  }>(`/api/projects/${projectId}/portal-configuration`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrfToken,
+    },
+    body: JSON.stringify(payload),
+  });
+  return response.portal_configuration;
 }
 
 export async function getPublicationPreview(

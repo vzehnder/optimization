@@ -38,6 +38,8 @@ import {
   getHydraulicDiagram,
   getProjectHydraulicTimeSeriesSet,
   getProjectTimeSeriesSet,
+  getPortalCatalogs,
+  getPortalConfiguration,
   getPublicationPreview,
   getRun,
   getProject,
@@ -67,11 +69,23 @@ import {
   unpublishPublication,
   uploadScenarioVersion,
   uploadTimeSeriesSetReplacementSource,
+  savePortalConfiguration,
   updateDashboardTemplate,
   updatePublicationDraft,
   validateHydraulicDiagram,
   validateHydraulicV3Preview,
   type DashboardTemplate,
+  type PortalCatalogChart,
+  type PortalCatalogTable,
+  type PortalCatalogs,
+  type PortalConfigChartItem,
+  type PortalConfigDocument,
+  type PortalConfigKpiItem,
+  type PortalConfigTableItem,
+  type PortalConfiguration,
+  type PortalConfigurationStatus,
+  type PortalKpiEmphasis,
+  type PortalKpiSign,
   type DashboardTemplatePayload,
   type HydraulicComponentType,
   type HydraulicCurvePoint,
@@ -126,10 +140,10 @@ import {
   parseInflowWorkbook,
 } from "./hydro/inflowImport";
 import {
-  DashboardResultsContent,
-  RunArtifactsSection,
-  RunResultsSection,
-} from "./RunResults";
+  PortalPublicationHeader,
+  PortalPublicationReport,
+} from "./PortalResults";
+import { RunArtifactsSection, RunResultsSection } from "./RunResults";
 import {
   catalogSignalUnit,
   findSuggestedCatalogColumn,
@@ -821,6 +835,666 @@ function DashboardTemplateList({
   );
 }
 
+const portalConfigurationQueryKey = (projectId: number) =>
+  ["portal-configuration", projectId] as const;
+
+const portalKpiSignOptions: Array<[PortalKpiSign, string]> = [
+  ["auto", "Automatico"],
+  ["always", "Siempre con signo"],
+  ["never", "Sin signo"],
+];
+
+const portalKpiEmphasisOptions: Array<[PortalKpiEmphasis, string]> = [
+  ["normal", "Normal"],
+  ["strong", "Destacado"],
+];
+
+function newPortalKpiItem(): PortalConfigKpiItem {
+  return {
+    id: "",
+    path: "",
+    label: "",
+    unit: null,
+    decimals: 0,
+    sign: "auto",
+    emphasis: "normal",
+  };
+}
+
+function PortalKpiItemFields({
+  index,
+  item,
+  onChange,
+  onRemove,
+}: {
+  index: number;
+  item: PortalConfigKpiItem;
+  onChange: (item: PortalConfigKpiItem) => void;
+  onRemove: () => void;
+}) {
+  const fieldId = (field: string) => `portal-kpi-${index}-${field}`;
+  return (
+    <li className="portal-config-item">
+      <label htmlFor={fieldId("id")}>Id publico</label>
+      <input
+        id={fieldId("id")}
+        type="text"
+        value={item.id}
+        onChange={(event) => onChange({ ...item, id: event.target.value })}
+      />
+      <label htmlFor={fieldId("path")}>Ruta canonica</label>
+      <input
+        id={fieldId("path")}
+        type="text"
+        value={item.path}
+        onChange={(event) => onChange({ ...item, path: event.target.value })}
+      />
+      <label htmlFor={fieldId("label")}>Etiqueta publica</label>
+      <input
+        id={fieldId("label")}
+        type="text"
+        value={item.label}
+        onChange={(event) => onChange({ ...item, label: event.target.value })}
+      />
+      <label htmlFor={fieldId("unit")}>Unidad</label>
+      <input
+        id={fieldId("unit")}
+        type="text"
+        value={item.unit || ""}
+        onChange={(event) =>
+          onChange({ ...item, unit: event.target.value || null })
+        }
+      />
+      <label htmlFor={fieldId("decimals")}>Decimales</label>
+      <input
+        id={fieldId("decimals")}
+        type="number"
+        min="0"
+        max="6"
+        value={item.decimals}
+        onChange={(event) =>
+          onChange({
+            ...item,
+            decimals: Math.min(6, Math.max(0, Number(event.target.value) || 0)),
+          })
+        }
+      />
+      <label htmlFor={fieldId("sign")}>Signo</label>
+      <select
+        id={fieldId("sign")}
+        value={item.sign}
+        onChange={(event) =>
+          onChange({ ...item, sign: event.target.value as PortalKpiSign })
+        }
+      >
+        {portalKpiSignOptions.map(([value, label]) => (
+          <option key={value} value={value}>
+            {label}
+          </option>
+        ))}
+      </select>
+      <label htmlFor={fieldId("emphasis")}>Enfasis</label>
+      <select
+        id={fieldId("emphasis")}
+        value={item.emphasis}
+        onChange={(event) =>
+          onChange({
+            ...item,
+            emphasis: event.target.value as PortalKpiEmphasis,
+          })
+        }
+      >
+        {portalKpiEmphasisOptions.map(([value, label]) => (
+          <option key={value} value={value}>
+            {label}
+          </option>
+        ))}
+      </select>
+      <button type="button" onClick={onRemove}>
+        Quitar KPI
+      </button>
+    </li>
+  );
+}
+
+const portalCatalogsQueryKey = ["portal-catalogs"] as const;
+
+function chartItemFromCatalog(
+  chart: PortalCatalogChart,
+): PortalConfigChartItem {
+  return {
+    id: chart.key,
+    chart_key: chart.key,
+    label: chart.label,
+    series: chart.series.map((series) => ({
+      key: series.key,
+      label: series.label,
+    })),
+  };
+}
+
+function tableItemFromCatalog(
+  table: PortalCatalogTable,
+): PortalConfigTableItem {
+  return {
+    id: table.key,
+    table_key: table.key,
+    label: table.label,
+    row_limit: 24,
+    columns: [],
+  };
+}
+
+function CatalogPicker({
+  label,
+  actionLabel,
+  options,
+  onAdd,
+}: {
+  label: string;
+  actionLabel: string;
+  options: Array<{ key: string; label: string }>;
+  onAdd: (key: string) => void;
+}) {
+  const [selected, setSelected] = useState("");
+  const value = selected || options[0]?.key || "";
+  if (!options.length) return null;
+  return (
+    <div className="portal-config-picker">
+      <label>
+        <span>{label}</span>
+        <select
+          value={value}
+          onChange={(event) => setSelected(event.target.value)}
+        >
+          {options.map((option) => (
+            <option key={option.key} value={option.key}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button type="button" onClick={() => value && onAdd(value)}>
+        {actionLabel}
+      </button>
+    </div>
+  );
+}
+
+function PortalChartItemFields({
+  item,
+  onChange,
+  onRemove,
+}: {
+  item: PortalConfigChartItem;
+  onChange: (item: PortalConfigChartItem) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <li
+      className="portal-config-item"
+      data-testid={`portal-chart-item-${item.id}`}
+    >
+      <label>
+        <span>Etiqueta publica</span>
+        <input
+          type="text"
+          value={item.label}
+          onChange={(event) => onChange({ ...item, label: event.target.value })}
+        />
+      </label>
+      <ul className="portal-config-series-list">
+        {item.series.map((series, index) => (
+          <li key={series.key} data-testid={`portal-series-${series.key}`}>
+            <label>
+              <span>Etiqueta de la serie</span>
+              <input
+                type="text"
+                value={series.label}
+                onChange={(event) =>
+                  onChange({
+                    ...item,
+                    series: item.series.map((current, position) =>
+                      position === index
+                        ? { ...current, label: event.target.value }
+                        : current,
+                    ),
+                  })
+                }
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() =>
+                onChange({
+                  ...item,
+                  series: item.series.filter(
+                    (_, position) => position !== index,
+                  ),
+                })
+              }
+            >
+              Quitar serie
+            </button>
+          </li>
+        ))}
+      </ul>
+      <button type="button" onClick={onRemove}>
+        Quitar grafico
+      </button>
+    </li>
+  );
+}
+
+function PortalTableItemFields({
+  item,
+  catalog,
+  onChange,
+  onRemove,
+}: {
+  item: PortalConfigTableItem;
+  catalog: PortalCatalogTable | undefined;
+  onChange: (item: PortalConfigTableItem) => void;
+  onRemove: () => void;
+}) {
+  // The field keeps its own text so the analyst can clear it before retyping;
+  // the document only takes a valid positive row limit.
+  const [rowLimitText, setRowLimitText] = useState(String(item.row_limit));
+  const declared = new Set(item.columns.map((column) => column.key));
+  const available = (catalog?.columns || []).filter(
+    (column) => !declared.has(column.key),
+  );
+  return (
+    <li
+      className="portal-config-item"
+      data-testid={`portal-table-item-${item.id}`}
+    >
+      <label>
+        <span>Etiqueta publica</span>
+        <input
+          type="text"
+          value={item.label}
+          onChange={(event) => onChange({ ...item, label: event.target.value })}
+        />
+      </label>
+      <label>
+        <span>Filas visibles</span>
+        <input
+          type="number"
+          min="1"
+          value={rowLimitText}
+          onChange={(event) => {
+            setRowLimitText(event.target.value);
+            const parsed = Number(event.target.value);
+            if (Number.isInteger(parsed) && parsed >= 1) {
+              onChange({ ...item, row_limit: parsed });
+            }
+          }}
+        />
+      </label>
+      <ul className="portal-config-series-list">
+        {item.columns.map((column, index) => (
+          <li key={column.key} data-testid={`portal-column-${column.key}`}>
+            <label>
+              <span>Etiqueta de la columna</span>
+              <input
+                type="text"
+                value={column.label}
+                onChange={(event) =>
+                  onChange({
+                    ...item,
+                    columns: item.columns.map((current, position) =>
+                      position === index
+                        ? { ...current, label: event.target.value }
+                        : current,
+                    ),
+                  })
+                }
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() =>
+                onChange({
+                  ...item,
+                  columns: item.columns.filter(
+                    (_, position) => position !== index,
+                  ),
+                })
+              }
+            >
+              Quitar columna
+            </button>
+          </li>
+        ))}
+      </ul>
+      <CatalogPicker
+        label="Columna del catalogo"
+        actionLabel="Agregar columna"
+        options={available}
+        onAdd={(key) => {
+          const column = available.find((entry) => entry.key === key);
+          if (!column) return;
+          onChange({
+            ...item,
+            columns: [
+              ...item.columns,
+              {
+                key: column.key,
+                id: column.key,
+                label: column.label,
+                unit: column.unit,
+              },
+            ],
+          });
+        }}
+      />
+      <button type="button" onClick={onRemove}>
+        Quitar tabla
+      </button>
+    </li>
+  );
+}
+
+function PortalConfigurationForm({
+  projectId,
+  configuration,
+}: {
+  projectId: number;
+  configuration: PortalConfiguration;
+}) {
+  const queryClient = useQueryClient();
+  const [document, setDocument] = useState<PortalConfigDocument>(
+    configuration.document,
+  );
+  const [status, setStatus] = useState<PortalConfigurationStatus>(
+    configuration.status,
+  );
+  const [error, setError] = useState("");
+  const mutation = useMutation({
+    mutationFn: () =>
+      savePortalConfiguration(projectId, {
+        document,
+        status,
+        expected_revision: configuration.revision,
+      }),
+    onSuccess: (saved) => {
+      setError("");
+      queryClient.setQueryData(portalConfigurationQueryKey(projectId), saved);
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError)),
+  });
+
+  const catalogs = useQuery<PortalCatalogs>({
+    queryKey: portalCatalogsQueryKey,
+    queryFn: ({ signal }) => getPortalCatalogs(signal),
+    retry: false,
+  });
+  const chartCatalog = catalogs.data?.charts || [];
+  const tableCatalog = catalogs.data?.tables || [];
+
+  const kpis = document.sections.kpis;
+  const charts = document.sections.charts;
+  const tables = document.sections.tables;
+  const downloads = document.sections.downloads;
+  const updateKpis = (next: Partial<typeof kpis>) =>
+    setDocument({
+      ...document,
+      sections: { ...document.sections, kpis: { ...kpis, ...next } },
+    });
+  const updateCharts = (next: Partial<typeof charts>) =>
+    setDocument({
+      ...document,
+      sections: { ...document.sections, charts: { ...charts, ...next } },
+    });
+  const updateTables = (next: Partial<typeof tables>) =>
+    setDocument({
+      ...document,
+      sections: { ...document.sections, tables: { ...tables, ...next } },
+    });
+  const updateDownloads = (next: Partial<typeof downloads>) =>
+    setDocument({
+      ...document,
+      sections: { ...document.sections, downloads: { ...downloads, ...next } },
+    });
+
+  return (
+    <form
+      className="workspace-form portal-config-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        setError("");
+        mutation.mutate();
+      }}
+    >
+      {error ? <p role="alert">{error}</p> : null}
+      <p>Revision {configuration.revision}</p>
+      <label htmlFor="portal-display-name">Nombre publico</label>
+      <input
+        id="portal-display-name"
+        type="text"
+        value={document.display_name}
+        onChange={(event) =>
+          setDocument({ ...document, display_name: event.target.value })
+        }
+      />
+      <label className="checkbox-row">
+        <input
+          type="checkbox"
+          aria-label="Mostrar KPIs"
+          checked={kpis.enabled}
+          onChange={(event) => updateKpis({ enabled: event.target.checked })}
+        />
+        <span>Mostrar KPIs</span>
+      </label>
+      <label htmlFor="portal-kpi-label">Titulo de la seccion KPI</label>
+      <input
+        id="portal-kpi-label"
+        type="text"
+        value={kpis.label}
+        onChange={(event) => updateKpis({ label: event.target.value })}
+      />
+      <ul className="portal-config-item-list">
+        {kpis.items.map((item, index) => (
+          <PortalKpiItemFields
+            key={index}
+            index={index}
+            item={item}
+            onChange={(next) =>
+              updateKpis({
+                items: kpis.items.map((current, position) =>
+                  position === index ? next : current,
+                ),
+              })
+            }
+            onRemove={() =>
+              updateKpis({
+                items: kpis.items.filter((_, position) => position !== index),
+              })
+            }
+          />
+        ))}
+      </ul>
+      <button
+        type="button"
+        onClick={() =>
+          updateKpis({ items: [...kpis.items, newPortalKpiItem()] })
+        }
+      >
+        Agregar KPI
+      </button>
+      <label className="checkbox-row">
+        <input
+          type="checkbox"
+          aria-label="Mostrar graficos"
+          checked={charts.enabled}
+          onChange={(event) => updateCharts({ enabled: event.target.checked })}
+        />
+        <span>Mostrar graficos</span>
+      </label>
+      <label htmlFor="portal-chart-label">
+        Titulo de la seccion de graficos
+      </label>
+      <input
+        id="portal-chart-label"
+        type="text"
+        value={charts.label}
+        onChange={(event) => updateCharts({ label: event.target.value })}
+      />
+      <ul className="portal-config-item-list">
+        {charts.items.map((item, index) => (
+          <PortalChartItemFields
+            key={item.id}
+            item={item}
+            onChange={(next) =>
+              updateCharts({
+                items: charts.items.map((current, position) =>
+                  position === index ? next : current,
+                ),
+              })
+            }
+            onRemove={() =>
+              updateCharts({
+                items: charts.items.filter((_, position) => position !== index),
+              })
+            }
+          />
+        ))}
+      </ul>
+      <CatalogPicker
+        label="Grafico del catalogo"
+        actionLabel="Agregar grafico"
+        options={chartCatalog.filter(
+          (chart) => !charts.items.some((item) => item.chart_key === chart.key),
+        )}
+        onAdd={(key) => {
+          const chart = chartCatalog.find((entry) => entry.key === key);
+          if (!chart) return;
+          updateCharts({
+            items: [...charts.items, chartItemFromCatalog(chart)],
+          });
+        }}
+      />
+      <label className="checkbox-row">
+        <input
+          type="checkbox"
+          aria-label="Mostrar tablas"
+          checked={tables.enabled}
+          onChange={(event) => updateTables({ enabled: event.target.checked })}
+        />
+        <span>Mostrar tablas</span>
+      </label>
+      <label htmlFor="portal-table-label">Titulo de la seccion de tablas</label>
+      <input
+        id="portal-table-label"
+        type="text"
+        value={tables.label}
+        onChange={(event) => updateTables({ label: event.target.value })}
+      />
+      <ul className="portal-config-item-list">
+        {tables.items.map((item, index) => (
+          <PortalTableItemFields
+            key={item.id}
+            item={item}
+            catalog={tableCatalog.find((entry) => entry.key === item.table_key)}
+            onChange={(next) =>
+              updateTables({
+                items: tables.items.map((current, position) =>
+                  position === index ? next : current,
+                ),
+              })
+            }
+            onRemove={() =>
+              updateTables({
+                items: tables.items.filter((_, position) => position !== index),
+              })
+            }
+          />
+        ))}
+      </ul>
+      <CatalogPicker
+        label="Tabla del catalogo"
+        actionLabel="Agregar tabla"
+        options={tableCatalog.filter(
+          (table) => !tables.items.some((item) => item.table_key === table.key),
+        )}
+        onAdd={(key) => {
+          const table = tableCatalog.find((entry) => entry.key === key);
+          if (!table) return;
+          updateTables({
+            items: [...tables.items, tableItemFromCatalog(table)],
+          });
+        }}
+      />
+      <label className="checkbox-row">
+        <input
+          type="checkbox"
+          aria-label="Mostrar descargas"
+          checked={downloads.enabled}
+          onChange={(event) =>
+            updateDownloads({ enabled: event.target.checked })
+          }
+        />
+        <span>Mostrar descargas</span>
+      </label>
+      <label htmlFor="portal-downloads-label">
+        Titulo de la seccion de descargas
+      </label>
+      <input
+        id="portal-downloads-label"
+        type="text"
+        value={downloads.label}
+        onChange={(event) => updateDownloads({ label: event.target.value })}
+      />
+      <label htmlFor="portal-status">Estado</label>
+      <select
+        id="portal-status"
+        value={status}
+        onChange={(event) =>
+          setStatus(event.target.value as PortalConfigurationStatus)
+        }
+      >
+        <option value="draft">Borrador</option>
+        <option value="active">Activa</option>
+      </select>
+      <button type="submit" disabled={mutation.isPending}>
+        Guardar portal
+      </button>
+    </form>
+  );
+}
+
+function PortalConfigurationSection({ projectId }: { projectId: number }) {
+  const configuration = useQuery({
+    queryKey: portalConfigurationQueryKey(projectId),
+    queryFn: ({ signal }) => getPortalConfiguration(projectId, signal),
+    retry: false,
+  });
+
+  return (
+    <section
+      className="workspace-section"
+      aria-labelledby="portal-configuration"
+    >
+      <h2 id="portal-configuration">Portal del cliente</h2>
+      {configuration.isPending ? (
+        <LoadingView label="Cargando configuracion del portal" />
+      ) : configuration.isError ? (
+        <RequestErrorView
+          error={configuration.error}
+          retry={() => void configuration.refetch()}
+        />
+      ) : (
+        <PortalConfigurationForm
+          key={configuration.data.revision}
+          projectId={projectId}
+          configuration={configuration.data}
+        />
+      )}
+    </section>
+  );
+}
+
 function DashboardTemplatesSection({ projectId }: { projectId: number }) {
   const templates = useQuery({
     queryKey: dashboardTemplatesQueryKey(projectId),
@@ -930,6 +1604,7 @@ export function ProjectDetailView({
             projectName={project.data.name}
           />
         ) : null}
+        <PortalConfigurationSection projectId={projectId} />
         <DashboardTemplatesSection projectId={projectId} />
       </div>
     </section>
@@ -8366,46 +9041,6 @@ function PublicationSection({
   );
 }
 
-function PublicationDownloads({
-  downloads,
-}: {
-  downloads: Array<{
-    artifact_type: string;
-    display_name: string;
-    media_type: string;
-    byte_size: number;
-    download_url: string;
-  }>;
-}) {
-  return (
-    <section
-      className="workspace-section"
-      aria-labelledby="publication-downloads"
-    >
-      <h2 id="publication-downloads">Downloads</h2>
-      {downloads.length ? (
-        <ul className="resource-list artifact-list">
-          {downloads.map((download) => (
-            <li key={download.artifact_type}>
-              <a href={download.download_url} download={download.display_name}>
-                {download.display_name}
-              </a>
-              <p>
-                {download.artifact_type} | {download.media_type} |{" "}
-                {download.byte_size} bytes
-              </p>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="empty-state">
-          No downloads enabled for this publication.
-        </p>
-      )}
-    </section>
-  );
-}
-
 export function PublicationPreviewView() {
   const publicationId = useNumericParam("publicationId");
   const preview = useQuery({
@@ -8431,6 +9066,7 @@ export function PublicationPreviewView() {
   }
 
   const data = preview.data;
+  const context = data.preview_context;
   return (
     <section className="workspace-view">
       <Breadcrumbs>
@@ -8438,43 +9074,32 @@ export function PublicationPreviewView() {
         <span aria-hidden="true">/</span>
         <Link to={`/projects/${data.project.id}`}>{data.project.name}</Link>
         <span aria-hidden="true">/</span>
-        <Link to={`/runs/${data.run.id}`}>Run {data.run.id}</Link>
+        <Link to={`/runs/${context.run_id}`}>Run {context.run_id}</Link>
         <span aria-hidden="true">/</span>
         <span>Preview</span>
       </Breadcrumbs>
-      <header className="workspace-heading">
-        <p className="eyebrow">Client preview</p>
-        <h1>{data.publication.public_title}</h1>
-        <p>{data.publication.analyst_notes || "Sin notas."}</p>
-      </header>
-      <div className="workspace-stack">
-        <section className="workspace-section" aria-labelledby="preview-meta">
-          <h2 id="preview-meta">Publication</h2>
-          <dl className="source-metadata version-metadata">
+      <p className="eyebrow">Client preview</p>
+      <PortalPublicationHeader detail={data} />
+      <section className="workspace-section" aria-labelledby="preview-context">
+        <h2 id="preview-context">Contexto interno</h2>
+        <dl className="source-metadata version-metadata">
+          <div>
+            <dt>Estado</dt>
+            <dd>{data.publication.status}</dd>
+          </div>
+          <div>
+            <dt>Version de escenario</dt>
+            <dd>{context.scenario_version_number}</dd>
+          </div>
+          {context.results_error ? (
             <div>
-              <dt>Template</dt>
-              <dd>{data.template.name}</dd>
+              <dt>Resultados</dt>
+              <dd>{context.results_error}</dd>
             </div>
-            <div>
-              <dt>Status</dt>
-              <dd>{data.publication.status}</dd>
-            </div>
-            <div>
-              <dt>Run Status</dt>
-              <dd>{data.run.status}</dd>
-            </div>
-            <div>
-              <dt>Scenario Version</dt>
-              <dd>{data.scenario_version.version_number}</dd>
-            </div>
-          </dl>
-        </section>
-        <DashboardResultsContent
-          results={data.results}
-          resultsError={data.results_error}
-        />
-        <PublicationDownloads downloads={data.downloads} />
-      </div>
+          ) : null}
+        </dl>
+      </section>
+      <PortalPublicationReport detail={data} />
     </section>
   );
 }

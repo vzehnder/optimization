@@ -7,7 +7,11 @@ from fastapi.testclient import TestClient
 from app.auth import hash_password
 from app.main import create_app
 from app.persistence import AnalystStore
-from tests.auth_test_helpers import login_json_with_csrf, post_json_with_csrf
+from tests.auth_test_helpers import (
+    login_json_with_csrf,
+    post_json_with_csrf,
+    put_json_with_csrf,
+)
 from tests.test_results_review import create_completed_run_with_result_artifacts
 
 
@@ -60,6 +64,7 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
                 },
             ).json()["publication"]
             post_json_with_csrf(analyst, f"/api/publications/{publication['id']}/publish")
+            self.activate_portal(analyst, project_id)
 
             client = TestClient(create_app(store=self.store, artifact_root=artifact_root, auth_enabled=True))
             self.login(client, "client@example.local", "client pass")
@@ -67,7 +72,7 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
 
             self.assertEqual(detail.status_code, 200)
             downloads = detail.json()["downloads"]
-            self.assertEqual([download["display_name"] for download in downloads], ["summary.json"])
+            self.assertEqual([download["label"] for download in downloads], ["summary.json"])
             self.assertEqual(
                 downloads[0]["download_url"],
                 f"/api/client/projects/{project_id}/publications/{publication['id']}/artifacts/summary_json/download",
@@ -205,10 +210,9 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
             detail = publication_page.json()
             self.assertEqual(detail["publication"]["public_title"], "June Dispatch Review")
             self.assertEqual(detail["publication"]["analyst_notes"], "Approved for client review.")
-            self.assertEqual(detail["run"]["status"], "succeeded")
-            self.assertEqual(detail["results"]["summary"]["objective_value_usd"], 1250.5)
-            self.assertIsNotNone(detail["results"]["dispatch_table"])
-            self.assertIsNone(detail["results"]["asset_dispatch_table"])
+            self.assertEqual(detail["results_state"], "available")
+            self.assertEqual(detail["results_block"]["kpis"], [])
+            self.assertNotIn("run", detail)
 
     def test_unpublishing_publication_removes_client_access_immediately(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -313,9 +317,9 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
             preview_body = preview.json()
             self.assertEqual(preview_body["publication"]["public_title"], "Previewable Review")
             self.assertEqual(preview_body["publication"]["analyst_notes"], "Preview these assumptions.")
-            self.assertEqual(preview_body["run"]["status"], "succeeded")
-            self.assertIsNotNone(preview_body["results"]["dispatch_table"])
-            self.assertIsNone(preview_body["results"]["asset_dispatch_table"])
+            self.assertEqual(preview_body["results_state"], "available")
+            self.assertEqual(preview_body["preview_context"]["run_id"], run["id"])
+            self.assertNotIn("results", preview_body)
             self.assertEqual(client.get(f"/api/publications/{publication['id']}/preview").status_code, 403)
 
             post_json_with_csrf(analyst, f"/api/publications/{publication['id']}/publish")
@@ -357,6 +361,33 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
             self.assertEqual(unpublish_response.status_code, 200)
             unpublished = self.store.get_publication(publication["id"])
             self.assertEqual(unpublished["status"], "unpublished")
+
+    def activate_portal(self, analyst, project_id, *, downloads=True):
+        """Presentation now comes from the portal configuration, not a template."""
+
+        response = put_json_with_csrf(
+            analyst,
+            f"/api/projects/{project_id}/portal-configuration",
+            {
+                "document": {
+                    "schema_version": "portal_config.v1",
+                    "display_name": "Portal cliente",
+                    "sections": {
+                        "kpis": {"enabled": False, "label": "Resumen", "items": []},
+                        "charts": {
+                            "enabled": False,
+                            "label": "Resultados",
+                            "items": [],
+                        },
+                        "tables": {"enabled": False, "label": "Detalle", "items": []},
+                        "downloads": {"enabled": downloads, "label": "Descargas"},
+                    },
+                },
+                "status": "active",
+                "expected_revision": 0,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
 
     def create_user(self, email, *, role, password):
         return self.store.create_user(

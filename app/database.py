@@ -48,6 +48,7 @@ ID_TABLES = {
     "hydraulic_time_series_sets",
     "hydraulic_units",
     "optimization_cases",
+    "portal_configurations",
     "projects",
     "publications",
     "run_artifacts",

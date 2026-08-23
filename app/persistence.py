@@ -60,6 +60,11 @@ from app.hydraulic_time_series_adapter import (
     build_hydraulic_catalog_summary,
 )
 from app.time_series_ingestion import find_source
+from app.portal_configuration import (
+    StalePortalConfigurationError,
+    default_portal_config_document,
+    portal_config_document_from_dashboard_template,
+)
 
 
 DASHBOARD_TEMPLATE_FLAGS = [
@@ -75,6 +80,8 @@ DASHBOARD_TEMPLATE_FLAGS = [
 ]
 
 DEFAULT_TABLE_PREVIEW_LIMIT = 10
+
+PORTAL_CONFIGURATION_MIGRATION = "portal_configurations_from_dashboard_templates"
 
 DEFAULT_PUBLICATION_ARTIFACT_TYPES = [
     "summary_json",
@@ -943,6 +950,24 @@ class AnalystStore:
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                name TEXT PRIMARY KEY,
+                applied_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS portal_configurations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL UNIQUE,
+                status TEXT NOT NULL DEFAULT 'draft',
+                document_json TEXT NOT NULL,
+                revision INTEGER NOT NULL DEFAULT 1,
+                updated_at TEXT NOT NULL,
+                updated_by_user_id INTEGER,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+                CHECK (status IN ('draft', 'active'))
+            );
+
             CREATE TABLE IF NOT EXISTS dashboard_templates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER NOT NULL,
@@ -1035,6 +1060,10 @@ class AnalystStore:
         self._ensure_column("run_schedules", "rolling_duration_hours", "REAL")
         self._ensure_query_shape_indexes()
         self.connection.commit()
+        self._apply_migration_once(
+            PORTAL_CONFIGURATION_MIGRATION,
+            self.migrate_dashboard_templates_to_portal_configurations,
+        )
 
     def _ensure_external_user_role_constraint(self) -> None:
         if self.database_backend == "postgresql":
@@ -1106,6 +1135,27 @@ class AnalystStore:
             """
         )
         self.connection.execute("UPDATE users SET role = 'external' WHERE role = 'client'")
+
+    def _apply_migration_once(self, name: str, migration) -> None:
+        """Run a one-shot data migration and remember that it already ran.
+
+        Without the marker a project published after the cutover would be
+        configured from its dashboard template on the next start, silently
+        enabling panels the analyst never declared.
+        """
+
+        applied = self.connection.execute(
+            "SELECT 1 FROM schema_migrations WHERE name = ?", (name,)
+        ).fetchone()
+        if applied is not None:
+            return
+        migration()
+        with self._lock:
+            self.connection.execute(
+                "INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)",
+                (name, utc_now_iso()),
+            )
+            self.connection.commit()
 
     def _ensure_column(self, table_name: str, column_name: str, definition: str) -> None:
         if self.database_backend == "postgresql":
@@ -1937,6 +1987,132 @@ class AnalystStore:
             )
             self.connection.commit()
         return self.get_project_external_access(project_id, user_id)
+
+    def get_portal_configuration(self, project_id: int) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            """
+            SELECT id, project_id, status, document_json, revision,
+                   updated_at, updated_by_user_id
+            FROM portal_configurations
+            WHERE project_id = ?
+            """,
+            (project_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return portal_configuration_row_to_dict(row)
+
+    def save_portal_configuration(
+        self,
+        project_id: int,
+        *,
+        document: Mapping[str, Any],
+        status: str,
+        expected_revision: int,
+        updated_by_user_id: int | None,
+    ) -> dict[str, Any]:
+        self.get_project(project_id)
+        now = utc_now_iso()
+        document_json = json.dumps(document, sort_keys=True)
+        with self._lock:
+            current = self.get_portal_configuration(project_id)
+            current_revision = 0 if current is None else int(current["revision"])
+            if int(expected_revision) != current_revision:
+                raise StalePortalConfigurationError(
+                    "stale portal configuration revision",
+                    current_revision=current_revision,
+                )
+            if current is None:
+                self.connection.execute(
+                    """
+                    INSERT INTO portal_configurations (
+                        project_id, status, document_json, revision,
+                        updated_at, updated_by_user_id
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (project_id, status, document_json, 1, now, updated_by_user_id),
+                )
+            else:
+                self.connection.execute(
+                    """
+                    UPDATE portal_configurations
+                    SET status = ?,
+                        document_json = ?,
+                        revision = revision + 1,
+                        updated_at = ?,
+                        updated_by_user_id = ?
+                    WHERE project_id = ?
+                    """,
+                    (status, document_json, now, updated_by_user_id, project_id),
+                )
+            self.connection.commit()
+        return self.get_portal_configuration(project_id)
+
+    def migrate_dashboard_templates_to_portal_configurations(self) -> int:
+        """Give every published project an explicit portal configuration.
+
+        Presentation used to come from the dashboard template attached to each
+        publication. Projects that already carry a configuration are left alone,
+        and a project without a usable template gets an empty portal instead of
+        a permissive fallback.
+        """
+
+        rows = self.connection.execute(
+            """
+            SELECT DISTINCT p.id AS project_id, p.name AS project_name
+            FROM projects AS p
+            JOIN publications AS pub ON pub.project_id = p.id
+            LEFT JOIN portal_configurations AS pc ON pc.project_id = p.id
+            WHERE pc.id IS NULL
+            ORDER BY p.id
+            """
+        ).fetchall()
+        if not rows:
+            return 0
+
+        now = utc_now_iso()
+        migrated = 0
+        with self._lock:
+            for row in rows:
+                template = self.connection.execute(
+                    """
+                    SELECT *
+                    FROM dashboard_templates
+                    WHERE project_id = ?
+                    ORDER BY updated_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (row["project_id"],),
+                ).fetchone()
+                if template is None:
+                    document = default_portal_config_document()
+                    document["display_name"] = row["project_name"]
+                else:
+                    document = portal_config_document_from_dashboard_template(
+                        dashboard_template_row_to_dict(template),
+                        display_name=row["project_name"],
+                    )
+                self.connection.execute(
+                    """
+                    INSERT INTO portal_configurations (
+                        project_id, status, document_json, revision,
+                        updated_at, updated_by_user_id
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        row["project_id"],
+                        "active",
+                        json.dumps(document, sort_keys=True),
+                        1,
+                        now,
+                        None,
+                    ),
+                )
+                migrated += 1
+            self.connection.commit()
+        return migrated
 
     def create_dashboard_template(
         self,
@@ -9922,6 +10098,18 @@ def case_input_variant_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict
     value = row_to_dict(row)
     value["is_default"] = bool(value["is_default"])
     return value
+
+
+def portal_configuration_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "project_id": row["project_id"],
+        "status": row["status"],
+        "document": json.loads(row["document_json"]),
+        "revision": int(row["revision"]),
+        "updated_at": row["updated_at"],
+        "updated_by_user_id": row["updated_by_user_id"],
+    }
 
 
 def dashboard_template_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:

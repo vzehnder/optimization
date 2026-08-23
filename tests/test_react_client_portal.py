@@ -7,7 +7,11 @@ from fastapi.testclient import TestClient
 from app.auth import hash_password
 from app.main import create_app
 from app.persistence import AnalystStore
-from tests.auth_test_helpers import login_json_with_csrf, post_json_with_csrf
+from tests.auth_test_helpers import (
+    login_json_with_csrf,
+    post_json_with_csrf,
+    put_json_with_csrf,
+)
 from tests.test_results_review import create_completed_run_with_result_artifacts
 
 
@@ -138,6 +142,39 @@ class ReactClientPortalApiTests(unittest.TestCase):
                 },
             ).json()["publication"]
             post_json_with_csrf(analyst, f"/api/publications/{publication['id']}/publish")
+            configure_portal = put_json_with_csrf(
+                analyst,
+                f"/api/projects/{project_id}/portal-configuration",
+                {
+                    "document": {
+    "schema_version": "portal_config.v1",
+    "display_name": "Portal cliente",
+    "sections": {
+        "kpis": {
+            "enabled": True,
+            "label": "Resumen",
+            "items": [
+                {
+                    "id": "beneficio_total",
+                    "path": "objective_value_usd",
+                    "label": "Beneficio total",
+                    "unit": "USD",
+                    "decimals": 0,
+                    "sign": "auto",
+                    "emphasis": "strong",
+                }
+            ],
+        },
+        "charts": {"enabled": False, "label": "Resultados", "items": []},
+        "tables": {"enabled": False, "label": "Detalle", "items": []},
+        "downloads": {"enabled": True, "label": "Descargas"},
+    },
+},
+                    "status": "active",
+                    "expected_revision": 0,
+                },
+            )
+            self.assertEqual(configure_portal.status_code, 200)
 
             client = TestClient(
                 create_app(store=self.store, artifact_root=artifact_root, auth_enabled=True)
@@ -161,18 +198,27 @@ class ReactClientPortalApiTests(unittest.TestCase):
             detail = detail_response.json()
             self.assertEqual(detail["publication"]["public_title"], "Client Dispatch Review")
             self.assertEqual(detail["publication"]["analyst_notes"], "Approved for client.")
-            self.assertEqual(detail["run"]["status"], "succeeded")
-            self.assertEqual(detail["scenario_version"]["version_number"], 1)
-            self.assertEqual(detail["results"]["summary"]["objective_value_usd"], 1250.5)
-            self.assertEqual(len(detail["results"]["dispatch_table"]["rows"]), 1)
-            self.assertIsNone(detail["results"]["asset_dispatch_table"])
+            self.assertEqual(detail["results_state"], "available")
+            self.assertEqual(
+                detail["results_block"]["kpis"],
+                [
+                    {
+                        "id": "beneficio_total",
+                        "label": "Beneficio total",
+                        "value": 1250.5,
+                        "unit": "USD",
+                        "decimals": 0,
+                        "sign": "auto",
+                        "emphasis": "strong",
+                    }
+                ],
+            )
             self.assertGreater(detail["downloads"][0]["byte_size"], 0)
             self.assertEqual(
                 detail["downloads"],
                 [
                     {
-                        "artifact_type": "summary_json",
-                        "display_name": "summary.json",
+                        "label": "summary.json",
                         "media_type": "application/json",
                         "byte_size": detail["downloads"][0]["byte_size"],
                         "download_url": (
@@ -182,7 +228,6 @@ class ReactClientPortalApiTests(unittest.TestCase):
                     }
                 ],
             )
-            self.assertNotIn("path", detail["downloads"][0])
             self.assertEqual(
                 client.get(
                     f"/api/client/projects/{project_id}/publications/{hidden_draft['id']}"
