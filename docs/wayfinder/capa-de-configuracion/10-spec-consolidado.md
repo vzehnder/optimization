@@ -25,6 +25,21 @@ Debe contener:
   recorte que fija **Contrato del payload de las superficies configuradas**.
 - **Comportamiento de ambas superficies**: que ve cada perfil, en que orden,
   con que estados de carga y error.
+- **Marca del portal cliente**: los dos unicos campos configurables
+  —`display_name` y logo—, con el logo acotado a un slot **PNG/JPEG** de hasta
+  **256 KB**, guardado en columnas de `portal_configurations` y servido por un
+  endpoint propio bajo `/api/` con el control de acceso del portal, **nunca** bajo
+  `/react/*`, que esta exento del gate de rol. Debe registrar la regla de fallback
+  que **nunca** cae en la marca del producto —sin `display_name` muestra
+  `project.name`, sin logo no muestra ninguno, y en particular no el brand mark
+  `Z` del header del analista—, el titulo del documento por proyecto, el `ETag`
+  por revision, y las dos **enmiendas declaradas** por **Alcance de marca del
+  portal cliente**: que el documento JSON lleva solo `display_name` porque un
+  binario no cabe en el, y que el sobre del portal reemplaza `project { name }`
+  por `branding { display_name, logo_url }` con el fallback ya resuelto en
+  backend, igual que `landing_path`. Debe dejar escrito que
+  `project.description` deja de mostrarse en el portal, como **regresion
+  consciente** respecto de hoy y no como omision.
 - **Navegacion global y aterrizaje por perfil**: las tres raices que no comparten
   header, la ruta plana `/console/:consoleId`, la ruta separada de configuracion
   dentro del workspace de escenario, la regla unica de `landing_path` como campo
