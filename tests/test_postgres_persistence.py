@@ -168,6 +168,155 @@ class PostgresPersistenceTests(unittest.TestCase):
                 store.delete_project(project_id)
             store.close()
 
+    def test_a_console_series_edit_forks_a_copy_on_postgresql(self):
+        suffix = uuid.uuid4().hex
+        store = AnalystStore(POSTGRES_TEST_DATABASE_URL)
+        project_id = 0
+        try:
+            project = store.create_project(name=f"Console series {suffix}")
+            project_id = project["id"]
+            scenario = store.create_scenario(
+                project_id=project_id, name=f"Scenario {suffix}"
+            )
+            case = store.get_or_create_case_for_scenario(scenario["id"])
+            variant = store.get_or_create_default_input_variant(case["id"])
+            operator = store.create_user(
+                email=f"operator-{suffix}@example.com",
+                password_hash="test-hash",
+                role="external",
+            )
+            start = datetime(2026, 1, 1)
+            prepared = prepare_time_series_catalog_import(
+                rows=[
+                    {
+                        "period_start": (start + timedelta(hours=offset)).isoformat(),
+                        "hours": "1.0",
+                        "demand": str(10 + offset),
+                    }
+                    for offset in range(3)
+                ],
+                request=CatalogImportRequest(
+                    set_name=f"Demanda {suffix}",
+                    version_label="v1",
+                    data_kind="real",
+                    timezone="America/Santiago",
+                    timestamp_column="period_start",
+                    duration_hours_column="hours",
+                    signal_mappings=[
+                        CatalogSignalMappingRequest(
+                            source_column="demand", signal_key="load_demand_mw"
+                        )
+                    ],
+                ),
+            )
+            demand_set = store.import_time_series_catalog_set(
+                scenario_id=scenario["id"],
+                source={
+                    "id": f"demand-{suffix}",
+                    "original_filename": "demanda.csv",
+                    "media_type": "text/csv",
+                    "checksum": f"sha256:{suffix}",
+                },
+                prepared_import=prepared,
+            )
+            store.upsert_case_time_series_binding(
+                case_input_variant_id=variant["id"],
+                signal_key="load_demand_mw",
+                time_series_set_id=demand_set["id"],
+            )
+            document = {
+                "schema_version": "operator_console_config.v1",
+                "public_identity": {"name": "Plan diario", "description": ""},
+                "parameters": [],
+                "groups": [
+                    {
+                        "id": "potencia",
+                        "label": "Potencia",
+                        "granularities": ["full_horizon"],
+                        "columns": [
+                            {
+                                "id": "demanda",
+                                "signal": {
+                                    "entity_type": "component:load",
+                                    "entity_id": "load_1",
+                                    "signal_key": "load_demand_mw",
+                                },
+                                "label": "Demanda",
+                                "editable": True,
+                                "source_options": [
+                                    {
+                                        "id": "base",
+                                        "label": "Demanda base",
+                                        "time_series_set_id": demand_set["id"],
+                                    }
+                                ],
+                                "default_source_option_id": "base",
+                            }
+                        ],
+                    }
+                ],
+                "results": {"kpis": [], "charts": [], "tables": []},
+            }
+            console = store.create_operator_console(
+                case_id=case["id"],
+                source_variant_id=variant["id"],
+                document=document,
+                created_by_user_id=None,
+            )
+            lease = store.acquire_operator_console_group_lease(
+                console["id"], group_id="potencia", user_id=operator["id"]
+            )
+            loaded = store.resolve_operator_console_group_values(
+                console["id"],
+                group_id="potencia",
+                range_start=demand_set["horizon"]["start"],
+                range_end=demand_set["horizon"]["end"],
+                granularity="full_horizon",
+            )
+
+            saved = store.save_operator_console_group_values(
+                console["id"],
+                group_id="potencia",
+                range_start=demand_set["horizon"]["start"],
+                range_end=demand_set["horizon"]["end"],
+                granularity="full_horizon",
+                expected_token=loaded["token"],
+                cells=[{"column_id": "demanda", "row_index": 1, "value": 99.5}],
+                note="Ajuste manual",
+                actor_user_id=operator["id"],
+                lease_token=lease["token"],
+            )
+
+            copies = store.list_operator_console_series_copies(console["id"])
+            self.assertEqual(len(copies), 1)
+            self.assertEqual(copies[0]["origin_set_id"], demand_set["id"])
+            self.assertEqual(
+                [row["values"]["demanda"] for row in saved["rows"]],
+                [10.0, 99.5, 12.0],
+            )
+            self.assertEqual(
+                [
+                    value["value_numeric"]
+                    for value in store.get_time_series_set(
+                        project_id, demand_set["id"]
+                    )["values"]
+                ],
+                [10.0, 11.0, 12.0],
+            )
+            self.assertEqual(
+                [
+                    binding["time_series_set_id"]
+                    for binding in store.list_case_time_series_bindings(
+                        console["owned_variant_id"]
+                    )
+                ],
+                [copies[0]["time_series_set_id"]],
+            )
+        finally:
+            if project_id:
+                store.delete_project(project_id)
+            store.close()
+
     def test_configuration_access_migration_is_idempotent(self):
         suffix = uuid.uuid4().hex
         store = AnalystStore(POSTGRES_TEST_DATABASE_URL)

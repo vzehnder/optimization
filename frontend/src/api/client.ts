@@ -503,6 +503,7 @@ export interface ConsoleShell {
     selected_end: string | null;
   };
   parameters?: ConsoleParameter[];
+  groups?: ConsoleGroup[];
   run_gate?: ConsoleRunGate;
   internal_test?: { return_path: string; tester: string };
 }
@@ -523,6 +524,68 @@ export interface ConsoleRunGate {
   message: string;
   contact: string | null;
   editing_locked_by: string | null;
+}
+
+export interface ConsoleGroupColumn {
+  id: string;
+  label: string;
+  unit: string | null;
+  nonnegative: boolean;
+  editable: boolean;
+}
+
+export interface ConsoleGroup {
+  id: string;
+  label: string;
+  granularities: string[];
+  columns: ConsoleGroupColumn[];
+}
+
+export interface ConsoleGroupRow {
+  index: number;
+  timestamp: string;
+  values: Record<string, number | null>;
+}
+
+export interface ConsoleGroupValues {
+  group_id: string;
+  granularity: string;
+  range: { start: string; end: string };
+  columns: ConsoleGroupColumn[];
+  rows: ConsoleGroupRow[];
+}
+
+/** The grid plus the opaque version the next save must hand back. */
+export interface ConsoleGroupValuesSnapshot {
+  values: ConsoleGroupValues;
+  etag: string;
+}
+
+export interface ConsoleLease {
+  token: string;
+  expires_at: string;
+  holder_name: string;
+}
+
+export interface ConsoleSaveErrorCell {
+  group_id: string;
+  column_id: string;
+  row_index: number | null;
+  message: string;
+}
+
+/** A refused save, stated in the coordinates the operator can see. */
+export class ConsoleSaveError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly cells: ConsoleSaveErrorCell[],
+    readonly totalCells: number,
+    readonly shownCells: number,
+  ) {
+    super(message);
+    this.name = "ConsoleSaveError";
+  }
 }
 
 export interface ConsoleRunEntry {
@@ -2173,6 +2236,147 @@ export async function saveConsoleParameters(
     { parameters },
   );
   return response.parameters;
+}
+
+function consoleGroupValuesPath(consoleId: number, groupId: string): string {
+  return `/api/console/${consoleId}/groups/${encodeURIComponent(groupId)}/values`;
+}
+
+function consoleGroupLeasePath(consoleId: number, groupId: string): string {
+  return `/api/console/${consoleId}/groups/${encodeURIComponent(groupId)}/lease`;
+}
+
+async function consoleGroupValuesSnapshot(
+  response: Response,
+): Promise<ConsoleGroupValuesSnapshot> {
+  const body = (await response.json()) as { group_values: ConsoleGroupValues };
+  return {
+    values: body.group_values,
+    etag: response.headers.get("etag") || "",
+  };
+}
+
+async function consoleErrorFromResponse(
+  response: Response,
+): Promise<ConsoleSaveError | ApiError> {
+  const isJson = response.headers
+    .get("content-type")
+    ?.includes("application/json");
+  if (!isJson) {
+    return new ApiError(
+      `Request failed (${response.status})`,
+      response.status,
+      `http_${response.status}`,
+    );
+  }
+  const body = (await response.json()) as {
+    save_error?: {
+      message: string;
+      cells: ConsoleSaveErrorCell[];
+      total_cells: number;
+      shown_cells: number;
+    };
+    detail?: string;
+  };
+  if (!body.save_error) {
+    return new ApiError(
+      body.detail || `Request failed (${response.status})`,
+      response.status,
+      `http_${response.status}`,
+    );
+  }
+  return new ConsoleSaveError(
+    body.save_error.message,
+    response.status,
+    body.save_error.cells,
+    body.save_error.total_cells,
+    body.save_error.shown_cells,
+  );
+}
+
+export async function getConsoleGroupValues(
+  consoleId: number,
+  groupId: string,
+  range: { start: string; end: string; granularity: string },
+  signal?: AbortSignal,
+): Promise<ConsoleGroupValuesSnapshot> {
+  const query = new URLSearchParams({
+    start: range.start,
+    end: range.end,
+    granularity: range.granularity,
+  });
+  const response = await fetch(
+    `${consoleGroupValuesPath(consoleId, groupId)}?${query}`,
+    {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+      signal,
+    },
+  );
+  if (!response.ok) throw await consoleErrorFromResponse(response);
+  return consoleGroupValuesSnapshot(response);
+}
+
+export async function acquireConsoleGroupLease(
+  consoleId: number,
+  groupId: string,
+): Promise<ConsoleLease> {
+  const csrfToken = await getCsrfToken();
+  const response = await fetch(consoleGroupLeasePath(consoleId, groupId), {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrfToken,
+    },
+  });
+  if (!response.ok) throw await consoleErrorFromResponse(response);
+  const body = (await response.json()) as { lease: ConsoleLease };
+  return body.lease;
+}
+
+export async function releaseConsoleGroupLease(
+  consoleId: number,
+  groupId: string,
+  leaseToken: string,
+): Promise<void> {
+  const csrfToken = await getCsrfToken();
+  const query = new URLSearchParams({ lease_token: leaseToken });
+  await fetch(`${consoleGroupLeasePath(consoleId, groupId)}?${query}`, {
+    method: "DELETE",
+    credentials: "same-origin",
+    headers: { Accept: "application/json", "X-CSRF-Token": csrfToken },
+  });
+}
+
+export async function saveConsoleGroupValues(
+  consoleId: number,
+  groupId: string,
+  payload: {
+    range_start: string;
+    range_end: string;
+    granularity: string;
+    lease_token: string;
+    note: string;
+    cells: Array<{ column_id: string; row_index: number; value: number }>;
+  },
+  etag: string,
+): Promise<ConsoleGroupValuesSnapshot> {
+  const csrfToken = await getCsrfToken();
+  const response = await fetch(consoleGroupValuesPath(consoleId, groupId), {
+    method: "PUT",
+    credentials: "same-origin",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrfToken,
+      "If-Match": etag,
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw await consoleErrorFromResponse(response);
+  return consoleGroupValuesSnapshot(response);
 }
 
 export async function createConsoleRun(

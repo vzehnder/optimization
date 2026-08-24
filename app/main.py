@@ -54,6 +54,7 @@ from app.result_comparison import ComparisonError, compare_runs
 from app.result_indexing import rebuild_all_run_results, rebuild_run_results
 from app.result_retention import cleanup_project_result_data, cleanup_run_result_data
 from app.results import ResultReadError, apply_dashboard_template, read_run_results
+from app.console_series import ConsoleSeriesError
 from app.operator_console import (
     OperatorConsoleConfigurationError,
     validate_operator_console_config_document,
@@ -67,9 +68,12 @@ from app.portal_configuration import (
     validate_portal_configuration_status,
 )
 from app.surface_payloads import (
+    build_console_group_values,
+    build_console_lease,
     build_console_list_entry,
     build_console_payload,
     build_console_run_entry,
+    build_console_save_error,
     build_results_block,
     build_portal_branding,
     build_portal_publication_payload,
@@ -205,6 +209,31 @@ class ConsoleParametersWriteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     parameters: list[ConsoleParameterOverrideRequest]
+
+
+class ConsoleLeaseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    lease_token: str = Field(min_length=1)
+
+
+class ConsoleGroupCellRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    column_id: str = Field(min_length=1)
+    row_index: int
+    value: Any
+
+
+class ConsoleGroupValuesWriteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    range_start: str = Field(min_length=1)
+    range_end: str = Field(min_length=1)
+    granularity: str = Field(min_length=1)
+    lease_token: str = Field(min_length=1)
+    note: str | None = None
+    cells: list[ConsoleGroupCellRequest]
 
 
 class ConsoleRunRequest(BaseModel):
@@ -2839,6 +2868,23 @@ def create_app(
             ]
         }
 
+    def console_editing_lock(
+        console: Mapping[str, Any], viewer_user_id: int | None
+    ) -> dict[str, Any] | None:
+        """Whether someone else currently holds the edit lock on any group."""
+
+        for group in console["document"].get("groups") or []:
+            lease = analyst_store.describe_operator_console_group_lease(
+                int(console["id"]), group_id=str(group["id"])
+            )
+            holder_user_id = lease["holder_user_id"]
+            if holder_user_id is None:
+                continue
+            if viewer_user_id is not None and int(holder_user_id) == int(viewer_user_id):
+                continue
+            return lease
+        return None
+
     @app.get("/api/console/{console_id}")
     async def get_console_shell(console_id: int, request: Request):
         resolved = operator_console_for_viewer(request, console_id)
@@ -2848,11 +2894,29 @@ def create_app(
             int(resolved["location"]["scenario_id"]), resolved["console"]
         )
         contact = console_preparer_name(resolved["console"]["prepared_by_user_id"])
-        if resolved_parameters["unavailable_ids"]:
+        editing_lock = console_editing_lock(
+            resolved["console"], current_user_id(request)
+        )
+        resolved_groups = analyst_store.resolve_operator_console_group_metadata(
+            console_id
+        )
+        if editing_lock is not None:
+            run_gate = {
+                "can_run": False,
+                "reason": "edicion_de_otro_usuario",
+                "message": f"{editing_lock['holder_name']} esta editando este grupo.",
+                "contact": None,
+                "editing_locked_by": editing_lock["holder_name"],
+            }
+        elif resolved_parameters["unavailable_ids"] or resolved_groups["unavailable_ids"]:
             run_gate = {
                 "can_run": False,
                 "reason": "campo_no_disponible",
-                "message": "Un parametro configurado ya no esta disponible.",
+                "message": (
+                    "Un parametro configurado ya no esta disponible."
+                    if resolved_parameters["unavailable_ids"]
+                    else "Una serie configurada ya no esta disponible."
+                ),
                 "contact": contact,
                 "editing_locked_by": None,
             }
@@ -2879,6 +2943,7 @@ def create_app(
             run_gate=run_gate,
             period=resolved_period,
             history=analyst_store.list_operator_console_runs(console_id),
+            groups=resolved_groups["groups"],
         )
         if resolved["internal"]:
             payload["internal_test"] = {
@@ -2912,6 +2977,188 @@ def create_app(
             parameters=parameters["parameters"],
         )
         return {"parameters": shell["parameters"]}
+
+    def console_group_values_response(
+        console_id: int,
+        *,
+        group_id: str,
+        range_start: str,
+        range_end: str,
+        granularity: str,
+        status_code: int = 200,
+    ) -> JSONResponse:
+        loaded = analyst_store.resolve_operator_console_group_values(
+            console_id,
+            group_id=group_id,
+            range_start=range_start,
+            range_end=range_end,
+            granularity=granularity,
+        )
+        return JSONResponse(
+            {"group_values": build_console_group_values(loaded)},
+            status_code=status_code,
+            headers={"ETag": f'"{loaded["token"]}"'},
+        )
+
+    def console_group_or_404(console: Mapping[str, Any], group_id: str) -> None:
+        declared = {
+            str(group["id"]) for group in console["document"].get("groups") or []
+        }
+        if str(group_id) not in declared:
+            raise HTTPException(status_code=404, detail="group not found")
+
+    def console_save_failure(error: ConsoleSeriesError) -> JSONResponse:
+        return JSONResponse(
+            {
+                "save_error": build_console_save_error(
+                    message=error.message,
+                    cells=error.cells,
+                    total_cells=error.total_cells,
+                )
+            },
+            status_code=error.status_code,
+        )
+
+    @app.get("/api/console/{console_id}/groups/{group_id}/values")
+    async def get_console_group_values(
+        console_id: int,
+        group_id: str,
+        request: Request,
+        start: str,
+        end: str,
+        granularity: str,
+    ):
+        resolved = operator_console_for_viewer(request, console_id)
+        console_group_or_404(resolved["console"], group_id)
+        try:
+            return console_group_values_response(
+                console_id,
+                group_id=group_id,
+                range_start=start,
+                range_end=end,
+                granularity=granularity,
+            )
+        except ConsoleSeriesError as error:
+            return console_save_failure(error)
+        except InputVariantRangeError as error:
+            return JSONResponse(
+                {
+                    "failure": {
+                        "cause": "rango_sin_cobertura",
+                        "message": "El tramo elegido no tiene cobertura completa.",
+                        "reference": None,
+                    }
+                },
+                status_code=400,
+            )
+
+    @app.post("/api/console/{console_id}/groups/{group_id}/lease")
+    async def acquire_console_group_lease(
+        console_id: int, group_id: str, request: Request
+    ):
+        resolved = operator_console_for_viewer(request, console_id)
+        console_group_or_404(resolved["console"], group_id)
+        try:
+            lease = analyst_store.acquire_operator_console_group_lease(
+                console_id, group_id=group_id, user_id=current_user_id(request)
+            )
+        except ConsoleSeriesError as error:
+            return console_save_failure(error)
+        return {"lease": build_console_lease(lease)}
+
+    @app.put("/api/console/{console_id}/groups/{group_id}/lease")
+    async def heartbeat_console_group_lease(
+        console_id: int,
+        group_id: str,
+        payload: ConsoleLeaseRequest,
+        request: Request,
+    ):
+        resolved = operator_console_for_viewer(request, console_id)
+        console_group_or_404(resolved["console"], group_id)
+        try:
+            lease = analyst_store.heartbeat_operator_console_group_lease(
+                console_id,
+                group_id=group_id,
+                user_id=current_user_id(request),
+                lease_token=payload.lease_token,
+            )
+        except ConsoleSeriesError as error:
+            return console_save_failure(error)
+        return {"lease": build_console_lease(lease)}
+
+    @app.delete(
+        "/api/console/{console_id}/groups/{group_id}/lease", status_code=204
+    )
+    async def release_console_group_lease(
+        console_id: int, group_id: str, lease_token: str, request: Request
+    ):
+        resolved = operator_console_for_viewer(request, console_id)
+        console_group_or_404(resolved["console"], group_id)
+        analyst_store.release_operator_console_group_lease(
+            console_id,
+            group_id=group_id,
+            user_id=current_user_id(request),
+            lease_token=lease_token,
+        )
+        return Response(status_code=204)
+
+    @app.put("/api/console/{console_id}/groups/{group_id}/values")
+    async def save_console_group_values(
+        console_id: int,
+        group_id: str,
+        payload: ConsoleGroupValuesWriteRequest,
+        request: Request,
+    ):
+        resolved = operator_console_for_viewer(request, console_id)
+        console_group_or_404(resolved["console"], group_id)
+        expected_token = request.headers.get("if-match")
+        if not expected_token:
+            return JSONResponse(
+                {
+                    "save_error": build_console_save_error(
+                        message=(
+                            "vuelve a cargar el tramo antes de guardar: falta la "
+                            "referencia de version"
+                        ),
+                        cells=[],
+                        total_cells=0,
+                    )
+                },
+                status_code=428,
+            )
+        try:
+            analyst_store.save_operator_console_group_values(
+                console_id,
+                group_id=group_id,
+                range_start=payload.range_start,
+                range_end=payload.range_end,
+                granularity=payload.granularity,
+                expected_token=expected_token.strip().strip('"'),
+                cells=[cell.model_dump() for cell in payload.cells],
+                note=payload.note,
+                actor_user_id=current_user_id(request),
+                lease_token=payload.lease_token,
+            )
+        except ConsoleSeriesError as error:
+            return console_save_failure(error)
+        except InputVariantRangeError:
+            return JSONResponse(
+                {
+                    "failure": {
+                        "cause": "rango_sin_cobertura",
+                        "message": "El tramo elegido no tiene cobertura completa.",
+                        "reference": None,
+                    }
+                },
+                status_code=400,
+            )
+        return console_group_values_response(
+            console_id,
+            group_id=group_id,
+            range_start=payload.range_start,
+            range_end=payload.range_end,
+            granularity=payload.granularity,
+        )
 
     @app.post("/api/console/{console_id}/runs", status_code=201)
     async def create_console_run(

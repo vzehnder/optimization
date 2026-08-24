@@ -1,11 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useMatch, useParams } from "react-router-dom";
 
 import {
   ApiError,
+  ConsoleSaveError,
+  acquireConsoleGroupLease,
   createConsoleRun,
   createOperatorConsole,
+  getConsoleGroupValues,
   getConsoleRun,
   listCaseInputVariants,
   getConsoleShell,
@@ -13,8 +16,13 @@ import {
   listOperableConsoles,
   listConsoleRuns,
   listOperatorConsoles,
+  releaseConsoleGroupLease,
+  saveConsoleGroupValues,
   saveOperatorConsole,
   saveConsoleParameters,
+  type ConsoleGroup,
+  type ConsoleGroupValuesSnapshot,
+  type ConsoleLease,
   type ConsoleRunEntry,
   type OperatorConsole,
   type OperatorConsoleColumn,
@@ -22,6 +30,7 @@ import {
   type OperatorConsoleGroup,
   type OperatorConsoleStatus,
 } from "./api/client";
+import { loadPlotly, type PlotlyTrace } from "./plotly";
 import { PortalResultsBlock } from "./PortalResults";
 import {
   signalCatalogEntry,
@@ -39,6 +48,21 @@ const consoleShellQueryKey = (consoleId: number) =>
   ["console-shell", consoleId] as const;
 const consoleRunsQueryKey = (consoleId: number) =>
   ["console-runs", consoleId] as const;
+const consoleGroupValuesQueryKey = (
+  consoleId: number,
+  groupId: string,
+  start: string,
+  end: string,
+  granularity: string,
+) =>
+  [
+    "console-group-values",
+    consoleId,
+    groupId,
+    start,
+    end,
+    granularity,
+  ] as const;
 
 const STATUS_LABELS: Record<OperatorConsoleStatus, string> = {
   draft: "Borrador",
@@ -574,6 +598,357 @@ function ConsoleColumnFields({
   );
 }
 
+function ConsoleGroupChart({
+  group,
+  snapshot,
+}: {
+  group: ConsoleGroup;
+  snapshot: ConsoleGroupValuesSnapshot | undefined;
+}) {
+  const chartRef = useRef<HTMLDivElement | null>(null);
+  const [renderError, setRenderError] = useState("");
+  const rows = useMemo(() => snapshot?.values.rows ?? [], [snapshot]);
+  const columns = useMemo(
+    () => snapshot?.values.columns ?? group.columns,
+    [group.columns, snapshot],
+  );
+  const traces = useMemo<PlotlyTrace[]>(
+    () =>
+      columns.map((column) => ({
+        x: rows.map((row) => row.timestamp),
+        y: rows.map((row) => row.values[column.id] ?? null),
+        name: column.label,
+        type: "scatter",
+        mode: "lines+markers",
+        connectgaps: false,
+        customdata: rows.map(() => column.unit || ""),
+        hovertemplate: `%{x}<br>${column.label}: %{y} %{customdata}<extra></extra>`,
+      })),
+    [columns, rows],
+  );
+
+  useEffect(() => {
+    const element = chartRef.current;
+    if (!element) return undefined;
+    let disposed = false;
+    setRenderError("");
+
+    void loadPlotly()
+      .then((plotly) => {
+        if (disposed) return;
+        const units = [
+          ...new Set(columns.map((column) => column.unit).filter(Boolean)),
+        ];
+        plotly.react(
+          element,
+          traces,
+          {
+            title: { text: group.label, x: 0.02 },
+            autosize: true,
+            height: 280,
+            hovermode: "closest",
+            margin: { l: 62, r: 24, t: 48, b: 72 },
+            yaxis: { title: units.length === 1 ? (units[0] ?? "") : "" },
+            legend: { orientation: "h", yanchor: "top", y: -0.25 },
+            paper_bgcolor: "#ffffff",
+            plot_bgcolor: "#ffffff",
+            uirevision: group.id,
+          },
+          { responsive: true, displaylogo: false },
+        );
+      })
+      .catch((error: Error) => {
+        if (!disposed) setRenderError(error.message);
+      });
+
+    return () => {
+      disposed = true;
+      if (window.Plotly) window.Plotly.purge(element);
+    };
+  }, [columns, group, traces]);
+
+  // The chart mirrors the table and never accepts an edit.
+  return (
+    <div className="console-group-chart">
+      <div ref={chartRef} className="plotly-chart" />
+      {renderError ? <p className="field-error">{renderError}</p> : null}
+      <ul
+        className="series-summary"
+        data-testid={`console-group-series-${group.id}`}
+      >
+        {columns.map((column) => (
+          <li key={column.id}>
+            <strong>{column.label}</strong>
+            {column.unit ? <span>{column.unit}</span> : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function columnHeaderLabel(label: string, unit: string | null): string {
+  return unit ? `${label} (${unit})` : label;
+}
+
+export function ConsoleGroupEditor({
+  consoleId,
+  group,
+  range,
+  lockedBy,
+  onDirtyChange,
+}: {
+  consoleId: number;
+  group: ConsoleGroup;
+  range: { start: string; end: string };
+  lockedBy: string | null;
+  onDirtyChange: (dirty: boolean) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [granularity, setGranularity] = useState(group.granularities[0] || "");
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [lease, setLease] = useState<ConsoleLease | null>(null);
+  const [saveError, setSaveError] = useState<ConsoleSaveError | Error | null>(
+    null,
+  );
+  const enabled = Boolean(range.start && range.end && granularity);
+  const queryKey = consoleGroupValuesQueryKey(
+    consoleId,
+    group.id,
+    range.start,
+    range.end,
+    granularity,
+  );
+  const values = useQuery({
+    queryKey,
+    queryFn: ({ signal }) =>
+      getConsoleGroupValues(
+        consoleId,
+        group.id,
+        { start: range.start, end: range.end, granularity },
+        signal,
+      ),
+    enabled,
+    retry: false,
+  });
+
+  const rows = values.data?.values.rows ?? [];
+  const columns = values.data?.values.columns ?? group.columns;
+  const dirtyCells = Object.entries(edits)
+    .map(([key, text]) => {
+      const [columnId, rawIndex] = key.split("|");
+      return {
+        column_id: columnId,
+        row_index: Number(rawIndex),
+        value: Number(text),
+        text,
+      };
+    })
+    .filter(
+      (cell) =>
+        cell.text !== "" &&
+        Number.isFinite(cell.value) &&
+        cell.value !== rows[cell.row_index]?.values[cell.column_id],
+    );
+  const dirty = Object.keys(edits).length > 0;
+
+  const takeLease = useMutation({
+    mutationFn: () => acquireConsoleGroupLease(consoleId, group.id),
+    onSuccess: (acquired) => {
+      setSaveError(null);
+      setLease(acquired);
+    },
+    onError: (error: Error) => setSaveError(error),
+  });
+  const dropLease = useMutation({
+    mutationFn: async () => {
+      if (lease)
+        await releaseConsoleGroupLease(consoleId, group.id, lease.token);
+    },
+    onSuccess: () => {
+      setLease(null);
+      setEdits({});
+    },
+  });
+  const save = useMutation({
+    mutationFn: () =>
+      saveConsoleGroupValues(
+        consoleId,
+        group.id,
+        {
+          range_start: range.start,
+          range_end: range.end,
+          granularity,
+          lease_token: lease?.token || "",
+          note: "",
+          cells: dirtyCells.map((cell) => ({
+            column_id: cell.column_id,
+            row_index: cell.row_index,
+            value: cell.value,
+          })),
+        },
+        values.data?.etag || "",
+      ),
+    onSuccess: (saved) => {
+      setSaveError(null);
+      setEdits({});
+      queryClient.setQueryData(queryKey, saved);
+    },
+    onError: (error: Error) => setSaveError(error),
+  });
+
+  useEffect(() => {
+    onDirtyChange(dirty || save.isPending);
+  }, [dirty, onDirtyChange, save.isPending]);
+
+  const editing = lease !== null && lockedBy === null;
+  const cellsInError =
+    saveError instanceof ConsoleSaveError ? saveError.cells : [];
+
+  function cellKey(columnId: string, rowIndex: number): string {
+    return `${columnId}|${rowIndex}`;
+  }
+
+  function cellText(columnId: string, rowIndex: number): string {
+    const edited = edits[cellKey(columnId, rowIndex)];
+    if (edited !== undefined) return edited;
+    const value = rows[rowIndex]?.values[columnId];
+    return value === null || value === undefined ? "" : String(value);
+  }
+
+  return (
+    <section
+      className="content-panel console-group"
+      aria-labelledby={`console-group-${group.id}`}
+    >
+      <h2 id={`console-group-${group.id}`}>{group.label}</h2>
+      {lockedBy ? (
+        <p className="source-note">
+          Solo lectura: {lockedBy} tiene la edicion de este grupo.
+        </p>
+      ) : null}
+      <div className="inline-actions">
+        <label htmlFor={`console-granularity-${group.id}`}>Granularidad</label>
+        <select
+          id={`console-granularity-${group.id}`}
+          value={granularity}
+          onChange={(event) => setGranularity(event.target.value)}
+          disabled={editing}
+        >
+          {group.granularities.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+        {lockedBy ? null : editing ? (
+          <>
+            <button
+              type="button"
+              disabled={dirtyCells.length === 0 || save.isPending}
+              onClick={() => save.mutate()}
+            >
+              Guardar valores
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={save.isPending}
+              onClick={() => dropLease.mutate()}
+            >
+              Liberar edicion
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            disabled={takeLease.isPending || values.isPending}
+            onClick={() => takeLease.mutate()}
+          >
+            Editar valores
+          </button>
+        )}
+      </div>
+      {values.isError ? <p role="alert">{errorMessage(values.error)}</p> : null}
+      {saveError ? (
+        <div role="alert">
+          <p>{errorMessage(saveError)}</p>
+          {cellsInError.length ? (
+            <ul>
+              {cellsInError.map((cell) => (
+                <li key={`${cell.column_id}-${cell.row_index}`}>
+                  {columns.find((column) => column.id === cell.column_id)
+                    ?.label || cell.column_id}
+                  {cell.row_index === null ? "" : ` fila ${cell.row_index + 1}`}
+                  : {cell.message}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {saveError instanceof ConsoleSaveError &&
+          saveError.totalCells > saveError.shownCells ? (
+            <p className="source-note">
+              Se muestran {saveError.shownCells} de {saveError.totalCells}{" "}
+              celdas con error.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {values.isPending ? <p role="status">Cargando valores</p> : null}
+      {values.data ? (
+        <>
+          <table className="console-group-table" aria-label={group.label}>
+            <caption className="source-note">
+              {values.data.values.range.start} a {values.data.values.range.end}
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Periodo</th>
+                {columns.map((column) => (
+                  <th key={column.id} scope="col">
+                    {columnHeaderLabel(column.label, column.unit)}
+                    {column.editable ? "" : " 🔒"}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.index}>
+                  <th scope="row">{row.timestamp}</th>
+                  {columns.map((column) => (
+                    <td key={column.id}>
+                      {editing && column.editable ? (
+                        <input
+                          type="number"
+                          step="any"
+                          min={column.nonnegative ? 0 : undefined}
+                          aria-label={`${column.label} ${row.timestamp}`}
+                          value={cellText(column.id, row.index)}
+                          onChange={(event) =>
+                            setEdits((current) => ({
+                              ...current,
+                              [cellKey(column.id, row.index)]:
+                                event.target.value,
+                            }))
+                          }
+                        />
+                      ) : (
+                        cellText(column.id, row.index)
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <ConsoleGroupChart group={group} snapshot={values.data} />
+        </>
+      ) : null}
+    </section>
+  );
+}
+
 export function ConsoleListView() {
   const consoles = useQuery({
     queryKey: consoleShellListQueryKey,
@@ -645,6 +1020,7 @@ export function ConsoleShellView() {
   const [selectedEnd, setSelectedEnd] = useState<string | null>(null);
   const [activeRunId, setActiveRunId] = useState<number | null>(null);
   const [actionError, setActionError] = useState("");
+  const [dirtyGroups, setDirtyGroups] = useState<Record<string, boolean>>({});
   const shell = useQuery({
     queryKey: consoleShellQueryKey(consoleId || 0),
     queryFn: ({ signal }) => getConsoleShell(consoleId || 0, signal),
@@ -737,6 +1113,7 @@ export function ConsoleShellView() {
     internal_test: internalTest,
     period,
     parameters = [],
+    groups = [],
     run_gate: runGate,
   } = shell.data;
   const effectiveSelectedStart = selectedStart ?? period?.selected_start ?? "";
@@ -760,9 +1137,13 @@ export function ConsoleShellView() {
       parameterValues[parameter.id] !== undefined &&
       Number(parameterValues[parameter.id]) !== parameter.value,
   );
+  // Editing and running stay two operations: a dirty cell or a save in flight
+  // closes the run gate until the values are committed.
+  const seriesDirty = Object.values(dirtyGroups).some(Boolean);
   const canRun = Boolean(
     runGate?.can_run &&
     !parametersDirty &&
+    !seriesDirty &&
     parameterValuesValid &&
     effectiveSelectedStart &&
     effectiveSelectedEnd &&
@@ -879,10 +1260,29 @@ export function ConsoleShellView() {
             Ejecutar
           </button>
         </div>
-        {parametersDirty ? (
+        {parametersDirty || seriesDirty ? (
           <p className="source-note">Guarda los cambios antes de ejecutar.</p>
         ) : null}
       </section>
+      {groups.map((group) => (
+        <ConsoleGroupEditor
+          key={group.id}
+          consoleId={consoleId}
+          group={group}
+          range={{
+            start: effectiveSelectedStart,
+            end: effectiveSelectedEnd,
+          }}
+          lockedBy={runGate?.editing_locked_by ?? null}
+          onDirtyChange={(dirty) =>
+            setDirtyGroups((current) =>
+              current[group.id] === dirty
+                ? current
+                : { ...current, [group.id]: dirty },
+            )
+          }
+        />
+      ))}
       <section
         className="content-panel"
         aria-labelledby="console-history-title"

@@ -74,6 +74,7 @@ def build_console_payload(
     run_gate: Mapping[str, Any] | None = None,
     period: Mapping[str, Any] | None = None,
     history: list[Mapping[str, Any]] | None = None,
+    groups: list[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the console envelope an operator receives.
 
@@ -115,7 +116,95 @@ def build_console_payload(
             "contact": (run_gate or {}).get("contact"),
             "editing_locked_by": (run_gate or {}).get("editing_locked_by"),
         },
+        "groups": [
+            {
+                "id": group["id"],
+                "label": group["label"],
+                "granularities": list(group["granularities"]),
+                "columns": [
+                    {
+                        "id": column["id"],
+                        "label": column["label"],
+                        "unit": column["unit"],
+                        "nonnegative": bool(column["nonnegative"]),
+                        "editable": bool(column["editable"]),
+                    }
+                    for column in group["columns"]
+                ],
+            }
+            for group in (groups or [])
+        ],
         "history": [build_console_run_entry(run) for run in (history or [])],
+    }
+
+
+def build_console_group_values(group_values: Mapping[str, Any]) -> dict[str, Any]:
+    """Build the editable grid an operator receives for one group.
+
+    Row positions and external column ids are the only coordinates that cross:
+    period indexes, signal keys and set ids stay behind the boundary, and the
+    concurrency token leaves as an opaque ETag header instead of a field.
+    """
+
+    return {
+        "group_id": group_values["group_id"],
+        "granularity": group_values["granularity"],
+        "range": {
+            "start": group_values["range"]["start"],
+            "end": group_values["range"]["end"],
+        },
+        "columns": [
+            {
+                "id": column["id"],
+                "label": column["label"],
+                "unit": column["unit"],
+                "nonnegative": bool(column["nonnegative"]),
+                "editable": bool(column["editable"]),
+            }
+            for column in group_values["columns"]
+        ],
+        "rows": [
+            {
+                "index": row["index"],
+                "timestamp": row["timestamp"],
+                "values": dict(row["values"]),
+            }
+            for row in group_values["rows"]
+        ],
+    }
+
+
+def build_console_lease(lease: Mapping[str, Any]) -> dict[str, Any]:
+    """The edit lock as the operator sees it: a token, a name and a deadline."""
+
+    return {
+        "token": lease["token"],
+        "expires_at": lease["expires_at"],
+        "holder_name": lease.get("holder_name") or "",
+    }
+
+
+def build_console_save_error(
+    *,
+    message: str,
+    cells: list[Mapping[str, Any]],
+    total_cells: int,
+) -> dict[str, Any]:
+    """State a refused save in the coordinates the operator can see."""
+
+    return {
+        "message": message,
+        "cells": [
+            {
+                "group_id": cell["group_id"],
+                "column_id": cell["column_id"],
+                "row_index": cell["row_index"],
+                "message": cell["message"],
+            }
+            for cell in cells
+        ],
+        "total_cells": total_cells,
+        "shown_cells": len(cells),
     }
 
 

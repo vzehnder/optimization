@@ -47,6 +47,7 @@ ID_TABLES = {
     "hydraulic_time_series_set_migrations",
     "hydraulic_time_series_sets",
     "hydraulic_units",
+    "operator_console_series_copies",
     "operator_consoles",
     "optimization_cases",
     "portal_configurations",

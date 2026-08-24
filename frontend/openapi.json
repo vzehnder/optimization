@@ -201,6 +201,97 @@
         "title": "CaseTimeSeriesBindingRequest",
         "type": "object"
       },
+      "ConsoleGroupCellRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "column_id": {
+            "minLength": 1,
+            "title": "Column Id",
+            "type": "string"
+          },
+          "row_index": {
+            "title": "Row Index",
+            "type": "integer"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "column_id",
+          "row_index",
+          "value"
+        ],
+        "title": "ConsoleGroupCellRequest",
+        "type": "object"
+      },
+      "ConsoleGroupValuesWriteRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "cells": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleGroupCellRequest"
+            },
+            "title": "Cells",
+            "type": "array"
+          },
+          "granularity": {
+            "minLength": 1,
+            "title": "Granularity",
+            "type": "string"
+          },
+          "lease_token": {
+            "minLength": 1,
+            "title": "Lease Token",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "range_end": {
+            "minLength": 1,
+            "title": "Range End",
+            "type": "string"
+          },
+          "range_start": {
+            "minLength": 1,
+            "title": "Range Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "range_start",
+          "range_end",
+          "granularity",
+          "lease_token",
+          "cells"
+        ],
+        "title": "ConsoleGroupValuesWriteRequest",
+        "type": "object"
+      },
+      "ConsoleLeaseRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "lease_token": {
+            "minLength": 1,
+            "title": "Lease Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lease_token"
+        ],
+        "title": "ConsoleLeaseRequest",
+        "type": "object"
+      },
       "ConsoleParameterOverrideRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2943,6 +3034,281 @@
           }
         },
         "summary": "Get Console Shell"
+      }
+    },
+    "/api/console/{console_id}/groups/{group_id}/lease": {
+      "delete": {
+        "operationId": "release_console_group_lease_api_console__console_id__groups__group_id__lease_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "console_id",
+            "required": true,
+            "schema": {
+              "title": "Console Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lease_token",
+            "required": true,
+            "schema": {
+              "title": "Lease Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Release Console Group Lease"
+      },
+      "post": {
+        "operationId": "acquire_console_group_lease_api_console__console_id__groups__group_id__lease_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "console_id",
+            "required": true,
+            "schema": {
+              "title": "Console Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Acquire Console Group Lease"
+      },
+      "put": {
+        "operationId": "heartbeat_console_group_lease_api_console__console_id__groups__group_id__lease_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "console_id",
+            "required": true,
+            "schema": {
+              "title": "Console Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleLeaseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Heartbeat Console Group Lease"
+      }
+    },
+    "/api/console/{console_id}/groups/{group_id}/values": {
+      "get": {
+        "operationId": "get_console_group_values_api_console__console_id__groups__group_id__values_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "console_id",
+            "required": true,
+            "schema": {
+              "title": "Console Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "title": "Start",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "title": "End",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "granularity",
+            "required": true,
+            "schema": {
+              "title": "Granularity",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Console Group Values"
+      },
+      "put": {
+        "operationId": "save_console_group_values_api_console__console_id__groups__group_id__values_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "console_id",
+            "required": true,
+            "schema": {
+              "title": "Console Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleGroupValuesWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Console Group Values"
       }
     },
     "/api/console/{console_id}/parameters": {

@@ -398,6 +398,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/console/{console_id}/groups/{group_id}/lease": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Heartbeat Console Group Lease */
+        put: operations["heartbeat_console_group_lease_api_console__console_id__groups__group_id__lease_put"];
+        /** Acquire Console Group Lease */
+        post: operations["acquire_console_group_lease_api_console__console_id__groups__group_id__lease_post"];
+        /** Release Console Group Lease */
+        delete: operations["release_console_group_lease_api_console__console_id__groups__group_id__lease_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/console/{console_id}/groups/{group_id}/values": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Console Group Values */
+        get: operations["get_console_group_values_api_console__console_id__groups__group_id__values_get"];
+        /** Save Console Group Values */
+        put: operations["save_console_group_values_api_console__console_id__groups__group_id__values_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/console/{console_id}/parameters": {
         parameters: {
             query?: never;
@@ -1647,6 +1684,35 @@ export interface components {
             signal_key: string;
             /** Time Series Set Id */
             time_series_set_id: number;
+        };
+        /** ConsoleGroupCellRequest */
+        ConsoleGroupCellRequest: {
+            /** Column Id */
+            column_id: string;
+            /** Row Index */
+            row_index: number;
+            /** Value */
+            value: unknown;
+        };
+        /** ConsoleGroupValuesWriteRequest */
+        ConsoleGroupValuesWriteRequest: {
+            /** Cells */
+            cells: components["schemas"]["ConsoleGroupCellRequest"][];
+            /** Granularity */
+            granularity: string;
+            /** Lease Token */
+            lease_token: string;
+            /** Note */
+            note?: string | null;
+            /** Range End */
+            range_end: string;
+            /** Range Start */
+            range_start: string;
+        };
+        /** ConsoleLeaseRequest */
+        ConsoleLeaseRequest: {
+            /** Lease Token */
+            lease_token: string;
         };
         /** ConsoleParameterOverrideRequest */
         ConsoleParameterOverrideRequest: {
@@ -3046,6 +3112,178 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    heartbeat_console_group_lease_api_console__console_id__groups__group_id__lease_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                console_id: number;
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleLeaseRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    acquire_console_group_lease_api_console__console_id__groups__group_id__lease_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                console_id: number;
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    release_console_group_lease_api_console__console_id__groups__group_id__lease_delete: {
+        parameters: {
+            query: {
+                lease_token: string;
+            };
+            header?: never;
+            path: {
+                console_id: number;
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_console_group_values_api_console__console_id__groups__group_id__values_get: {
+        parameters: {
+            query: {
+                start: string;
+                end: string;
+                granularity: string;
+            };
+            header?: never;
+            path: {
+                console_id: number;
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_console_group_values_api_console__console_id__groups__group_id__values_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                console_id: number;
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleGroupValuesWriteRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

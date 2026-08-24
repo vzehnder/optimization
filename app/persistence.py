@@ -5,6 +5,7 @@ import json
 import math
 import sqlite3
 import threading
+import uuid
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -60,6 +61,15 @@ from app.hydraulic_time_series_adapter import (
     build_hydraulic_catalog_summary,
 )
 from app.time_series_ingestion import find_source
+from app.console_series import (
+    ConsoleSeriesError,
+    build_console_group_rows,
+    console_group_values_token,
+    console_range_period_indexes,
+    prepare_console_cell_edits,
+    range_hours,
+    validate_console_granularity,
+)
 from app.operator_console import StaleOperatorConsoleError
 from app.portal_configuration import (
     StalePortalConfigurationError,
@@ -143,6 +153,15 @@ HYDRAULIC_GENERIC_SERIES_DATA_KIND = "real"
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+CONSOLE_LEASE_SECONDS = 300
+
+
+def iso_timestamp_plus_seconds(timestamp: str, seconds: int) -> str:
+    return (
+        datetime.fromisoformat(timestamp) + timedelta(seconds=seconds)
+    ).isoformat(timespec="seconds")
 
 
 def elapsed_seconds(started_at: str | None, finished_at: str) -> float | None:
@@ -1007,6 +1026,35 @@ class AnalystStore:
                 PRIMARY KEY (console_id, asset_id, field),
                 FOREIGN KEY (console_id) REFERENCES operator_consoles(id) ON DELETE CASCADE,
                 FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS operator_console_series_copies (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                console_id INTEGER NOT NULL,
+                time_series_set_id INTEGER NOT NULL,
+                origin_set_id INTEGER NOT NULL,
+                origin_revision_number INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                created_by_user_id INTEGER,
+                archived_at TEXT,
+                FOREIGN KEY (console_id) REFERENCES operator_consoles(id) ON DELETE CASCADE,
+                FOREIGN KEY (time_series_set_id) REFERENCES time_series_sets(id) ON DELETE CASCADE,
+                FOREIGN KEY (origin_set_id) REFERENCES time_series_sets(id) ON DELETE CASCADE,
+                FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS operator_console_series_leases (
+                console_id INTEGER NOT NULL,
+                origin_set_id INTEGER NOT NULL,
+                lease_token TEXT NOT NULL,
+                holder_user_id INTEGER,
+                acquired_at TEXT NOT NULL,
+                heartbeat_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                PRIMARY KEY (console_id, origin_set_id),
+                FOREIGN KEY (console_id) REFERENCES operator_consoles(id) ON DELETE CASCADE,
+                FOREIGN KEY (origin_set_id) REFERENCES time_series_sets(id) ON DELETE CASCADE,
+                FOREIGN KEY (holder_user_id) REFERENCES users(id) ON DELETE SET NULL
             );
 
             CREATE TABLE IF NOT EXISTS dashboard_templates (
@@ -7709,6 +7757,1096 @@ class AnalystStore:
             "selected_start": available_start,
             "selected_end": available_end,
         }
+
+    def _operator_console_group(
+        self, console: Mapping[str, Any], group_id: str
+    ) -> dict[str, Any]:
+        for group in console["document"].get("groups") or []:
+            if str(group["id"]) == str(group_id):
+                return group
+        raise KeyError(f"operator console group {group_id} not found")
+
+    def _resolve_console_column_set_id(
+        self, *, bindings: list[Mapping[str, Any]], signal: Mapping[str, Any]
+    ) -> int:
+        """Which set the console variant actually reads for one column.
+
+        The binding is the truth a run consumes, so the editor edits exactly
+        what the run will read. An entity-scoped binding wins over the
+        unscoped one for the same signal.
+        """
+
+        signal_key = str(signal.get("signal_key") or "")
+        entity_type = normalize_optional_text(signal.get("entity_type"))
+        entity_id = normalize_optional_text(signal.get("entity_id"))
+        scoped = None
+        unscoped = None
+        for binding in bindings:
+            if str(binding["signal_key"]) != signal_key:
+                continue
+            if (
+                binding.get("entity_type") == entity_type
+                and binding.get("entity_id") == entity_id
+            ):
+                scoped = binding
+            elif binding.get("entity_type") is None and binding.get("entity_id") is None:
+                unscoped = binding
+        binding = scoped or unscoped
+        if binding is None:
+            raise ConsoleSeriesError(
+                f"no series is bound for column signal {signal_key}",
+                status_code=409,
+            )
+        return int(binding["time_series_set_id"])
+
+    def _resolve_console_group_columns(
+        self, console_id: int, *, group_id: str | None = None
+    ) -> dict[str, dict[str, Any]]:
+        """Resolve configured groups to their columns and canonical sets.
+
+        Naming one group keeps a broken pointer in another group from
+        blocking the one the operator is actually working on.
+        """
+
+        console = self.get_operator_console(console_id)
+        location = self.get_operator_console_location(console_id)
+        bindings = self.list_case_time_series_bindings(
+            int(console["owned_variant_id"])
+        )
+        resolved: dict[str, dict[str, Any]] = {}
+        sets_by_id: dict[int, dict[str, Any]] = {}
+        for group in console["document"].get("groups") or []:
+            if group_id is not None and str(group["id"]) != str(group_id):
+                continue
+            columns: list[dict[str, Any]] = []
+            for column in group["columns"]:
+                signal = column["signal"]
+                signal_key = str(signal["signal_key"])
+                set_id = self._resolve_console_column_set_id(
+                    bindings=bindings, signal=signal
+                )
+                if set_id not in sets_by_id:
+                    sets_by_id[set_id] = self.get_time_series_set(
+                        int(location["project_id"]), set_id
+                    )
+                time_series_set = sets_by_id[set_id]
+                matching = [
+                    entry
+                    for entry in time_series_set["signals"]
+                    if str(entry["signal_key"]) == signal_key
+                ]
+                if len(matching) != 1:
+                    raise ConsoleSeriesError(
+                        f"column {column['id']} does not resolve to exactly one "
+                        f"series in its bound set",
+                        status_code=409,
+                    )
+                definition = TIME_SERIES_SIGNAL_CATALOG.get(signal_key)
+                columns.append(
+                    {
+                        "id": str(column["id"]),
+                        "label": str(column["label"]),
+                        "unit": str(matching[0]["unit"]),
+                        "nonnegative": bool(definition.nonnegative)
+                        if definition is not None
+                        else False,
+                        "editable": bool(column["editable"]),
+                        "signal_key": signal_key,
+                        "time_series_set_id": set_id,
+                        "set": time_series_set,
+                    }
+                )
+            resolved[str(group["id"])] = {"group": group, "columns": columns}
+        return resolved
+
+    def resolve_operator_console_group_metadata(
+        self, console_id: int
+    ) -> dict[str, Any]:
+        """Public group and column metadata, plus the groups that no longer resolve."""
+
+        console = self.get_operator_console(console_id)
+        groups: list[dict[str, Any]] = []
+        unavailable_ids: list[str] = []
+        for declared in console["document"].get("groups") or []:
+            group_id = str(declared["id"])
+            try:
+                entry = self._resolve_console_group_columns(
+                    console_id, group_id=group_id
+                )[group_id]
+            except ConsoleSeriesError:
+                unavailable_ids.append(group_id)
+                continue
+            groups.append(
+                {
+                    "id": group_id,
+                    "label": entry["group"]["label"],
+                    "granularities": list(entry["group"]["granularities"]),
+                    "columns": [
+                        {
+                            "id": column["id"],
+                            "label": column["label"],
+                            "unit": column["unit"],
+                            "nonnegative": column["nonnegative"],
+                            "editable": column["editable"],
+                        }
+                        for column in entry["columns"]
+                    ],
+                }
+            )
+        return {"groups": groups, "unavailable_ids": unavailable_ids}
+
+    def resolve_operator_console_group_values(
+        self,
+        console_id: int,
+        *,
+        group_id: str,
+        range_start: str,
+        range_end: str,
+        granularity: str,
+    ) -> dict[str, Any]:
+        """Load one configured group and range by external ids alone."""
+
+        console = self.get_operator_console(console_id)
+        group = self._operator_console_group(console, group_id)
+        resolved = self._resolve_console_group_columns(
+            console_id, group_id=str(group_id)
+        )[str(group_id)]
+        validate_console_granularity(
+            granularity,
+            allowed=group["granularities"],
+            hours=range_hours(range_start, range_end),
+        )
+        columns = resolved["columns"]
+        rows = build_console_group_rows(
+            columns=columns, range_start=range_start, range_end=range_end
+        )
+        return {
+            "group_id": str(group_id),
+            "granularity": str(granularity),
+            "range": {"start": range_start, "end": range_end},
+            "columns": [
+                {
+                    "id": column["id"],
+                    "label": column["label"],
+                    "unit": column["unit"],
+                    "nonnegative": column["nonnegative"],
+                    "editable": column["editable"],
+                }
+                for column in columns
+            ],
+            "rows": rows,
+            "token": console_group_values_token(
+                [
+                    (column["time_series_set_id"], str(column["set"]["content_hash"]))
+                    for column in columns
+                ]
+            ),
+        }
+
+    def list_operator_console_series_copies(
+        self, console_id: int, *, include_archived: bool = False
+    ) -> list[dict[str, Any]]:
+        """The operational copies this console owns, oldest first."""
+
+        self.get_operator_console(console_id)
+        sql = """
+            SELECT id, console_id, time_series_set_id, origin_set_id,
+                   origin_revision_number, created_at, created_by_user_id, archived_at
+            FROM operator_console_series_copies
+            WHERE console_id = ?
+        """
+        if not include_archived:
+            sql += " AND archived_at IS NULL"
+        rows = self.connection.execute(sql + " ORDER BY id", (console_id,)).fetchall()
+        return [row_to_dict(row) for row in rows]
+
+    def _active_console_series_copy(
+        self, console_id: int, time_series_set_id: int
+    ) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            """
+            SELECT id, console_id, time_series_set_id, origin_set_id,
+                   origin_revision_number, created_at, created_by_user_id, archived_at
+            FROM operator_console_series_copies
+            WHERE console_id = ? AND time_series_set_id = ? AND archived_at IS NULL
+            """,
+            (console_id, time_series_set_id),
+        ).fetchone()
+        return row_to_dict(row) if row is not None else None
+
+    def _create_operator_console_series_copy(
+        self,
+        *,
+        console_id: int,
+        project_id: int,
+        origin_set_id: int,
+        created_by: str,
+        created_by_user_id: int | None,
+        now: str,
+    ) -> dict[str, Any]:
+        """Fork one flat, non-derived operational copy of a canonical set.
+
+        The copy keeps its origin set and revision as inert lineage: it is
+        never regenerated from that origin and can never go stale because of
+        it. The canonical set is only read here.
+        """
+
+        origin = self.get_time_series_set(project_id, origin_set_id)
+        copy_number = int(
+            self.connection.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM operator_console_series_copies
+                WHERE console_id = ? AND origin_set_id = ?
+                """,
+                (console_id, origin_set_id),
+            ).fetchone()["total"]
+        ) + 1
+        name = f"{origin['name']} (consola {console_id})"
+        version_label = f"operativa-{copy_number}"
+        version_number = int(
+            self.connection.execute(
+                """
+                SELECT COALESCE(MAX(version_number), 0) AS max_version
+                FROM time_series_sets
+                WHERE project_id = ? AND name = ?
+                """,
+                (project_id, name),
+            ).fetchone()["max_version"]
+        ) + 1
+
+        signal_rows = self.connection.execute(
+            """
+            SELECT id, signal_key, unit, entity_type, entity_key, source_column,
+                   source_unit, signal_role, aggregation
+            FROM time_series_signals
+            WHERE time_series_set_id = ?
+            ORDER BY id
+            """,
+            (origin_set_id,),
+        ).fetchall()
+        period_rows = self.connection.execute(
+            """
+            SELECT id, period_index, timestamp_start, timestamp_end, duration_hours
+            FROM time_series_periods
+            WHERE time_series_set_id = ?
+            ORDER BY period_index
+            """,
+            (origin_set_id,),
+        ).fetchall()
+        value_rows = self.connection.execute(
+            """
+            SELECT time_series_values.time_series_signal_id AS signal_id,
+                   time_series_values.time_series_period_id AS period_id,
+                   time_series_values.value_numeric AS value_numeric,
+                   time_series_values.source_row_number AS source_row_number,
+                   time_series_periods.period_index AS period_index,
+                   time_series_signals.signal_key AS signal_key
+            FROM time_series_values
+            JOIN time_series_periods
+              ON time_series_periods.id = time_series_values.time_series_period_id
+            JOIN time_series_signals
+              ON time_series_signals.id = time_series_values.time_series_signal_id
+            WHERE time_series_values.time_series_set_id = ?
+            ORDER BY time_series_periods.period_index, time_series_signals.signal_key
+            """,
+            (origin_set_id,),
+        ).fetchall()
+
+        content_hash = compute_catalog_content_hash(
+            set_name=name,
+            version_label=version_label,
+            data_kind=str(origin["data_kind"]),
+            timezone=str(origin["timezone"]),
+            signals=[
+                {
+                    "signal_key": row["signal_key"],
+                    "unit": row["unit"],
+                    "source_column": row["source_column"],
+                    "source_unit": row["source_unit"],
+                    "entity_type": row["entity_type"],
+                    "entity_key": row["entity_key"],
+                }
+                for row in signal_rows
+            ],
+            periods=[
+                {
+                    "period_index": row["period_index"],
+                    "timestamp_start": row["timestamp_start"],
+                    "timestamp_end": row["timestamp_end"],
+                    "duration_hours": row["duration_hours"],
+                }
+                for row in period_rows
+            ],
+            values=[
+                {
+                    "period_index": row["period_index"],
+                    "signal_key": row["signal_key"],
+                    "value_numeric": row["value_numeric"],
+                    "source_row_number": row["source_row_number"],
+                }
+                for row in value_rows
+            ],
+        )
+        lineage = {
+            "origin": {
+                "time_series_set_id": int(origin_set_id),
+                "revision_number": int(origin["revision_number"]),
+            },
+            "operator_console": {"id": int(console_id)},
+        }
+        cursor = self.connection.execute(
+            """
+            INSERT INTO time_series_sets (
+                project_id, name, version_number, version_label, data_kind,
+                timezone, status, content_hash, created_at, updated_at,
+                created_by, updated_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 'validated', ?, ?, ?, ?, ?)
+            """,
+            (
+                project_id,
+                name,
+                version_number,
+                version_label,
+                str(origin["data_kind"]),
+                str(origin["timezone"]),
+                content_hash,
+                now,
+                now,
+                created_by,
+                created_by,
+            ),
+        )
+        copied_set_id = int(cursor.lastrowid)
+        self.connection.execute(
+            """
+            INSERT INTO time_series_set_revisions (
+                time_series_set_id, revision_number, time_series_source_id,
+                superseded_revision_number, content_hash, change_summary,
+                created_at, created_by, metadata_json
+            )
+            VALUES (?, 1, NULL, NULL, ?, ?, ?, ?, ?)
+            """,
+            (
+                copied_set_id,
+                content_hash,
+                "Copia operativa de consola",
+                now,
+                created_by,
+                json.dumps(lineage, sort_keys=True),
+            ),
+        )
+        signal_ids_by_origin: dict[int, int] = {}
+        for row in signal_rows:
+            signal_cursor = self.connection.execute(
+                """
+                INSERT INTO time_series_signals (
+                    time_series_set_id, signal_key, unit, source_column,
+                    source_unit, entity_type, entity_key, signal_role,
+                    aggregation, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    copied_set_id,
+                    row["signal_key"],
+                    row["unit"],
+                    row["source_column"],
+                    row["source_unit"],
+                    row["entity_type"],
+                    row["entity_key"],
+                    row["signal_role"],
+                    row["aggregation"],
+                    now,
+                ),
+            )
+            signal_ids_by_origin[int(row["id"])] = int(signal_cursor.lastrowid)
+        period_ids_by_origin: dict[int, int] = {}
+        for row in period_rows:
+            period_cursor = self.connection.execute(
+                """
+                INSERT INTO time_series_periods (
+                    time_series_set_id, period_index, timestamp_start,
+                    timestamp_end, duration_hours, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    copied_set_id,
+                    row["period_index"],
+                    row["timestamp_start"],
+                    row["timestamp_end"],
+                    row["duration_hours"],
+                    now,
+                ),
+            )
+            period_ids_by_origin[int(row["id"])] = int(period_cursor.lastrowid)
+        self._bulk_insert_time_series_values(
+            time_series_set_id=copied_set_id,
+            values=[
+                (
+                    signal_ids_by_origin[int(row["signal_id"])],
+                    period_ids_by_origin[int(row["period_id"])],
+                    row["value_numeric"],
+                    row["source_row_number"],
+                )
+                for row in value_rows
+            ],
+            now=now,
+        )
+        copy_cursor = self.connection.execute(
+            """
+            INSERT INTO operator_console_series_copies (
+                console_id, time_series_set_id, origin_set_id,
+                origin_revision_number, created_at, created_by_user_id, archived_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, NULL)
+            """,
+            (
+                console_id,
+                copied_set_id,
+                origin_set_id,
+                int(origin["revision_number"]),
+                now,
+                created_by_user_id,
+            ),
+        )
+        return {
+            "id": int(copy_cursor.lastrowid),
+            "console_id": int(console_id),
+            "time_series_set_id": copied_set_id,
+            "origin_set_id": int(origin_set_id),
+            "origin_revision_number": int(origin["revision_number"]),
+            "created_at": now,
+            "created_by_user_id": created_by_user_id,
+            "archived_at": None,
+            "lineage": lineage,
+        }
+
+    def _console_group_lease_set_ids(self, console_id: int, group_id: str) -> list[int]:
+        """The lease keys one group touches.
+
+        A lease belongs to an operational copy, but the copy only exists once
+        an edit is accepted. Keying it by the origin set the copy was forked
+        from gives the same identity before and after the fork.
+        """
+
+        resolved = self._resolve_console_group_columns(
+            console_id, group_id=str(group_id)
+        )[str(group_id)]
+        key_ids: set[int] = set()
+        for column in resolved["columns"]:
+            resolved_set_id = int(column["time_series_set_id"])
+            copy = self._active_console_series_copy(console_id, resolved_set_id)
+            key_ids.add(
+                int(copy["origin_set_id"]) if copy is not None else resolved_set_id
+            )
+        return sorted(key_ids)
+
+    def _live_console_series_leases(
+        self, console_id: int, set_ids: list[int], now: str
+    ) -> list[dict[str, Any]]:
+        if not set_ids:
+            return []
+        placeholders = ", ".join("?" for _ in set_ids)
+        rows = self.connection.execute(
+            f"""
+            SELECT console_id, origin_set_id, lease_token, holder_user_id,
+                   acquired_at, heartbeat_at, expires_at
+            FROM operator_console_series_leases
+            WHERE console_id = ? AND origin_set_id IN ({placeholders})
+              AND expires_at > ?
+            ORDER BY origin_set_id
+            """,
+            (console_id, *set_ids, now),
+        ).fetchall()
+        return [row_to_dict(row) for row in rows]
+
+    def acquire_operator_console_group_lease(
+        self, console_id: int, *, group_id: str, user_id: int
+    ) -> dict[str, Any]:
+        """Take the edit lock for every copy the group touches, or none of them."""
+
+        with self._lock:
+            console = self.get_operator_console(console_id)
+            self._operator_console_group(console, group_id)
+            set_ids = self._console_group_lease_set_ids(console_id, group_id)
+            now = utc_now_iso()
+            held = self._live_console_series_leases(console_id, set_ids, now)
+            foreign = [
+                lease
+                for lease in held
+                if lease["holder_user_id"] is not None
+                and int(lease["holder_user_id"]) != int(user_id)
+            ]
+            if foreign:
+                holder = self._console_actor_identity(foreign[0]["holder_user_id"])
+                raise ConsoleSeriesError(
+                    f"{holder['name']} esta editando este grupo",
+                    status_code=409,
+                )
+            token = uuid.uuid4().hex
+            expires_at = iso_timestamp_plus_seconds(now, CONSOLE_LEASE_SECONDS)
+            for set_id in set_ids:
+                self.connection.execute(
+                    """
+                    DELETE FROM operator_console_series_leases
+                    WHERE console_id = ? AND origin_set_id = ?
+                    """,
+                    (console_id, set_id),
+                )
+                self.connection.execute(
+                    """
+                    INSERT INTO operator_console_series_leases (
+                        console_id, origin_set_id, lease_token, holder_user_id,
+                        acquired_at, heartbeat_at, expires_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (console_id, set_id, token, user_id, now, now, expires_at),
+                )
+            self.connection.commit()
+        actor = self._console_actor_identity(user_id)
+        return {
+            "token": token,
+            "expires_at": expires_at,
+            "holder_user_id": int(user_id),
+            "holder_name": actor["name"],
+        }
+
+    def heartbeat_operator_console_group_lease(
+        self, console_id: int, *, group_id: str, user_id: int, lease_token: str
+    ) -> dict[str, Any]:
+        """Keep the holder's lock alive while the table stays open."""
+
+        with self._lock:
+            console = self.get_operator_console(console_id)
+            self._operator_console_group(console, group_id)
+            set_ids = self._console_group_lease_set_ids(console_id, group_id)
+            now = utc_now_iso()
+            self._require_console_group_lease(
+                console_id=console_id,
+                set_ids=set_ids,
+                user_id=user_id,
+                lease_token=lease_token,
+                now=now,
+            )
+            expires_at = iso_timestamp_plus_seconds(now, CONSOLE_LEASE_SECONDS)
+            for set_id in set_ids:
+                self.connection.execute(
+                    """
+                    UPDATE operator_console_series_leases
+                    SET heartbeat_at = ?, expires_at = ?
+                    WHERE console_id = ? AND origin_set_id = ? AND lease_token = ?
+                    """,
+                    (now, expires_at, console_id, set_id, str(lease_token)),
+                )
+            self.connection.commit()
+        actor = self._console_actor_identity(user_id)
+        return {
+            "token": str(lease_token),
+            "expires_at": expires_at,
+            "holder_user_id": int(user_id),
+            "holder_name": actor["name"],
+        }
+
+    def release_operator_console_group_lease(
+        self, console_id: int, *, group_id: str, user_id: int, lease_token: str
+    ) -> None:
+        """Give the lock back so the next editor can take it immediately."""
+
+        with self._lock:
+            console = self.get_operator_console(console_id)
+            self._operator_console_group(console, group_id)
+            for set_id in self._console_group_lease_set_ids(console_id, group_id):
+                self.connection.execute(
+                    """
+                    DELETE FROM operator_console_series_leases
+                    WHERE console_id = ? AND origin_set_id = ? AND lease_token = ?
+                      AND holder_user_id = ?
+                    """,
+                    (console_id, set_id, str(lease_token), int(user_id)),
+                )
+            self.connection.commit()
+
+    def describe_operator_console_group_lease(
+        self, console_id: int, *, group_id: str
+    ) -> dict[str, Any]:
+        """Who is editing this group right now, in public terms."""
+
+        console = self.get_operator_console(console_id)
+        self._operator_console_group(console, group_id)
+        try:
+            set_ids = self._console_group_lease_set_ids(console_id, group_id)
+        except ConsoleSeriesError:
+            # A group whose pointers no longer resolve cannot be held at all.
+            return {"holder_user_id": None, "holder_name": None, "expires_at": None}
+        held = self._live_console_series_leases(console_id, set_ids, utc_now_iso())
+        if not held:
+            return {"holder_user_id": None, "holder_name": None, "expires_at": None}
+        lease = held[0]
+        actor = self._console_actor_identity(lease["holder_user_id"])
+        return {
+            "holder_user_id": lease["holder_user_id"],
+            "holder_name": actor["name"] or None,
+            "expires_at": lease["expires_at"],
+        }
+
+    def _require_console_group_lease(
+        self,
+        *,
+        console_id: int,
+        set_ids: list[int],
+        user_id: int | None,
+        lease_token: str | None,
+        now: str,
+    ) -> None:
+        """Refuse to write unless the caller holds the lock on every copy."""
+
+        held = {
+            int(lease["origin_set_id"]): lease
+            for lease in self._live_console_series_leases(console_id, set_ids, now)
+        }
+        for set_id in set_ids:
+            lease = held.get(int(set_id))
+            if lease is None:
+                raise ConsoleSeriesError(
+                    "necesitas tomar la edicion antes de guardar", status_code=409
+                )
+            if (
+                user_id is None
+                or int(lease["holder_user_id"] or 0) != int(user_id)
+                or str(lease["lease_token"]) != str(lease_token or "")
+            ):
+                holder = self._console_actor_identity(lease["holder_user_id"])
+                raise ConsoleSeriesError(
+                    f"{holder['name']} esta editando este grupo", status_code=409
+                )
+
+    def save_operator_console_group_values(
+        self,
+        console_id: int,
+        *,
+        group_id: str,
+        range_start: str,
+        range_end: str,
+        granularity: str,
+        expected_token: str,
+        cells: list[Mapping[str, Any]],
+        note: str | None = None,
+        actor_user_id: int | None = None,
+        lease_token: str | None = None,
+    ) -> dict[str, Any]:
+        """Save one all-or-nothing block of edited cells for one group.
+
+        The first accepted edit forks the operational copy and redirects only
+        the console-owned variant. Every later edit lands on that copy. The
+        canonical set is never written.
+        """
+
+        with self._lock:
+            console = self.get_operator_console(console_id)
+            location = self.get_operator_console_location(console_id)
+            group = self._operator_console_group(console, group_id)
+            resolved = self._resolve_console_group_columns(
+            console_id, group_id=str(group_id)
+        )[str(group_id)]
+            columns = resolved["columns"]
+            validate_console_granularity(
+                granularity,
+                allowed=group["granularities"],
+                hours=range_hours(range_start, range_end),
+            )
+            rows = build_console_group_rows(
+                columns=columns, range_start=range_start, range_end=range_end
+            )
+            current_token = console_group_values_token(
+                [
+                    (column["time_series_set_id"], str(column["set"]["content_hash"]))
+                    for column in columns
+                ]
+            )
+            if str(expected_token) != current_token:
+                raise ConsoleSeriesError(
+                    "los datos cambiaron mientras editabas; vuelve a cargar el tramo",
+                    status_code=412,
+                )
+            self._require_console_group_lease(
+                console_id=console_id,
+                set_ids=self._console_group_lease_set_ids(console_id, str(group_id)),
+                user_id=actor_user_id,
+                lease_token=lease_token,
+                now=utc_now_iso(),
+            )
+            prepared = prepare_console_cell_edits(
+                cells=cells, columns=columns, rows=rows, group_id=str(group_id)
+            )
+            if not prepared:
+                raise ConsoleSeriesError("no hay celdas para guardar")
+
+            actor = self._console_actor_identity(actor_user_id)
+            now = utc_now_iso()
+            period_indexes = console_range_period_indexes(
+                columns[0]["set"], range_start, range_end
+            )
+            edits_by_column: dict[str, list[dict[str, Any]]] = {}
+            for edit in prepared:
+                edits_by_column.setdefault(edit["column_id"], []).append(edit)
+
+            columns_by_id = {column["id"]: column for column in columns}
+            touched: dict[int, dict[str, Any]] = {}
+            for column_id, column_edits in edits_by_column.items():
+                column = columns_by_id[column_id]
+                entry = touched.setdefault(
+                    int(column["time_series_set_id"]),
+                    {"column": column, "edits": []},
+                )
+                entry["edits"].extend(
+                    {
+                        "period_index": period_indexes[edit["row_index"]],
+                        "signal_key": column["signal_key"],
+                        "column_id": column_id,
+                        "row_index": edit["row_index"],
+                        "previous_value": edit["previous_value"],
+                        "new_value": edit["value"],
+                    }
+                    for edit in column_edits
+                )
+
+            try:
+                copies: list[dict[str, Any]] = []
+                for resolved_set_id, entry in sorted(touched.items()):
+                    copy = self._active_console_series_copy(console_id, resolved_set_id)
+                    if copy is None:
+                        copy = self._create_operator_console_series_copy(
+                            console_id=console_id,
+                            project_id=int(location["project_id"]),
+                            origin_set_id=resolved_set_id,
+                            created_by=actor["created_by"],
+                            created_by_user_id=actor_user_id,
+                            now=now,
+                        )
+                        self._rebind_console_variant_series(
+                            case_input_variant_id=int(console["owned_variant_id"]),
+                            origin_set_id=resolved_set_id,
+                            copied_set_id=int(copy["time_series_set_id"]),
+                            updated_by=actor["created_by"],
+                            now=now,
+                        )
+                    self._write_console_series_revision(
+                        project_id=int(location["project_id"]),
+                        time_series_set_id=int(copy["time_series_set_id"]),
+                        edits=entry["edits"],
+                        actor=actor,
+                        console=console,
+                        group_id=str(group_id),
+                        range_start=range_start,
+                        range_end=range_end,
+                        note=note,
+                        now=now,
+                    )
+                    copies.append(copy)
+                self._refresh_console_variant_series_dependencies(
+                    project_id=int(location["project_id"]),
+                    case_input_variant_id=int(console["owned_variant_id"]),
+                    copies=copies,
+                    now=now,
+                )
+            except Exception:
+                self.connection.rollback()
+                raise
+            self.connection.commit()
+
+        return self.resolve_operator_console_group_values(
+            console_id,
+            group_id=str(group_id),
+            range_start=range_start,
+            range_end=range_end,
+            granularity=granularity,
+        )
+
+    def _console_actor_identity(self, actor_user_id: int | None) -> dict[str, Any]:
+        if actor_user_id is None:
+            return {"user_id": None, "created_by": "operator_console", "name": ""}
+        try:
+            user = self.get_user(int(actor_user_id))
+        except KeyError:
+            return {"user_id": int(actor_user_id), "created_by": "operator_console", "name": ""}
+        return {
+            "user_id": int(actor_user_id),
+            "created_by": str(user["email"]),
+            "name": str(user["display_name"] or user["email"]),
+        }
+
+    def _rebind_console_variant_series(
+        self,
+        *,
+        case_input_variant_id: int,
+        origin_set_id: int,
+        copied_set_id: int,
+        updated_by: str,
+        now: str,
+    ) -> None:
+        """Point only this console's variant at the operational copy."""
+
+        self.connection.execute(
+            """
+            UPDATE case_time_series_bindings
+            SET time_series_set_id = ?, updated_at = ?, updated_by = ?
+            WHERE case_input_variant_id = ? AND time_series_set_id = ?
+            """,
+            (copied_set_id, now, updated_by, case_input_variant_id, origin_set_id),
+        )
+
+    def _refresh_console_variant_series_dependencies(
+        self,
+        *,
+        project_id: int,
+        case_input_variant_id: int,
+        copies: list[Mapping[str, Any]],
+        now: str,
+    ) -> None:
+        """Refresh only the copied-set dependency of the console variant.
+
+        Topology and parameters recorded at the last validation are left
+        exactly as they were: saving values attests to the values it wrote and
+        to nothing else.
+        """
+
+        recorded = self.connection.execute(
+            """
+            SELECT dependency_id
+            FROM validation_dependencies
+            WHERE owner_type = 'case_input_variant' AND owner_id = ?
+              AND dependency_type = 'time_series_set'
+            """,
+            (case_input_variant_id,),
+        ).fetchall()
+        if not recorded:
+            # The variant was never validated, so there is nothing recorded
+            # that a new copy could drift from.
+            return
+        recorded_ids = {str(row["dependency_id"]) for row in recorded}
+        for copy in copies:
+            copied_set_id = int(copy["time_series_set_id"])
+            content_hash = str(
+                self.get_time_series_set(project_id, copied_set_id)["content_hash"]
+            )
+            self.connection.execute(
+                """
+                DELETE FROM validation_dependencies
+                WHERE owner_type = 'case_input_variant' AND owner_id = ?
+                  AND dependency_type = 'time_series_set'
+                  AND dependency_id IN (?, ?)
+                """,
+                (
+                    case_input_variant_id,
+                    str(copy["origin_set_id"]),
+                    str(copied_set_id),
+                ),
+            )
+            if str(copy["origin_set_id"]) in recorded_ids or str(copied_set_id) in recorded_ids:
+                self.connection.execute(
+                    """
+                    INSERT INTO validation_dependencies (
+                        owner_type, owner_id, dependency_type, dependency_id,
+                        recorded_hash, created_at, updated_at
+                    )
+                    VALUES ('case_input_variant', ?, 'time_series_set', ?, ?, ?, ?)
+                    """,
+                    (
+                        case_input_variant_id,
+                        str(copied_set_id),
+                        content_hash,
+                        now,
+                        now,
+                    ),
+                )
+
+    def _write_console_series_revision(
+        self,
+        *,
+        project_id: int,
+        time_series_set_id: int,
+        edits: list[Mapping[str, Any]],
+        actor: Mapping[str, Any],
+        console: Mapping[str, Any],
+        group_id: str,
+        range_start: str,
+        range_end: str,
+        note: str | None,
+        now: str,
+    ) -> None:
+        """Write one auditable revision of an operational copy."""
+
+        signal_rows = self.connection.execute(
+            """
+            SELECT id, signal_key, unit, source_column, source_unit, entity_type, entity_key
+            FROM time_series_signals
+            WHERE time_series_set_id = ?
+            ORDER BY id
+            """,
+            (time_series_set_id,),
+        ).fetchall()
+        period_rows = self.connection.execute(
+            """
+            SELECT id, period_index, timestamp_start, timestamp_end, duration_hours
+            FROM time_series_periods
+            WHERE time_series_set_id = ?
+            ORDER BY period_index
+            """,
+            (time_series_set_id,),
+        ).fetchall()
+        value_rows = self.connection.execute(
+            """
+            SELECT time_series_values.id AS id,
+                   time_series_periods.period_index AS period_index,
+                   time_series_signals.signal_key AS signal_key,
+                   time_series_values.value_numeric AS value_numeric,
+                   time_series_values.source_row_number AS source_row_number
+            FROM time_series_values
+            JOIN time_series_periods
+              ON time_series_periods.id = time_series_values.time_series_period_id
+            JOIN time_series_signals
+              ON time_series_signals.id = time_series_values.time_series_signal_id
+            WHERE time_series_values.time_series_set_id = ?
+            """,
+            (time_series_set_id,),
+        ).fetchall()
+        values_by_key = {
+            (int(row["period_index"]), str(row["signal_key"])): row_to_dict(row)
+            for row in value_rows
+        }
+        for edit in edits:
+            key = (int(edit["period_index"]), str(edit["signal_key"]))
+            existing = values_by_key.get(key)
+            if existing is None:
+                raise ConsoleSeriesError(
+                    "la celda editada no existe en la serie", status_code=409
+                )
+            values_by_key[key] = {**existing, "value_numeric": float(edit["new_value"])}
+
+        set_row = self.connection.execute(
+            """
+            SELECT name, version_label, data_kind, timezone
+            FROM time_series_sets
+            WHERE id = ?
+            """,
+            (time_series_set_id,),
+        ).fetchone()
+        content_hash = compute_catalog_content_hash(
+            set_name=str(set_row["name"]),
+            version_label=str(set_row["version_label"]),
+            data_kind=str(set_row["data_kind"]),
+            timezone=str(set_row["timezone"]),
+            signals=[
+                {
+                    "signal_key": row["signal_key"],
+                    "unit": row["unit"],
+                    "source_column": row["source_column"],
+                    "source_unit": row["source_unit"],
+                    "entity_type": row["entity_type"],
+                    "entity_key": row["entity_key"],
+                }
+                for row in signal_rows
+            ],
+            periods=[
+                {
+                    "period_index": row["period_index"],
+                    "timestamp_start": row["timestamp_start"],
+                    "timestamp_end": row["timestamp_end"],
+                    "duration_hours": row["duration_hours"],
+                }
+                for row in period_rows
+            ],
+            values=[
+                {
+                    "period_index": row["period_index"],
+                    "signal_key": row["signal_key"],
+                    "value_numeric": row["value_numeric"],
+                    "source_row_number": row["source_row_number"],
+                }
+                for row in sorted(
+                    values_by_key.values(),
+                    key=lambda item: (item["period_index"], item["signal_key"]),
+                )
+            ],
+        )
+        latest = self.connection.execute(
+            """
+            SELECT revision_number, metadata_json
+            FROM time_series_set_revisions
+            WHERE time_series_set_id = ?
+            ORDER BY revision_number DESC
+            LIMIT 1
+            """,
+            (time_series_set_id,),
+        ).fetchone()
+        latest_revision_number = int(latest["revision_number"]) if latest else 0
+        lineage: dict[str, Any] = {}
+        if latest is not None and latest["metadata_json"]:
+            try:
+                parsed = json.loads(str(latest["metadata_json"]))
+            except json.JSONDecodeError:
+                parsed = {}
+            if isinstance(parsed, dict) and isinstance(parsed.get("origin"), dict):
+                lineage["origin"] = parsed["origin"]
+        metadata = {
+            **lineage,
+            "operator_console": {
+                "id": int(console["id"]),
+                "revision": int(console["revision"]),
+            },
+            "actor": {"user_id": actor["user_id"], "name": actor["name"]},
+            "group_id": str(group_id),
+            "range": {"start": range_start, "end": range_end},
+            "note": (note or "").strip(),
+            "cell_count": len(edits),
+            "edits": [
+                {
+                    "column_id": edit["column_id"],
+                    "row_index": int(edit["row_index"]),
+                    "previous_value": edit["previous_value"],
+                    "new_value": float(edit["new_value"]),
+                }
+                for edit in edits
+            ],
+        }
+        self.connection.execute(
+            """
+            INSERT INTO time_series_set_revisions (
+                time_series_set_id, revision_number, time_series_source_id,
+                superseded_revision_number, content_hash, change_summary,
+                created_at, created_by, metadata_json
+            )
+            VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                time_series_set_id,
+                latest_revision_number + 1,
+                latest_revision_number or None,
+                content_hash,
+                "Edicion operativa de consola",
+                now,
+                actor["created_by"],
+                json.dumps(metadata, sort_keys=True),
+            ),
+        )
+        for edit in edits:
+            key = (int(edit["period_index"]), str(edit["signal_key"]))
+            self.connection.execute(
+                "UPDATE time_series_values SET value_numeric = ? WHERE id = ?",
+                (float(edit["new_value"]), int(values_by_key[key]["id"])),
+            )
+        self.connection.execute(
+            """
+            UPDATE time_series_sets
+            SET content_hash = ?, updated_at = ?, updated_by = ?
+            WHERE id = ?
+            """,
+            (content_hash, now, actor["created_by"], time_series_set_id),
+        )
 
     def materialize_operator_console_run(
         self,

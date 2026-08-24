@@ -76,6 +76,7 @@ function stubApi(
     path: string,
     method: string,
     body: Record<string, unknown> | undefined,
+    init?: RequestInit,
   ) => Response | undefined,
 ) {
   const fetchMock = vi.fn(
@@ -85,7 +86,7 @@ function stubApi(
       const body = init?.body
         ? (JSON.parse(String(init.body)) as Record<string, unknown>)
         : undefined;
-      const handled = handler(path, method, body);
+      const handled = handler(path, method, body, init);
       if (handled) return handled;
       if (path === "/api/auth/me") {
         return Response.json({ user: identity, bootstrap_required: false });
@@ -512,6 +513,76 @@ describe("the console configuration editor and the canonical signal catalog", ()
   });
 });
 
+const editableGroup = {
+  id: "potencia",
+  label: "Potencia",
+  granularities: ["day", "full_horizon"],
+  columns: [
+    {
+      id: "demanda",
+      label: "Demanda",
+      unit: "MW",
+      nonnegative: true,
+      editable: true,
+    },
+  ],
+};
+
+function consoleShellPayload() {
+  return {
+    console: {
+      id: 4,
+      name: "Plan diario Planta Norte",
+      description: "Ajuste diario",
+      prepared_by: "Ada Analyst",
+      updated_at: "2026-08-23T12:00:00Z",
+    },
+    period: {
+      available_start: "2026-01-01T00:00:00-03:00",
+      available_end: "2026-01-01T04:00:00-03:00",
+      selected_start: "2026-01-01T00:00:00-03:00",
+      selected_end: "2026-01-01T04:00:00-03:00",
+    },
+    parameters: [],
+    groups: [editableGroup],
+    run_gate: {
+      can_run: true,
+      reason: null,
+      message: "",
+      contact: null,
+      editing_locked_by: null,
+    },
+    history: [],
+  };
+}
+
+function groupValuesPayload(demand: number[]) {
+  return {
+    group_values: {
+      group_id: "potencia",
+      granularity: "day",
+      range: {
+        start: "2026-01-01T00:00:00-03:00",
+        end: "2026-01-01T04:00:00-03:00",
+      },
+      columns: editableGroup.columns,
+      rows: demand.map((value, index) => ({
+        index,
+        timestamp: `2026-01-01T0${index}:00:00-03:00`,
+        values: { demanda: value },
+      })),
+    },
+  };
+}
+
+const leasePayload = {
+  lease: {
+    token: "lease-1",
+    expires_at: "2026-08-24T10:05:00Z",
+    holder_name: "Olga Operadora",
+  },
+};
+
 describe("the operator console shell", () => {
   it("lists the operator's consoles across projects and opens one", async () => {
     window.history.replaceState({}, "", "/react/console");
@@ -790,5 +861,191 @@ describe("the operator console shell", () => {
     expect(screen.getByText("1250.5")).toBeVisible();
     await new Promise((resolve) => window.setTimeout(resolve, 1100));
     expect(detailReads).toBe(1);
+  });
+
+  it("edits one exposed series and only then re-enables running", async () => {
+    window.history.replaceState({}, "", "/react/console/4");
+    const writes: Array<Record<string, unknown>> = [];
+    const sentTokens: Array<string | null> = [];
+    let demand = [10, 11, 12, 13];
+    let token = "token-1";
+    stubApi(operatorIdentity, (path, method, body, init) => {
+      if (path === "/api/console/4" && method === "GET") {
+        return Response.json(consoleShellPayload());
+      }
+      if (path === "/api/console/4/runs" && method === "GET") {
+        return Response.json({ history: [] });
+      }
+      if (path.startsWith("/api/console/4/groups/potencia/values")) {
+        if (method === "PUT") {
+          writes.push(body as Record<string, unknown>);
+          sentTokens.push(new Headers(init?.headers).get("if-match"));
+          demand = [10, 99.5, 12, 13];
+          token = "token-2";
+        }
+        return Response.json(groupValuesPayload(demand), {
+          headers: { ETag: `"${token}"` },
+        });
+      }
+      if (
+        path === "/api/console/4/groups/potencia/lease" &&
+        method === "POST"
+      ) {
+        return Response.json(leasePayload);
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    const table = await screen.findByRole("table", { name: "Potencia" });
+    expect(
+      within(table).getByRole("columnheader", { name: "Demanda (MW)" }),
+    ).toBeVisible();
+    expect(
+      within(table).getByRole("rowheader", {
+        name: "2026-01-01T01:00:00-03:00",
+      }),
+    ).toBeVisible();
+    expect(within(table).getByText("11")).toBeVisible();
+    expect(
+      screen.getByTestId("console-group-series-potencia"),
+    ).toHaveTextContent("Demanda");
+
+    const runButton = screen.getByRole("button", { name: "Ejecutar" });
+    expect(runButton).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Editar valores" }));
+    const cell = await screen.findByRole("spinbutton", {
+      name: "Demanda 2026-01-01T01:00:00-03:00",
+    });
+    await user.clear(cell);
+    await user.type(cell, "99.5");
+    expect(runButton).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Guardar valores" }));
+
+    await vi.waitFor(() => expect(runButton).toBeEnabled());
+    expect(writes).toEqual([
+      {
+        range_start: "2026-01-01T00:00:00-03:00",
+        range_end: "2026-01-01T04:00:00-03:00",
+        granularity: "day",
+        lease_token: "lease-1",
+        note: "",
+        cells: [{ column_id: "demanda", row_index: 1, value: 99.5 }],
+      },
+    ]);
+    expect(sentTokens).toEqual(['"token-1"']);
+    expect(
+      await screen.findByRole("spinbutton", {
+        name: "Demanda 2026-01-01T01:00:00-03:00",
+      }),
+    ).toHaveValue(99.5);
+  });
+
+  it("names the cells a refused save rejected and keeps running disabled", async () => {
+    window.history.replaceState({}, "", "/react/console/4");
+    stubApi(operatorIdentity, (path, method) => {
+      if (path === "/api/console/4" && method === "GET") {
+        return Response.json(consoleShellPayload());
+      }
+      if (path === "/api/console/4/runs" && method === "GET") {
+        return Response.json({ history: [] });
+      }
+      if (path.startsWith("/api/console/4/groups/potencia/values")) {
+        if (method === "GET") {
+          return Response.json(groupValuesPayload([10, 11, 12, 13]), {
+            headers: { ETag: '"token-1"' },
+          });
+        }
+        return Response.json(
+          {
+            save_error: {
+              message: "el bloque tiene celdas invalidas y no se guardo nada",
+              cells: [
+                {
+                  group_id: "potencia",
+                  column_id: "demanda",
+                  row_index: 1,
+                  message: "el valor no admite negativos",
+                },
+              ],
+              total_cells: 1,
+              shown_cells: 1,
+            },
+          },
+          { status: 400 },
+        );
+      }
+      if (
+        path === "/api/console/4/groups/potencia/lease" &&
+        method === "POST"
+      ) {
+        return Response.json(leasePayload);
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Editar valores" }),
+    );
+    const cell = await screen.findByRole("spinbutton", {
+      name: "Demanda 2026-01-01T01:00:00-03:00",
+    });
+    await user.clear(cell);
+    await user.type(cell, "-3");
+    await user.click(screen.getByRole("button", { name: "Guardar valores" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Demanda");
+    expect(alert).toHaveTextContent("fila 2");
+    expect(alert).toHaveTextContent("el valor no admite negativos");
+    expect(screen.getByRole("button", { name: "Ejecutar" })).toBeDisabled();
+  });
+
+  it("keeps the table read-only while another operator holds the lock", async () => {
+    window.history.replaceState({}, "", "/react/console/4");
+    stubApi(operatorIdentity, (path, method) => {
+      if (path === "/api/console/4" && method === "GET") {
+        return Response.json({
+          ...consoleShellPayload(),
+          run_gate: {
+            can_run: false,
+            reason: "edicion_de_otro_usuario",
+            message: "Otro Operador esta editando este grupo.",
+            contact: null,
+            editing_locked_by: "Otro Operador",
+          },
+        });
+      }
+      if (path === "/api/console/4/runs" && method === "GET") {
+        return Response.json({ history: [] });
+      }
+      if (path.startsWith("/api/console/4/groups/potencia/values")) {
+        return Response.json(groupValuesPayload([10, 11, 12, 13]), {
+          headers: { ETag: '"token-1"' },
+        });
+      }
+      return undefined;
+    });
+
+    render(<App />);
+
+    expect(
+      await screen.findByText(
+        "Solo lectura: Otro Operador tiene la edicion de este grupo.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText("Otro Operador esta editando este grupo."),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Editar valores" })).toBeNull();
+    expect(screen.queryByRole("spinbutton")).toBeNull();
+    expect(screen.getByRole("button", { name: "Ejecutar" })).toBeDisabled();
   });
 });

@@ -207,13 +207,42 @@ class ExternalConsolePayloadBoundaryTests(unittest.TestCase):
 
     def test_configured_column_ids_and_labels_are_what_may_cross(self):
         payload = build_console_payload(
-            console=self.console(), prepared_by="Ana Analista"
+            console=self.console(),
+            prepared_by="Ana Analista",
+            groups=[
+                {
+                    "id": "potencia",
+                    "label": "Potencia",
+                    "granularities": ["day"],
+                    "columns": [
+                        {
+                            "id": "demanda",
+                            "label": "Demanda",
+                            "unit": "MW",
+                            "nonnegative": True,
+                            "editable": True,
+                        }
+                    ],
+                }
+            ],
         )
 
         self.assertEqual(
             payload["console"]["name"], "Plan diario Planta Norte"
         )
-        self.assertNotIn("groups", json.dumps(payload))
+        self.assertEqual(
+            payload["groups"][0]["columns"],
+            [
+                {
+                    "id": "demanda",
+                    "label": "Demanda",
+                    "unit": "MW",
+                    "nonnegative": True,
+                    "editable": True,
+                }
+            ],
+        )
+        self.assert_no_canonical_leak(payload)
 
 
 if __name__ == "__main__":
