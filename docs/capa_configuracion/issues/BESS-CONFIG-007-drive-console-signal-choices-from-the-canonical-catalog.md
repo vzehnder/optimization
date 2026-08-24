@@ -1,6 +1,6 @@
 # BESS-CONFIG-007: Drive Console Signal Choices From The Canonical Catalog
 
-Status: Todo
+Status: In Review
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/capa_configuracion/architecture_configuration_layer_final.md`
@@ -16,15 +16,15 @@ changing hydraulic behavior.
 
 ## Acceptance criteria
 
-- [ ] Internal authenticated users can read the canonical signal catalog with signal key, unit, entity type and nonnegative metadata.
-- [ ] The signal-catalog endpoint passes through the common authenticated application boundary and is unavailable to external surfaces.
-- [ ] The console configuration editor derives signal options, units and nonnegative presentation from the catalog response.
-- [ ] The frontend no longer contains a separately maintained canonical signal-to-unit mapping.
-- [ ] One-bus required-signal discovery accepts an ordered list of signals per entity type and still emits the established `entity_type`, `entity_id` and `signal_key` shape.
-- [ ] Hydraulic required-signal behavior remains separate and unchanged.
-- [ ] Adding a declarative vector signal to the catalog and one-bus requirement list makes it selectable without editing the operator table, parser, payload builder or frontend unit mapping.
-- [ ] External console payloads continue to expose only configuration column ids and labels, never signal keys or entity pointers.
-- [ ] API, configuration UI, required-signal and regression tests prove the new source of truth.
+- [x] Internal authenticated users can read the canonical signal catalog with signal key, unit, entity type and nonnegative metadata.
+- [x] The signal-catalog endpoint passes through the common authenticated application boundary and is unavailable to external surfaces.
+- [x] The console configuration editor derives signal options, units and nonnegative presentation from the catalog response.
+- [x] The frontend no longer contains a separately maintained canonical signal-to-unit mapping.
+- [x] One-bus required-signal discovery accepts an ordered list of signals per entity type and still emits the established `entity_type`, `entity_id` and `signal_key` shape.
+- [x] Hydraulic required-signal behavior remains separate and unchanged.
+- [x] Adding a declarative vector signal to the catalog and one-bus requirement list makes it selectable without editing the operator table, parser, payload builder or frontend unit mapping.
+- [x] External console payloads continue to expose only configuration column ids and labels, never signal keys or entity pointers.
+- [x] API, configuration UI, required-signal and regression tests prove the new source of truth.
 
 ## Blocked by
 

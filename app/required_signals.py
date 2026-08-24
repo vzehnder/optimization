@@ -9,11 +9,50 @@ PRICE_SIGNAL_FAMILY: tuple[str, ...] = (
     "export_price_usd_per_mwh",
 )
 
-_ONE_BUS_ENTITY_SIGNALS: dict[str, tuple[str, str]] = {
-    "grid": ("grid", "price_usd_per_mwh"),
-    "load": ("component:load", "load_demand_mw"),
-    "renewable": ("component:renewable", "renewable_available_power_mw"),
-    "hydro": ("component:hydro", "hydro_inflow_m3s"),
+
+
+@dataclass(frozen=True)
+class OneBusSignalRequirement:
+    """One declarative signal a one-bus node type needs.
+
+    ``candidate_signal_keys`` names the interchangeable family that satisfies
+    the requirement; it defaults to the declared key alone.
+    """
+
+    entity_type: str
+    signal_key: str
+    candidate_signal_keys: tuple[str, ...] = ()
+
+    def candidates(self) -> tuple[str, ...]:
+        return self.candidate_signal_keys or (self.signal_key,)
+
+
+ONE_BUS_ENTITY_SIGNALS: dict[str, tuple[OneBusSignalRequirement, ...]] = {
+    "grid": (
+        OneBusSignalRequirement(
+            entity_type="grid",
+            signal_key="price_usd_per_mwh",
+            candidate_signal_keys=PRICE_SIGNAL_FAMILY,
+        ),
+    ),
+    "load": (
+        OneBusSignalRequirement(
+            entity_type="component:load",
+            signal_key="load_demand_mw",
+        ),
+    ),
+    "renewable": (
+        OneBusSignalRequirement(
+            entity_type="component:renewable",
+            signal_key="renewable_available_power_mw",
+        ),
+    ),
+    "hydro": (
+        OneBusSignalRequirement(
+            entity_type="component:hydro",
+            signal_key="hydro_inflow_m3s",
+        ),
+    ),
 }
 
 
@@ -49,8 +88,8 @@ def discover_required_signals(system_case: dict[str, Any]) -> list[RequiredSigna
     """Derive the case's required signals from its one-bus topology.
 
     ``system_case`` is the flat ``nodes``/``edges`` shape produced by
-    ``generate_system_case_from_draft``; each node type maps to the
-    canonical ``signal_key`` its family needs, per the TS-2 signal catalog.
+    ``generate_system_case_from_draft``; each node type declares the ordered
+    list of canonical signals its family needs, per the TS-2 signal catalog.
     """
     required: list[RequiredSignal] = []
     nodes = system_case.get("nodes")
@@ -58,19 +97,15 @@ def discover_required_signals(system_case: dict[str, Any]) -> list[RequiredSigna
         for node in nodes:
             if not isinstance(node, dict):
                 continue
-            mapping = _ONE_BUS_ENTITY_SIGNALS.get(node.get("type"))
-            if mapping is None:
-                continue
-            entity_type, signal_key = mapping
-            candidates = PRICE_SIGNAL_FAMILY if entity_type == "grid" else (signal_key,)
-            required.append(
-                RequiredSignal(
-                    entity_type=entity_type,
-                    entity_id=str(node.get("id")),
-                    signal_key=signal_key,
-                    candidate_signal_keys=candidates,
+            for requirement in ONE_BUS_ENTITY_SIGNALS.get(node.get("type"), ()):
+                required.append(
+                    RequiredSignal(
+                        entity_type=requirement.entity_type,
+                        entity_id=str(node.get("id")),
+                        signal_key=requirement.signal_key,
+                        candidate_signal_keys=requirement.candidates(),
+                    )
                 )
-            )
     required.extend(_discover_hydraulic_required_signals(system_case.get("hydraulic_network")))
     return required
 

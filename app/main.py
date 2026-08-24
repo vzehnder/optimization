@@ -82,6 +82,7 @@ from app.time_series_catalog import (
     CatalogValueEdit,
     TimeSeriesCatalogError,
     prepare_time_series_catalog_import,
+    signal_catalog_entries,
 )
 from app.transformations import TransformationError
 from app.runner import JuliaRunExecutor, LocalRunQueue
@@ -1277,6 +1278,12 @@ def create_app(
     @app.get("/api/portal-catalogs")
     async def get_portal_catalogs():
         return portal_catalogs()
+
+    @app.get("/api/time-series/signal-catalog")
+    async def get_signal_catalog():
+        """Expose the canonical signal registry to internal surfaces only."""
+
+        return {"signals": signal_catalog_entries()}
 
     @app.get("/api/projects/{project_id}/portal-configuration")
     async def get_portal_configuration(project_id: int):

@@ -42,14 +42,18 @@ import {
 } from "./api/client";
 import { CaseHierarchyProvenanceSummary } from "./CaseHierarchyProvenance";
 import {
-  catalogSignalUnit,
   findSuggestedCatalogColumn,
   isRecord,
   mappingString,
   suggestedCatalogMappings,
   timeSeriesCatalogDataKindOptions,
-  timeSeriesCatalogSignalOptions,
 } from "./timeSeriesCatalogMapping";
+import {
+  signalCatalogOptions,
+  signalCatalogUnit,
+  useSignalCatalog,
+  type SignalCatalogEntry,
+} from "./signalCatalog";
 import { ForbiddenView, NotFoundView } from "./Workspace";
 
 const scenarioQueryKey = (scenarioId: number) =>
@@ -334,9 +338,10 @@ function defaultCatalogValueColumn(columns: string[]): string {
 
 function defaultCatalogImportPayload(
   source: TimeSeriesSource | null,
+  catalog: SignalCatalogEntry[],
 ): TimeSeriesCatalogImportPayload {
   const columns = Array.isArray(source?.columns) ? source.columns : [];
-  const signalMappings = suggestedCatalogMappings(source);
+  const signalMappings = suggestedCatalogMappings(source, catalog);
   return {
     set_name: defaultCatalogSetName(source),
     version_label: "v1",
@@ -360,7 +365,7 @@ function defaultCatalogImportPayload(
             {
               source_column: defaultCatalogValueColumn(columns),
               signal_key: "price_usd_per_mwh",
-              source_unit: "USD/MWh",
+              source_unit: signalCatalogUnit(catalog, "price_usd_per_mwh"),
             },
           ],
   };
@@ -1180,17 +1185,35 @@ function TimeSeriesRowsEditor({
   );
 }
 
-function TimeSeriesCatalogImportPanel({
-  scenarioId,
-  source,
-  disabled,
-}: {
+function TimeSeriesCatalogImportPanel(props: {
   scenarioId: number;
   source: TimeSeriesSource;
   disabled: boolean;
 }) {
+  const signalCatalog = useSignalCatalog();
+  if (signalCatalog.isPending) {
+    return <p role="status">Cargando catalogo de senales</p>;
+  }
+  // The suggested mappings are seeded from the registry, so the form only
+  // exists once the registry has answered.
+  return (
+    <TimeSeriesCatalogImportForm {...props} catalog={signalCatalog.data ?? []} />
+  );
+}
+
+function TimeSeriesCatalogImportForm({
+  scenarioId,
+  source,
+  disabled,
+  catalog,
+}: {
+  scenarioId: number;
+  source: TimeSeriesSource;
+  disabled: boolean;
+  catalog: SignalCatalogEntry[];
+}) {
   const [payload, setPayload] = useState<TimeSeriesCatalogImportPayload>(() =>
-    defaultCatalogImportPayload(source),
+    defaultCatalogImportPayload(source, catalog),
   );
   const [importError, setImportError] = useState("");
   const [createdSet, setCreatedSet] = useState<ProjectTimeSeriesSet | null>(
@@ -1248,7 +1271,7 @@ function TimeSeriesCatalogImportPanel({
         !patch.source_unit &&
         !String(existing.source_unit || "").trim()
       ) {
-        nextMapping.source_unit = catalogSignalUnit(patch.signal_key);
+        nextMapping.source_unit = signalCatalogUnit(catalog, patch.signal_key);
       }
       nextMappings[index] = nextMapping;
       return { ...current, signal_mappings: nextMappings };
@@ -1365,10 +1388,7 @@ function TimeSeriesCatalogImportPanel({
               id={`catalog_signal_key_${mappingIndex}`}
               label={`Canonical signal ${mappingIndex + 1}`}
               value={mapping.signal_key}
-              options={timeSeriesCatalogSignalOptions.map((option) => ({
-                value: option.value,
-                label: option.label,
-              }))}
+              options={signalCatalogOptions(catalog)}
               onChange={(value) =>
                 updateSignalMapping(mappingIndex, { signal_key: value })
               }

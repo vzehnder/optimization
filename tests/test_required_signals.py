@@ -1,7 +1,10 @@
 import unittest
+from unittest import mock
 
 from app.required_signals import (
+    ONE_BUS_ENTITY_SIGNALS,
     MissingRequiredSignalsError,
+    OneBusSignalRequirement,
     discover_required_signals,
     evaluate_variant_completeness,
 )
@@ -95,6 +98,62 @@ class DiscoverRequiredSignalsTests(unittest.TestCase):
 
     def test_hydraulic_v3_case_requires_inflow_and_series_backed_minimum_flow(self):
         required = discover_required_signals(hydraulic_v3_system_case())
+
+        self.assertEqual(
+            {(item.entity_type, item.entity_id, item.signal_key) for item in required},
+            {
+                ("hydraulic_node", "reservoir_alpha", "natural_inflow_m3s"),
+                ("hydraulic_reach", "reach_reservoir_intake", "minimum_flow_m3s"),
+            },
+        )
+
+
+class OneBusRequirementListTests(unittest.TestCase):
+    def test_an_entity_type_declares_an_ordered_list_of_signals(self):
+        extra = OneBusSignalRequirement(
+            entity_type="component:load",
+            signal_key="load_reactive_power_mvar",
+        )
+        with mock.patch.dict(
+            ONE_BUS_ENTITY_SIGNALS,
+            {"load": ONE_BUS_ENTITY_SIGNALS["load"] + (extra,)},
+        ):
+            required = discover_required_signals(hybrid_system_case())
+
+        load_requirements = [item for item in required if item.entity_id == "load_1"]
+        self.assertEqual(
+            [
+                (item.entity_type, item.entity_id, item.signal_key)
+                for item in load_requirements
+            ],
+            [
+                ("component:load", "load_1", "load_demand_mw"),
+                ("component:load", "load_1", "load_reactive_power_mvar"),
+            ],
+        )
+
+    def test_a_declared_signal_family_still_drives_candidate_keys(self):
+        required = discover_required_signals(grid_battery_system_case())
+
+        self.assertEqual(
+            required[0].candidate_signal_keys,
+            (
+                "price_usd_per_mwh",
+                "import_price_usd_per_mwh",
+                "export_price_usd_per_mwh",
+            ),
+        )
+
+    def test_the_hydraulic_path_ignores_the_one_bus_requirement_list(self):
+        extra = OneBusSignalRequirement(
+            entity_type="component:load",
+            signal_key="load_reactive_power_mvar",
+        )
+        with mock.patch.dict(
+            ONE_BUS_ENTITY_SIGNALS,
+            {"load": ONE_BUS_ENTITY_SIGNALS["load"] + (extra,)},
+        ):
+            required = discover_required_signals(hydraulic_v3_system_case())
 
         self.assertEqual(
             {(item.entity_type, item.entity_id, item.signal_key) for item in required},

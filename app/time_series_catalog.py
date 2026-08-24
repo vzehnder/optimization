@@ -75,6 +75,25 @@ TIME_SERIES_SIGNAL_CATALOG: dict[str, TimeSeriesSignalDefinition] = {
 }
 
 
+def signal_catalog_entries() -> list[dict[str, Any]]:
+    """Serialize the canonical signal registry for internal surfaces.
+
+    The registry is the single source of truth for signal keys, units, entity
+    types and nonnegative rules; a new declarative definition reaches every
+    internal editor through this list alone.
+    """
+
+    return [
+        {
+            "signal_key": definition.signal_key,
+            "unit": definition.unit,
+            "entity_type": definition.entity_type,
+            "nonnegative": definition.nonnegative,
+        }
+        for definition in TIME_SERIES_SIGNAL_CATALOG.values()
+    ]
+
+
 class TimeSeriesCatalogError(ValueError):
     pass
 

@@ -12,9 +12,17 @@ import {
   listOperatorConsoles,
   saveOperatorConsole,
   type OperatorConsole,
+  type OperatorConsoleColumn,
   type OperatorConsoleDocument,
+  type OperatorConsoleGroup,
   type OperatorConsoleStatus,
 } from "./api/client";
+import {
+  signalCatalogEntry,
+  signalCatalogOptions,
+  useSignalCatalog,
+  type SignalCatalogEntry,
+} from "./signalCatalog";
 
 const operatorConsolesQueryKey = (scenarioId: number) =>
   ["operator-consoles", scenarioId] as const;
@@ -200,6 +208,8 @@ export function OperatorConsoleEditorView() {
     retry: false,
   });
 
+  const signalCatalog = useSignalCatalog();
+
   const saveMutation = useMutation({
     mutationFn: (payload: {
       document: OperatorConsoleDocument;
@@ -277,7 +287,12 @@ export function OperatorConsoleEditorView() {
         <dd>{blockingLabel(console.blocking.reason)}</dd>
       </dl>
       <ConsoleDocumentForm
+        key={console.revision}
         document={console.document}
+        catalog={signalCatalog.data ?? []}
+        catalogError={
+          signalCatalog.isError ? errorMessage(signalCatalog.error) : ""
+        }
         disabled={saveMutation.isPending}
         onSave={(document) => save(document, console.status)}
       />
@@ -312,10 +327,14 @@ export function OperatorConsoleEditorView() {
 
 function ConsoleDocumentForm({
   document,
+  catalog,
+  catalogError,
   disabled,
   onSave,
 }: {
   document: OperatorConsoleDocument;
+  catalog: SignalCatalogEntry[];
+  catalogError: string;
   disabled: boolean;
   onSave: (document: OperatorConsoleDocument) => void;
 }) {
@@ -323,44 +342,90 @@ function ConsoleDocumentForm({
   const [description, setDescription] = useState(
     document.public_identity.description,
   );
+  const [groups, setGroups] = useState<OperatorConsoleGroup[]>(document.groups);
   const [documentText, setDocumentText] = useState(() =>
     JSON.stringify(
-      {
-        parameters: document.parameters,
-        groups: document.groups,
-        results: document.results,
-      },
+      { parameters: document.parameters, results: document.results },
       null,
       2,
     ),
   );
-  const [parseError, setParseError] = useState("");
+  const [formError, setFormError] = useState("");
+
+  function patchColumn(
+    groupId: string,
+    columnId: string,
+    patch: (column: OperatorConsoleColumn) => OperatorConsoleColumn,
+  ) {
+    setGroups((current) =>
+      current.map((group) =>
+        group.id !== groupId
+          ? group
+          : {
+              ...group,
+              columns: group.columns.map((column) =>
+                column.id !== columnId ? column : patch(column),
+              ),
+            },
+      ),
+    );
+  }
+
+  function chooseSignal(groupId: string, columnId: string, signalKey: string) {
+    const entry = signalCatalogEntry(catalog, signalKey);
+    patchColumn(groupId, columnId, (column) => ({
+      ...column,
+      signal: {
+        ...column.signal,
+        signal_key: signalKey,
+        // The registry owns the entity type; a signal declared without one
+        // keeps the entity the analyst already chose for the column.
+        entity_type: entry?.entity_type || column.signal.entity_type,
+      },
+    }));
+  }
+
+  function undeclaredSignalKey(): string {
+    for (const group of groups) {
+      for (const column of group.columns) {
+        if (!signalCatalogEntry(catalog, column.signal.signal_key)) {
+          return column.signal.signal_key;
+        }
+      }
+    }
+    return "";
+  }
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    let parsed: Pick<
-      OperatorConsoleDocument,
-      "parameters" | "groups" | "results"
-    >;
+    let parsed: Pick<OperatorConsoleDocument, "parameters" | "results">;
     try {
       parsed = JSON.parse(documentText);
     } catch {
-      setParseError("El documento no es JSON valido.");
+      setFormError("El documento no es JSON valido.");
       return;
     }
-    setParseError("");
+    const undeclared = undeclaredSignalKey();
+    if (undeclared) {
+      setFormError(
+        `La senal ${undeclared} no esta en el catalogo canonico de senales.`,
+      );
+      return;
+    }
+    setFormError("");
     onSave({
       schema_version: "operator_console_config.v1",
       public_identity: { name: name.trim(), description: description.trim() },
       parameters: parsed.parameters,
-      groups: parsed.groups,
+      groups,
       results: parsed.results,
     });
   }
 
   return (
     <form className="workspace-form console-document-form" onSubmit={submit}>
-      {parseError ? <p role="alert">{parseError}</p> : null}
+      {formError ? <p role="alert">{formError}</p> : null}
+      {catalogError ? <p role="alert">{catalogError}</p> : null}
       <label htmlFor="console-identity-name">Nombre publico</label>
       <input
         id="console-identity-name"
@@ -375,9 +440,35 @@ function ConsoleDocumentForm({
         value={description}
         onChange={(event) => setDescription(event.target.value)}
       />
-      <label htmlFor="console-document">
-        Parametros, grupos y resultados (JSON)
-      </label>
+      {groups.map((group) => (
+        <fieldset key={group.id} className="console-group-fieldset">
+          <legend>Grupo {group.label}</legend>
+          {group.columns.map((column) => (
+            <ConsoleColumnFields
+              key={column.id}
+              group={group}
+              column={column}
+              catalog={catalog}
+              onChooseSignal={(signalKey) =>
+                chooseSignal(group.id, column.id, signalKey)
+              }
+              onChangeLabel={(label) =>
+                patchColumn(group.id, column.id, (current) => ({
+                  ...current,
+                  label,
+                }))
+              }
+              onChangeEntityId={(entityId) =>
+                patchColumn(group.id, column.id, (current) => ({
+                  ...current,
+                  signal: { ...current.signal, entity_id: entityId },
+                }))
+              }
+            />
+          ))}
+        </fieldset>
+      ))}
+      <label htmlFor="console-document">Parametros y resultados (JSON)</label>
       <textarea
         id="console-document"
         rows={12}
@@ -388,6 +479,70 @@ function ConsoleDocumentForm({
         Guardar configuracion
       </button>
     </form>
+  );
+}
+
+function ConsoleColumnFields({
+  group,
+  column,
+  catalog,
+  onChooseSignal,
+  onChangeLabel,
+  onChangeEntityId,
+}: {
+  group: OperatorConsoleGroup;
+  column: OperatorConsoleColumn;
+  catalog: SignalCatalogEntry[];
+  onChooseSignal: (signalKey: string) => void;
+  onChangeLabel: (label: string) => void;
+  onChangeEntityId: (entityId: string) => void;
+}) {
+  const signalKey = column.signal.signal_key;
+  const entry = signalCatalogEntry(catalog, signalKey);
+  const fieldId = `${group.id}-${column.id}`;
+
+  return (
+    <fieldset className="console-column-fieldset">
+      <legend>Columna {column.id}</legend>
+      <label htmlFor={`console-column-label-${fieldId}`}>Etiqueta</label>
+      <input
+        id={`console-column-label-${fieldId}`}
+        type="text"
+        value={column.label}
+        onChange={(event) => onChangeLabel(event.target.value)}
+      />
+      <label htmlFor={`console-column-signal-${fieldId}`}>Senal canonica</label>
+      <select
+        id={`console-column-signal-${fieldId}`}
+        value={signalKey}
+        onChange={(event) => onChooseSignal(event.target.value)}
+      >
+        {entry ? null : (
+          <option value={signalKey}>{signalKey} (fuera del catalogo)</option>
+        )}
+        {signalCatalogOptions(catalog).map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <label htmlFor={`console-column-entity-${fieldId}`}>Entidad</label>
+      <input
+        id={`console-column-entity-${fieldId}`}
+        type="text"
+        value={column.signal.entity_id}
+        onChange={(event) => onChangeEntityId(event.target.value)}
+      />
+      <p className="source-note">
+        {entry
+          ? `Unidad ${entry.unit}. ${
+              entry.nonnegative
+                ? "No admite valores negativos."
+                : "Admite valores negativos."
+            }`
+          : "Esta senal no esta declarada en el catalogo canonico."}
+      </p>
+    </fieldset>
   );
 }
 

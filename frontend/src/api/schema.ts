@@ -1488,6 +1488,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/time-series/signal-catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Signal Catalog
+         * @description Expose the canonical signal registry to internal surfaces only.
+         */
+        get: operations["get_signal_catalog_api_time_series_signal_catalog_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/favicon.ico": {
         parameters: {
             query?: never;
@@ -5646,6 +5666,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_signal_catalog_api_time_series_signal_catalog_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

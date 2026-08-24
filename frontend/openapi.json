@@ -6371,6 +6371,23 @@
         "summary": "Validate System Case"
       }
     },
+    "/api/time-series/signal-catalog": {
+      "get": {
+        "description": "Expose the canonical signal registry to internal surfaces only.",
+        "operationId": "get_signal_catalog_api_time_series_signal_catalog_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Signal Catalog"
+      }
+    },
     "/favicon.ico": {
       "get": {
         "operationId": "favicon_favicon_ico_get",

@@ -5910,6 +5910,27 @@ describe("application shell", () => {
             headers: { "Content-Type": "application/json" },
           });
         }
+        if (path === "/api/time-series/signal-catalog") {
+          return new Response(
+            JSON.stringify({
+              signals: [
+                {
+                  signal_key: "import_price_usd_per_mwh",
+                  unit: "USD/MWh",
+                  entity_type: null,
+                  nonnegative: false,
+                },
+                {
+                  signal_key: "export_price_usd_per_mwh",
+                  unit: "USD/MWh",
+                  entity_type: null,
+                  nonnegative: false,
+                },
+              ],
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
         return new Response(
           JSON.stringify({ detail: `unhandled ${method} ${path}` }),
           {
@@ -9592,6 +9613,26 @@ describe("application shell", () => {
       "",
       "/react/projects/1/time-series-sets/501",
     );
+    const publishedSignalCatalog = [
+      {
+        signal_key: "price_usd_per_mwh",
+        unit: "USD/MWh",
+        entity_type: null,
+        nonnegative: false,
+      },
+      {
+        signal_key: "load_demand_mw",
+        unit: "MW",
+        entity_type: "component:load",
+        nonnegative: true,
+      },
+      {
+        signal_key: "load_reactive_power_mvar",
+        unit: "MVAr",
+        entity_type: "component:load",
+        nonnegative: false,
+      },
+    ];
     const project = {
       id: 1,
       name: "Hybrid PMGD",
@@ -9781,6 +9822,12 @@ describe("application shell", () => {
             { headers: { "Content-Type": "application/json" } },
           );
         }
+        if (path === "/api/time-series/signal-catalog") {
+          return new Response(
+            JSON.stringify({ signals: publishedSignalCatalog }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
         return new Response(
           JSON.stringify({ detail: `unhandled ${method} ${path}` }),
           {
@@ -9824,10 +9871,18 @@ describe("application shell", () => {
       screen.getByLabelText("Columna de origen 1"),
       "spot_price",
     );
-    await user.selectOptions(
-      screen.getByLabelText("Senal canonica 1"),
+    const canonicalSignal = screen.getByLabelText("Senal canonica 1");
+    expect(
+      Array.from(canonicalSignal.querySelectorAll("option")).map(
+        (option) => option.value,
+      ),
+    ).toEqual([
+      "",
       "price_usd_per_mwh",
-    );
+      "load_demand_mw",
+      "load_reactive_power_mvar",
+    ]);
+    await user.selectOptions(canonicalSignal, "price_usd_per_mwh");
     await user.type(
       screen.getByLabelText("Resumen del reemplazo (opcional)"),
       "Corrected Jan 1st spike",

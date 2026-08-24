@@ -1,4 +1,5 @@
 import type { TimeSeriesSource } from "./api/client";
+import { isPerEntitySignal, type SignalCatalogEntry } from "./signalCatalog";
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -23,41 +24,6 @@ export function findSuggestedCatalogColumn(
   return (
     columns.find((column) => aliasSet.has(normalizeColumnName(column))) || ""
   );
-}
-
-export const timeSeriesCatalogSignalOptions = [
-  { value: "price_usd_per_mwh", label: "price_usd_per_mwh (USD/MWh)" },
-  {
-    value: "import_price_usd_per_mwh",
-    label: "import_price_usd_per_mwh (USD/MWh)",
-  },
-  {
-    value: "export_price_usd_per_mwh",
-    label: "export_price_usd_per_mwh (USD/MWh)",
-  },
-  { value: "load_demand_mw", label: "load_demand_mw (MW)" },
-  {
-    value: "renewable_available_power_mw",
-    label: "renewable_available_power_mw (MW)",
-  },
-  { value: "hydro_inflow_m3s", label: "hydro_inflow_m3s (m3/s)" },
-  { value: "natural_inflow_m3s", label: "natural_inflow_m3s (m3/s)" },
-  { value: "minimum_flow_m3s", label: "minimum_flow_m3s (m3/s)" },
-] as const;
-
-const timeSeriesCatalogSignalUnits: Record<string, string> = {
-  price_usd_per_mwh: "USD/MWh",
-  import_price_usd_per_mwh: "USD/MWh",
-  export_price_usd_per_mwh: "USD/MWh",
-  load_demand_mw: "MW",
-  renewable_available_power_mw: "MW",
-  hydro_inflow_m3s: "m3/s",
-  natural_inflow_m3s: "m3/s",
-  minimum_flow_m3s: "m3/s",
-};
-
-export function catalogSignalUnit(signalKey: string): string {
-  return timeSeriesCatalogSignalUnits[signalKey] || "";
 }
 
 export const timeSeriesCatalogDataKindOptions = [
@@ -86,31 +52,19 @@ function firstNestedMappingColumn(value: unknown): string {
 
 export function suggestedCatalogMappings(
   source: TimeSeriesSource | null,
+  catalog: SignalCatalogEntry[],
 ): CatalogSignalMappingDraft[] {
   const suggestions = source?.mapping_suggestions;
   const candidateMappings: CatalogSignalMappingDraft[] = [];
-  const scalarKeys = [
-    "price_usd_per_mwh",
-    "import_price_usd_per_mwh",
-    "export_price_usd_per_mwh",
-    "load_demand_mw",
-    "renewable_available_power_mw",
-    "hydro_inflow_m3s",
-    "natural_inflow_m3s",
-    "minimum_flow_m3s",
-  ] as const;
-  for (const key of scalarKeys) {
-    const suggestedColumn =
-      key === "load_demand_mw" ||
-      key === "renewable_available_power_mw" ||
-      key === "hydro_inflow_m3s"
-        ? firstNestedMappingColumn(suggestions?.[key])
-        : mappingString(suggestions?.[key]);
+  for (const entry of catalog) {
+    const suggestedColumn = isPerEntitySignal(entry)
+      ? firstNestedMappingColumn(suggestions?.[entry.signal_key])
+      : mappingString(suggestions?.[entry.signal_key]);
     if (!suggestedColumn) continue;
     candidateMappings.push({
       source_column: suggestedColumn,
-      signal_key: key,
-      source_unit: catalogSignalUnit(key),
+      signal_key: entry.signal_key,
+      source_unit: entry.unit,
     });
   }
   const deduped = new Map<string, CatalogSignalMappingDraft>();

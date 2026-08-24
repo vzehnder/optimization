@@ -148,14 +148,18 @@ import {
 } from "./PortalResults";
 import { RunArtifactsSection, RunResultsSection } from "./RunResults";
 import {
-  catalogSignalUnit,
   findSuggestedCatalogColumn,
   isRecord,
   suggestedCatalogMappings,
   timeSeriesCatalogDataKindOptions,
-  timeSeriesCatalogSignalOptions,
   type CatalogSignalMappingDraft,
 } from "./timeSeriesCatalogMapping";
+import {
+  signalCatalogOptions,
+  signalCatalogUnit,
+  useSignalCatalog,
+  type SignalCatalogEntry,
+} from "./signalCatalog";
 
 const projectsQueryKey = ["projects"] as const;
 const projectQueryKey = (projectId: number) => ["project", projectId] as const;
@@ -1952,6 +1956,7 @@ function TimeSeriesConnectorIngestionPanel({
   projectId: number;
 }) {
   const queryClient = useQueryClient();
+  const signalCatalog = useSignalCatalog();
   const [baseUrl, setBaseUrl] = useState("");
   const [recordsPath, setRecordsPath] = useState("");
   const [authToken, setAuthToken] = useState("");
@@ -2216,7 +2221,7 @@ function TimeSeriesConnectorIngestionPanel({
             disabled={mutation.isPending}
           >
             <option value="">Selecciona una senal</option>
-            {timeSeriesCatalogSignalOptions.map((option) => (
+            {signalCatalogOptions(signalCatalog.data ?? []).map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
@@ -2740,9 +2745,10 @@ type TimeSeriesSetReplaceFormState = {
 function defaultTimeSeriesSetReplaceFormState(
   source: TimeSeriesSource,
   timeSeriesSet: ProjectTimeSeriesSet,
+  catalog: SignalCatalogEntry[],
 ): TimeSeriesSetReplaceFormState {
   const columns = Array.isArray(source.columns) ? source.columns : [];
-  const signalMappings = suggestedCatalogMappings(source);
+  const signalMappings = suggestedCatalogMappings(source, catalog);
   return {
     data_kind: timeSeriesSet.data_kind,
     timezone: timeSeriesSet.timezone,
@@ -2773,6 +2779,7 @@ function TimeSeriesSetReplacePanel({
   timeSeriesSet: ProjectTimeSeriesSet;
 }) {
   const queryClient = useQueryClient();
+  const signalCatalog = useSignalCatalog();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [uploadedSource, setUploadedSource] = useState<TimeSeriesSource | null>(
     null,
@@ -2792,7 +2799,13 @@ function TimeSeriesSetReplacePanel({
     onSuccess: (source) => {
       setUploadError("");
       setUploadedSource(source);
-      setForm(defaultTimeSeriesSetReplaceFormState(source, timeSeriesSet));
+      setForm(
+        defaultTimeSeriesSetReplaceFormState(
+          source,
+          timeSeriesSet,
+          signalCatalog.data ?? [],
+        ),
+      );
       setReplaceError("");
     },
     onError: (mutationError) => setUploadError(errorMessage(mutationError)),
@@ -2874,7 +2887,10 @@ function TimeSeriesSetReplacePanel({
         !patch.source_unit &&
         !String(existing.source_unit || "").trim()
       ) {
-        nextMapping.source_unit = catalogSignalUnit(patch.signal_key);
+        nextMapping.source_unit = signalCatalogUnit(
+          signalCatalog.data ?? [],
+          patch.signal_key,
+        );
       }
       nextMappings[index] = nextMapping;
       return { ...current, signal_mappings: nextMappings };
@@ -3099,11 +3115,13 @@ function TimeSeriesSetReplacePanel({
                     disabled={replaceMutation.isPending}
                   >
                     <option value="">Selecciona senal</option>
-                    {timeSeriesCatalogSignalOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
+                    {signalCatalogOptions(signalCatalog.data ?? []).map(
+                      (option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ),
+                    )}
                   </select>
                 </label>
                 <label

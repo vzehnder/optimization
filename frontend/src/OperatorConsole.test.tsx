@@ -103,6 +103,27 @@ function stubApi(
   return fetchMock;
 }
 
+const signalCatalog = [
+  {
+    signal_key: "price_usd_per_mwh",
+    unit: "USD/MWh",
+    entity_type: null,
+    nonnegative: false,
+  },
+  {
+    signal_key: "load_demand_mw",
+    unit: "MW",
+    entity_type: "component:load",
+    nonnegative: true,
+  },
+  {
+    signal_key: "hydro_inflow_m3s",
+    unit: "m3/s",
+    entity_type: "component:hydro",
+    nonnegative: true,
+  },
+];
+
 function stubScenarioWorkspace(
   handler: (
     path: string,
@@ -135,6 +156,9 @@ function stubScenarioWorkspace(
           created_by: "ada@example.local",
         },
       });
+    }
+    if (path === "/api/time-series/signal-catalog") {
+      return Response.json({ signals: signalCatalog });
     }
     if (path === "/api/scenarios/10/versions") {
       return Response.json({ versions: [] });
@@ -317,6 +341,167 @@ describe("operator consoles in the scenario workspace", () => {
       "stale operator console revision",
     );
     expect(within(editor).getByText("Borrador")).toBeVisible();
+  });
+});
+
+describe("the console configuration editor and the canonical signal catalog", () => {
+  function stubEditor(
+    handler: (
+      path: string,
+      method: string,
+      body: Record<string, unknown> | undefined,
+    ) => Response | undefined = () => undefined,
+  ) {
+    window.history.replaceState({}, "", "/react/scenarios/10/consoles/4");
+    return stubScenarioWorkspace((path, method, body) => {
+      const handled = handler(path, method, body);
+      if (handled) return handled;
+      if (path === "/api/scenarios/10/consoles/4" && method === "GET") {
+        return Response.json({ operator_console: draftConsole });
+      }
+      return undefined;
+    });
+  }
+
+  it("presents column choices, units and nonnegative rules from the catalog", async () => {
+    stubEditor();
+
+    render(<App />);
+
+    const column = await screen.findByRole("group", { name: "Columna demanda" });
+    const signal = within(column).getByLabelText("Senal canonica");
+    expect(
+      Array.from(signal.querySelectorAll("option")).map(
+        (option) => option.textContent,
+      ),
+    ).toEqual([
+      "price_usd_per_mwh (USD/MWh)",
+      "load_demand_mw (MW)",
+      "hydro_inflow_m3s (m3/s)",
+    ]);
+    expect(signal).toHaveValue("load_demand_mw");
+    expect(
+      within(column).getByText("Unidad MW. No admite valores negativos."),
+    ).toBeVisible();
+  });
+
+  it("takes the entity type of a chosen signal from the catalog", async () => {
+    const saves: unknown[] = [];
+    stubEditor((path, method, body) => {
+      if (path === "/api/scenarios/10/consoles/4" && method === "PUT") {
+        saves.push(body);
+        return Response.json({
+          operator_console: { ...draftConsole, revision: 2 },
+        });
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    const column = await screen.findByRole("group", { name: "Columna demanda" });
+    await user.selectOptions(
+      within(column).getByLabelText("Senal canonica"),
+      "hydro_inflow_m3s",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Guardar configuracion" }),
+    );
+
+    await vi.waitFor(() => expect(saves).toHaveLength(1));
+    const document = (saves[0] as { document: typeof consoleDocument }).document;
+    expect(document.groups[0].columns[0].signal).toEqual({
+      entity_type: "component:hydro",
+      entity_id: "load_1",
+      signal_key: "hydro_inflow_m3s",
+    });
+  });
+
+  it("offers a newly declared catalog signal without any editor change", async () => {
+    stubEditor((path) => {
+      if (path === "/api/time-series/signal-catalog") {
+        return Response.json({
+          signals: [
+            ...signalCatalog,
+            {
+              signal_key: "load_reactive_power_mvar",
+              unit: "MVAr",
+              entity_type: "component:load",
+              nonnegative: false,
+            },
+          ],
+        });
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    const column = await screen.findByRole("group", { name: "Columna demanda" });
+    await user.selectOptions(
+      within(column).getByLabelText("Senal canonica"),
+      "load_reactive_power_mvar",
+    );
+
+    expect(within(column).getByLabelText("Senal canonica")).toHaveValue(
+      "load_reactive_power_mvar",
+    );
+    expect(
+      within(column).getByText("Unidad MVAr. Admite valores negativos."),
+    ).toBeVisible();
+  });
+
+  it("refuses to save a column signal the catalog does not declare", async () => {
+    const saves: unknown[] = [];
+    stubEditor((path, method, body) => {
+      if (path === "/api/scenarios/10/consoles/4" && method === "GET") {
+        return Response.json({
+          operator_console: {
+            ...draftConsole,
+            document: {
+              ...consoleDocument,
+              groups: [
+                {
+                  ...consoleDocument.groups[0],
+                  columns: [
+                    {
+                      ...consoleDocument.groups[0].columns[0],
+                      signal: {
+                        entity_type: "component:load",
+                        entity_id: "load_1",
+                        signal_key: "load_retired_mw",
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        });
+      }
+      if (path === "/api/scenarios/10/consoles/4" && method === "PUT") {
+        saves.push(body);
+        return Response.json({ operator_console: draftConsole });
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    const editor = await screen.findByRole("region", {
+      name: "Configuracion de la consola",
+    });
+    await user.click(
+      within(editor).getByRole("button", { name: "Guardar configuracion" }),
+    );
+
+    expect(await within(editor).findByRole("alert")).toHaveTextContent(
+      "load_retired_mw",
+    );
+    expect(saves).toEqual([]);
   });
 });
 

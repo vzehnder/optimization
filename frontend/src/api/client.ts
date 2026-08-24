@@ -393,6 +393,13 @@ export interface PortalCatalogs {
   tables: PortalCatalogTable[];
 }
 
+export interface SignalCatalogEntry {
+  signal_key: string;
+  unit: string;
+  entity_type: string | null;
+  nonnegative: boolean;
+}
+
 export type OperatorConsoleStatus = "draft" | "active";
 
 export interface OperatorConsoleSignal {
@@ -2042,6 +2049,16 @@ export async function getPortalCatalogs(
   signal?: AbortSignal,
 ): Promise<PortalCatalogs> {
   return requestJson<PortalCatalogs>("/api/portal-catalogs", { signal });
+}
+
+export async function getSignalCatalog(
+  signal?: AbortSignal,
+): Promise<SignalCatalogEntry[]> {
+  const response = await requestJson<{ signals: SignalCatalogEntry[] }>(
+    "/api/time-series/signal-catalog",
+    { signal },
+  );
+  return response.signals;
 }
 
 export async function listOperatorConsoles(
