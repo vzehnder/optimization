@@ -1971,6 +1971,31 @@ class AnalystStore:
         ).fetchone()
         return row is not None
 
+    def external_has_any_project_capability(
+        self,
+        *,
+        user_id: int,
+        capability: str,
+    ) -> bool:
+        """Whether the capability is granted on at least one project."""
+
+        if capability not in {"portal_view", "operate"}:
+            raise ValueError(f"unsupported external capability: {capability}")
+        row = self.connection.execute(
+            f"""
+            SELECT 1
+            FROM project_client_access
+            JOIN users ON users.id = project_client_access.user_id
+            WHERE project_client_access.user_id = ?
+              AND users.role = 'external'
+              AND users.is_active = 1
+              AND project_client_access.{capability} = 1
+            LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
+        return row is not None
+
     def list_client_projects(self, user_id: int) -> list[dict[str, Any]]:
         user = self.get_user(user_id)
         if user["role"] != "external" or not user["is_active"]:

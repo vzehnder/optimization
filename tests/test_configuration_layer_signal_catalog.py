@@ -117,7 +117,7 @@ class SignalCatalogEndpointTests(unittest.TestCase):
 
         response = self.client.get(SIGNAL_CATALOG_PATH)
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 404)
 
     def test_an_anonymous_request_is_refused(self):
         response = self.client.get(SIGNAL_CATALOG_PATH)

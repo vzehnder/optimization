@@ -1,6 +1,6 @@
 # BESS-CONFIG-008: Land Users In Separate Analyst, Console And Portal Roots
 
-Status: Todo
+Status: In Review
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/capa_configuracion/architecture_configuration_layer_final.md`
@@ -16,16 +16,16 @@ report root.
 
 ## Acceptance criteria
 
-- [ ] Login and current-user responses return the same backend-calculated `landing_path` for the same user and safe next target.
-- [ ] Landing precedence is safe next, internal workspace, `operate` with one visible console, `operate` with zero or multiple consoles, then portal.
-- [ ] `operate` takes precedence over `portal_view` without removing the user's ability to navigate to an authorized portal.
-- [ ] Analyst, console and portal routes render distinct root layouts and do not share the analyst header.
-- [ ] The console list is cross-project, stays at its own route and never redirects merely because one row exists.
-- [ ] Configuring and operating the same console use separate internal and external routes.
-- [ ] React's scattered client-role checks are replaced by three root guards plus the existing admin-only check.
-- [ ] An external user cannot enter analyst routes, foreign console routes or internal run routes even when an id is known.
-- [ ] An internal analyst without admin permission receives 403 from user administration.
-- [ ] Route, login, refresh, direct-navigation and back/forward tests prove there is no second landing calculation in the frontend.
+- [x] Login and current-user responses return the same backend-calculated `landing_path` for the same user and safe next target.
+- [x] Landing precedence is safe next, internal workspace, `operate` with one visible console, `operate` with zero or multiple consoles, then portal.
+- [x] `operate` takes precedence over `portal_view` without removing the user's ability to navigate to an authorized portal.
+- [x] Analyst, console and portal routes render distinct root layouts and do not share the analyst header.
+- [x] The console list is cross-project, stays at its own route and never redirects merely because one row exists.
+- [x] Configuring and operating the same console use separate internal and external routes.
+- [x] React's scattered client-role checks are replaced by three root guards plus the existing admin-only check.
+- [x] An external user cannot enter analyst routes, foreign console routes or internal run routes even when an id is known.
+- [x] An internal analyst without admin permission receives 403 from user administration.
+- [x] Route, login, refresh, direct-navigation and back/forward tests prove there is no second landing calculation in the frontend.
 
 ## Blocked by
 

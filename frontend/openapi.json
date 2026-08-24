@@ -3,8 +3,8 @@
     "schemas": {
       "AuthSessionResponse": {
         "properties": {
-          "redirect_path": {
-            "title": "Redirect Path",
+          "landing_path": {
+            "title": "Landing Path",
             "type": "string"
           },
           "user": {
@@ -13,7 +13,7 @@
         },
         "required": [
           "user",
-          "redirect_path"
+          "landing_path"
         ],
         "title": "AuthSessionResponse",
         "type": "object"
@@ -258,6 +258,17 @@
             "default": false,
             "title": "Bootstrap Required",
             "type": "boolean"
+          },
+          "landing_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Landing Path"
           },
           "user": {
             "anyOf": [

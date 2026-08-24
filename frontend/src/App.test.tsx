@@ -8343,7 +8343,7 @@ describe("application shell", () => {
               role: "admin",
               is_active: true,
             },
-            redirect_path: "/react/projects",
+            landing_path: "/react/projects",
           }),
           { status: 201, headers: { "Content-Type": "application/json" } },
         ),
@@ -8411,7 +8411,7 @@ describe("application shell", () => {
               role: "analyst",
               is_active: true,
             },
-            redirect_path: "/react/system",
+            landing_path: "/react/system",
           }),
           { headers: { "Content-Type": "application/json" } },
         ),
@@ -8454,7 +8454,7 @@ describe("application shell", () => {
     expect(logoutHeaders.get("X-CSRF-Token")).toBe("csrf-logout");
   });
 
-  it("lands external users in the client area and blocks internal routes", async () => {
+  it("keeps external users out of the analyst root", async () => {
     window.history.replaceState({}, "", "/react/projects");
     vi.stubGlobal(
       "fetch",
@@ -8470,6 +8470,7 @@ describe("application shell", () => {
                 is_active: true,
               },
               bootstrap_required: false,
+              landing_path: "/react/client",
             }),
             { headers: { "Content-Type": "application/json" } },
           ),
@@ -8479,7 +8480,7 @@ describe("application shell", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "Forbidden" }),
+      await screen.findByRole("heading", { name: "No encontrado" }),
     ).toBeVisible();
     expect(screen.getByText("Client User")).toBeVisible();
   });
@@ -8510,6 +8511,7 @@ describe("application shell", () => {
             is_active: true,
           },
           bootstrap_required: false,
+          landing_path: "/react/projects",
         }),
         { headers: { "Content-Type": "application/json" } },
       ),
@@ -8591,6 +8593,7 @@ describe("application shell", () => {
             is_active: true,
           },
           bootstrap_required: false,
+          landing_path: "/react/projects",
         }),
         { headers: { "Content-Type": "application/json" } },
       );

@@ -588,7 +588,7 @@ class TS5AcceptanceTests(unittest.TestCase):
         ]
         for path in routes:
             with self.subTest(actor="client", path=path):
-                self.assertEqual(client_user.get(path).status_code, 403)
+                self.assertEqual(client_user.get(path).status_code, 404)
             for actor_name, actor in [("analyst", analyst), ("admin", admin)]:
                 with self.subTest(actor=actor_name, path=path):
                     self.assertEqual(actor.get(path).status_code, 200)

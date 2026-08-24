@@ -10,6 +10,7 @@ import {
   BrowserRouter,
   Link,
   Navigate,
+  Outlet,
   Route,
   Routes,
   useLocation,
@@ -36,6 +37,7 @@ import { ScenarioDraftEditorView } from "./DraftEditor";
 import { ErrorBoundary } from "./ErrorBoundary";
 import {
   ConsoleListView,
+  ConsoleRootPlanIdentity,
   ConsoleShellView,
   OperatorConsoleEditorView,
 } from "./OperatorConsole";
@@ -68,10 +70,6 @@ function currentReactPath(location: ReturnType<typeof useLocation>): string {
   return `/react${location.pathname}${location.search}`;
 }
 
-function landingRoute(user: CurrentUser): string {
-  return isExternalIdentity(user) ? "/client" : "/projects";
-}
-
 function isExternalIdentity(user: CurrentUser): boolean {
   return user.role === "external";
 }
@@ -89,7 +87,7 @@ function useAcceptAuthSession() {
       user: session.user,
       bootstrap_required: false,
     });
-    navigate(reactRouteFromServerPath(session.redirect_path), {
+    navigate(reactRouteFromServerPath(session.landing_path), {
       replace: true,
     });
   };
@@ -218,7 +216,12 @@ function SystemStatus() {
   );
 }
 
-function ShellHeader({ user }: { user: CurrentUser }) {
+interface RootProps {
+  user: CurrentUser;
+  landingPath: string;
+}
+
+function LogoutButton() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const mutation = useMutation({
@@ -227,173 +230,214 @@ function ShellHeader({ user }: { user: CurrentUser }) {
       queryClient.setQueryData<CurrentUserResponse>(identityQueryKey, {
         user: null,
         bootstrap_required: false,
+        landing_path: null,
       });
       navigate("/", { replace: true });
     },
   });
-  const external = isExternalIdentity(user);
 
   return (
-    <>
-      <header className="topbar">
-        {external ? (
-          <Link className="portal-shell-link" to="/client">
-            Portal cliente
-          </Link>
-        ) : (
-          <Link className="brand" to="/">
-            <span className="brand-mark" aria-hidden="true">
-              Z
-            </span>
-            <span>BESS Workspace</span>
-          </Link>
-        )}
-        <div className="identity">
-          <strong>{user.display_name || user.email}</strong>
-          <span className="role-badge">{user.role}</span>
-          <button
-            className="secondary-button"
-            type="button"
-            onClick={() => mutation.mutate()}
-            disabled={mutation.isPending}
-          >
-            Salir
-          </button>
-        </div>
-      </header>
-      <nav className="primary-nav" aria-label="Navegacion principal">
-        {!external ? (
-          <>
-            <Link to="/projects">Analista</Link>
-            {user.role === "admin" ? (
-              <Link to="/admin/users">Admin</Link>
-            ) : null}
-            <Link to="/system">Sistema</Link>
-          </>
-        ) : (
-          <Link to="/client">Cliente</Link>
-        )}
-      </nav>
-    </>
+    <button
+      className="secondary-button"
+      type="button"
+      onClick={() => mutation.mutate()}
+      disabled={mutation.isPending}
+    >
+      Salir
+    </button>
   );
 }
 
-function AuthenticatedRoutes({ user }: { user: CurrentUser }) {
-  const isClient = isExternalIdentity(user);
+function IdentityStrip({ user }: { user: CurrentUser }) {
+  return (
+    <div className="identity">
+      <strong>{user.display_name || user.email}</strong>
+      <span className="role-badge">{user.role}</span>
+      <LogoutButton />
+    </div>
+  );
+}
+
+// A root the identity may not enter says only that, and still lets it leave.
+function DeniedRoot({ user, landingPath }: RootProps) {
   return (
     <div className="app-frame">
-      <ShellHeader user={user} />
+      <header className="topbar">
+        <IdentityStrip user={user} />
+      </header>
       <main id="main-content">
-        <Routes>
-          <Route index element={<Navigate to={landingRoute(user)} replace />} />
-          <Route
-            path="projects"
-            element={isClient ? <ForbiddenView /> : <ProjectListView />}
-          />
-          <Route
-            path="projects/:projectId"
-            element={
-              isClient ? (
-                <ForbiddenView />
-              ) : (
-                <ProjectDetailView
-                  canManageExternalAccess={user.role === "admin"}
-                />
-              )
-            }
-          />
-          <Route
-            path="projects/:projectId/time-series-sets"
-            element={
-              isClient ? (
-                <ForbiddenView />
-              ) : (
-                <TimeSeriesCatalogView
-                  canBulkMigrateHydraulicSeries={user.role === "admin"}
-                />
-              )
-            }
-          />
-          <Route
-            path="projects/:projectId/time-series-sets/hydraulic/:hydraulicTimeSeriesSetId"
-            element={
-              isClient ? (
-                <ForbiddenView />
-              ) : (
-                <HydraulicTimeSeriesSetDetailView />
-              )
-            }
-          />
-          <Route
-            path="projects/:projectId/time-series-sets/:timeSeriesSetId"
-            element={isClient ? <ForbiddenView /> : <TimeSeriesSetDetailView />}
-          />
-          <Route
-            path="scenarios/:scenarioId"
-            element={isClient ? <ForbiddenView /> : <ScenarioDetailView />}
-          />
-          <Route
-            path="scenarios/:scenarioId/draft"
-            element={isClient ? <ForbiddenView /> : <ScenarioDraftEditorView />}
-          />
-          <Route
-            path="scenarios/:scenarioId/consoles/:consoleId"
-            element={
-              isClient ? <ForbiddenView /> : <OperatorConsoleEditorView />
-            }
-          />
-          <Route path="console" element={<ConsoleListView />} />
-          <Route path="console/:consoleId" element={<ConsoleShellView />} />
-          <Route
-            path="scenarios/:scenarioId/runs/compare"
-            element={isClient ? <ForbiddenView /> : <RunComparisonView />}
-          />
-          <Route
-            path="scenarios/:scenarioId/hydraulic-diagram"
-            element={
-              isClient ? <ForbiddenView /> : <HydraulicDiagramEditorView />
-            }
-          />
-          <Route
-            path="scenario-versions/:versionId"
-            element={
-              isClient ? <ForbiddenView /> : <ScenarioVersionDetailView />
-            }
-          />
-          <Route
-            path="runs/:runId"
-            element={isClient ? <ForbiddenView /> : <RunDetailView />}
-          />
-          <Route
-            path="publications/:publicationId/preview"
-            element={isClient ? <ForbiddenView /> : <PublicationPreviewView />}
-          />
-          <Route
-            path="system"
-            element={isClient ? <ForbiddenView /> : <SystemStatus />}
-          />
-          <Route
-            path="admin/users"
-            element={
-              user.role === "admin" ? <AdminUsersView /> : <ForbiddenView />
-            }
-          />
-          <Route
-            path="client"
-            element={isClient ? <ClientPortalHomeView /> : <ForbiddenView />}
-          />
-          <Route
-            path="client/projects/:projectId"
-            element={isClient ? <ClientProjectView /> : <ForbiddenView />}
-          />
-          <Route
-            path="client/projects/:projectId/publications/:publicationId"
-            element={isClient ? <ClientPublicationView /> : <ForbiddenView />}
-          />
-          <Route path="*" element={<NotFoundView />} />
-        </Routes>
+        <section className="content-panel">
+          <h1>No encontrado</h1>
+          <p>El recurso solicitado no existe.</p>
+          <Link
+            className="button-link"
+            to={reactRouteFromServerPath(landingPath)}
+          >
+            Volver
+          </Link>
+        </section>
       </main>
     </div>
+  );
+}
+
+function AnalystRoot({ user, landingPath }: RootProps) {
+  if (isExternalIdentity(user))
+    return <DeniedRoot user={user} landingPath={landingPath} />;
+
+  return (
+    <div className="app-frame">
+      <header className="topbar">
+        <Link className="brand" to="/">
+          <span className="brand-mark" aria-hidden="true">
+            Z
+          </span>
+          <span>BESS Workspace</span>
+        </Link>
+        <IdentityStrip user={user} />
+      </header>
+      <nav className="primary-nav" aria-label="Navegacion principal">
+        <Link to="/projects">Analista</Link>
+        {user.role === "admin" ? <Link to="/admin/users">Admin</Link> : null}
+        <Link to="/system">Sistema</Link>
+      </nav>
+      <main id="main-content">
+        <Outlet />
+      </main>
+    </div>
+  );
+}
+
+function ConsoleRoot({ user }: RootProps) {
+  return (
+    <div className="app-frame">
+      <header className="topbar console-topbar">
+        <ConsoleRootPlanIdentity />
+        <IdentityStrip user={user} />
+      </header>
+      <main id="main-content">
+        <Outlet />
+      </main>
+    </div>
+  );
+}
+
+function PortalRoot({ user, landingPath }: RootProps) {
+  if (!isExternalIdentity(user))
+    return <DeniedRoot user={user} landingPath={landingPath} />;
+
+  return (
+    <div className="app-frame">
+      <header className="topbar portal-topbar">
+        <Link className="portal-shell-link" to="/client">
+          Portal cliente
+        </Link>
+        <IdentityStrip user={user} />
+      </header>
+      <nav className="primary-nav" aria-label="Navegacion del informe">
+        <Link to="/client">Cliente</Link>
+      </nav>
+      <main id="main-content">
+        <Outlet />
+      </main>
+    </div>
+  );
+}
+
+// The one landing decision belongs to the backend; this only follows it.
+function LandingRedirect({ landingPath }: { landingPath: string }) {
+  const route = reactRouteFromServerPath(landingPath);
+  if (route === "/") return <NotFoundView />;
+  return <Navigate to={route} replace />;
+}
+
+function AuthenticatedRoutes({
+  user,
+  landingPath,
+}: {
+  user: CurrentUser;
+  landingPath: string;
+}) {
+  return (
+    <Routes>
+      <Route index element={<LandingRedirect landingPath={landingPath} />} />
+      <Route element={<AnalystRoot user={user} landingPath={landingPath} />}>
+        <Route path="projects" element={<ProjectListView />} />
+        <Route
+          path="projects/:projectId"
+          element={
+            <ProjectDetailView
+              canManageExternalAccess={user.role === "admin"}
+            />
+          }
+        />
+        <Route
+          path="projects/:projectId/time-series-sets"
+          element={
+            <TimeSeriesCatalogView
+              canBulkMigrateHydraulicSeries={user.role === "admin"}
+            />
+          }
+        />
+        <Route
+          path="projects/:projectId/time-series-sets/hydraulic/:hydraulicTimeSeriesSetId"
+          element={<HydraulicTimeSeriesSetDetailView />}
+        />
+        <Route
+          path="projects/:projectId/time-series-sets/:timeSeriesSetId"
+          element={<TimeSeriesSetDetailView />}
+        />
+        <Route path="scenarios/:scenarioId" element={<ScenarioDetailView />} />
+        <Route
+          path="scenarios/:scenarioId/draft"
+          element={<ScenarioDraftEditorView />}
+        />
+        <Route
+          path="scenarios/:scenarioId/consoles/:consoleId"
+          element={<OperatorConsoleEditorView />}
+        />
+        <Route
+          path="scenarios/:scenarioId/runs/compare"
+          element={<RunComparisonView />}
+        />
+        <Route
+          path="scenarios/:scenarioId/hydraulic-diagram"
+          element={<HydraulicDiagramEditorView />}
+        />
+        <Route
+          path="scenario-versions/:versionId"
+          element={<ScenarioVersionDetailView />}
+        />
+        <Route path="runs/:runId" element={<RunDetailView />} />
+        <Route
+          path="publications/:publicationId/preview"
+          element={<PublicationPreviewView />}
+        />
+        <Route path="system" element={<SystemStatus />} />
+        <Route
+          path="admin/users"
+          element={
+            user.role === "admin" ? <AdminUsersView /> : <ForbiddenView />
+          }
+        />
+        <Route path="*" element={<NotFoundView />} />
+      </Route>
+      <Route element={<ConsoleRoot user={user} landingPath={landingPath} />}>
+        <Route path="console" element={<ConsoleListView />} />
+        <Route path="console/:consoleId" element={<ConsoleShellView />} />
+      </Route>
+      <Route element={<PortalRoot user={user} landingPath={landingPath} />}>
+        <Route path="client" element={<ClientPortalHomeView />} />
+        <Route
+          path="client/projects/:projectId"
+          element={<ClientProjectView />}
+        />
+        <Route
+          path="client/projects/:projectId/publications/:publicationId"
+          element={<ClientPublicationView />}
+        />
+      </Route>
+    </Routes>
   );
 }
 
@@ -427,7 +471,12 @@ function Shell() {
     return <LoginView />;
   }
 
-  return <AuthenticatedRoutes user={identity.data.user} />;
+  return (
+    <AuthenticatedRoutes
+      user={identity.data.user}
+      landingPath={identity.data.landing_path || "/react"}
+    />
+  );
 }
 
 export function App() {

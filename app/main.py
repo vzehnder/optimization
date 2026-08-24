@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from app.auth import (
     AuthorizationService,
+    INTERNAL_USER_ROLES,
     VALID_USER_ROLES,
     hash_password,
     hash_session_token,
@@ -153,11 +154,12 @@ class CurrentUser(BaseModel):
 class CurrentUserResponse(BaseModel):
     user: CurrentUser | None
     bootstrap_required: bool = False
+    landing_path: str | None = None
 
 
 class AuthSessionResponse(BaseModel):
     user: CurrentUser
-    redirect_path: str
+    landing_path: str
 
 
 class CsrfTokenResponse(BaseModel):
@@ -574,6 +576,20 @@ def create_app(
             return JSONResponse({"detail": "forbidden"}, status_code=403)
         return react_bookmark_redirect(request)
 
+    def not_found_response() -> Response:
+        return JSONResponse({"detail": "not found"}, status_code=404)
+
+    def external_may_reach_path(path: str) -> bool:
+        """The console and portal roots, and nothing else."""
+
+        return (
+            path in {"/", "/api/auth/me"}
+            or path.startswith("/api/console")
+            or path.startswith("/api/client")
+            or path == "/client"
+            or path.startswith("/client/")
+        )
+
     def require_admin_user(request: Request) -> None:
         if not auth_required:
             return
@@ -630,21 +646,47 @@ def create_app(
             secure=cookie_secure,
         )
 
-    def authenticated_landing_path(user: dict[str, Any], next_path: str = "") -> str:
-        safe_next = safe_internal_next_path(next_path)
-        if user["role"] == "external":
-            return safe_next if safe_next.startswith("/client") else "/client"
-        if safe_next and not safe_next.startswith("/client"):
-            return safe_next
-        return "/projects"
+    def user_may_enter_react_root(user: dict[str, Any], root: str) -> bool:
+        """Whether the identity is allowed inside one of the three roots."""
+
+        internal = user["role"] in INTERNAL_USER_ROLES
+        if root == "analyst":
+            return internal
+        if root == "console":
+            return internal or analyst_store.external_has_any_project_capability(
+                user_id=int(user["id"]), capability="operate"
+            )
+        if root == "portal":
+            if user["role"] != "external":
+                return False
+            return analyst_store.external_has_any_project_capability(
+                user_id=int(user["id"]), capability="portal_view"
+            )
+        return False
+
+    def external_landing_path(user: dict[str, Any]) -> str:
+        """`operate` wins over `portal_view`; one visible console opens itself."""
+
+        user_id = int(user["id"])
+        consoles = analyst_store.list_operable_operator_consoles(user_id)
+        if len(consoles) == 1:
+            return f"/react/console/{consoles[0]['id']}"
+        if consoles or analyst_store.external_has_any_project_capability(
+            user_id=user_id, capability="operate"
+        ):
+            return "/react/console"
+        return "/react/client"
 
     def react_authenticated_landing_path(user: dict[str, Any], next_path: str = "") -> str:
+        """The single landing calculation shared by login and current-user."""
+
         safe_next = safe_react_next_path(next_path)
-        if user["role"] == "external":
-            return safe_next if safe_next.startswith("/react/client") else "/react/client"
-        if safe_next and not safe_next.startswith("/react/client"):
+        root = react_root_of_path(safe_next)
+        if root and user_may_enter_react_root(user, root):
             return safe_next
-        return "/react/projects"
+        if user["role"] in INTERNAL_USER_ROLES:
+            return "/react/projects"
+        return external_landing_path(user)
 
     def require_csrf_token(request: Request) -> None:
         expected = request.cookies.get(csrf_cookie_name)
@@ -656,13 +698,13 @@ def create_app(
         user: dict[str, Any],
         token: str,
         *,
-        redirect_path: str,
+        landing_path: str,
         status_code: int = 200,
     ) -> JSONResponse:
         response = JSONResponse(
             {
                 "user": public_current_user(user),
-                "redirect_path": redirect_path,
+                "landing_path": landing_path,
             },
             status_code=status_code,
         )
@@ -696,6 +738,11 @@ def create_app(
         request.state.current_user = user
         if user is None:
             return auth_required_response(request)
+
+        if user["role"] == "external" and not external_may_reach_path(path):
+            # A root an external identity may not enter reveals nothing about
+            # itself, not even that the route exists.
+            return not_found_response()
 
         if path.startswith("/api/") and request.method not in {"GET", "HEAD", "OPTIONS"}:
             try:
@@ -993,7 +1040,7 @@ def create_app(
         return auth_session_response(
             user,
             token,
-            redirect_path=react_authenticated_landing_path(user),
+            landing_path=react_authenticated_landing_path(user),
             status_code=201,
         )
 
@@ -1021,7 +1068,7 @@ def create_app(
         return auth_session_response(
             user,
             token,
-            redirect_path=react_authenticated_landing_path(user, payload.next),
+            landing_path=react_authenticated_landing_path(user, payload.next),
         )
 
     @app.post("/api/auth/logout", status_code=204)
@@ -1140,10 +1187,12 @@ def create_app(
             return {
                 "user": None,
                 "bootstrap_required": auth_required and analyst_store.count_users() == 0,
+                "landing_path": None,
             }
         return {
             "user": public_current_user(user),
             "bootstrap_required": False,
+            "landing_path": react_authenticated_landing_path(user),
         }
 
     @app.get("/api/admin/users")
@@ -3441,6 +3490,21 @@ def safe_internal_next_path(next_path: str) -> str:
     if not next_path.startswith("/") or next_path.startswith("//"):
         return ""
     return next_path
+
+
+def react_root_of_path(path: str) -> str:
+    """Which sibling application root a React path belongs to, if any."""
+
+    if path != "/react" and not path.startswith("/react/"):
+        return ""
+    route = path[len("/react") :]
+    if not route or route == "/":
+        return ""
+    if route == "/client" or route.startswith("/client/"):
+        return "portal"
+    if route == "/console" or route.startswith("/console/"):
+        return "console"
+    return "analyst"
 
 
 def safe_react_next_path(next_path: str) -> str:

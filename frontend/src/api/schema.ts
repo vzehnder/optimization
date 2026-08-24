@@ -1531,8 +1531,8 @@ export interface components {
     schemas: {
         /** AuthSessionResponse */
         AuthSessionResponse: {
-            /** Redirect Path */
-            redirect_path: string;
+            /** Landing Path */
+            landing_path: string;
             user: components["schemas"]["CurrentUser"];
         };
         /** Body_upload_draft_time_series_source_api_scenarios__scenario_id__draft_time_series_sources_upload_post */
@@ -1624,6 +1624,8 @@ export interface components {
              * @default false
              */
             bootstrap_required: boolean;
+            /** Landing Path */
+            landing_path?: string | null;
             user: components["schemas"]["CurrentUser"] | null;
         };
         /** DashboardTemplateWriteRequest */

@@ -186,7 +186,7 @@ class ClientBlockedFromTs5SurfacesTests(PermissionMatrixFixture):
             with self.subTest(path=path):
                 headers = csrf_headers(client) if method == "post" else {}
                 response = getattr(client, method)(path, headers=headers)
-                self.assertEqual(response.status_code, 403)
+                self.assertEqual(response.status_code, 404)
 
     def test_client_is_denied_from_internal_publication_preview(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -209,7 +209,7 @@ class ClientBlockedFromTs5SurfacesTests(PermissionMatrixFixture):
             self.login(client, "client@example.local", "client pass")
 
             response = client.get(f"/api/publications/{publication['id']}/preview")
-            self.assertEqual(response.status_code, 403)
+            self.assertEqual(response.status_code, 404)
 
 
 class AnalystAdminParityTests(PermissionMatrixFixture):
@@ -393,10 +393,10 @@ class ClientOnlySeesPublishedOutputsTests(PermissionMatrixFixture):
             allowed = client.get(f"/api/client/projects/{project_id}/publications/{publication['id']}")
             self.assertEqual(allowed.status_code, 200)
 
-            self.assertEqual(client.get(f"/api/runs/{run['id']}/results").status_code, 403)
-            self.assertEqual(client.get(f"/api/projects/{project_id}/time-series-sets").status_code, 403)
+            self.assertEqual(client.get(f"/api/runs/{run['id']}/results").status_code, 404)
+            self.assertEqual(client.get(f"/api/projects/{project_id}/time-series-sets").status_code, 404)
             self.assertEqual(
-                client.get(f"/api/projects/{project_id}/time-series-sets/hydraulic").status_code, 403
+                client.get(f"/api/projects/{project_id}/time-series-sets/hydraulic").status_code, 404
             )
 
 

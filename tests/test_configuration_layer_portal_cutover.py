@@ -1215,7 +1215,7 @@ class PortalCatalogApiTests(unittest.TestCase):
             200,
         )
 
-        self.assertEqual(external.get("/api/portal-catalogs").status_code, 403)
+        self.assertEqual(external.get("/api/portal-catalogs").status_code, 404)
 
 
 if __name__ == "__main__":

@@ -219,7 +219,7 @@ class Iteration6PublicationDraftTests(unittest.TestCase):
                 "public_title": "Client Attempt",
             },
         )
-        self.assertEqual(client_response.status_code, 403)
+        self.assertEqual(client_response.status_code, 404)
 
     def create_succeeded_run(self):
         project = self.store.create_project(name="Publication Project", created_by="test")

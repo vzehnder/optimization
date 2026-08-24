@@ -88,7 +88,7 @@ class Iteration6ProjectAccessTests(unittest.TestCase):
         active_client_session = TestClient(create_app(store=self.store, auth_enabled=True))
         active_login = login_json_with_csrf(active_client_session, "client@example.local", "client pass")
         self.assertEqual(active_login.status_code, 200)
-        self.assertEqual(active_login.json()["redirect_path"], "/react/client")
+        self.assertEqual(active_login.json()["landing_path"], "/react/client")
 
         deactivate_response = post_json_with_csrf(
             self.client,

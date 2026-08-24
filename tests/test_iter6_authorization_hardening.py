@@ -31,16 +31,16 @@ class Iteration6AuthorizationHardeningTests(unittest.TestCase):
         self.assertEqual(me_response.status_code, 200)
         self.assertEqual(me_response.json()["user"]["email"], "client@example.local")
         self.assertEqual(me_response.json()["user"]["role"], "external")
-        self.assertEqual(self.client.get("/api/projects").status_code, 403)
+        self.assertEqual(self.client.get("/api/projects").status_code, 404)
         self.assertEqual(
             self.client.post(
                 "/api/system-cases/validate",
                 json={"system_case_json": "{}"},
             ).status_code,
-            403,
+            404,
         )
 
-    def test_external_is_redirected_from_legacy_bookmarks_and_blocked_from_mutation_apis(self):
+    def test_external_is_not_found_on_legacy_bookmarks_and_internal_apis(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             artifact_root = Path(temp_dir) / "artifacts"
             run = create_completed_run_with_result_artifacts(self.store, artifact_root)
@@ -64,18 +64,17 @@ class Iteration6AuthorizationHardeningTests(unittest.TestCase):
             client = TestClient(create_app(store=self.store, artifact_root=artifact_root, auth_enabled=True))
             self.login(client, "client@example.local", "client pass")
 
-            for path, react_path in [
-                (f"/projects/{project_id}", f"/react/projects/{project_id}"),
-                (f"/scenarios/{scenario_id}", f"/react/scenarios/{scenario_id}"),
-                (f"/scenarios/{scenario_id}/draft", f"/react/scenarios/{scenario_id}/draft"),
-                (f"/runs/{run['id']}", f"/react/runs/{run['id']}"),
-                ("/system-cases/validate", "/react/system"),
-                (f"/publications/{publication['id']}/preview", f"/react/publications/{publication['id']}/preview"),
+            for path in [
+                f"/projects/{project_id}",
+                f"/scenarios/{scenario_id}",
+                f"/scenarios/{scenario_id}/draft",
+                f"/runs/{run['id']}",
+                "/system-cases/validate",
+                f"/publications/{publication['id']}/preview",
             ]:
                 with self.subTest(path=path):
                     response = client.get(path, follow_redirects=False)
-                    self.assertEqual(response.status_code, 303)
-                    self.assertEqual(response.headers["location"], react_path)
+                    self.assertEqual(response.status_code, 404)
 
             mutation_routes = [
                 ("post", f"/api/scenarios/{scenario_id}/draft", {"json": {"document": {}}}),
@@ -90,7 +89,7 @@ class Iteration6AuthorizationHardeningTests(unittest.TestCase):
             for method, path, kwargs in mutation_routes:
                 with self.subTest(path=path):
                     response = getattr(client, method)(path, **kwargs)
-                    self.assertEqual(response.status_code, 403)
+                    self.assertEqual(response.status_code, 404)
 
     def test_project_publication_and_user_revocation_block_client_downloads_immediately(self):
         with tempfile.TemporaryDirectory() as temp_dir:

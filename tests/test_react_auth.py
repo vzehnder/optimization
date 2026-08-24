@@ -38,7 +38,7 @@ class ReactAuthenticationContractTests(unittest.TestCase):
             headers=self.csrf_header(csrf),
         )
         self.assertEqual(bootstrap.status_code, 201)
-        self.assertEqual(bootstrap.json()["redirect_path"], "/react/projects")
+        self.assertEqual(bootstrap.json()["landing_path"], "/react/projects")
         self.assertEqual(bootstrap.json()["user"]["role"], "admin")
         self.assertIn("httponly", bootstrap.headers["set-cookie"].lower())
         self.assertTrue(self.store.list_users()[0]["password_hash"].startswith("pbkdf2_sha256$"))
@@ -89,7 +89,7 @@ class ReactAuthenticationContractTests(unittest.TestCase):
             headers=self.csrf_header(csrf),
         )
         self.assertEqual(login.status_code, 200)
-        self.assertEqual(login.json()["redirect_path"], "/react/system")
+        self.assertEqual(login.json()["landing_path"], "/react/system")
         self.assertEqual(login.json()["user"]["email"], "admin@example.local")
 
         unsafe_login = TestClient(create_app(store=self.store, auth_enabled=True))
@@ -104,7 +104,7 @@ class ReactAuthenticationContractTests(unittest.TestCase):
             headers=self.csrf_header(unsafe_csrf),
         )
         self.assertEqual(unsafe_response.status_code, 200)
-        self.assertEqual(unsafe_response.json()["redirect_path"], "/react/projects")
+        self.assertEqual(unsafe_response.json()["landing_path"], "/react/projects")
 
         self.store.set_user_active(self.store.list_users()[0]["id"], False, updated_by="test")
         self.assertIsNone(self.client.get("/api/auth/me").json()["user"])

@@ -320,7 +320,7 @@ class Iteration6ClientPublicationTests(unittest.TestCase):
             self.assertEqual(preview_body["results_state"], "available")
             self.assertEqual(preview_body["preview_context"]["run_id"], run["id"])
             self.assertNotIn("results", preview_body)
-            self.assertEqual(client.get(f"/api/publications/{publication['id']}/preview").status_code, 403)
+            self.assertEqual(client.get(f"/api/publications/{publication['id']}/preview").status_code, 404)
 
             post_json_with_csrf(analyst, f"/api/publications/{publication['id']}/publish")
             live = client.get(f"/api/client/projects/{project_id}/publications/{publication['id']}")

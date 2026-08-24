@@ -464,7 +464,7 @@ class PortalConfigurationApiTests(unittest.TestCase):
             200,
         )
 
-        self.assertEqual(external_client.get(self.path).status_code, 403)
+        self.assertEqual(external_client.get(self.path).status_code, 404)
         self.assertEqual(
             put_json_with_csrf(
                 external_client,
@@ -475,7 +475,7 @@ class PortalConfigurationApiTests(unittest.TestCase):
                     "expected_revision": 0,
                 },
             ).status_code,
-            403,
+            404,
         )
 
 

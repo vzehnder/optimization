@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FormEvent, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useMatch, useParams } from "react-router-dom";
 
 import {
   ApiError,
@@ -582,6 +582,27 @@ export function ConsoleListView() {
         </ul>
       )}
     </section>
+  );
+}
+
+// The console root names the plan being operated, never the analyst brand.
+export function ConsoleRootPlanIdentity() {
+  const match = useMatch("/console/:consoleId");
+  const consoleId = numericParam(match?.params.consoleId);
+  const shell = useQuery({
+    queryKey: consoleShellQueryKey(consoleId || 0),
+    queryFn: ({ signal }) => getConsoleShell(consoleId || 0, signal),
+    enabled: consoleId !== null,
+    retry: false,
+  });
+
+  if (consoleId !== null && shell.data) {
+    return <span className="console-root-plan">{shell.data.console.name}</span>;
+  }
+  return (
+    <Link className="console-root-link" to="/console">
+      Mis consolas
+    </Link>
   );
 }
 

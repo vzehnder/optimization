@@ -280,7 +280,7 @@ class Iteration6DashboardTemplateTests(unittest.TestCase):
         self.login(client_session, "client@example.local", "client pass")
         self.assertEqual(
             client_session.get(f"/api/projects/{first_project['id']}/dashboard-templates").status_code,
-            403,
+            404,
         )
         self.assertEqual(client_user["role"], "external")
 

@@ -29,7 +29,7 @@ class Iteration6AuthTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.json()["redirect_path"], "/react/projects")
+        self.assertEqual(response.json()["landing_path"], "/react/projects")
         users = self.store.list_users()
         self.assertEqual(len(users), 1)
         self.assertEqual(users[0]["email"], "admin@example.local")
@@ -47,7 +47,7 @@ class Iteration6AuthTests(unittest.TestCase):
 
         login_response = login_json_with_csrf(self.client, "analyst@example.local", "let me work")
         self.assertEqual(login_response.status_code, 200)
-        self.assertEqual(login_response.json()["redirect_path"], "/react/projects")
+        self.assertEqual(login_response.json()["landing_path"], "/react/projects")
 
         project_response = post_json_with_csrf(
             self.client,
@@ -96,7 +96,7 @@ class Iteration6AuthTests(unittest.TestCase):
             next_path="/react/projects",
         )
         self.assertEqual(login_response.status_code, 200)
-        self.assertEqual(login_response.json()["redirect_path"], "/react/client")
+        self.assertEqual(login_response.json()["landing_path"], "/react/client")
 
         portal_response = self.client.get("/api/client/projects")
         self.assertEqual(portal_response.status_code, 200)
@@ -109,10 +109,9 @@ class Iteration6AuthTests(unittest.TestCase):
         )
 
         analyst_page = self.client.get("/projects", follow_redirects=False)
-        self.assertEqual(analyst_page.status_code, 303)
-        self.assertEqual(analyst_page.headers["location"], "/react/projects")
+        self.assertEqual(analyst_page.status_code, 404)
         analyst_api = self.client.post("/api/projects", json={"name": "Forbidden"})
-        self.assertEqual(analyst_api.status_code, 403)
+        self.assertEqual(analyst_api.status_code, 404)
 
     def test_bootstrap_closes_after_first_user_exists(self):
         self.create_user("admin@example.local", role="admin", password="admin pass")

@@ -53,7 +53,7 @@ class Iteration6AcceptanceTests(unittest.TestCase):
 
                 bootstrap = bootstrap_admin_with_csrf(client, "admin@example.local", "admin pass", "Admin")
                 self.assertEqual(bootstrap.status_code, 201)
-                self.assertEqual(bootstrap.json()["redirect_path"], "/react/projects")
+                self.assertEqual(bootstrap.json()["landing_path"], "/react/projects")
                 admin_user = store.get_user_by_email("admin@example.local")
                 self.assertTrue(admin_user["password_hash"].startswith("pbkdf2_sha256$"))
                 self.assertNotEqual(admin_user["password_hash"], "admin pass")
@@ -274,8 +274,7 @@ class Iteration6AcceptanceTests(unittest.TestCase):
                 )
 
                 legacy_internal = client.get("/projects", follow_redirects=False)
-                self.assertEqual(legacy_internal.status_code, 303)
-                self.assertEqual(legacy_internal.headers["location"], "/react/projects")
+                self.assertEqual(legacy_internal.status_code, 404)
 
                 for method, path, kwargs in [
                     ("post", "/api/projects", {"json": {"name": "Client mutation"}}),
@@ -283,7 +282,7 @@ class Iteration6AcceptanceTests(unittest.TestCase):
                     ("post", f"/api/scenario-versions/{version['id']}/runs", {}),
                 ]:
                     with self.subTest(path=path):
-                        self.assertEqual(getattr(client, method)(path, **kwargs).status_code, 403)
+                        self.assertEqual(getattr(client, method)(path, **kwargs).status_code, 404)
 
                 post_json_with_csrf(client, "/api/auth/logout")
                 self.login(client, "analyst@example.local", "analyst pass")

@@ -9,10 +9,7 @@ export type ScenarioCreatePayload =
   components["schemas"]["ScenarioCreateRequest"];
 export type UserCreatePayload = components["schemas"]["UserCreateRequest"];
 
-export interface AuthSessionResponse {
-  user: CurrentUser;
-  redirect_path: string;
-}
+export type AuthSessionResponse = components["schemas"]["AuthSessionResponse"];
 
 export interface BootstrapAdminPayload {
   email: string;

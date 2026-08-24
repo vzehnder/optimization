@@ -298,7 +298,7 @@ class ConfigurationLayerAccessApiTests(unittest.TestCase):
             external_session, "viewer@example.local", "viewer pass"
         )
         self.assertEqual(login.status_code, 200)
-        self.assertEqual(login.json()["redirect_path"], "/react/client")
+        self.assertEqual(login.json()["landing_path"], "/react/console")
         self.assertEqual(
             external_session.get("/api/client/projects").status_code,
             404,
