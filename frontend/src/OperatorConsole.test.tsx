@@ -368,7 +368,9 @@ describe("the console configuration editor and the canonical signal catalog", ()
 
     render(<App />);
 
-    const column = await screen.findByRole("group", { name: "Columna demanda" });
+    const column = await screen.findByRole("group", {
+      name: "Columna demanda",
+    });
     const signal = within(column).getByLabelText("Senal canonica");
     expect(
       Array.from(signal.querySelectorAll("option")).map(
@@ -400,7 +402,9 @@ describe("the console configuration editor and the canonical signal catalog", ()
 
     render(<App />);
 
-    const column = await screen.findByRole("group", { name: "Columna demanda" });
+    const column = await screen.findByRole("group", {
+      name: "Columna demanda",
+    });
     await user.selectOptions(
       within(column).getByLabelText("Senal canonica"),
       "hydro_inflow_m3s",
@@ -410,7 +414,8 @@ describe("the console configuration editor and the canonical signal catalog", ()
     );
 
     await vi.waitFor(() => expect(saves).toHaveLength(1));
-    const document = (saves[0] as { document: typeof consoleDocument }).document;
+    const document = (saves[0] as { document: typeof consoleDocument })
+      .document;
     expect(document.groups[0].columns[0].signal).toEqual({
       entity_type: "component:hydro",
       entity_id: "load_1",
@@ -439,7 +444,9 @@ describe("the console configuration editor and the canonical signal catalog", ()
 
     render(<App />);
 
-    const column = await screen.findByRole("group", { name: "Columna demanda" });
+    const column = await screen.findByRole("group", {
+      name: "Columna demanda",
+    });
     await user.selectOptions(
       within(column).getByLabelText("Senal canonica"),
       "load_reactive_power_mvar",
@@ -582,5 +589,206 @@ describe("the operator console shell", () => {
     expect(
       within(strip).getByRole("link", { name: "Volver al workspace" }),
     ).toHaveAttribute("href", "/react/scenarios/10/consoles/4");
+  });
+
+  it("saves a scalar override before enabling and enqueueing a run", async () => {
+    window.history.replaceState({}, "", "/react/console/4");
+    const writes: unknown[] = [];
+    const runs: unknown[] = [];
+    let effectiveValue = 4;
+    stubApi(operatorIdentity, (path, method, body) => {
+      if (path === "/api/console/4" && method === "GET") {
+        return Response.json({
+          console: {
+            id: 4,
+            name: "Plan diario Planta Norte",
+            description: "Ajuste diario",
+            prepared_by: "Ada Analyst",
+            updated_at: "2026-08-23T12:00:00Z",
+          },
+          period: {
+            available_start: "2026-01-01T00:00:00+00:00",
+            available_end: "2026-01-01T03:00:00+00:00",
+            selected_start: "2026-01-01T00:00:00+00:00",
+            selected_end: "2026-01-01T03:00:00+00:00",
+          },
+          parameters: [
+            {
+              id: "potencia_bess",
+              label: "Potencia maxima BESS",
+              unit: "MW",
+              min: 0,
+              max: 100,
+              default: 40,
+              value: effectiveValue,
+            },
+          ],
+          run_gate: {
+            can_run: true,
+            reason: null,
+            message: "",
+            contact: null,
+            editing_locked_by: null,
+          },
+        });
+      }
+      if (path === "/api/console/4/runs" && method === "GET") {
+        return Response.json({ history: runs });
+      }
+      if (path === "/api/console/4/parameters" && method === "PUT") {
+        writes.push(body);
+        effectiveValue = 6.5;
+        return Response.json({
+          parameters: [
+            {
+              id: "potencia_bess",
+              label: "Potencia maxima BESS",
+              unit: "MW",
+              min: 0,
+              max: 100,
+              default: 40,
+              value: effectiveValue,
+            },
+          ],
+        });
+      }
+      if (path === "/api/console/4/runs" && method === "POST") {
+        writes.push(body);
+        const run = {
+          id: 88,
+          started_at: "2026-08-24T10:00:00Z",
+          state: "en_espera",
+          duration_seconds: null,
+          triggered_by: "Olga Operadora",
+        };
+        runs.splice(0, runs.length, run);
+        return Response.json({ run }, { status: 201 });
+      }
+      if (path === "/api/console/4/runs/88" && method === "GET") {
+        return Response.json({
+          run: runs[0],
+          failure: null,
+          results_block: null,
+        });
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    const parameter = await screen.findByRole("spinbutton", {
+      name: "Potencia maxima BESS (MW)",
+    });
+    const runButton = screen.getByRole("button", { name: "Ejecutar" });
+    expect(screen.getByLabelText("Inicio")).toHaveValue("2026-01-01T00:00");
+    expect(screen.getByLabelText("Fin")).toHaveValue("2026-01-01T03:00");
+    expect(runButton).toBeEnabled();
+
+    await user.clear(parameter);
+    await user.type(parameter, "6.5");
+    expect(runButton).toBeDisabled();
+    await user.click(
+      screen.getByRole("button", { name: "Guardar parametros" }),
+    );
+    await vi.waitFor(() => expect(runButton).toBeEnabled());
+    await user.click(runButton);
+
+    expect(await screen.findByText("En espera")).toBeVisible();
+    expect(writes).toEqual([
+      { parameters: [{ id: "potencia_bess", value: 6.5 }] },
+      {
+        range_start: "2026-01-01T00:00:00+00:00",
+        range_end: "2026-01-01T03:00:00+00:00",
+      },
+    ]);
+  });
+
+  it("opens one completed run and renders its configured result block", async () => {
+    window.history.replaceState({}, "", "/react/console/4");
+    let detailReads = 0;
+    const completed = {
+      id: 90,
+      started_at: "2026-08-24T10:00:00Z",
+      state: "lista",
+      duration_seconds: 2.5,
+      triggered_by: "Olga Operadora",
+    };
+    stubApi(operatorIdentity, (path, method) => {
+      if (path === "/api/console/4" && method === "GET") {
+        return Response.json({
+          console: {
+            id: 4,
+            name: "Plan diario Planta Norte",
+            description: "Ajuste diario",
+            prepared_by: "Ada Analyst",
+            updated_at: "2026-08-23T12:00:00Z",
+          },
+          period: {
+            available_start: null,
+            available_end: null,
+            selected_start: null,
+            selected_end: null,
+          },
+          parameters: [],
+          run_gate: {
+            can_run: false,
+            reason: "dependencia_movida",
+            message: "Solicita revision.",
+            contact: "Ada Analyst",
+            editing_locked_by: null,
+          },
+        });
+      }
+      if (path === "/api/console/4/runs" && method === "GET") {
+        return Response.json({ history: [completed] });
+      }
+      if (path === "/api/console/4/runs/90" && method === "GET") {
+        detailReads += 1;
+        return Response.json({
+          run: completed,
+          failure: null,
+          results_block: {
+            labels: {
+              kpis: "Indicadores",
+              charts: "",
+              tables: "",
+              downloads: "",
+            },
+            kpis: [
+              {
+                id: "beneficio_total",
+                label: "Beneficio total",
+                value: 1250.5,
+                unit: "USD",
+                decimals: 1,
+                sign: "auto",
+                emphasis: "strong",
+              },
+            ],
+            charts: [],
+            tables: [],
+          },
+        });
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Abrir resultados de corrida 90",
+      }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Indicadores" }),
+    ).toBeVisible();
+    expect(screen.getByText("Beneficio total")).toBeVisible();
+    expect(screen.getByText("1250.5")).toBeVisible();
+    await new Promise((resolve) => window.setTimeout(resolve, 1100));
+    expect(detailReads).toBe(1);
   });
 });

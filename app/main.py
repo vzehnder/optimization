@@ -13,7 +13,7 @@ from urllib.parse import quote
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from plotly.offline import get_plotlyjs
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth import (
     AuthorizationService,
@@ -69,6 +69,8 @@ from app.portal_configuration import (
 from app.surface_payloads import (
     build_console_list_entry,
     build_console_payload,
+    build_console_run_entry,
+    build_results_block,
     build_portal_branding,
     build_portal_publication_payload,
 )
@@ -190,6 +192,26 @@ class OperatorConsoleWriteRequest(BaseModel):
     document: dict[str, Any]
     status: str
     expected_revision: int
+
+
+class ConsoleParameterOverrideRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1)
+    value: float
+
+
+class ConsoleParametersWriteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    parameters: list[ConsoleParameterOverrideRequest]
+
+
+class ConsoleRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    range_start: str = Field(min_length=1)
+    range_end: str = Field(min_length=1)
 
 
 class DashboardTemplateWriteRequest(BaseModel):
@@ -789,6 +811,7 @@ def create_app(
         scenario_id: int,
         candidate_text: str,
         generation_metadata: dict[str, Any] | None = None,
+        created_by: str = "internal_analyst",
     ) -> tuple[dict | None, ValidationResult | None]:
         result = service.validate_text(candidate_text)
         if not result.ok:
@@ -809,11 +832,31 @@ def create_app(
             system_case_json=document,
             validation_payload=result.payload,
             generation_metadata=generation_metadata,
+            created_by=created_by,
         )
         return version, None
 
-    def create_and_enqueue_run(scenario_version_id: int) -> dict:
-        run = analyst_store.create_run(scenario_version_id=scenario_version_id)
+    def create_and_enqueue_run(
+        scenario_version_id: int,
+        *,
+        triggered_by: str = "internal_analyst",
+        trigger_type: str = "manual",
+        triggered_by_user_id: int | None = None,
+        triggered_by_display_name: str | None = None,
+        operator_console_id: int | None = None,
+        operator_console_revision: int | None = None,
+        materialized_lineage: dict[str, Any] | None = None,
+    ) -> dict:
+        run = analyst_store.create_run(
+            scenario_version_id=scenario_version_id,
+            triggered_by=triggered_by,
+            trigger_type=trigger_type,
+            triggered_by_user_id=triggered_by_user_id,
+            triggered_by_display_name=triggered_by_display_name,
+            operator_console_id=operator_console_id,
+            operator_console_revision=operator_console_revision,
+            materialized_lineage=materialized_lineage,
+        )
         local_run_queue.enqueue(run["id"])
         return run
 
@@ -2799,9 +2842,43 @@ def create_app(
     @app.get("/api/console/{console_id}")
     async def get_console_shell(console_id: int, request: Request):
         resolved = operator_console_for_viewer(request, console_id)
+        resolved_parameters = analyst_store.resolve_operator_console_parameters(console_id)
+        resolved_period = analyst_store.resolve_operator_console_period(console_id)
+        blocking = operator_console_blocking(
+            int(resolved["location"]["scenario_id"]), resolved["console"]
+        )
+        contact = console_preparer_name(resolved["console"]["prepared_by_user_id"])
+        if resolved_parameters["unavailable_ids"]:
+            run_gate = {
+                "can_run": False,
+                "reason": "campo_no_disponible",
+                "message": "Un parametro configurado ya no esta disponible.",
+                "contact": contact,
+                "editing_locked_by": None,
+            }
+        elif blocking["reason"] is not None:
+            run_gate = {
+                "can_run": False,
+                "reason": "dependencia_movida",
+                "message": "Los datos base cambiaron; solicita revision de ingenieria.",
+                "contact": contact,
+                "editing_locked_by": None,
+            }
+        else:
+            run_gate = {
+                "can_run": True,
+                "reason": None,
+                "message": "",
+                "contact": None,
+                "editing_locked_by": None,
+            }
         payload = build_console_payload(
             console=resolved["console"],
-            prepared_by=console_preparer_name(resolved["console"]["prepared_by_user_id"]),
+            prepared_by=contact,
+            parameters=resolved_parameters["parameters"],
+            run_gate=run_gate,
+            period=resolved_period,
+            history=analyst_store.list_operator_console_runs(console_id),
         )
         if resolved["internal"]:
             payload["internal_test"] = {
@@ -2812,6 +2889,218 @@ def create_app(
                 "tester": current_user_email(request),
             }
         return payload
+
+    @app.put("/api/console/{console_id}/parameters")
+    async def replace_console_parameters(
+        console_id: int,
+        payload: ConsoleParametersWriteRequest,
+        request: Request,
+    ):
+        resolved = operator_console_for_viewer(request, console_id)
+        try:
+            analyst_store.replace_operator_console_parameter_overrides(
+                console_id,
+                parameters=[parameter.model_dump() for parameter in payload.parameters],
+                updated_by_user_id=current_user_id(request),
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        parameters = analyst_store.resolve_operator_console_parameters(console_id)
+        shell = build_console_payload(
+            console=resolved["console"],
+            prepared_by=console_preparer_name(resolved["console"]["prepared_by_user_id"]),
+            parameters=parameters["parameters"],
+        )
+        return {"parameters": shell["parameters"]}
+
+    @app.post("/api/console/{console_id}/runs", status_code=201)
+    async def create_console_run(
+        console_id: int,
+        payload: ConsoleRunRequest,
+        request: Request,
+    ):
+        resolved = operator_console_for_viewer(request, console_id)
+        parameters = analyst_store.resolve_operator_console_parameters(console_id)
+        contact = console_preparer_name(resolved["console"]["prepared_by_user_id"])
+        if parameters["unavailable_ids"]:
+            return JSONResponse(
+                {
+                    "run_gate": {
+                        "can_run": False,
+                        "reason": "campo_no_disponible",
+                        "message": "Un parametro configurado ya no esta disponible.",
+                        "contact": contact,
+                        "editing_locked_by": None,
+                    }
+                },
+                status_code=409,
+            )
+        blocking = operator_console_blocking(
+            int(resolved["location"]["scenario_id"]), resolved["console"]
+        )
+        if blocking["reason"] is not None:
+            return JSONResponse(
+                {
+                    "run_gate": {
+                        "can_run": False,
+                        "reason": "dependencia_movida",
+                        "message": "Los datos base cambiaron; solicita revision de ingenieria.",
+                        "contact": contact,
+                        "editing_locked_by": None,
+                    }
+                },
+                status_code=409,
+            )
+        try:
+            materialized = analyst_store.materialize_operator_console_run(
+                console_id,
+                range_start=payload.range_start,
+                range_end=payload.range_end,
+            )
+        except InputVariantRangeError:
+            return JSONResponse(
+                {
+                    "failure": {
+                        "cause": "rango_sin_cobertura",
+                        "message": "El periodo elegido no tiene cobertura completa.",
+                        "reference": None,
+                    }
+                },
+                status_code=400,
+            )
+        except (DraftGenerationError, MissingRequiredSignalsError):
+            return JSONResponse(
+                {
+                    "failure": {
+                        "cause": "serie_incompleta",
+                        "message": "Faltan datos requeridos para el periodo elegido.",
+                        "reference": None,
+                    }
+                },
+                status_code=400,
+            )
+        except VariantStaleError:
+            return JSONResponse(
+                {
+                    "run_gate": {
+                        "can_run": False,
+                        "reason": "dependencia_movida",
+                        "message": "Los datos base cambiaron; solicita revision de ingenieria.",
+                        "contact": contact,
+                        "editing_locked_by": None,
+                    }
+                },
+                status_code=409,
+            )
+        except ValueError as error:
+            return JSONResponse(
+                {
+                    "failure": {
+                        "cause": "parametro_fuera_de_rango",
+                        "message": str(error),
+                        "reference": None,
+                    }
+                },
+                status_code=400,
+            )
+
+        actor = getattr(request.state, "current_user", None) or {}
+        actor_email = current_user_email(request)
+        actor_display_name = str(actor.get("display_name") or actor_email)
+        lineage = materialized["lineage"]
+        scenario_version, error = save_validated_scenario_version(
+            int(resolved["location"]["scenario_id"]),
+            json.dumps(materialized["system_case"], sort_keys=True),
+            lineage,
+            created_by=actor_email,
+        )
+        if error is not None:
+            return JSONResponse(
+                {
+                    "failure": {
+                        "cause": "serie_incompleta",
+                        "message": error.message,
+                        "reference": None,
+                    }
+                },
+                status_code=400,
+            )
+        run = create_and_enqueue_run(
+            scenario_version["id"],
+            triggered_by=actor_email,
+            trigger_type="operator_console",
+            triggered_by_user_id=current_user_id(request),
+            triggered_by_display_name=actor_display_name,
+            operator_console_id=console_id,
+            operator_console_revision=int(resolved["console"]["revision"]),
+            materialized_lineage=lineage,
+        )
+        return {"run": build_console_run_entry(run)}
+
+    @app.get("/api/console/{console_id}/runs")
+    async def list_console_runs(console_id: int, request: Request):
+        operator_console_for_viewer(request, console_id)
+        return {
+            "history": [
+                build_console_run_entry(run)
+                for run in analyst_store.list_operator_console_runs(console_id)
+            ]
+        }
+
+    @app.get("/api/console/{console_id}/runs/{run_id}")
+    async def get_console_run(console_id: int, run_id: int, request: Request):
+        resolved = operator_console_for_viewer(request, console_id)
+        try:
+            run = analyst_store.get_run(run_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="run not found") from error
+        if int(run.get("operator_console_id") or 0) != int(console_id):
+            raise HTTPException(status_code=404, detail="run not found")
+        failure = None
+        if run["status"] == "failed":
+            failure = {
+                "cause": "ejecucion_fallida",
+                "message": "La ejecucion fallo. Comunica la referencia al ingeniero.",
+                "reference": str(run_id),
+            }
+        results_block = None
+        if run["status"] == "succeeded":
+            configured = resolved["console"]["document"].get("results") or {}
+            results_document = {
+                "sections": {
+                    "kpis": {
+                        "enabled": bool(configured.get("kpis")),
+                        "label": "Indicadores" if configured.get("kpis") else "",
+                        "items": configured.get("kpis") or [],
+                    },
+                    "charts": {
+                        "enabled": bool(configured.get("charts")),
+                        "label": "Graficos" if configured.get("charts") else "",
+                        "items": configured.get("charts") or [],
+                    },
+                    "tables": {
+                        "enabled": bool(configured.get("tables")),
+                        "label": "Tablas" if configured.get("tables") else "",
+                        "items": configured.get("tables") or [],
+                    },
+                    "downloads": {"enabled": False, "label": ""},
+                }
+            }
+            try:
+                results = read_run_results(
+                    run,
+                    analyst_store.list_run_artifacts(run_id),
+                    configured_artifact_root,
+                )
+            except ResultReadError:
+                results = None
+            if results is not None:
+                results_block = build_results_block(results_document, results)
+        return {
+            "run": build_console_run_entry(run),
+            "failure": failure,
+            "results_block": results_block,
+        }
 
     @app.post("/api/scenarios/{scenario_id}/versions", status_code=201)
     async def create_scenario_version(scenario_id: int, payload: ScenarioVersionCreateRequest):

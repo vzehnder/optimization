@@ -11,6 +11,8 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping
 
+from app.portal_configuration import PortalConfigurationError, validate_portal_config_document
+
 
 OPERATOR_CONSOLE_CONFIG_SCHEMA_VERSION = "operator_console_config.v1"
 
@@ -96,6 +98,7 @@ def _validate_public_identity(value: Any) -> dict[str, Any]:
 def _validate_parameters(value: Any) -> list[dict[str, Any]]:
     raw_items = _require_list(value, "parameters")
     declared_ids: set[str] = set()
+    declared_pointers: set[tuple[str, str]] = set()
     parameters = []
     for position, raw_item in enumerate(raw_items):
         where = f"parameters[{position}]"
@@ -103,15 +106,29 @@ def _validate_parameters(value: Any) -> list[dict[str, Any]]:
         _reject_unknown_keys(
             item, {"id", "pointer", "label", "unit", "min", "max", "default"}, where
         )
+        minimum = _require_number(item.get("min"), f"{where}.min")
+        maximum = _require_number(item.get("max"), f"{where}.max")
+        default = _require_number(item.get("default"), f"{where}.default")
+        if minimum > maximum or default < minimum or default > maximum:
+            raise OperatorConsoleConfigurationError(
+                f"{where} parameter range must contain its default"
+            )
+        pointer = _validate_pointer(item.get("pointer"), f"{where}.pointer")
+        pointer_key = (pointer["asset_id"], pointer["field"])
+        if pointer_key in declared_pointers:
+            raise OperatorConsoleConfigurationError(
+                f"duplicate parameter pointer in document: {pointer['asset_id']}.{pointer['field']}"
+            )
+        declared_pointers.add(pointer_key)
         parameters.append(
             {
                 "id": _register_id(item.get("id"), where, declared_ids),
-                "pointer": _validate_pointer(item.get("pointer"), f"{where}.pointer"),
+                "pointer": pointer,
                 "label": _require_text(item.get("label"), f"{where}.label"),
                 "unit": _optional_text(item.get("unit"), f"{where}.unit"),
-                "min": _require_number(item.get("min"), f"{where}.min"),
-                "max": _require_number(item.get("max"), f"{where}.max"),
-                "default": _require_number(item.get("default"), f"{where}.default"),
+                "min": minimum,
+                "max": maximum,
+                "default": default,
             }
         )
     return parameters
@@ -260,10 +277,45 @@ def _validate_source_options(value: Any, column_where: str) -> list[dict[str, An
 def _validate_results(value: Any) -> dict[str, Any]:
     mapping = _require_mapping(value, "results")
     _reject_unknown_keys(mapping, {"kpis", "charts", "tables"}, "results")
-    return {
+    raw_results = {
         "kpis": _require_list(mapping.get("kpis"), "results.kpis"),
         "charts": _require_list(mapping.get("charts"), "results.charts"),
         "tables": _require_list(mapping.get("tables"), "results.tables"),
+    }
+    try:
+        validated = validate_portal_config_document(
+            {
+                "schema_version": "portal_config.v1",
+                "display_name": "Operator console",
+                "sections": {
+                    "kpis": {
+                        "enabled": bool(raw_results["kpis"]),
+                        "label": "Indicadores",
+                        "items": raw_results["kpis"],
+                    },
+                    "charts": {
+                        "enabled": bool(raw_results["charts"]),
+                        "label": "Graficos",
+                        "items": raw_results["charts"],
+                    },
+                    "tables": {
+                        "enabled": bool(raw_results["tables"]),
+                        "label": "Tablas",
+                        "items": raw_results["tables"],
+                    },
+                    "downloads": {"enabled": False, "label": "Descargas"},
+                },
+            }
+        )
+    except PortalConfigurationError as error:
+        raise OperatorConsoleConfigurationError(
+            f"results do not match the shared results grammar: {error}"
+        ) from error
+    sections = validated["sections"]
+    return {
+        "kpis": sections["kpis"]["items"],
+        "charts": sections["charts"]["items"],
+        "tables": sections["tables"]["items"],
     }
 
 

@@ -1,6 +1,6 @@
 # BESS-CONFIG-009: Run A Configured Console With Parameter Overrides
 
-Status: Todo
+Status: In Review
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/capa_configuracion/architecture_configuration_layer_final.md`
@@ -16,17 +16,17 @@ and real actor.
 
 ## Acceptance criteria
 
-- [ ] The console payload exposes only configured parameter ids, labels, units, ranges, defaults and effective values.
-- [ ] An operator can replace parameter overrides by external configuration id; arbitrary asset ids and fields are rejected at the boundary.
-- [ ] Values outside configured ranges or pointing to unavailable scalar fields block before a version or run is created.
-- [ ] Saving an override never edits the analyst draft or changes the base parameters provenance hash.
-- [ ] Materialization applies overrides after base provenance and freezes the effective values in a new immutable scenario version.
-- [ ] The run records the real authenticated actor, operator-console origin, console configuration revision and exact materialized lineage.
-- [ ] Execution reuses the common queue, Julia runner, result indexer and immutable run history.
-- [ ] The operator UI covers parameter editing, run gating, enqueue, polling, reduced history and configured result rendering.
-- [ ] Pre-engine failures are translated to actionable causes; Julia failures expose a generic message and reference but no stdout, stderr, exit code, paths or raw error message.
-- [ ] The console result payload uses the shared results grammar and passes the same negative boundary test as the portal.
-- [ ] Revoking `operate` blocks subsequent reads and mutations without cancelling an already-started run.
+- [x] The console payload exposes only configured parameter ids, labels, units, ranges, defaults and effective values.
+- [x] An operator can replace parameter overrides by external configuration id; arbitrary asset ids and fields are rejected at the boundary.
+- [x] Values outside configured ranges or pointing to unavailable scalar fields block before a version or run is created.
+- [x] Saving an override never edits the analyst draft or changes the base parameters provenance hash.
+- [x] Materialization applies overrides after base provenance and freezes the effective values in a new immutable scenario version.
+- [x] The run records the real authenticated actor, operator-console origin, console configuration revision and exact materialized lineage.
+- [x] Execution reuses the common queue, Julia runner, result indexer and immutable run history.
+- [x] The operator UI covers parameter editing, run gating, enqueue, polling, reduced history and configured result rendering.
+- [x] Pre-engine failures are translated to actionable causes; Julia failures expose a generic message and reference but no stdout, stderr, exit code, paths or raw error message.
+- [x] The console result payload uses the shared results grammar and passes the same negative boundary test as the portal.
+- [x] Revoking `operate` blocks subsequent reads and mutations without cancelling an already-started run.
 
 ## Blocked by
 

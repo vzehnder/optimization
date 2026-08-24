@@ -4,19 +4,25 @@ import { Link, useMatch, useParams } from "react-router-dom";
 
 import {
   ApiError,
+  createConsoleRun,
   createOperatorConsole,
+  getConsoleRun,
   listCaseInputVariants,
   getConsoleShell,
   getOperatorConsole,
   listOperableConsoles,
+  listConsoleRuns,
   listOperatorConsoles,
   saveOperatorConsole,
+  saveConsoleParameters,
+  type ConsoleRunEntry,
   type OperatorConsole,
   type OperatorConsoleColumn,
   type OperatorConsoleDocument,
   type OperatorConsoleGroup,
   type OperatorConsoleStatus,
 } from "./api/client";
+import { PortalResultsBlock } from "./PortalResults";
 import {
   signalCatalogEntry,
   signalCatalogOptions,
@@ -31,6 +37,8 @@ const operatorConsoleQueryKey = (scenarioId: number, consoleId: number) =>
 const consoleShellListQueryKey = ["console-shell-list"] as const;
 const consoleShellQueryKey = (consoleId: number) =>
   ["console-shell", consoleId] as const;
+const consoleRunsQueryKey = (consoleId: number) =>
+  ["console-runs", consoleId] as const;
 
 const STATUS_LABELS: Record<OperatorConsoleStatus, string> = {
   draft: "Borrador",
@@ -52,6 +60,26 @@ function numericParam(value: string | undefined): number | null {
   const parsed = Number(value);
   if (!value || !Number.isInteger(parsed) || parsed < 1) return null;
   return parsed;
+}
+
+function datetimeLocalInputValue(value: string | null | undefined): string {
+  if (!value) return "";
+  const match = value.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
+  return match?.[0] || "";
+}
+
+function rangeRequestValue(
+  editedValue: string | null,
+  originalValue: string | null | undefined,
+): string {
+  if (editedValue === null) return originalValue || "";
+  if (!editedValue) return "";
+  const timezone = originalValue?.match(/(Z|[+-]\d{2}:\d{2})$/)?.[1] || "";
+  const withSeconds =
+    editedValue.length === "2026-01-01T00:00".length
+      ? `${editedValue}:00`
+      : editedValue;
+  return `${withSeconds}${timezone}`;
 }
 
 function emptyConsoleDocument(name: string): OperatorConsoleDocument {
@@ -609,11 +637,81 @@ export function ConsoleRootPlanIdentity() {
 export function ConsoleShellView() {
   const params = useParams();
   const consoleId = numericParam(params.consoleId);
+  const queryClient = useQueryClient();
+  const [parameterValues, setParameterValues] = useState<
+    Record<string, string>
+  >({});
+  const [selectedStart, setSelectedStart] = useState<string | null>(null);
+  const [selectedEnd, setSelectedEnd] = useState<string | null>(null);
+  const [activeRunId, setActiveRunId] = useState<number | null>(null);
+  const [actionError, setActionError] = useState("");
   const shell = useQuery({
     queryKey: consoleShellQueryKey(consoleId || 0),
     queryFn: ({ signal }) => getConsoleShell(consoleId || 0, signal),
     enabled: consoleId !== null,
     retry: false,
+  });
+  const history = useQuery({
+    queryKey: consoleRunsQueryKey(consoleId || 0),
+    queryFn: ({ signal }) => listConsoleRuns(consoleId || 0, signal),
+    enabled: consoleId !== null,
+    retry: false,
+  });
+  const runDetail = useQuery({
+    queryKey: ["console-run", consoleId || 0, activeRunId || 0] as const,
+    queryFn: ({ signal }) =>
+      getConsoleRun(consoleId || 0, activeRunId || 0, signal),
+    enabled: consoleId !== null && activeRunId !== null,
+    retry: false,
+    refetchInterval: (query) => {
+      const state = query.state.data?.run.state;
+      return state === "en_espera" || state === "ejecutando" ? 1000 : false;
+    },
+  });
+
+  const saveParameters = useMutation({
+    mutationFn: () =>
+      saveConsoleParameters(
+        consoleId || 0,
+        (shell.data?.parameters ?? []).map((parameter) => ({
+          id: parameter.id,
+          value: Number(parameterValues[parameter.id] ?? parameter.value ?? ""),
+        })),
+      ),
+    onSuccess: (saved) => {
+      setActionError("");
+      queryClient.setQueryData(
+        consoleShellQueryKey(consoleId || 0),
+        shell.data ? { ...shell.data, parameters: saved } : shell.data,
+      );
+      setParameterValues({});
+    },
+    onError: (error) => setActionError(errorMessage(error)),
+  });
+  const enqueueRun = useMutation({
+    mutationFn: () =>
+      createConsoleRun(consoleId || 0, {
+        range_start: rangeRequestValue(
+          selectedStart,
+          shell.data?.period?.selected_start,
+        ),
+        range_end: rangeRequestValue(
+          selectedEnd,
+          shell.data?.period?.selected_end,
+        ),
+      }),
+    onSuccess: (run) => {
+      setActionError("");
+      setActiveRunId(run.id);
+      queryClient.setQueryData<ConsoleRunEntry[]>(
+        consoleRunsQueryKey(consoleId || 0),
+        (current) => [
+          run,
+          ...(current ?? []).filter((item) => item.id !== run.id),
+        ],
+      );
+    },
+    onError: (error) => setActionError(errorMessage(error)),
   });
 
   if (consoleId === null) {
@@ -634,7 +732,50 @@ export function ConsoleShellView() {
     );
   }
 
-  const { console: identity, internal_test: internalTest } = shell.data;
+  const {
+    console: identity,
+    internal_test: internalTest,
+    period,
+    parameters = [],
+    run_gate: runGate,
+  } = shell.data;
+  const effectiveSelectedStart = selectedStart ?? period?.selected_start ?? "";
+  const effectiveSelectedEnd = selectedEnd ?? period?.selected_end ?? "";
+  const displayedSelectedStart = datetimeLocalInputValue(
+    effectiveSelectedStart,
+  );
+  const displayedSelectedEnd = datetimeLocalInputValue(effectiveSelectedEnd);
+  const parameterValuesValid = parameters.every((parameter) => {
+    const rawValue = parameterValues[parameter.id] ?? parameter.value ?? "";
+    const value = Number(rawValue);
+    return (
+      rawValue !== "" &&
+      Number.isFinite(value) &&
+      value >= parameter.min &&
+      value <= parameter.max
+    );
+  });
+  const parametersDirty = parameters.some(
+    (parameter) =>
+      parameterValues[parameter.id] !== undefined &&
+      Number(parameterValues[parameter.id]) !== parameter.value,
+  );
+  const canRun = Boolean(
+    runGate?.can_run &&
+    !parametersDirty &&
+    parameterValuesValid &&
+    effectiveSelectedStart &&
+    effectiveSelectedEnd &&
+    !saveParameters.isPending &&
+    !enqueueRun.isPending,
+  );
+  const visibleRun = runDetail.data?.run || history.data?.[0];
+  const runLabels: Record<ConsoleRunEntry["state"], string> = {
+    en_espera: "En espera",
+    ejecutando: "Ejecutando",
+    lista: "Lista",
+    fallida: "Fallida",
+  };
 
   return (
     <>
@@ -656,6 +797,130 @@ export function ConsoleShellView() {
         </p>
         <p className="source-note">Actualizado {identity.updated_at}</p>
       </section>
+      <section
+        className="content-panel"
+        aria-labelledby="console-parameters-title"
+      >
+        <h2 id="console-parameters-title">Periodo y parametros</h2>
+        {actionError ? <p role="alert">{actionError}</p> : null}
+        {runGate && !runGate.can_run ? (
+          <p role="alert">
+            {runGate.message}
+            {runGate.contact ? ` Contacta a ${runGate.contact}.` : ""}
+          </p>
+        ) : null}
+        {period ? (
+          <div className="console-period-fields">
+            <label htmlFor="console-period-start">Inicio</label>
+            <input
+              id="console-period-start"
+              type="datetime-local"
+              value={displayedSelectedStart}
+              min={datetimeLocalInputValue(period.available_start) || undefined}
+              max={datetimeLocalInputValue(period.available_end) || undefined}
+              onChange={(event) => setSelectedStart(event.target.value)}
+            />
+            <label htmlFor="console-period-end">Fin</label>
+            <input
+              id="console-period-end"
+              type="datetime-local"
+              value={displayedSelectedEnd}
+              min={datetimeLocalInputValue(period.available_start) || undefined}
+              max={datetimeLocalInputValue(period.available_end) || undefined}
+              onChange={(event) => setSelectedEnd(event.target.value)}
+            />
+          </div>
+        ) : null}
+        <div className="console-parameter-grid">
+          {parameters.map((parameter) => (
+            <label
+              key={parameter.id}
+              htmlFor={`console-parameter-${parameter.id}`}
+            >
+              {parameter.label}
+              {parameter.unit ? ` (${parameter.unit})` : ""}
+              <input
+                id={`console-parameter-${parameter.id}`}
+                type="number"
+                step="any"
+                min={parameter.min}
+                max={parameter.max}
+                value={
+                  parameterValues[parameter.id] ??
+                  (parameter.value === null ? "" : String(parameter.value))
+                }
+                onChange={(event) =>
+                  setParameterValues((current) => ({
+                    ...current,
+                    [parameter.id]: event.target.value,
+                  }))
+                }
+              />
+            </label>
+          ))}
+        </div>
+        <div className="inline-actions">
+          <button
+            type="button"
+            disabled={
+              !parametersDirty ||
+              !parameterValuesValid ||
+              saveParameters.isPending
+            }
+            onClick={() => saveParameters.mutate()}
+          >
+            Guardar parametros
+          </button>
+          <button
+            type="button"
+            disabled={!canRun}
+            onClick={() => enqueueRun.mutate()}
+          >
+            Ejecutar
+          </button>
+        </div>
+        {parametersDirty ? (
+          <p className="source-note">Guarda los cambios antes de ejecutar.</p>
+        ) : null}
+      </section>
+      <section
+        className="content-panel"
+        aria-labelledby="console-history-title"
+      >
+        <h2 id="console-history-title">Historial reciente</h2>
+        {history.data?.length ? (
+          <ul className="resource-list">
+            {history.data.map((run) => (
+              <li key={run.id}>
+                <strong>{runLabels[run.state]}</strong>{" "}
+                <span>{run.started_at}</span> <span>{run.triggered_by}</span>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  aria-label={`Abrir resultados de corrida ${run.id}`}
+                  onClick={() => setActiveRunId(run.id)}
+                >
+                  Abrir
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : visibleRun ? (
+          <p>
+            <strong>{runLabels[visibleRun.state]}</strong>{" "}
+            <span>{visibleRun.started_at}</span>
+          </p>
+        ) : (
+          <p className="empty-state">Todavia no hay corridas.</p>
+        )}
+        {runDetail.data?.failure ? (
+          <p role="alert">
+            {runDetail.data.failure.message} Referencia{" "}
+            {runDetail.data.failure.reference}
+          </p>
+        ) : null}
+      </section>
+      <PortalResultsBlock block={runDetail.data?.results_block} />
     </>
   );
 }

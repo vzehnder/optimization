@@ -496,7 +496,51 @@ export interface ConsoleShell {
     prepared_by: string | null;
     updated_at: string;
   };
+  period?: {
+    available_start: string | null;
+    available_end: string | null;
+    selected_start: string | null;
+    selected_end: string | null;
+  };
+  parameters?: ConsoleParameter[];
+  run_gate?: ConsoleRunGate;
   internal_test?: { return_path: string; tester: string };
+}
+
+export interface ConsoleParameter {
+  id: string;
+  label: string;
+  unit: string | null;
+  min: number;
+  max: number;
+  default: number;
+  value: number | null;
+}
+
+export interface ConsoleRunGate {
+  can_run: boolean;
+  reason: string | null;
+  message: string;
+  contact: string | null;
+  editing_locked_by: string | null;
+}
+
+export interface ConsoleRunEntry {
+  id: number;
+  started_at: string | null;
+  state: "en_espera" | "ejecutando" | "lista" | "fallida";
+  duration_seconds: number | null;
+  triggered_by: string;
+}
+
+export interface ConsoleRunDetail {
+  run: ConsoleRunEntry;
+  failure: {
+    cause: string;
+    message: string;
+    reference: string | null;
+  } | null;
+  results_block: PortalResultsBlockPayload | null;
 }
 
 export type PortalConfigurationStatus = "draft" | "active";
@@ -2073,10 +2117,9 @@ export async function createOperatorConsole(
   scenarioId: number,
   payload: OperatorConsoleCreatePayload,
 ): Promise<OperatorConsole> {
-  const response = await postJsonWithCsrf<{ operator_console: OperatorConsole }>(
-    `/api/scenarios/${scenarioId}/consoles`,
-    payload,
-  );
+  const response = await postJsonWithCsrf<{
+    operator_console: OperatorConsole;
+  }>(`/api/scenarios/${scenarioId}/consoles`, payload);
   return response.operator_console;
 }
 
@@ -2119,6 +2162,50 @@ export async function getConsoleShell(
   signal?: AbortSignal,
 ): Promise<ConsoleShell> {
   return requestJson<ConsoleShell>(`/api/console/${consoleId}`, { signal });
+}
+
+export async function saveConsoleParameters(
+  consoleId: number,
+  parameters: Array<{ id: string; value: number }>,
+): Promise<ConsoleParameter[]> {
+  const response = await putJsonWithCsrf<{ parameters: ConsoleParameter[] }>(
+    `/api/console/${consoleId}/parameters`,
+    { parameters },
+  );
+  return response.parameters;
+}
+
+export async function createConsoleRun(
+  consoleId: number,
+  payload: { range_start: string; range_end: string },
+): Promise<ConsoleRunEntry> {
+  const response = await postJsonWithCsrf<{ run: ConsoleRunEntry }>(
+    `/api/console/${consoleId}/runs`,
+    payload,
+  );
+  return response.run;
+}
+
+export async function listConsoleRuns(
+  consoleId: number,
+  signal?: AbortSignal,
+): Promise<ConsoleRunEntry[]> {
+  const response = await requestJson<{ history: ConsoleRunEntry[] }>(
+    `/api/console/${consoleId}/runs`,
+    { signal },
+  );
+  return response.history;
+}
+
+export async function getConsoleRun(
+  consoleId: number,
+  runId: number,
+  signal?: AbortSignal,
+): Promise<ConsoleRunDetail> {
+  return requestJson<ConsoleRunDetail>(
+    `/api/console/${consoleId}/runs/${runId}`,
+    { signal },
+  );
 }
 
 export async function getPortalConfiguration(

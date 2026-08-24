@@ -779,6 +779,11 @@ class AnalystStore:
                 stderr TEXT NOT NULL DEFAULT '',
                 triggered_by TEXT NOT NULL,
                 trigger_type TEXT NOT NULL,
+                triggered_by_user_id INTEGER,
+                triggered_by_display_name TEXT,
+                operator_console_id INTEGER,
+                operator_console_revision INTEGER,
+                materialized_lineage_json TEXT NOT NULL DEFAULT '{}',
                 FOREIGN KEY (scenario_version_id) REFERENCES scenario_versions(id) ON DELETE CASCADE,
                 CHECK (status IN ('queued', 'running', 'succeeded', 'failed'))
             );
@@ -992,6 +997,18 @@ class AnalystStore:
                 CHECK (status IN ('draft', 'active'))
             );
 
+            CREATE TABLE IF NOT EXISTS operator_console_parameter_overrides (
+                console_id INTEGER NOT NULL,
+                asset_id TEXT NOT NULL,
+                field TEXT NOT NULL,
+                value REAL NOT NULL,
+                updated_at TEXT NOT NULL,
+                updated_by_user_id INTEGER,
+                PRIMARY KEY (console_id, asset_id, field),
+                FOREIGN KEY (console_id) REFERENCES operator_consoles(id) ON DELETE CASCADE,
+                FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+            );
+
             CREATE TABLE IF NOT EXISTS dashboard_templates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER NOT NULL,
@@ -1062,6 +1079,11 @@ class AnalystStore:
         self._ensure_column("runs", "stdout_log_path", "TEXT")
         self._ensure_column("runs", "stderr_log_path", "TEXT")
         self._ensure_column("runs", "error_message", "TEXT NOT NULL DEFAULT ''")
+        self._ensure_column("runs", "triggered_by_user_id", "INTEGER")
+        self._ensure_column("runs", "triggered_by_display_name", "TEXT")
+        self._ensure_column("runs", "operator_console_id", "INTEGER")
+        self._ensure_column("runs", "operator_console_revision", "INTEGER")
+        self._ensure_column("runs", "materialized_lineage_json", "TEXT NOT NULL DEFAULT '{}'")
         self._ensure_column("scenario_versions", "generation_metadata_json", "TEXT NOT NULL DEFAULT '{}'")
         self._ensure_column("time_series_signals", "source_column", "TEXT")
         self._ensure_column("time_series_signals", "source_unit", "TEXT")
@@ -5796,8 +5818,8 @@ class AnalystStore:
         version_number = self._next_version_number(scenario_id)
         created_at = utc_now_iso()
         full_generation_metadata = {
-            **(generation_metadata or {}),
             **derive_case_hierarchy_provenance(system_case_json),
+            **(generation_metadata or {}),
         }
         cursor = self.connection.execute(
             """
@@ -6097,6 +6119,11 @@ class AnalystStore:
         scenario_version_id: int,
         triggered_by: str = "internal_analyst",
         trigger_type: str = "manual",
+        triggered_by_user_id: int | None = None,
+        triggered_by_display_name: str | None = None,
+        operator_console_id: int | None = None,
+        operator_console_revision: int | None = None,
+        materialized_lineage: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             self.get_scenario_version(scenario_version_id, include_document=False)
@@ -6108,11 +6135,26 @@ class AnalystStore:
                     status,
                     created_at,
                     triggered_by,
-                    trigger_type
+                    trigger_type,
+                    triggered_by_user_id,
+                    triggered_by_display_name,
+                    operator_console_id,
+                    operator_console_revision,
+                    materialized_lineage_json
                 )
-                VALUES (?, 'queued', ?, ?, ?)
+                VALUES (?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (scenario_version_id, created_at, triggered_by, trigger_type),
+                (
+                    scenario_version_id,
+                    created_at,
+                    triggered_by,
+                    trigger_type,
+                    triggered_by_user_id,
+                    triggered_by_display_name,
+                    operator_console_id,
+                    operator_console_revision,
+                    json.dumps(materialized_lineage or {}, sort_keys=True),
+                ),
             )
             self.connection.commit()
             return self.get_run(cursor.lastrowid)
@@ -6449,7 +6491,12 @@ class AnalystStore:
                     stdout,
                     stderr,
                     triggered_by,
-                    trigger_type
+                    trigger_type,
+                    triggered_by_user_id,
+                    triggered_by_display_name,
+                    operator_console_id,
+                    operator_console_revision,
+                    materialized_lineage_json
                 FROM runs
                 WHERE id = ?
                 """,
@@ -6484,13 +6531,38 @@ class AnalystStore:
                 runs.stdout,
                 runs.stderr,
                 runs.triggered_by,
-                runs.trigger_type
+                runs.trigger_type,
+                runs.triggered_by_user_id,
+                runs.triggered_by_display_name,
+                runs.operator_console_id,
+                runs.operator_console_revision,
+                runs.materialized_lineage_json
             FROM runs
             JOIN scenario_versions ON scenario_versions.id = runs.scenario_version_id
             WHERE scenario_versions.scenario_id = ?
             ORDER BY scenario_versions.version_number DESC, runs.id DESC
             """,
             (scenario_id,),
+        ).fetchall()
+        return [run_row_to_dict(row) for row in rows]
+
+    def list_operator_console_runs(self, console_id: int) -> list[dict[str, Any]]:
+        self.get_operator_console(console_id)
+        rows = self.connection.execute(
+            """
+            SELECT id, scenario_version_id, status, created_at, started_at,
+                   finished_at, duration_seconds, exit_code, workspace_path,
+                   input_snapshot_path, output_dir, summary_path,
+                   stdout_log_path, stderr_log_path, error_message,
+                   success_payload_json, error_payload_json, stdout, stderr,
+                   triggered_by, trigger_type, triggered_by_user_id,
+                   triggered_by_display_name, operator_console_id,
+                   operator_console_revision, materialized_lineage_json
+            FROM runs
+            WHERE operator_console_id = ?
+            ORDER BY id DESC
+            """,
+            (console_id,),
         ).fetchall()
         return [run_row_to_dict(row) for row in rows]
 
@@ -7561,6 +7633,241 @@ class AnalystStore:
             )
             self.connection.commit()
         return self.get_operator_console(console_id)
+
+    def resolve_operator_console_parameters(self, console_id: int) -> dict[str, Any]:
+        """Resolve configured scalar pointers without exposing canonical ids."""
+
+        console = self.get_operator_console(console_id)
+        location = self.get_operator_console_location(console_id)
+        try:
+            system_case = self._generate_base_system_case_for_variant(
+                int(location["scenario_id"])
+            )
+        except (KeyError, DraftGenerationError):
+            system_case = {}
+
+        overrides = {
+            (str(row["asset_id"]), str(row["field"])): row["value"]
+            for row in self.list_operator_console_parameter_overrides(console_id)
+        }
+        parameters: list[dict[str, Any]] = []
+        unavailable_ids: list[str] = []
+        for configured in console["document"].get("parameters") or []:
+            pointer = configured.get("pointer") or {}
+            base_value = find_system_case_scalar(
+                system_case,
+                asset_id=str(pointer.get("asset_id") or ""),
+                field=str(pointer.get("field") or ""),
+            )
+            if base_value is None:
+                unavailable_ids.append(str(configured["id"]))
+            value = overrides.get(
+                (str(pointer.get("asset_id") or ""), str(pointer.get("field") or "")),
+                base_value,
+            )
+            parameters.append(
+                {
+                    "id": configured["id"],
+                    "label": configured["label"],
+                    "unit": configured.get("unit"),
+                    "min": configured["min"],
+                    "max": configured["max"],
+                    "default": configured["default"],
+                    "value": value,
+                }
+            )
+        return {"parameters": parameters, "unavailable_ids": unavailable_ids}
+
+    def resolve_operator_console_period(self, console_id: int) -> dict[str, Any]:
+        """Return the common horizon of every series bound to the console."""
+
+        console = self.get_operator_console(console_id)
+        location = self.get_operator_console_location(console_id)
+        horizons = [
+            self.get_time_series_set(
+                int(location["project_id"]), int(binding["time_series_set_id"])
+            )["horizon"]
+            for binding in self.list_case_time_series_bindings(
+                int(console["owned_variant_id"])
+            )
+        ]
+        if not horizons:
+            return {
+                "available_start": None,
+                "available_end": None,
+                "selected_start": None,
+                "selected_end": None,
+            }
+        available_start = max(str(horizon["start"]) for horizon in horizons)
+        available_end = min(str(horizon["end"]) for horizon in horizons)
+        if available_start >= available_end:
+            available_start = None
+            available_end = None
+        return {
+            "available_start": available_start,
+            "available_end": available_end,
+            "selected_start": available_start,
+            "selected_end": available_end,
+        }
+
+    def materialize_operator_console_run(
+        self,
+        console_id: int,
+        *,
+        range_start: str,
+        range_end: str,
+    ) -> dict[str, Any]:
+        """Materialize the console variant, then apply its scalar overlay."""
+
+        console = self.get_operator_console(console_id)
+        location = self.get_operator_console_location(console_id)
+        materialized = self.materialize_system_case_for_variant(
+            scenario_id=int(location["scenario_id"]),
+            case_input_variant_id=int(console["owned_variant_id"]),
+            range_start=range_start,
+            range_end=range_end,
+        )
+        base_system_case = materialized["system_case"]
+        base_provenance = derive_case_hierarchy_provenance(base_system_case)
+        effective_system_case = deepcopy(base_system_case)
+        overrides = {
+            (str(row["asset_id"]), str(row["field"])): float(row["value"])
+            for row in self.list_operator_console_parameter_overrides(console_id)
+        }
+        applied_overrides: list[dict[str, Any]] = []
+        effective_parameters: list[dict[str, Any]] = []
+        for configured in console["document"].get("parameters") or []:
+            external_id = str(configured["id"])
+            pointer = configured["pointer"]
+            pointer_key = (str(pointer["asset_id"]), str(pointer["field"]))
+            base_value = find_system_case_scalar(
+                base_system_case,
+                asset_id=pointer_key[0],
+                field=pointer_key[1],
+            )
+            if base_value is None:
+                raise ValueError(
+                    f"parameter {external_id} points to an unavailable scalar field"
+                )
+            effective_value = overrides.get(pointer_key, base_value)
+            if (
+                effective_value < float(configured["min"])
+                or effective_value > float(configured["max"])
+            ):
+                raise ValueError(f"parameter {external_id} is outside its configured range")
+            write_system_case_scalar(
+                effective_system_case,
+                asset_id=pointer_key[0],
+                field=pointer_key[1],
+                value=effective_value,
+            )
+            effective_parameters.append(
+                {"id": external_id, "value": effective_value, "pointer": dict(pointer)}
+            )
+            if pointer_key in overrides:
+                applied_overrides.append({"id": external_id, "value": effective_value})
+
+        lineage = {
+            "kind": "operator_console",
+            "operator_console": {"id": console_id, "revision": console["revision"]},
+            "parameter_overrides": applied_overrides,
+            "effective_parameters": effective_parameters,
+            "date_range": {"start": range_start, "end": range_end},
+            "series_bindings": materialized["series_bindings"],
+            "input_variant": {
+                "id": console["owned_variant_id"],
+                "display_name": self.get_case_input_variant(
+                    int(console["owned_variant_id"])
+                )["display_name"],
+            },
+            "parameters": base_provenance["parameters"],
+            "topology": base_provenance["topology"],
+        }
+        return {"system_case": effective_system_case, "lineage": lineage}
+
+    def list_operator_console_parameter_overrides(
+        self, console_id: int
+    ) -> list[dict[str, Any]]:
+        self.get_operator_console(console_id)
+        rows = self.connection.execute(
+            """
+            SELECT console_id, asset_id, field, value, updated_at, updated_by_user_id
+            FROM operator_console_parameter_overrides
+            WHERE console_id = ?
+            ORDER BY asset_id, field
+            """,
+            (console_id,),
+        ).fetchall()
+        return [row_to_dict(row) for row in rows]
+
+    def replace_operator_console_parameter_overrides(
+        self,
+        console_id: int,
+        *,
+        parameters: list[Mapping[str, Any]],
+        updated_by_user_id: int | None,
+    ) -> list[dict[str, Any]]:
+        """Replace one console's scalar overlay after validating every value."""
+
+        console = self.get_operator_console(console_id)
+        configured_by_id = {
+            str(parameter["id"]): parameter
+            for parameter in console["document"].get("parameters") or []
+        }
+        location = self.get_operator_console_location(console_id)
+        try:
+            system_case = self._generate_base_system_case_for_variant(
+                int(location["scenario_id"])
+            )
+        except (KeyError, DraftGenerationError):
+            system_case = {}
+        prepared: list[tuple[str, str, float]] = []
+        seen: set[str] = set()
+        for override in parameters:
+            external_id = str(override.get("id") or "")
+            if external_id in seen:
+                raise ValueError(f"duplicate parameter id: {external_id}")
+            seen.add(external_id)
+            configured = configured_by_id.get(external_id)
+            if configured is None:
+                raise ValueError(f"unknown configured parameter id: {external_id}")
+            raw_value = override.get("value")
+            if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
+                raise ValueError(f"parameter {external_id} value must be a number")
+            value = float(raw_value)
+            if not math.isfinite(value):
+                raise ValueError(f"parameter {external_id} value must be finite")
+            if value < float(configured["min"]) or value > float(configured["max"]):
+                raise ValueError(f"parameter {external_id} is outside its configured range")
+            pointer = configured["pointer"]
+            if find_system_case_scalar(
+                system_case,
+                asset_id=str(pointer["asset_id"]),
+                field=str(pointer["field"]),
+            ) is None:
+                raise ValueError(
+                    f"parameter {external_id} points to an unavailable scalar field"
+                )
+            prepared.append((str(pointer["asset_id"]), str(pointer["field"]), value))
+
+        now = utc_now_iso()
+        with self._lock:
+            self.connection.execute(
+                "DELETE FROM operator_console_parameter_overrides WHERE console_id = ?",
+                (console_id,),
+            )
+            for asset_id, field, value in prepared:
+                self.connection.execute(
+                    """
+                    INSERT INTO operator_console_parameter_overrides (
+                        console_id, asset_id, field, value, updated_at, updated_by_user_id
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (console_id, asset_id, field, value, now, updated_by_user_id),
+                )
+            self.connection.commit()
+        return self.list_operator_console_parameter_overrides(console_id)
 
     def upsert_case_time_series_binding(
         self,
@@ -11370,6 +11677,43 @@ def extract_system_case_metadata(document: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def find_system_case_scalar(
+    system_case: Mapping[str, Any], *, asset_id: str, field: str
+) -> float | int | None:
+    """Find a numeric scalar on a named one-bus or hydraulic asset."""
+
+    candidates: list[Any] = list(system_case.get("nodes") or [])
+    hydraulic = system_case.get("hydraulic_network") or {}
+    if isinstance(hydraulic, Mapping):
+        for collection in ("nodes", "reaches", "plants", "units"):
+            candidates.extend(hydraulic.get(collection) or [])
+    for candidate in candidates:
+        if not isinstance(candidate, Mapping) or str(candidate.get("id")) != asset_id:
+            continue
+        value = candidate.get(field)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return value
+    return None
+
+
+def write_system_case_scalar(
+    system_case: dict[str, Any], *, asset_id: str, field: str, value: float | int
+) -> None:
+    """Write a scalar through the same canonical lookup used for resolution."""
+
+    candidates: list[Any] = list(system_case.get("nodes") or [])
+    hydraulic = system_case.get("hydraulic_network") or {}
+    if isinstance(hydraulic, Mapping):
+        for collection in ("nodes", "reaches", "plants", "units"):
+            candidates.extend(hydraulic.get(collection) or [])
+    for candidate in candidates:
+        if isinstance(candidate, dict) and str(candidate.get("id")) == asset_id:
+            candidate[field] = value
+            return
+    raise ValueError(f"asset {asset_id} is unavailable")
+
+
 def build_hydraulic_diagram_layout_snapshot(
     diagram: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -11500,6 +11844,10 @@ def run_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
     value = row_to_dict(row)
     value["success_payload"] = json.loads(value.pop("success_payload_json") or "{}")
     value["error_payload"] = json.loads(value.pop("error_payload_json") or "{}")
+    if "materialized_lineage_json" in value:
+        value["materialized_lineage"] = json.loads(
+            value.pop("materialized_lineage_json") or "{}"
+        )
     return value
 
 

@@ -398,6 +398,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/console/{console_id}/parameters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replace Console Parameters */
+        put: operations["replace_console_parameters_api_console__console_id__parameters_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/console/{console_id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Console Runs */
+        get: operations["list_console_runs_api_console__console_id__runs_get"];
+        put?: never;
+        /** Create Console Run */
+        post: operations["create_console_run_api_console__console_id__runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/console/{console_id}/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Console Run */
+        get: operations["get_console_run_api_console__console_id__runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/dashboard-templates/{template_id}": {
         parameters: {
             query?: never;
@@ -1595,6 +1647,25 @@ export interface components {
             signal_key: string;
             /** Time Series Set Id */
             time_series_set_id: number;
+        };
+        /** ConsoleParameterOverrideRequest */
+        ConsoleParameterOverrideRequest: {
+            /** Id */
+            id: string;
+            /** Value */
+            value: number;
+        };
+        /** ConsoleParametersWriteRequest */
+        ConsoleParametersWriteRequest: {
+            /** Parameters */
+            parameters: components["schemas"]["ConsoleParameterOverrideRequest"][];
+        };
+        /** ConsoleRunRequest */
+        ConsoleRunRequest: {
+            /** Range End */
+            range_end: string;
+            /** Range Start */
+            range_start: string;
         };
         /** CsrfTokenResponse */
         CsrfTokenResponse: {
@@ -2971,6 +3042,139 @@ export interface operations {
             header?: never;
             path: {
                 console_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replace_console_parameters_api_console__console_id__parameters_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                console_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleParametersWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_console_runs_api_console__console_id__runs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                console_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_console_run_api_console__console_id__runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                console_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_console_run_api_console__console_id__runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                console_id: number;
+                run_id: number;
             };
             cookie?: never;
         };

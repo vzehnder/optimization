@@ -70,6 +70,10 @@ def build_console_payload(
     *,
     console: Mapping[str, Any],
     prepared_by: str | None,
+    parameters: list[Mapping[str, Any]] | None = None,
+    run_gate: Mapping[str, Any] | None = None,
+    period: Mapping[str, Any] | None = None,
+    history: list[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the console envelope an operator receives.
 
@@ -85,7 +89,33 @@ def build_console_payload(
             "description": identity.get("description") or "",
             "prepared_by": prepared_by,
             "updated_at": console["updated_at"],
-        }
+        },
+        "parameters": [
+            {
+                "id": parameter["id"],
+                "label": parameter["label"],
+                "unit": parameter.get("unit"),
+                "min": parameter["min"],
+                "max": parameter["max"],
+                "default": parameter["default"],
+                "value": parameter.get("value"),
+            }
+            for parameter in (parameters or [])
+        ],
+        "period": {
+            "available_start": (period or {}).get("available_start"),
+            "available_end": (period or {}).get("available_end"),
+            "selected_start": (period or {}).get("selected_start"),
+            "selected_end": (period or {}).get("selected_end"),
+        },
+        "run_gate": {
+            "can_run": bool((run_gate or {}).get("can_run")),
+            "reason": (run_gate or {}).get("reason"),
+            "message": str((run_gate or {}).get("message") or ""),
+            "contact": (run_gate or {}).get("contact"),
+            "editing_locked_by": (run_gate or {}).get("editing_locked_by"),
+        },
+        "history": [build_console_run_entry(run) for run in (history or [])],
     }
 
 
@@ -103,6 +133,26 @@ def build_console_list_entry(
         },
         "project": {"name": project_name},
         "state": console["status"],
+    }
+
+
+def build_console_run_entry(run: Mapping[str, Any]) -> dict[str, Any]:
+    """Translate one internal run row to the reduced operator history grammar."""
+
+    states = {
+        "queued": "en_espera",
+        "running": "ejecutando",
+        "succeeded": "lista",
+        "failed": "fallida",
+    }
+    return {
+        "id": run["id"],
+        "started_at": run.get("started_at") or run.get("created_at"),
+        "state": states.get(str(run.get("status")), "fallida"),
+        "duration_seconds": run.get("duration_seconds"),
+        "triggered_by": run.get("triggered_by_display_name")
+        or run.get("triggered_by")
+        or "",
     }
 
 
