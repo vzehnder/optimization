@@ -1,5 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ClipboardEvent,
+  FormEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Link, useMatch, useParams } from "react-router-dom";
 
 import {
@@ -691,6 +698,82 @@ function columnHeaderLabel(label: string, unit: string | null): string {
   return unit ? `${label} (${unit})` : label;
 }
 
+type ConsoleNumberParseResult =
+  | { ok: true; value: number }
+  | { ok: false; message: string };
+
+function parseConsoleNumber(text: string): ConsoleNumberParseResult {
+  const trimmed = text.trim();
+  const match = trimmed.match(/^([+-]?)([0-9.,]+)$/);
+  if (!match) return { ok: false, message: "el valor debe ser numerico" };
+  const sign = match[1] || "";
+  const body = match[2];
+  const dots = [...body.matchAll(/\./g)].map((entry) => entry.index);
+  const commas = [...body.matchAll(/,/g)].map((entry) => entry.index);
+  let normalized: string;
+
+  if (dots.length && commas.length) {
+    const decimalSeparator =
+      dots[dots.length - 1] > commas[commas.length - 1] ? "." : ",";
+    const thousandsSeparator = decimalSeparator === "." ? "," : ".";
+    const decimalIndex = body.lastIndexOf(decimalSeparator);
+    const integerText = body.slice(0, decimalIndex);
+    const fractionText = body.slice(decimalIndex + 1);
+    const groups = integerText.split(thousandsSeparator);
+    if (
+      !fractionText.match(/^\d+$/) ||
+      !groups[0]?.match(/^\d{1,3}$/) ||
+      groups.slice(1).some((group) => !group.match(/^\d{3}$/)) ||
+      integerText.includes(decimalSeparator)
+    ) {
+      return { ok: false, message: "el formato numerico no es valido" };
+    }
+    normalized = `${groups.join("")}.${fractionText}`;
+  } else if (dots.length + commas.length > 1) {
+    const separator = dots.length ? "." : ",";
+    const groups = body.split(separator);
+    if (
+      !groups[0]?.match(/^\d{1,3}$/) ||
+      groups.slice(1).some((group) => !group.match(/^\d{3}$/))
+    ) {
+      return { ok: false, message: "el formato numerico no es valido" };
+    }
+    normalized = groups.join("");
+  } else if (dots.length + commas.length === 1) {
+    const separator = dots.length ? "." : ",";
+    const [integerText, fractionText] = body.split(separator);
+    if (!integerText.match(/^\d+$/) || !fractionText?.match(/^\d+$/)) {
+      return { ok: false, message: "el formato numerico no es valido" };
+    }
+    if (
+      fractionText.length === 3 &&
+      integerText !== "0" &&
+      integerText.length <= 3
+    ) {
+      return { ok: false, message: "el formato numerico es ambiguo" };
+    }
+    normalized = `${integerText}.${fractionText}`;
+  } else {
+    normalized = body;
+  }
+
+  const value = Number(`${sign}${normalized}`);
+  return Number.isFinite(value)
+    ? { ok: true, value }
+    : { ok: false, message: "el valor debe ser finito" };
+}
+
+interface ConsolePasteCellError {
+  group_id: string;
+  column_id: string;
+  row_index: number;
+  message: string;
+}
+
+const CONSOLE_TABLE_ROW_HEIGHT = 42;
+const CONSOLE_TABLE_WINDOW_ROWS = 80;
+const CONSOLE_TABLE_VIRTUALIZE_AFTER = 200;
+
 export function ConsoleGroupEditor({
   consoleId,
   group,
@@ -711,6 +794,10 @@ export function ConsoleGroupEditor({
   const [saveError, setSaveError] = useState<ConsoleSaveError | Error | null>(
     null,
   );
+  const [pasteErrors, setPasteErrors] = useState<ConsolePasteCellError[]>([]);
+  const [pasteWarnings, setPasteWarnings] = useState<string[]>([]);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [virtualStart, setVirtualStart] = useState(0);
   const enabled = Boolean(range.start && range.end && granularity);
   const queryKey = consoleGroupValuesQueryKey(
     consoleId,
@@ -734,6 +821,20 @@ export function ConsoleGroupEditor({
 
   const rows = values.data?.values.rows ?? [];
   const columns = values.data?.values.columns ?? group.columns;
+  const virtualized = rows.length > CONSOLE_TABLE_VIRTUALIZE_AFTER;
+  const visibleStart = virtualized
+    ? Math.min(
+        virtualStart,
+        Math.max(0, rows.length - CONSOLE_TABLE_WINDOW_ROWS),
+      )
+    : 0;
+  const visibleRows = virtualized
+    ? rows.slice(visibleStart, visibleStart + CONSOLE_TABLE_WINDOW_ROWS)
+    : rows;
+  const hiddenRowsAfter = Math.max(
+    0,
+    rows.length - visibleStart - visibleRows.length,
+  );
   const dirtyCells = Object.entries(edits)
     .map(([key, text]) => {
       const [columnId, rawIndex] = key.split("|");
@@ -768,6 +869,9 @@ export function ConsoleGroupEditor({
     onSuccess: () => {
       setLease(null);
       setEdits({});
+      setPasteErrors([]);
+      setPasteWarnings([]);
+      setReviewOpen(false);
     },
   });
   const save = useMutation({
@@ -792,6 +896,9 @@ export function ConsoleGroupEditor({
     onSuccess: (saved) => {
       setSaveError(null);
       setEdits({});
+      setPasteErrors([]);
+      setPasteWarnings([]);
+      setReviewOpen(false);
       queryClient.setQueryData(queryKey, saved);
     },
     onError: (error: Error) => setSaveError(error),
@@ -816,6 +923,86 @@ export function ConsoleGroupEditor({
     return value === null || value === undefined ? "" : String(value);
   }
 
+  function pasteCells(
+    event: ClipboardEvent<HTMLInputElement>,
+    anchorColumnId: string,
+    anchorRowIndex: number,
+  ) {
+    event.preventDefault();
+    const anchorColumn = columns.findIndex(
+      (column) => column.id === anchorColumnId,
+    );
+    const anchorRow = rows.findIndex((row) => row.index === anchorRowIndex);
+    if (anchorColumn < 0 || anchorRow < 0) return;
+    const matrix = event.clipboardData
+      .getData("text")
+      .replace(/\r\n?/g, "\n")
+      .split("\n")
+      .map((line) => line.split("\t"));
+    while (
+      matrix.length > 1 &&
+      matrix[matrix.length - 1].every((cell) => cell === "")
+    ) {
+      matrix.pop();
+    }
+    const warnings: string[] = [];
+    let sourceRows = matrix;
+    if (matrix[0]?.every((cell) => !/\d/.test(cell)) && matrix.length > 1) {
+      warnings.push("Se omitio la primera fila porque parecia un encabezado.");
+      sourceRows = matrix.slice(1);
+    }
+    const prepared: Record<string, string> = {};
+    const failures: ConsolePasteCellError[] = [];
+    const lockedColumns = new Set<string>();
+    let overflow = false;
+    sourceRows.forEach((sourceRow, rowOffset) => {
+      const targetRow = rows[anchorRow + rowOffset];
+      if (!targetRow) {
+        overflow = true;
+        return;
+      }
+      sourceRow.forEach((text, columnOffset) => {
+        const targetColumn = columns[anchorColumn + columnOffset];
+        if (!targetColumn) {
+          overflow = true;
+          return;
+        }
+        if (!targetColumn.editable) {
+          lockedColumns.add(targetColumn.label);
+          return;
+        }
+        const parsed = parseConsoleNumber(text);
+        if (!parsed.ok) {
+          failures.push({
+            group_id: group.id,
+            column_id: targetColumn.id,
+            row_index: targetRow.index,
+            message: parsed.message,
+          });
+          return;
+        }
+        prepared[cellKey(targetColumn.id, targetRow.index)] = String(
+          parsed.value,
+        );
+      });
+    });
+    lockedColumns.forEach((label) =>
+      warnings.push(`${label}: columna bloqueada omitida durante el pegado.`),
+    );
+    if (overflow) {
+      warnings.push(
+        "El excedente fue truncado al tramo configurado; no se crearon periodos.",
+      );
+    }
+    setPasteWarnings(warnings);
+    if (failures.length) {
+      setPasteErrors(failures);
+      return;
+    }
+    setPasteErrors([]);
+    setEdits((current) => ({ ...current, ...prepared }));
+  }
+
   return (
     <section
       className="content-panel console-group"
@@ -832,7 +1019,10 @@ export function ConsoleGroupEditor({
         <select
           id={`console-granularity-${group.id}`}
           value={granularity}
-          onChange={(event) => setGranularity(event.target.value)}
+          onChange={(event) => {
+            setGranularity(event.target.value);
+            setVirtualStart(0);
+          }}
           disabled={editing}
         >
           {group.granularities.map((option) => (
@@ -845,10 +1035,22 @@ export function ConsoleGroupEditor({
           <>
             <button
               type="button"
-              disabled={dirtyCells.length === 0 || save.isPending}
+              disabled={
+                dirtyCells.length === 0 ||
+                pasteErrors.length > 0 ||
+                save.isPending
+              }
               onClick={() => save.mutate()}
             >
               Guardar valores
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={dirtyCells.length === 0 || save.isPending}
+              onClick={() => setReviewOpen(true)}
+            >
+              Revisar cambios
             </button>
             <button
               type="button"
@@ -894,54 +1096,164 @@ export function ConsoleGroupEditor({
           ) : null}
         </div>
       ) : null}
-      {values.isPending ? <p role="status">Cargando valores</p> : null}
-      {values.data ? (
-        <>
-          <table className="console-group-table" aria-label={group.label}>
-            <caption className="source-note">
-              {values.data.values.range.start} a {values.data.values.range.end}
-            </caption>
+      {pasteErrors.length ? (
+        <div role="alert">
+          <p>El pegado tiene celdas invalidas.</p>
+          <ul>
+            {pasteErrors.slice(0, 100).map((cell) => (
+              <li key={`${cell.column_id}-${cell.row_index}`}>
+                {columns.find((column) => column.id === cell.column_id)
+                  ?.label || cell.column_id}
+                {` fila ${cell.row_index + 1}`}: {cell.message}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {pasteWarnings.length ? (
+        <div className="console-paste-warning" role="status">
+          {pasteWarnings.map((warning) => (
+            <p key={warning}>{warning}</p>
+          ))}
+        </div>
+      ) : null}
+      {reviewOpen ? (
+        <div
+          className="console-change-review"
+          role="dialog"
+          aria-label="Revision de cambios"
+        >
+          <h3>Revision de cambios</h3>
+          <table>
             <thead>
               <tr>
+                <th scope="col">Columna</th>
                 <th scope="col">Periodo</th>
-                {columns.map((column) => (
-                  <th key={column.id} scope="col">
-                    {columnHeaderLabel(column.label, column.unit)}
-                    {column.editable ? "" : " 🔒"}
-                  </th>
-                ))}
+                <th scope="col">Anterior</th>
+                <th scope="col">Nuevo</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
-                <tr key={row.index}>
-                  <th scope="row">{row.timestamp}</th>
-                  {columns.map((column) => (
-                    <td key={column.id}>
-                      {editing && column.editable ? (
-                        <input
-                          type="number"
-                          step="any"
-                          min={column.nonnegative ? 0 : undefined}
-                          aria-label={`${column.label} ${row.timestamp}`}
-                          value={cellText(column.id, row.index)}
-                          onChange={(event) =>
-                            setEdits((current) => ({
-                              ...current,
-                              [cellKey(column.id, row.index)]:
-                                event.target.value,
-                            }))
-                          }
-                        />
-                      ) : (
-                        cellText(column.id, row.index)
-                      )}
-                    </td>
-                  ))}
-                </tr>
-              ))}
+              {dirtyCells.map((cell) => {
+                const row = rows.find(
+                  (candidate) => candidate.index === cell.row_index,
+                );
+                return (
+                  <tr key={`${cell.column_id}-${cell.row_index}`}>
+                    <th scope="row">
+                      {columns.find((column) => column.id === cell.column_id)
+                        ?.label || cell.column_id}
+                    </th>
+                    <td>{row?.timestamp || cell.row_index + 1}</td>
+                    <td>{row?.values[cell.column_id] ?? ""}</td>
+                    <td>{cell.value}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => setReviewOpen(false)}
+          >
+            Cerrar revision
+          </button>
+        </div>
+      ) : null}
+      {values.isPending ? <p role="status">Cargando valores</p> : null}
+      {values.data ? (
+        <>
+          <div
+            className="console-group-table-viewport"
+            data-testid={`console-group-table-viewport-${group.id}`}
+            onScroll={(event) => {
+              if (!virtualized) return;
+              setVirtualStart(
+                Math.min(
+                  Math.max(0, rows.length - CONSOLE_TABLE_WINDOW_ROWS),
+                  Math.floor(
+                    event.currentTarget.scrollTop / CONSOLE_TABLE_ROW_HEIGHT,
+                  ),
+                ),
+              );
+            }}
+          >
+            <table className="console-group-table" aria-label={group.label}>
+              <caption className="source-note">
+                {values.data.values.range.start} a{" "}
+                {values.data.values.range.end}
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Periodo</th>
+                  {columns.map((column) => (
+                    <th key={column.id} scope="col">
+                      {columnHeaderLabel(column.label, column.unit)}
+                      {column.editable ? "" : " 🔒"}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {visibleStart > 0 ? (
+                  <tr aria-hidden="true">
+                    <td
+                      colSpan={columns.length + 1}
+                      style={{
+                        height: visibleStart * CONSOLE_TABLE_ROW_HEIGHT,
+                        padding: 0,
+                        border: 0,
+                      }}
+                    />
+                  </tr>
+                ) : null}
+                {visibleRows.map((row) => (
+                  <tr key={row.index}>
+                    <th scope="row">{row.timestamp}</th>
+                    {columns.map((column) => (
+                      <td key={column.id}>
+                        {editing && column.editable ? (
+                          <input
+                            type="number"
+                            step="any"
+                            min={column.nonnegative ? 0 : undefined}
+                            aria-label={`${column.label} ${row.timestamp}`}
+                            value={cellText(column.id, row.index)}
+                            onPaste={(event) =>
+                              pasteCells(event, column.id, row.index)
+                            }
+                            onChange={(event) => {
+                              setPasteErrors([]);
+                              setEdits((current) => ({
+                                ...current,
+                                [cellKey(column.id, row.index)]:
+                                  event.target.value,
+                              }));
+                            }}
+                          />
+                        ) : (
+                          cellText(column.id, row.index)
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+                {hiddenRowsAfter > 0 ? (
+                  <tr aria-hidden="true">
+                    <td
+                      colSpan={columns.length + 1}
+                      style={{
+                        height: hiddenRowsAfter * CONSOLE_TABLE_ROW_HEIGHT,
+                        padding: 0,
+                        border: 0,
+                      }}
+                    />
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
           <ConsoleGroupChart group={group} snapshot={values.data} />
         </>
       ) : null}

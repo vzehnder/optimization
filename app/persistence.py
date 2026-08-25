@@ -14,7 +14,11 @@ from typing import Any, Mapping
 from app.auth import VALID_USER_ROLES
 from app.database import connect_database, database_url_from_env, postgres_schema_from_sqlite
 from app.draft_editor import DraftGenerationError, generate_system_case_from_draft
-from app.input_variants import materialize_variant_time_series, resolve_bound_signal_series
+from app.input_variants import (
+    InputVariantRangeError,
+    materialize_variant_time_series,
+    resolve_bound_signal_series,
+)
 from app.required_signals import (
     MissingRequiredSignalsError,
     discover_required_signals,
@@ -62,6 +66,7 @@ from app.hydraulic_time_series_adapter import (
 )
 from app.time_series_ingestion import find_source
 from app.console_series import (
+    MAX_REPORTED_CELLS,
     ConsoleSeriesError,
     build_console_group_rows,
     console_group_values_token,
@@ -8458,9 +8463,30 @@ class AnalystStore:
                 allowed=group["granularities"],
                 hours=range_hours(range_start, range_end),
             )
-            rows = build_console_group_rows(
-                columns=columns, range_start=range_start, range_end=range_end
-            )
+            try:
+                rows = build_console_group_rows(
+                    columns=columns, range_start=range_start, range_end=range_end
+                )
+            except InputVariantRangeError as error:
+                coverage_cells = [
+                    {
+                        "group_id": str(group_id),
+                        "column_id": str(cell.get("column_id") or ""),
+                        "row_index": (
+                            cell.get("row_index")
+                            if isinstance(cell.get("row_index"), int)
+                            and not isinstance(cell.get("row_index"), bool)
+                            else None
+                        ),
+                        "message": "el tramo elegido no tiene cobertura completa",
+                    }
+                    for cell in cells[:MAX_REPORTED_CELLS]
+                ]
+                raise ConsoleSeriesError(
+                    "el tramo elegido no tiene cobertura completa y no se guardo nada",
+                    cells=coverage_cells,
+                    total_cells=len(cells),
+                ) from error
             current_token = console_group_values_token(
                 [
                     (column["time_series_set_id"], str(column["set"]["content_hash"]))
@@ -8468,9 +8494,25 @@ class AnalystStore:
                 ]
             )
             if str(expected_token) != current_token:
+                conflict_cells = [
+                    {
+                        "group_id": str(group_id),
+                        "column_id": str(cell.get("column_id") or ""),
+                        "row_index": (
+                            cell.get("row_index")
+                            if isinstance(cell.get("row_index"), int)
+                            and not isinstance(cell.get("row_index"), bool)
+                            else None
+                        ),
+                        "message": "los datos cambiaron mientras editabas",
+                    }
+                    for cell in cells[:MAX_REPORTED_CELLS]
+                ]
                 raise ConsoleSeriesError(
                     "los datos cambiaron mientras editabas; vuelve a cargar el tramo",
                     status_code=412,
+                    cells=conflict_cells,
+                    total_cells=len(cells),
                 )
             self._require_console_group_lease(
                 console_id=console_id,

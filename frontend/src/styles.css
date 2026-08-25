@@ -1629,3 +1629,38 @@ button:focus-visible {
   border-bottom: 1px solid #e0c98a;
   font-size: 0.9rem;
 }
+
+.console-group-table-viewport {
+  max-height: 32rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.console-group-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.console-group-table th,
+.console-group-table td {
+  min-height: 42px;
+  padding: 0.45rem 0.65rem;
+  border-bottom: 1px solid var(--border-subtle, #d9dee5);
+  text-align: left;
+}
+
+.console-group-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fff;
+}
+
+.console-paste-warning,
+.console-change-review {
+  margin: 0.75rem 0;
+  padding: 0.75rem;
+  border: 1px solid #d6a948;
+  border-radius: 0.4rem;
+  background: #fff8e6;
+}

@@ -168,7 +168,7 @@ class PostgresPersistenceTests(unittest.TestCase):
                 store.delete_project(project_id)
             store.close()
 
-    def test_a_console_series_edit_forks_a_copy_on_postgresql(self):
+    def test_a_console_multi_set_save_forks_both_copies_on_postgresql(self):
         suffix = uuid.uuid4().hex
         store = AnalystStore(POSTGRES_TEST_DATABASE_URL)
         project_id = 0
@@ -219,10 +219,50 @@ class PostgresPersistenceTests(unittest.TestCase):
                 },
                 prepared_import=prepared,
             )
+            prepared_price = prepare_time_series_catalog_import(
+                rows=[
+                    {
+                        "period_start": (start + timedelta(hours=offset)).isoformat(),
+                        "hours": "1.0",
+                        "price": str(50 + offset),
+                    }
+                    for offset in range(3)
+                ],
+                request=CatalogImportRequest(
+                    set_name=f"Precio {suffix}",
+                    version_label="v1",
+                    data_kind="real",
+                    timezone="America/Santiago",
+                    timestamp_column="period_start",
+                    duration_hours_column="hours",
+                    signal_mappings=[
+                        CatalogSignalMappingRequest(
+                            source_column="price", signal_key="price_usd_per_mwh"
+                        )
+                    ],
+                ),
+            )
+            price_set = store.import_time_series_catalog_set(
+                scenario_id=scenario["id"],
+                source={
+                    "id": f"price-{suffix}",
+                    "original_filename": "precio.csv",
+                    "media_type": "text/csv",
+                    "checksum": f"sha256:price-{suffix}",
+                },
+                prepared_import=prepared_price,
+            )
             store.upsert_case_time_series_binding(
                 case_input_variant_id=variant["id"],
                 signal_key="load_demand_mw",
                 time_series_set_id=demand_set["id"],
+            )
+            store.upsert_case_time_series_binding(
+                case_input_variant_id=variant["id"],
+                signal_key="price_usd_per_mwh",
+                entity_type="grid",
+                entity_id="grid_1",
+                time_series_set_id=price_set["id"],
             )
             document = {
                 "schema_version": "operator_console_config.v1",
@@ -251,7 +291,25 @@ class PostgresPersistenceTests(unittest.TestCase):
                                     }
                                 ],
                                 "default_source_option_id": "base",
-                            }
+                            },
+                            {
+                                "id": "precio",
+                                "signal": {
+                                    "entity_type": "grid",
+                                    "entity_id": "grid_1",
+                                    "signal_key": "price_usd_per_mwh",
+                                },
+                                "label": "Precio",
+                                "editable": True,
+                                "source_options": [
+                                    {
+                                        "id": "base",
+                                        "label": "Precio base",
+                                        "time_series_set_id": price_set["id"],
+                                    }
+                                ],
+                                "default_source_option_id": "base",
+                            },
                         ],
                     }
                 ],
@@ -281,18 +339,28 @@ class PostgresPersistenceTests(unittest.TestCase):
                 range_end=demand_set["horizon"]["end"],
                 granularity="full_horizon",
                 expected_token=loaded["token"],
-                cells=[{"column_id": "demanda", "row_index": 1, "value": 99.5}],
+                cells=[
+                    {"column_id": "demanda", "row_index": 1, "value": 99.5},
+                    {"column_id": "precio", "row_index": 2, "value": 88.25},
+                ],
                 note="Ajuste manual",
                 actor_user_id=operator["id"],
                 lease_token=lease["token"],
             )
 
             copies = store.list_operator_console_series_copies(console["id"])
-            self.assertEqual(len(copies), 1)
-            self.assertEqual(copies[0]["origin_set_id"], demand_set["id"])
+            self.assertEqual(len(copies), 2)
+            self.assertEqual(
+                {copy["origin_set_id"] for copy in copies},
+                {demand_set["id"], price_set["id"]},
+            )
             self.assertEqual(
                 [row["values"]["demanda"] for row in saved["rows"]],
                 [10.0, 99.5, 12.0],
+            )
+            self.assertEqual(
+                [row["values"]["precio"] for row in saved["rows"]],
+                [50.0, 51.0, 88.25],
             )
             self.assertEqual(
                 [
@@ -305,12 +373,21 @@ class PostgresPersistenceTests(unittest.TestCase):
             )
             self.assertEqual(
                 [
+                    value["value_numeric"]
+                    for value in store.get_time_series_set(
+                        project_id, price_set["id"]
+                    )["values"]
+                ],
+                [50.0, 51.0, 52.0],
+            )
+            self.assertEqual(
+                {
                     binding["time_series_set_id"]
                     for binding in store.list_case_time_series_bindings(
                         console["owned_variant_id"]
                     )
-                ],
-                [copies[0]["time_series_set_id"]],
+                },
+                {copy["time_series_set_id"] for copy in copies},
             )
         finally:
             if project_id:

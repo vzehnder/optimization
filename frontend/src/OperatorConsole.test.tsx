@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -943,6 +943,384 @@ describe("the operator console shell", () => {
         name: "Demanda 2026-01-01T01:00:00-03:00",
       }),
     ).toHaveValue(99.5);
+  });
+
+  it("pastes a rectangular block from the anchored cell and normalizes unambiguous numbers", async () => {
+    window.history.replaceState({}, "", "/react/console/4");
+    const columns = [
+      ...editableGroup.columns,
+      {
+        id: "precio",
+        label: "Precio",
+        unit: "USD/MWh",
+        nonnegative: false,
+        editable: true,
+      },
+    ];
+    const group = { ...editableGroup, columns };
+    const valuesPayload = {
+      group_values: {
+        group_id: "potencia",
+        granularity: "day",
+        range: {
+          start: "2026-01-01T00:00:00-03:00",
+          end: "2026-01-01T04:00:00-03:00",
+        },
+        columns,
+        rows: [
+          {
+            index: 0,
+            timestamp: "2026-01-01T00:00:00-03:00",
+            values: { demanda: 10, precio: 50 },
+          },
+          {
+            index: 1,
+            timestamp: "2026-01-01T01:00:00-03:00",
+            values: { demanda: 11, precio: 51 },
+          },
+          {
+            index: 2,
+            timestamp: "2026-01-01T02:00:00-03:00",
+            values: { demanda: 12, precio: 52 },
+          },
+        ],
+      },
+    };
+    const writes: Array<Record<string, unknown>> = [];
+    stubApi(operatorIdentity, (path, method, body) => {
+      if (path === "/api/console/4" && method === "GET") {
+        return Response.json({ ...consoleShellPayload(), groups: [group] });
+      }
+      if (path === "/api/console/4/runs" && method === "GET") {
+        return Response.json({ history: [] });
+      }
+      if (path.startsWith("/api/console/4/groups/potencia/values")) {
+        if (method === "PUT") writes.push(body as Record<string, unknown>);
+        return Response.json(valuesPayload, { headers: { ETag: '"token-1"' } });
+      }
+      if (
+        path === "/api/console/4/groups/potencia/lease" &&
+        method === "POST"
+      ) {
+        return Response.json(leasePayload);
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Editar valores" }),
+    );
+    const anchor = await screen.findByRole("spinbutton", {
+      name: "Demanda 2026-01-01T00:00:00-03:00",
+    });
+    await user.click(anchor);
+    await user.paste("1.234,5\t1,234.5\n1234,567\t0,001\n1.234.567\t52.5");
+    await user.click(screen.getByRole("button", { name: "Guardar valores" }));
+
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]).toMatchObject({
+      cells: [
+        { column_id: "demanda", row_index: 0, value: 1234.5 },
+        { column_id: "precio", row_index: 0, value: 1234.5 },
+        { column_id: "demanda", row_index: 1, value: 1234.567 },
+        { column_id: "precio", row_index: 1, value: 0.001 },
+        { column_id: "demanda", row_index: 2, value: 1234567 },
+        { column_id: "precio", row_index: 2, value: 52.5 },
+      ],
+    });
+  });
+
+  it("rejects structurally ambiguous pasted numbers without staging a partial block", async () => {
+    window.history.replaceState({}, "", "/react/console/4");
+    const writes: Array<Record<string, unknown>> = [];
+    stubApi(operatorIdentity, (path, method, body) => {
+      if (path === "/api/console/4" && method === "GET") {
+        return Response.json(consoleShellPayload());
+      }
+      if (path === "/api/console/4/runs" && method === "GET") {
+        return Response.json({ history: [] });
+      }
+      if (path.startsWith("/api/console/4/groups/potencia/values")) {
+        if (method === "PUT") writes.push(body as Record<string, unknown>);
+        return Response.json(groupValuesPayload([10, 11, 12, 13]), {
+          headers: { ETag: '"token-1"' },
+        });
+      }
+      if (
+        path === "/api/console/4/groups/potencia/lease" &&
+        method === "POST"
+      ) {
+        return Response.json(leasePayload);
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Editar valores" }),
+    );
+    const anchor = await screen.findByRole("spinbutton", {
+      name: "Demanda 2026-01-01T00:00:00-03:00",
+    });
+    await user.click(anchor);
+    await user.paste("1.234\n12,345");
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Demanda fila 1");
+    expect(alert).toHaveTextContent("Demanda fila 2");
+    expect(alert).toHaveTextContent("ambiguo");
+    expect(
+      screen.getByRole("button", { name: "Guardar valores" }),
+    ).toBeDisabled();
+    expect(anchor).toHaveValue(10);
+    expect(writes).toEqual([]);
+  });
+
+  it("skips an accidental header and locked columns while pasting", async () => {
+    window.history.replaceState({}, "", "/react/console/4");
+    const columns = [
+      editableGroup.columns[0],
+      {
+        id: "precio",
+        label: "Precio bloqueado",
+        unit: "USD/MWh",
+        nonnegative: false,
+        editable: false,
+      },
+      {
+        id: "solar",
+        label: "Solar",
+        unit: "MW",
+        nonnegative: true,
+        editable: true,
+      },
+    ];
+    const group = { ...editableGroup, columns };
+    const valuesPayload = {
+      group_values: {
+        group_id: "potencia",
+        granularity: "day",
+        range: {
+          start: "2026-01-01T00:00:00-03:00",
+          end: "2026-01-01T04:00:00-03:00",
+        },
+        columns,
+        rows: [0, 1].map((index) => ({
+          index,
+          timestamp: `2026-01-01T0${index}:00:00-03:00`,
+          values: { demanda: 10 + index, precio: 50 + index, solar: 5 + index },
+        })),
+      },
+    };
+    const writes: Array<Record<string, unknown>> = [];
+    stubApi(operatorIdentity, (path, method, body) => {
+      if (path === "/api/console/4" && method === "GET") {
+        return Response.json({ ...consoleShellPayload(), groups: [group] });
+      }
+      if (path === "/api/console/4/runs" && method === "GET") {
+        return Response.json({ history: [] });
+      }
+      if (path.startsWith("/api/console/4/groups/potencia/values")) {
+        if (method === "PUT") writes.push(body as Record<string, unknown>);
+        return Response.json(valuesPayload, { headers: { ETag: '"token-1"' } });
+      }
+      if (
+        path === "/api/console/4/groups/potencia/lease" &&
+        method === "POST"
+      ) {
+        return Response.json(leasePayload);
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Editar valores" }),
+    );
+    const anchor = await screen.findByRole("spinbutton", {
+      name: "Demanda 2026-01-01T00:00:00-03:00",
+    });
+    await user.click(anchor);
+    await user.paste("Demanda\tPrecio\tSolar\n100\t200\t300\n101\t201\t301");
+
+    expect(await screen.findByText(/primera fila.*encabezado/i)).toBeVisible();
+    expect(screen.getByText(/Precio bloqueado.*omitida/i)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Guardar valores" }));
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]).toMatchObject({
+      cells: [
+        { column_id: "demanda", row_index: 0, value: 100 },
+        { column_id: "solar", row_index: 0, value: 300 },
+        { column_id: "demanda", row_index: 1, value: 101 },
+        { column_id: "solar", row_index: 1, value: 301 },
+      ],
+    });
+  });
+
+  it("truncates paste overflow at the configured range and warns until save", async () => {
+    window.history.replaceState({}, "", "/react/console/4");
+    const writes: Array<Record<string, unknown>> = [];
+    stubApi(operatorIdentity, (path, method, body) => {
+      if (path === "/api/console/4" && method === "GET") {
+        return Response.json(consoleShellPayload());
+      }
+      if (path === "/api/console/4/runs" && method === "GET") {
+        return Response.json({ history: [] });
+      }
+      if (path.startsWith("/api/console/4/groups/potencia/values")) {
+        if (method === "PUT") writes.push(body as Record<string, unknown>);
+        return Response.json(groupValuesPayload([10, 11, 12, 13]), {
+          headers: { ETag: '"token-1"' },
+        });
+      }
+      if (
+        path === "/api/console/4/groups/potencia/lease" &&
+        method === "POST"
+      ) {
+        return Response.json(leasePayload);
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Editar valores" }),
+    );
+    const anchor = await screen.findByRole("spinbutton", {
+      name: "Demanda 2026-01-01T02:00:00-03:00",
+    });
+    await user.click(anchor);
+    await user.paste("100\n101\n102");
+
+    expect(await screen.findByText(/excedente.*truncado/i)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Guardar valores" }));
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]).toMatchObject({
+      cells: [
+        { column_id: "demanda", row_index: 2, value: 100 },
+        { column_id: "demanda", row_index: 3, value: 101 },
+      ],
+    });
+    expect(screen.queryByText(/excedente.*truncado/i)).toBeNull();
+  });
+
+  it("offers an optional review diff without making it a save prerequisite", async () => {
+    window.history.replaceState({}, "", "/react/console/4");
+    stubApi(operatorIdentity, (path, method) => {
+      if (path === "/api/console/4" && method === "GET") {
+        return Response.json(consoleShellPayload());
+      }
+      if (path === "/api/console/4/runs" && method === "GET") {
+        return Response.json({ history: [] });
+      }
+      if (path.startsWith("/api/console/4/groups/potencia/values")) {
+        return Response.json(groupValuesPayload([10, 11, 12, 13]), {
+          headers: { ETag: '"token-1"' },
+        });
+      }
+      if (
+        path === "/api/console/4/groups/potencia/lease" &&
+        method === "POST"
+      ) {
+        return Response.json(leasePayload);
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Editar valores" }),
+    );
+    const cell = await screen.findByRole("spinbutton", {
+      name: "Demanda 2026-01-01T01:00:00-03:00",
+    });
+    await user.clear(cell);
+    await user.type(cell, "99.5");
+
+    expect(
+      screen.getByRole("button", { name: "Guardar valores" }),
+    ).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Revisar cambios" }));
+    const review = await screen.findByRole("dialog", {
+      name: "Revision de cambios",
+    });
+    expect(review).toHaveTextContent("Demanda");
+    expect(review).toHaveTextContent("2026-01-01T01:00:00-03:00");
+    expect(review).toHaveTextContent("11");
+    expect(review).toHaveTextContent("99.5");
+  });
+
+  it("virtualizes all 8760 full-horizon rows and can scroll to the last one", async () => {
+    window.history.replaceState({}, "", "/react/console/4");
+    const fullHorizonGroup = {
+      ...editableGroup,
+      granularities: ["full_horizon"],
+    };
+    const rows = Array.from({ length: 8760 }, (_, index) => ({
+      index,
+      timestamp: `period-${index}`,
+      values: { demanda: index },
+    }));
+    stubApi(operatorIdentity, (path, method) => {
+      if (path === "/api/console/4" && method === "GET") {
+        return Response.json({
+          ...consoleShellPayload(),
+          groups: [fullHorizonGroup],
+        });
+      }
+      if (path === "/api/console/4/runs" && method === "GET") {
+        return Response.json({ history: [] });
+      }
+      if (path.startsWith("/api/console/4/groups/potencia/values")) {
+        return Response.json(
+          {
+            group_values: {
+              group_id: "potencia",
+              granularity: "full_horizon",
+              range: {
+                start: "2026-01-01T00:00:00-03:00",
+                end: "2027-01-01T00:00:00-03:00",
+              },
+              columns: fullHorizonGroup.columns,
+              rows,
+            },
+          },
+          { headers: { ETag: '"token-full"' } },
+        );
+      }
+      return undefined;
+    });
+
+    render(<App />);
+
+    const table = await screen.findByRole("table", { name: "Potencia" });
+    const viewport = await screen.findByTestId(
+      "console-group-table-viewport-potencia",
+    );
+    expect(within(table).getAllByRole("row").length).toBeLessThan(200);
+    expect(
+      within(table).getByRole("rowheader", { name: "period-0" }),
+    ).toBeVisible();
+    expect(
+      within(table).queryByRole("rowheader", { name: "period-8759" }),
+    ).toBeNull();
+
+    fireEvent.scroll(viewport, { target: { scrollTop: 8760 * 42 } });
+
+    expect(
+      await within(table).findByRole("rowheader", { name: "period-8759" }),
+    ).toBeVisible();
   });
 
   it("names the cells a refused save rejected and keeps running disabled", async () => {

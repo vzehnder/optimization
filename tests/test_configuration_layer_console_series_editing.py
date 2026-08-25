@@ -18,6 +18,7 @@ from app.persistence import AnalystStore
 from app.time_series_catalog import (
     CatalogImportRequest,
     CatalogSignalMappingRequest,
+    CatalogValueEdit,
     prepare_time_series_catalog_import,
 )
 from tests.auth_test_helpers import (
@@ -605,6 +606,344 @@ def import_price_set(store, scenario_id):
     )
 
 
+class ConsoleMultiSetPersistenceTests(unittest.TestCase):
+    """One configured group may atomically span several operational copies."""
+
+    def setUp(self):
+        self.store = AnalystStore("sqlite:///:memory:")
+        self.project = self.store.create_project(name="Planta Norte")
+        self.scenario = self.store.create_scenario(
+            project_id=self.project["id"], name="Operacion diaria"
+        )
+        self.store.create_or_replace_scenario_draft(
+            scenario_id=self.scenario["id"], document=CONSOLE_DRAFT_DOCUMENT
+        )
+        self.case = self.store.get_or_create_case_for_scenario(self.scenario["id"])
+        self.source_variant = self.store.get_or_create_default_input_variant(
+            self.case["id"]
+        )
+        self.operator = self.store.create_user(
+            email="operator@example.local",
+            display_name="Olga Operadora",
+            role="external",
+            password_hash="test-hash",
+        )
+        self.demand_set = import_demand_set(self.store, self.scenario["id"])
+        self.price_set = import_price_set(self.store, self.scenario["id"])
+        for signal_key, entity_type, entity_id, time_series_set in (
+            ("load_demand_mw", "component:load", "load_1", self.demand_set),
+            ("price_usd_per_mwh", "grid", "grid_1", self.price_set),
+        ):
+            self.store.upsert_case_time_series_binding(
+                case_input_variant_id=self.source_variant["id"],
+                signal_key=signal_key,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                time_series_set_id=time_series_set["id"],
+            )
+        demand_column = CONSOLE_DOCUMENT["groups"][0]["columns"][0]
+        document = {
+            **CONSOLE_DOCUMENT,
+            "groups": [
+                {
+                    **CONSOLE_DOCUMENT["groups"][0],
+                    "granularities": ["day", "week", "month", "full_horizon"],
+                    "columns": [
+                        {
+                            **demand_column,
+                            "source_options": [
+                                {
+                                    "id": "base",
+                                    "label": "Demanda base",
+                                    "time_series_set_id": self.demand_set["id"],
+                                }
+                            ],
+                        },
+                        {
+                            "id": "precio",
+                            "signal": {
+                                "entity_type": "grid",
+                                "entity_id": "grid_1",
+                                "signal_key": "price_usd_per_mwh",
+                            },
+                            "label": "Precio",
+                            "editable": True,
+                            "source_options": [
+                                {
+                                    "id": "base",
+                                    "label": "Precio base",
+                                    "time_series_set_id": self.price_set["id"],
+                                }
+                            ],
+                            "default_source_option_id": "base",
+                        },
+                    ],
+                }
+            ],
+        }
+        self.console = self.store.create_operator_console(
+            case_id=self.case["id"],
+            source_variant_id=self.source_variant["id"],
+            document=document,
+            created_by_user_id=None,
+        )
+        self.range_start = self.demand_set["horizon"]["start"]
+        self.range_end = self.demand_set["horizon"]["end"]
+
+    def tearDown(self):
+        self.store.close()
+
+    def load(self):
+        return self.store.resolve_operator_console_group_values(
+            self.console["id"],
+            group_id="potencia",
+            range_start=self.range_start,
+            range_end=self.range_end,
+            granularity="full_horizon",
+        )
+
+    def test_every_configured_granularity_keeps_the_same_native_group_range(self):
+        for granularity in ("day", "week", "month", "full_horizon"):
+            with self.subTest(granularity=granularity):
+                loaded = self.store.resolve_operator_console_group_values(
+                    self.console["id"],
+                    group_id="potencia",
+                    range_start=self.range_start,
+                    range_end=self.range_end,
+                    granularity=granularity,
+                )
+                self.assertEqual(loaded["granularity"], granularity)
+                self.assertEqual(
+                    loaded["range"],
+                    {"start": self.range_start, "end": self.range_end},
+                )
+                self.assertEqual(len(loaded["rows"]), 4)
+
+    def test_one_save_creates_a_revision_and_new_hash_for_each_touched_copy(self):
+        self.store.validate_case_input_variant(
+            scenario_id=self.scenario["id"],
+            case_input_variant_id=self.console["owned_variant_id"],
+            range_start=self.range_start,
+            range_end=self.range_end,
+        )
+        loaded = self.load()
+        originals = {
+            time_series_set["id"]: self.store.get_time_series_set(
+                self.project["id"], time_series_set["id"]
+            )
+            for time_series_set in (self.demand_set, self.price_set)
+        }
+        lease = self.store.acquire_operator_console_group_lease(
+            self.console["id"], group_id="potencia", user_id=self.operator["id"]
+        )
+
+        saved = self.store.save_operator_console_group_values(
+            self.console["id"],
+            group_id="potencia",
+            range_start=self.range_start,
+            range_end=self.range_end,
+            granularity="full_horizon",
+            expected_token=loaded["token"],
+            lease_token=lease["token"],
+            cells=[
+                {"column_id": "demanda", "row_index": 1, "value": 101.5},
+                {"column_id": "precio", "row_index": 2, "value": 88.25},
+            ],
+            note="Ajuste conjunto",
+            actor_user_id=self.operator["id"],
+        )
+
+        self.assertEqual(saved["rows"][1]["values"]["demanda"], 101.5)
+        self.assertEqual(saved["rows"][2]["values"]["precio"], 88.25)
+        copies = self.store.list_operator_console_series_copies(self.console["id"])
+        self.assertEqual(
+            {copy["origin_set_id"] for copy in copies},
+            {self.demand_set["id"], self.price_set["id"]},
+        )
+        for copy in copies:
+            copied_set = self.store.get_time_series_set(
+                self.project["id"], copy["time_series_set_id"]
+            )
+            self.assertEqual(copied_set["revision_number"], 2)
+            self.assertNotEqual(
+                copied_set["content_hash"], originals[copy["origin_set_id"]]["content_hash"]
+            )
+        for set_id, before in originals.items():
+            self.assertEqual(
+                self.store.get_time_series_set(self.project["id"], set_id), before
+            )
+        dependencies = {
+            (dependency["dependency_type"], dependency["dependency_id"]): dependency[
+                "hash"
+            ]
+            for dependency in self.store.get_case_input_variant_validation_dependencies(
+                self.console["owned_variant_id"]
+            )
+        }
+        for copy in copies:
+            copied_set = self.store.get_time_series_set(
+                self.project["id"], copy["time_series_set_id"]
+            )
+            self.assertEqual(
+                dependencies[("time_series_set", str(copy["time_series_set_id"]))],
+                copied_set["content_hash"],
+            )
+
+    def test_one_invalid_cell_leaves_both_existing_copies_and_dependencies_unchanged(self):
+        self.store.validate_case_input_variant(
+            scenario_id=self.scenario["id"],
+            case_input_variant_id=self.console["owned_variant_id"],
+            range_start=self.range_start,
+            range_end=self.range_end,
+        )
+        loaded = self.load()
+        lease = self.store.acquire_operator_console_group_lease(
+            self.console["id"], group_id="potencia", user_id=self.operator["id"]
+        )
+        self.store.save_operator_console_group_values(
+            self.console["id"],
+            group_id="potencia",
+            range_start=self.range_start,
+            range_end=self.range_end,
+            granularity="full_horizon",
+            expected_token=loaded["token"],
+            lease_token=lease["token"],
+            cells=[
+                {"column_id": "demanda", "row_index": 0, "value": 20.0},
+                {"column_id": "precio", "row_index": 0, "value": 60.0},
+            ],
+            actor_user_id=self.operator["id"],
+        )
+        copies = self.store.list_operator_console_series_copies(self.console["id"])
+        before_sets = {
+            copy["time_series_set_id"]: self.store.get_time_series_set(
+                self.project["id"], copy["time_series_set_id"]
+            )
+            for copy in copies
+        }
+        before_dependencies = self.store.get_case_input_variant_validation_dependencies(
+            self.console["owned_variant_id"]
+        )
+
+        with self.assertRaises(ConsoleSeriesError) as raised:
+            self.store.save_operator_console_group_values(
+                self.console["id"],
+                group_id="potencia",
+                range_start=self.range_start,
+                range_end=self.range_end,
+                granularity="full_horizon",
+                expected_token=self.load()["token"],
+                lease_token=lease["token"],
+                cells=[
+                    {"column_id": "demanda", "row_index": 1, "value": 21.0},
+                    {"column_id": "precio", "row_index": 1, "value": float("nan")},
+                ],
+                actor_user_id=self.operator["id"],
+            )
+
+        self.assertEqual(raised.exception.cells[0]["column_id"], "precio")
+        self.assertEqual(
+            self.store.list_operator_console_series_copies(self.console["id"]), copies
+        )
+        self.assertEqual(
+            {
+                copy["time_series_set_id"]: self.store.get_time_series_set(
+                    self.project["id"], copy["time_series_set_id"]
+                )
+                for copy in copies
+            },
+            before_sets,
+        )
+        self.assertEqual(
+            self.store.get_case_input_variant_validation_dependencies(
+                self.console["owned_variant_id"]
+            ),
+            before_dependencies,
+        )
+
+    def test_a_conflict_in_one_copy_leaves_the_other_copy_and_all_revisions_unchanged(self):
+        loaded = self.load()
+        lease = self.store.acquire_operator_console_group_lease(
+            self.console["id"], group_id="potencia", user_id=self.operator["id"]
+        )
+        self.store.save_operator_console_group_values(
+            self.console["id"],
+            group_id="potencia",
+            range_start=self.range_start,
+            range_end=self.range_end,
+            granularity="full_horizon",
+            expected_token=loaded["token"],
+            lease_token=lease["token"],
+            cells=[
+                {"column_id": "demanda", "row_index": 0, "value": 20.0},
+                {"column_id": "precio", "row_index": 0, "value": 60.0},
+            ],
+            actor_user_id=self.operator["id"],
+        )
+        stale_token = self.load()["token"]
+        copies = self.store.list_operator_console_series_copies(self.console["id"])
+        price_copy = next(
+            copy
+            for copy in copies
+            if copy["origin_set_id"] == self.price_set["id"]
+        )
+        self.store.edit_time_series_set_values(
+            project_id=self.project["id"],
+            time_series_set_id=price_copy["time_series_set_id"],
+            edits=[
+                CatalogValueEdit(
+                    period_index=2,
+                    signal_key="price_usd_per_mwh",
+                    value_text="77.0",
+                )
+            ],
+            created_by="engineer@example.local",
+        )
+        before_sets = {
+            copy["time_series_set_id"]: self.store.get_time_series_set(
+                self.project["id"], copy["time_series_set_id"]
+            )
+            for copy in copies
+        }
+        before_dependencies = self.store.get_case_input_variant_validation_dependencies(
+            self.console["owned_variant_id"]
+        )
+
+        with self.assertRaises(ConsoleSeriesError) as raised:
+            self.store.save_operator_console_group_values(
+                self.console["id"],
+                group_id="potencia",
+                range_start=self.range_start,
+                range_end=self.range_end,
+                granularity="full_horizon",
+                expected_token=stale_token,
+                lease_token=lease["token"],
+                cells=[
+                    {"column_id": "demanda", "row_index": 1, "value": 21.0},
+                    {"column_id": "precio", "row_index": 1, "value": 61.0},
+                ],
+                actor_user_id=self.operator["id"],
+            )
+
+        self.assertEqual(raised.exception.status_code, 412)
+        self.assertEqual(raised.exception.total_cells, 2)
+        self.assertEqual(
+            {
+                copy["time_series_set_id"]: self.store.get_time_series_set(
+                    self.project["id"], copy["time_series_set_id"]
+                )
+                for copy in copies
+            },
+            before_sets,
+        )
+        self.assertEqual(
+            self.store.get_case_input_variant_validation_dependencies(
+                self.console["owned_variant_id"]
+            ),
+            before_dependencies,
+        )
+
+
 class ConsoleSeriesEditingRunTests(unittest.TestCase):
     """An edited copy is what the next run consumes; canonical data is not."""
 
@@ -1029,6 +1368,49 @@ class ConsoleSeriesEditingApiTests(unittest.TestCase):
             [10.0, 99.5, 12.0, 13.0],
         )
 
+    def test_a_stale_block_reports_every_submitted_cell_in_external_coordinates(self):
+        loaded = self.load_values()
+        lease_token = self.take_lease()
+        first = self.put_values(
+            [{"column_id": "demanda", "row_index": 0, "value": 20.0}],
+            etag=loaded.headers["etag"],
+            lease_token=lease_token,
+        )
+        self.assertEqual(first.status_code, 200, first.text)
+
+        stale = self.put_values(
+            [
+                {"column_id": "demanda", "row_index": 1, "value": 21.0},
+                {"column_id": "demanda", "row_index": 2, "value": 22.0},
+            ],
+            etag=loaded.headers["etag"],
+            lease_token=lease_token,
+        )
+
+        self.assertEqual(stale.status_code, 412, stale.text)
+        self.assertEqual(
+            stale.json()["save_error"],
+            {
+                "message": "los datos cambiaron mientras editabas; vuelve a cargar el tramo",
+                "cells": [
+                    {
+                        "group_id": "potencia",
+                        "column_id": "demanda",
+                        "row_index": 1,
+                        "message": "los datos cambiaron mientras editabas",
+                    },
+                    {
+                        "group_id": "potencia",
+                        "column_id": "demanda",
+                        "row_index": 2,
+                        "message": "los datos cambiaron mientras editabas",
+                    },
+                ],
+                "total_cells": 2,
+                "shown_cells": 2,
+            },
+        )
+
     def test_a_rejected_block_names_its_cells_in_external_coordinates(self):
         loaded = self.load_values()
         lease_token = self.take_lease()
@@ -1054,6 +1436,35 @@ class ConsoleSeriesEditingApiTests(unittest.TestCase):
         self.assertEqual(
             [row["values"]["demanda"] for row in self.load_values().json()["group_values"]["rows"]],
             [10.0, 11.0, 12.0, 13.0],
+        )
+
+    def test_an_uncovered_save_range_reports_the_submitted_cell_and_writes_nothing(self):
+        loaded = self.load_values()
+        lease_token = self.take_lease()
+
+        response = self.put_values(
+            [{"column_id": "demanda", "row_index": 0, "value": 21.0}],
+            etag=loaded.headers["etag"],
+            lease_token=lease_token,
+            range_end="2026-01-02T00:00:00-03:00",
+        )
+
+        self.assertEqual(response.status_code, 400, response.text)
+        save_error = response.json()["save_error"]
+        self.assertEqual(save_error["total_cells"], 1)
+        self.assertEqual(
+            save_error["cells"],
+            [
+                {
+                    "group_id": "potencia",
+                    "column_id": "demanda",
+                    "row_index": 0,
+                    "message": "el tramo elegido no tiene cobertura completa",
+                }
+            ],
+        )
+        self.assertEqual(
+            self.store.list_operator_console_series_copies(self.console["id"]), []
         )
 
     def test_a_second_operator_is_locked_out_and_sees_who_is_editing(self):
