@@ -34,6 +34,7 @@ import {
   type GeneratedSystemCaseSnapshot,
   type Project,
   type Scenario,
+  type BlockedConsoleWarning,
   type ScenarioDraft,
   type ScenarioDraftDocument,
   type TimeSeriesMapping,
@@ -2465,6 +2466,9 @@ function DraftEditor({
     {},
   );
   const [saveError, setSaveError] = useState("");
+  const [blockedConsoles, setBlockedConsoles] = useState<
+    BlockedConsoleWarning[]
+  >([]);
   const [generatedValidationStale, setGeneratedValidationStale] =
     useState(false);
   const [pendingRemovalId, setPendingRemovalId] = useState<string | null>(null);
@@ -2527,6 +2531,7 @@ function DraftEditor({
     }) => updateScenarioDraft(scenario.id, variables.candidate),
     onSuccess: (savedDraft, variables) => {
       setSaveError("");
+      setBlockedConsoles(savedDraft.affected_consoles ?? []);
       queryClient.setQueryData(draftQueryKey(scenario.id), savedDraft);
       const savedTexts = jsonTextsFromDocument(savedDraft.document);
       const savedSignature = editorSignature(savedDraft.document, savedTexts);
@@ -2747,6 +2752,13 @@ function DraftEditor({
           </button>
         </div>
         {saveError ? <p role="alert">{saveError}</p> : null}
+        {/* Informative only: the save already went through. */}
+        {blockedConsoles.length ? (
+          <p role="status" className="source-note">
+            Consolas activas bloqueadas por este cambio:{" "}
+            {blockedConsoles.map((entry) => entry.name).join(", ")}.
+          </p>
+        ) : null}
         {Object.keys(validationErrors).length ? (
           <div
             className="validation-summary"

@@ -3403,6 +3403,44 @@
         "summary": "Replace Console Parameters"
       }
     },
+    "/api/console/{console_id}/request-review": {
+      "post": {
+        "description": "Mark that the operator is waiting on the preparer, and nothing else.\n\nNo inbox, mail, push, escalation or expiry follows: the engineer reads\n`waiting_since` on the console list they already open.",
+        "operationId": "request_console_review_api_console__console_id__request_review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "console_id",
+            "required": true,
+            "schema": {
+              "title": "Console Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Request Console Review"
+      }
+    },
     "/api/console/{console_id}/runs": {
       "get": {
         "operationId": "list_console_runs_api_console__console_id__runs_get",

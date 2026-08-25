@@ -75,7 +75,10 @@ from app.console_series import (
     range_hours,
     validate_console_granularity,
 )
-from app.operator_console import StaleOperatorConsoleError
+from app.operator_console import (
+    OperatorConsoleConfigurationError,
+    StaleOperatorConsoleError,
+)
 from app.portal_configuration import (
     StalePortalConfigurationError,
     default_portal_config_document,
@@ -7899,6 +7902,126 @@ class AnalystStore:
                 }
             )
         return {"groups": groups, "unavailable_ids": unavailable_ids}
+
+    def describe_operator_console_block(
+        self, console_id: int, *, viewer_user_id: int | None = None
+    ) -> dict[str, Any]:
+        """Everything that keeps this console from running, in internal terms.
+
+        This is the only place the three fail-closed conditions are decided.
+        The raw staleness reasons come back with it for the internal surfaces;
+        translating them into the operator's vocabulary happens at the
+        boundary, and the raw detail never follows.
+        """
+
+        console = self.get_operator_console(console_id)
+        location = self.get_operator_console_location(console_id)
+        reasons: list[dict[str, Any]] = []
+        try:
+            staleness = self.evaluate_case_input_variant_staleness(
+                scenario_id=int(location["scenario_id"]),
+                case_input_variant_id=int(console["owned_variant_id"]),
+            )
+        except (KeyError, DraftGenerationError):
+            staleness = {"stale": False, "reasons": []}
+        if staleness["stale"]:
+            reasons = list(staleness["reasons"])
+        return {
+            "editing_locked_by": self._operator_console_editing_holder(
+                console, viewer_user_id
+            ),
+            "unavailable_parameter": bool(
+                self.resolve_operator_console_parameters(console_id)["unavailable_ids"]
+            ),
+            "unavailable_series": bool(
+                self.resolve_operator_console_group_metadata(console_id)[
+                    "unavailable_ids"
+                ]
+            ),
+            "moved_dependency": bool(reasons),
+            "reasons": reasons,
+        }
+
+    def list_blocked_active_operator_consoles(
+        self, scenario_id: int
+    ) -> list[dict[str, Any]]:
+        """Active consoles of this scenario that cannot run right now.
+
+        An analyst reads this straight after saving a case change, as a
+        warning: it never cancels the save and never touches the consoles.
+        """
+
+        # A warning path reads; it never creates the case it looks under.
+        case_row = self.connection.execute(
+            "SELECT id FROM optimization_cases WHERE scenario_id = ?",
+            (scenario_id,),
+        ).fetchone()
+        if case_row is None:
+            return []
+        blocked: list[dict[str, Any]] = []
+        for console in self.list_operator_consoles(int(case_row["id"])):
+            if console["status"] != "active":
+                continue
+            block = self.describe_operator_console_block(int(console["id"]))
+            reason = None
+            if block["unavailable_parameter"] or block["unavailable_series"]:
+                reason = "campo_no_disponible"
+            elif block["moved_dependency"]:
+                reason = "dependencia_movida"
+            if reason is None:
+                continue
+            identity = console["document"].get("public_identity") or {}
+            blocked.append(
+                {
+                    "id": int(console["id"]),
+                    "name": str(identity.get("name") or ""),
+                    "reason": reason,
+                }
+            )
+        return blocked
+
+    def request_operator_console_review(self, console_id: int) -> dict[str, Any]:
+        """Record that an operator is waiting on the preparer, and only that.
+
+        There is no inbox, mail, push, escalation or expiry behind this: the
+        engineer sees `waiting_since` on the console list they already read.
+        """
+
+        block = self.describe_operator_console_block(console_id)
+        if not (block["unavailable_parameter"] or block["unavailable_series"] or block["moved_dependency"]):
+            raise OperatorConsoleConfigurationError(
+                "operator console is not blocked", status_code=409
+            )
+        with self._lock:
+            self.connection.execute(
+                """
+                UPDATE operator_consoles
+                SET waiting_since = ?
+                WHERE id = ? AND waiting_since IS NULL
+                """,
+                (utc_now_iso(), console_id),
+            )
+            self.connection.commit()
+        return self.get_operator_console(console_id)
+
+    def _operator_console_editing_holder(
+        self, console: Mapping[str, Any], viewer_user_id: int | None
+    ) -> str | None:
+        """The public name of whoever else holds an edit lock on any group."""
+
+        for group in console["document"].get("groups") or []:
+            lease = self.describe_operator_console_group_lease(
+                int(console["id"]), group_id=str(group["id"])
+            )
+            holder_user_id = lease["holder_user_id"]
+            if holder_user_id is None:
+                continue
+            if viewer_user_id is not None and int(holder_user_id) == int(
+                viewer_user_id
+            ):
+                continue
+            return lease["holder_name"]
+        return None
 
     def resolve_operator_console_group_values(
         self,

@@ -452,6 +452,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/console/{console_id}/request-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Console Review
+         * @description Mark that the operator is waiting on the preparer, and nothing else.
+         *
+         *     No inbox, mail, push, escalation or expiry follows: the engineer reads
+         *     `waiting_since` on the console list they already open.
+         */
+        post: operations["request_console_review_api_console__console_id__request_review_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/console/{console_id}/runs": {
         parameters: {
             query?: never;
@@ -3367,6 +3390,37 @@ export interface operations {
                 "application/json": components["schemas"]["ConsoleParametersWriteRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_console_review_api_console__console_id__request_review_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                console_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

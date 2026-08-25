@@ -524,6 +524,7 @@ export interface ConsoleRunGate {
   message: string;
   contact: string | null;
   editing_locked_by: string | null;
+  review_requested_at?: string | null;
 }
 
 export interface ConsoleGroupColumn {
@@ -1097,6 +1098,12 @@ export interface ScenarioDraftDocument {
   [key: string]: unknown;
 }
 
+export interface BlockedConsoleWarning {
+  id: number;
+  name: string;
+  reason: string;
+}
+
 export interface ScenarioDraft {
   id: number;
   scenario_id: number;
@@ -1106,6 +1113,9 @@ export interface ScenarioDraft {
   updated_at: string;
   created_by?: string;
   updated_by?: string;
+  // Present on a save: the active consoles the change left unable to run.
+  // Informative only — the save already succeeded.
+  affected_consoles?: BlockedConsoleWarning[];
 }
 
 export interface ScenarioDraftWritePayload {
@@ -2265,6 +2275,15 @@ export async function saveConsoleSeriesSelections(
     `/api/console/${consoleId}/series-selections`,
     { selections },
   );
+}
+
+export async function requestConsoleReview(
+  consoleId: number,
+): Promise<ConsoleRunGate> {
+  const response = await postJsonWithCsrf<{ run_gate: ConsoleRunGate }>(
+    `/api/console/${consoleId}/request-review`,
+  );
+  return response.run_gate;
 }
 
 export async function saveConsoleParameters(

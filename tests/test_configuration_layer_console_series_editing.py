@@ -1750,6 +1750,7 @@ class ConsoleSeriesEditingApiTests(unittest.TestCase):
                 "message": "Olga Operadora esta editando este grupo.",
                 "contact": None,
                 "editing_locked_by": "Olga Operadora",
+                "review_requested_at": None,
             },
         )
 

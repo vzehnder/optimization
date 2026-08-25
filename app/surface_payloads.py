@@ -115,6 +115,9 @@ def build_console_payload(
             "message": str((run_gate or {}).get("message") or ""),
             "contact": (run_gate or {}).get("contact"),
             "editing_locked_by": (run_gate or {}).get("editing_locked_by"),
+            # Whether a review was already asked for; the raw staleness detail
+            # behind the block stays on the internal surfaces.
+            "review_requested_at": (run_gate or {}).get("review_requested_at"),
         },
         "groups": [
             {

@@ -1493,5 +1493,63 @@ describe("the operator console shell", () => {
     expect(screen.queryByRole("button", { name: "Editar valores" })).toBeNull();
     expect(screen.queryByRole("spinbutton")).toBeNull();
     expect(screen.getByRole("button", { name: "Ejecutar" })).toBeDisabled();
+    expect(
+      screen.queryByRole("button", { name: "Solicitar revision" }),
+    ).toBeNull();
+  });
+
+  it("requests engineering review on a blocked console and shows the wait", async () => {
+    window.history.replaceState({}, "", "/react/console/4");
+    let reviewRequests = 0;
+    const blockedGate = {
+      can_run: false,
+      reason: "dependencia_movida",
+      message: "Los datos base cambiaron; solicita revision de ingenieria.",
+      contact: "Ada Analyst",
+      editing_locked_by: null,
+      review_requested_at: null as string | null,
+    };
+    stubApi(operatorIdentity, (path, method) => {
+      if (path === "/api/console/4" && method === "GET") {
+        return Response.json({
+          ...consoleShellPayload(),
+          run_gate: blockedGate,
+        });
+      }
+      if (path === "/api/console/4/request-review" && method === "POST") {
+        reviewRequests += 1;
+        blockedGate.review_requested_at = "2026-08-25T12:00:00Z";
+        return Response.json({ run_gate: { ...blockedGate } });
+      }
+      if (path === "/api/console/4/runs" && method === "GET") {
+        return Response.json({ history: [] });
+      }
+      if (path.startsWith("/api/console/4/groups/potencia/values")) {
+        return Response.json(groupValuesPayload([10, 11, 12, 13]), {
+          headers: { ETag: '"token-1"' },
+        });
+      }
+      return undefined;
+    });
+
+    render(<App />);
+
+    expect(
+      await screen.findByText(
+        "Los datos base cambiaron; solicita revision de ingenieria. Contacta a Ada Analyst.",
+      ),
+    ).toBeVisible();
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Solicitar revision" }),
+    );
+
+    expect(reviewRequests).toBe(1);
+    expect(
+      await screen.findByText("Revision solicitada 2026-08-25T12:00:00Z"),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Solicitar revision" }),
+    ).toBeNull();
+    expect(screen.getByRole("button", { name: "Ejecutar" })).toBeDisabled();
   });
 });

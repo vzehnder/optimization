@@ -5687,6 +5687,111 @@ describe("application shell", () => {
     expect(screen.getByText("Cambios sin guardar")).toBeVisible();
   });
 
+  it("warns which active consoles a saved case change blocked without cancelling the save", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10/draft");
+    const scenario = {
+      id: 10,
+      project_id: 1,
+      name: "Base case",
+      description: "Console branch",
+      created_at: "2026-08-25T12:05:00Z",
+    };
+    const project = {
+      id: 1,
+      name: "Hybrid PMGD",
+      description: "Analyst workspace",
+      created_at: "2026-08-25T12:00:00Z",
+    };
+    const draft = {
+      id: 3,
+      scenario_id: 10,
+      source_version_id: null,
+      created_at: "2026-08-25T12:10:00Z",
+      updated_at: "2026-08-25T12:10:00Z",
+      document: {
+        schema_version: "bess_editor_draft.v1",
+        case: { name: "Base case" },
+        source: null,
+        pcc: { id: "bus_1", type: "bus" },
+        grid: {
+          id: "grid_1",
+          import_power_max_mw: null,
+          export_power_max_mw: null,
+          prevent_simultaneous_grid_import_export: true,
+        },
+        assets: [],
+        time_series: { sources: [] },
+        solver: { name: "HiGHS", options: {} },
+      },
+    };
+    let savedName = "";
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method || "GET";
+        if (path === "/api/auth/me") {
+          return Response.json({
+            user: {
+              id: 7,
+              email: "ada@example.local",
+              display_name: "Ada Analyst",
+              role: "analyst",
+              is_active: true,
+            },
+            bootstrap_required: false,
+          });
+        }
+        if (path === "/api/auth/csrf") {
+          return Response.json({ csrf_token: "csrf-token" });
+        }
+        if (path === "/api/scenarios/10") return Response.json({ scenario });
+        if (path === "/api/projects/1") return Response.json({ project });
+        if (path === "/api/scenarios/10/draft" && method === "GET") {
+          return Response.json({ draft });
+        }
+        if (path === "/api/scenarios/10/draft" && method === "PUT") {
+          const document = JSON.parse(String(init?.body)).document;
+          savedName = document.case.name;
+          return Response.json({
+            ...draft,
+            updated_at: "2026-08-25T12:11:00Z",
+            document,
+            affected_consoles: [
+              {
+                id: 4,
+                name: "Plan diario Planta Norte",
+                reason: "dependencia_movida",
+              },
+            ],
+          });
+        }
+        return Response.json(
+          { detail: `unhandled ${method} ${path}` },
+          { status: 500 },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Draft estructurado" }),
+    ).toBeVisible();
+    await user.clear(screen.getByLabelText("Nombre del caso"));
+    await user.type(screen.getByLabelText("Nombre del caso"), "Nuevo caso");
+    await user.click(screen.getByRole("button", { name: "Guardar draft" }));
+
+    expect(await screen.findByText("Guardado")).toBeVisible();
+    expect(savedName).toBe("Nuevo caso");
+    expect(
+      await screen.findByText(
+        "Consolas activas bloqueadas por este cambio: Plan diario Planta Norte.",
+      ),
+    ).toBeVisible();
+  });
+
   it("imports an uploaded CSV source into the TS-2 catalog with multiple mapped signals and shows the created set confirmation", async () => {
     window.history.replaceState({}, "", "/react/scenarios/10/draft");
     const scenario = {

@@ -103,7 +103,15 @@ def operator_draft_document():
     }
 
 
-def console_document_with_scalar_parameter():
+def console_document_with_scalar_parameter(*, groups=None):
+    """A console whose only configured surface is one resolvable scalar.
+
+    `groups` defaults to the normative group, whose named source points at a
+    set these tests never import: that is a legitimate `campo_no_disponible`.
+    Tests about parameters and periods pass `groups=[]` so the only thing they
+    can trip over is the behaviour they are about.
+    """
+
     return {
         **NORMATIVE_DOCUMENT,
         "parameters": [
@@ -115,6 +123,7 @@ def console_document_with_scalar_parameter():
                 },
             }
         ],
+        "groups": NORMATIVE_DOCUMENT["groups"] if groups is None else groups,
     }
 
 
@@ -633,7 +642,9 @@ class InternalOperatorConsoleApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         listed = response.json()["operator_consoles"]
         self.assertEqual([entry["id"] for entry in listed], [console["id"]])
-        self.assertEqual(listed[0]["blocking"]["reason"], None)
+        # The normative document names a source this scenario never imported,
+        # so the internal row reports the block an engineer has to correct.
+        self.assertEqual(listed[0]["blocking"]["reason"], "campo_no_disponible")
 
     def test_an_analyst_activates_a_console_in_place(self):
         console = self.create_console()
@@ -1071,6 +1082,7 @@ class OperatorConsoleShellTests(unittest.TestCase):
                 "message": "Un parametro configurado ya no esta disponible.",
                 "contact": "Ana Analista",
                 "editing_locked_by": None,
+                "review_requested_at": None,
             },
         )
 
@@ -1117,7 +1129,7 @@ class OperatorConsoleShellTests(unittest.TestCase):
             signal_key="import_price_usd_per_mwh",
             time_series_set_id=price_set["id"],
         )
-        document = console_document_with_scalar_parameter()
+        document = console_document_with_scalar_parameter(groups=[])
         console = self.store.create_operator_console(
             case_id=self.case["id"],
             source_variant_id=self.variant["id"],
@@ -1198,7 +1210,7 @@ class OperatorConsoleShellTests(unittest.TestCase):
             signal_key="import_price_usd_per_mwh",
             time_series_set_id=price_set["id"],
         )
-        document = console_document_with_scalar_parameter()
+        document = console_document_with_scalar_parameter(groups=[])
         console = self.store.create_operator_console(
             case_id=self.case["id"],
             source_variant_id=self.variant["id"],

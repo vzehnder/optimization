@@ -25,6 +25,7 @@ import {
   listConsoleRuns,
   listOperatorConsoles,
   releaseConsoleGroupLease,
+  requestConsoleReview,
   saveConsoleGroupValues,
   saveOperatorConsole,
   saveConsoleParameters,
@@ -1408,6 +1409,17 @@ export function ConsoleShellView() {
     },
     onError: (error) => setActionError(errorMessage(error)),
   });
+  const requestReview = useMutation({
+    mutationFn: () => requestConsoleReview(consoleId || 0),
+    onSuccess: (gate) => {
+      setActionError("");
+      queryClient.setQueryData(
+        consoleShellQueryKey(consoleId || 0),
+        shell.data ? { ...shell.data, run_gate: gate } : shell.data,
+      );
+    },
+    onError: (error) => setActionError(errorMessage(error)),
+  });
   const enqueueRun = useMutation({
     mutationFn: () =>
       createConsoleRun(consoleId || 0, {
@@ -1481,6 +1493,9 @@ export function ConsoleShellView() {
       parameterValues[parameter.id] !== undefined &&
       Number(parameterValues[parameter.id]) !== parameter.value,
   );
+  const reviewableBlock =
+    runGate?.reason === "dependencia_movida" ||
+    runGate?.reason === "campo_no_disponible";
   // Editing and running stay two operations: a dirty cell or a save in flight
   // closes the run gate until the values are committed.
   const seriesDirty = Object.values(dirtyGroups).some(Boolean);
@@ -1534,6 +1549,24 @@ export function ConsoleShellView() {
             {runGate.message}
             {runGate.contact ? ` Contacta a ${runGate.contact}.` : ""}
           </p>
+        ) : null}
+        {/* Only an engineering block is worth a review request: another
+            operator's edit lock clears on its own. */}
+        {reviewableBlock ? (
+          runGate?.review_requested_at ? (
+            <p className="source-note">
+              Revision solicitada {runGate.review_requested_at}
+            </p>
+          ) : (
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={requestReview.isPending}
+              onClick={() => requestReview.mutate()}
+            >
+              Solicitar revision
+            </button>
+          )
         ) : null}
         {period ? (
           <div className="console-period-fields">

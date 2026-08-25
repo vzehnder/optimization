@@ -57,6 +57,7 @@ from app.results import ResultReadError, apply_dashboard_template, read_run_resu
 from app.console_series import ConsoleSeriesError
 from app.operator_console import (
     OperatorConsoleConfigurationError,
+    build_console_run_gate,
     validate_operator_console_config_document,
     validate_operator_console_status,
 )
@@ -1837,6 +1838,19 @@ def create_app(
         )
         return scenario_version
 
+    def blocked_console_warning(scenario_id: int) -> dict[str, Any]:
+        """The active consoles a just-saved case change left unable to run.
+
+        Purely informative and computed after the write: an engineer learns
+        who they broke without the save being refused on their behalf.
+        """
+
+        return {
+            "affected_consoles": analyst_store.list_blocked_active_operator_consoles(
+                scenario_id
+            )
+        }
+
     @app.post("/api/scenarios/{scenario_id}/draft", status_code=201)
     async def create_scenario_draft(scenario_id: int, payload: ScenarioDraftWriteRequest):
         try:
@@ -1854,7 +1868,7 @@ def create_app(
             )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        return draft
+        return {**draft, **blocked_console_warning(scenario_id)}
 
     @app.get("/api/scenarios/{scenario_id}/draft")
     async def get_scenario_draft(scenario_id: int):
@@ -2542,7 +2556,7 @@ def create_app(
             )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        return draft
+        return {**draft, **blocked_console_warning(scenario_id)}
 
     def build_case_input_variant_detail(scenario_id: int, variant: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -2716,23 +2730,40 @@ def create_app(
         run = create_and_enqueue_run(scenario_version["id"])
         return run
 
-    def operator_console_blocking(scenario_id: int, console: dict[str, Any]) -> dict[str, Any]:
-        """Translate the console's own variant state into a fail-closed reason.
+    def operator_console_blocking(console_id: int) -> dict[str, Any]:
+        """The internal view of a block: public reason plus its raw detail.
 
         Structural validation of the document never resolves pointers, so a
-        dependency that moved under the console shows up here instead.
+        dependency that moved under the console shows up here instead. The raw
+        reasons stay on this internal surface and never reach the operator.
         """
 
-        try:
-            staleness = analyst_store.evaluate_case_input_variant_staleness(
-                scenario_id=scenario_id,
-                case_input_variant_id=int(console["owned_variant_id"]),
-            )
-        except (KeyError, DraftGenerationError):
-            return {"reason": None, "reasons": []}
-        if not staleness["stale"]:
-            return {"reason": None, "reasons": []}
-        return {"reason": "dependencia_movida", "reasons": staleness["reasons"]}
+        block = analyst_store.describe_operator_console_block(console_id)
+        gate = build_console_run_gate(
+            unavailable_parameter=block["unavailable_parameter"],
+            unavailable_series=block["unavailable_series"],
+            moved_dependency=block["moved_dependency"],
+        )
+        return {"reason": gate["reason"], "reasons": block["reasons"]}
+
+    def console_run_gate(
+        console: Mapping[str, Any],
+        *,
+        viewer_user_id: int | None = None,
+    ) -> dict[str, Any]:
+        """The one gate every console surface answers with."""
+
+        block = analyst_store.describe_operator_console_block(
+            int(console["id"]), viewer_user_id=viewer_user_id
+        )
+        return build_console_run_gate(
+            editing_locked_by=block["editing_locked_by"],
+            unavailable_parameter=block["unavailable_parameter"],
+            unavailable_series=block["unavailable_series"],
+            moved_dependency=block["moved_dependency"],
+            contact=console_preparer_name(console["prepared_by_user_id"]),
+            review_requested_at=console["waiting_since"],
+        )
 
     def operator_console_detail(scenario_id: int, console: dict[str, Any]) -> dict[str, Any]:
         owned_variant = analyst_store.get_case_input_variant(int(console["owned_variant_id"]))
@@ -2753,7 +2784,7 @@ def create_app(
             "updated_at": console["updated_at"],
             "updated_by": portal_configuration_editor_email(console["updated_by_user_id"]),
             "waiting_since": console["waiting_since"],
-            "blocking": operator_console_blocking(scenario_id, console),
+            "blocking": operator_console_blocking(int(console["id"])),
         }
 
     def get_console_for_scenario(scenario_id: int, console_id: int) -> dict[str, Any]:
@@ -2883,74 +2914,18 @@ def create_app(
             ]
         }
 
-    def console_editing_lock(
-        console: Mapping[str, Any], viewer_user_id: int | None
-    ) -> dict[str, Any] | None:
-        """Whether someone else currently holds the edit lock on any group."""
-
-        for group in console["document"].get("groups") or []:
-            lease = analyst_store.describe_operator_console_group_lease(
-                int(console["id"]), group_id=str(group["id"])
-            )
-            holder_user_id = lease["holder_user_id"]
-            if holder_user_id is None:
-                continue
-            if viewer_user_id is not None and int(holder_user_id) == int(viewer_user_id):
-                continue
-            return lease
-        return None
-
     @app.get("/api/console/{console_id}")
     async def get_console_shell(console_id: int, request: Request):
         resolved = operator_console_for_viewer(request, console_id)
         resolved_parameters = analyst_store.resolve_operator_console_parameters(console_id)
         resolved_period = analyst_store.resolve_operator_console_period(console_id)
-        blocking = operator_console_blocking(
-            int(resolved["location"]["scenario_id"]), resolved["console"]
-        )
         contact = console_preparer_name(resolved["console"]["prepared_by_user_id"])
-        editing_lock = console_editing_lock(
-            resolved["console"], current_user_id(request)
-        )
         resolved_groups = analyst_store.resolve_operator_console_group_metadata(
             console_id
         )
-        if editing_lock is not None:
-            run_gate = {
-                "can_run": False,
-                "reason": "edicion_de_otro_usuario",
-                "message": f"{editing_lock['holder_name']} esta editando este grupo.",
-                "contact": None,
-                "editing_locked_by": editing_lock["holder_name"],
-            }
-        elif resolved_parameters["unavailable_ids"] or resolved_groups["unavailable_ids"]:
-            run_gate = {
-                "can_run": False,
-                "reason": "campo_no_disponible",
-                "message": (
-                    "Un parametro configurado ya no esta disponible."
-                    if resolved_parameters["unavailable_ids"]
-                    else "Una serie configurada ya no esta disponible."
-                ),
-                "contact": contact,
-                "editing_locked_by": None,
-            }
-        elif blocking["reason"] is not None:
-            run_gate = {
-                "can_run": False,
-                "reason": "dependencia_movida",
-                "message": "Los datos base cambiaron; solicita revision de ingenieria.",
-                "contact": contact,
-                "editing_locked_by": None,
-            }
-        else:
-            run_gate = {
-                "can_run": True,
-                "reason": None,
-                "message": "",
-                "contact": None,
-                "editing_locked_by": None,
-            }
+        run_gate = console_run_gate(
+            resolved["console"], viewer_user_id=current_user_id(request)
+        )
         payload = build_console_payload(
             console=resolved["console"],
             prepared_by=contact,
@@ -2969,6 +2944,32 @@ def create_app(
                 "tester": current_user_email(request),
             }
         return payload
+
+    @app.post("/api/console/{console_id}/request-review")
+    async def request_console_review(console_id: int, request: Request):
+        """Mark that the operator is waiting on the preparer, and nothing else.
+
+        No inbox, mail, push, escalation or expiry follows: the engineer reads
+        `waiting_since` on the console list they already open.
+        """
+
+        resolved = operator_console_for_viewer(request, console_id)
+        try:
+            console = analyst_store.request_operator_console_review(console_id)
+        except OperatorConsoleConfigurationError:
+            return JSONResponse(
+                {
+                    "run_gate": console_run_gate(
+                        resolved["console"], viewer_user_id=current_user_id(request)
+                    )
+                },
+                status_code=409,
+            )
+        return {
+            "run_gate": console_run_gate(
+                console, viewer_user_id=current_user_id(request)
+            )
+        }
 
     @app.get("/api/console/{console_id}/series-options")
     async def get_console_series_options(console_id: int, request: Request):
@@ -3217,37 +3218,14 @@ def create_app(
         request: Request,
     ):
         resolved = operator_console_for_viewer(request, console_id)
-        parameters = analyst_store.resolve_operator_console_parameters(console_id)
         contact = console_preparer_name(resolved["console"]["prepared_by_user_id"])
-        if parameters["unavailable_ids"]:
-            return JSONResponse(
-                {
-                    "run_gate": {
-                        "can_run": False,
-                        "reason": "campo_no_disponible",
-                        "message": "Un parametro configurado ya no esta disponible.",
-                        "contact": contact,
-                        "editing_locked_by": None,
-                    }
-                },
-                status_code=409,
-            )
-        blocking = operator_console_blocking(
-            int(resolved["location"]["scenario_id"]), resolved["console"]
+        # Fail closed before anything immutable exists: the same gate the shell
+        # showed decides here too.
+        gate = console_run_gate(
+            resolved["console"], viewer_user_id=current_user_id(request)
         )
-        if blocking["reason"] is not None:
-            return JSONResponse(
-                {
-                    "run_gate": {
-                        "can_run": False,
-                        "reason": "dependencia_movida",
-                        "message": "Los datos base cambiaron; solicita revision de ingenieria.",
-                        "contact": contact,
-                        "editing_locked_by": None,
-                    }
-                },
-                status_code=409,
-            )
+        if not gate["can_run"]:
+            return JSONResponse({"run_gate": gate}, status_code=409)
         try:
             materialized = analyst_store.materialize_operator_console_run(
                 console_id,
@@ -3277,15 +3255,15 @@ def create_app(
                 status_code=400,
             )
         except VariantStaleError:
+            # The materialization refuses in its own right; the operator still
+            # only ever learns the public reason.
             return JSONResponse(
                 {
-                    "run_gate": {
-                        "can_run": False,
-                        "reason": "dependencia_movida",
-                        "message": "Los datos base cambiaron; solicita revision de ingenieria.",
-                        "contact": contact,
-                        "editing_locked_by": None,
-                    }
+                    "run_gate": build_console_run_gate(
+                        moved_dependency=True,
+                        contact=contact,
+                        review_requested_at=resolved["console"]["waiting_since"],
+                    )
                 },
                 status_code=409,
             )

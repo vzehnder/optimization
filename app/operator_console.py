@@ -20,6 +20,94 @@ OPERATOR_CONSOLE_STATUSES = ("draft", "active")
 
 GRANULARITIES = ("day", "week", "month", "full_horizon")
 
+# The complete public vocabulary of a closed run gate. A raw staleness reason
+# never becomes a fourth entry: it stays on the internal surfaces.
+CONSOLE_RUN_GATE_REASONS = (
+    "edicion_de_otro_usuario",
+    "campo_no_disponible",
+    "dependencia_movida",
+)
+
+# Only an engineering block is worth a review request. Another operator holding
+# the lease resolves itself and must not reach the preparer.
+CONSOLE_REVIEWABLE_REASONS = ("campo_no_disponible", "dependencia_movida")
+
+CONSOLE_RUN_GATE_MESSAGES = {
+    "campo_no_disponible_parametro": "Un parametro configurado ya no esta disponible.",
+    "campo_no_disponible_serie": "Una serie configurada ya no esta disponible.",
+    "dependencia_movida": "Los datos base cambiaron; solicita revision de ingenieria.",
+}
+
+
+def build_console_run_gate(
+    *,
+    editing_locked_by: str | None = None,
+    unavailable_parameter: bool = False,
+    unavailable_series: bool = False,
+    moved_dependency: bool = False,
+    contact: str | None = None,
+    review_requested_at: str | None = None,
+) -> dict[str, Any]:
+    """Translate internal console state into the only gate an operator sees.
+
+    Another editor is a passing human conflict and wins over the engineering
+    blocks: it resolves itself and must not send the operator to the preparer.
+    A broken configured field is reported ahead of a moved dependency because
+    correcting the document is the action that unblocks it.
+    """
+
+    if editing_locked_by is not None:
+        return _closed_gate(
+            reason="edicion_de_otro_usuario",
+            message=f"{editing_locked_by} esta editando este grupo.",
+            editing_locked_by=editing_locked_by,
+        )
+    if unavailable_parameter or unavailable_series:
+        return _closed_gate(
+            reason="campo_no_disponible",
+            message=CONSOLE_RUN_GATE_MESSAGES[
+                "campo_no_disponible_parametro"
+                if unavailable_parameter
+                else "campo_no_disponible_serie"
+            ],
+            contact=contact,
+            review_requested_at=review_requested_at,
+        )
+    if moved_dependency:
+        return _closed_gate(
+            reason="dependencia_movida",
+            message=CONSOLE_RUN_GATE_MESSAGES["dependencia_movida"],
+            contact=contact,
+            review_requested_at=review_requested_at,
+        )
+    return {
+        "can_run": True,
+        "reason": None,
+        "message": "",
+        "contact": None,
+        "editing_locked_by": None,
+        "review_requested_at": None,
+    }
+
+
+def _closed_gate(
+    *,
+    reason: str,
+    message: str,
+    contact: str | None = None,
+    editing_locked_by: str | None = None,
+    review_requested_at: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "can_run": False,
+        "reason": reason,
+        "message": message,
+        "contact": contact,
+        "editing_locked_by": editing_locked_by,
+        "review_requested_at": review_requested_at,
+    }
+
+
 EXTERNAL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 CANONICAL_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_:.-]+$")
 
