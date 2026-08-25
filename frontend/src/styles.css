@@ -1664,3 +1664,16 @@ button:focus-visible {
   border-radius: 0.4rem;
   background: #fff8e6;
 }
+
+.console-comparison-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  align-items: start;
+}
+
+.console-comparison-side {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}

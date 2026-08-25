@@ -196,17 +196,24 @@ function PortalTableView({ table }: { table: PortalTable }) {
 export function PortalResultsBlock({
   block,
   resultsState = "available",
+  idPrefix = "portal",
+  unavailableMessage = "Los resultados de esta publicacion no estan disponibles.",
 }: {
   block: PortalResultsBlockPayload | null | undefined;
   resultsState?: "available" | "unavailable";
+  // Two blocks share one page when runs are compared, so their section ids and
+  // their empty wording belong to the surface that renders them.
+  idPrefix?: string;
+  unavailableMessage?: string;
 }) {
   if (resultsState === "unavailable") {
     return (
-      <section className="workspace-section" aria-labelledby="portal-results">
-        <h2 id="portal-results">Resultados</h2>
-        <p className="empty-state">
-          Los resultados de esta publicacion no estan disponibles.
-        </p>
+      <section
+        className="workspace-section"
+        aria-labelledby={`${idPrefix}-results`}
+      >
+        <h2 id={`${idPrefix}-results`}>Resultados</h2>
+        <p className="empty-state">{unavailableMessage}</p>
       </section>
     );
   }
@@ -215,12 +222,12 @@ export function PortalResultsBlock({
   return (
     <>
       {block.labels.kpis ? (
-        <PortalSection id="portal-kpis" label={block.labels.kpis}>
+        <PortalSection id={`${idPrefix}-kpis`} label={block.labels.kpis}>
           <PortalKpiList kpis={block.kpis} />
         </PortalSection>
       ) : null}
       {block.labels.charts ? (
-        <PortalSection id="portal-charts" label={block.labels.charts}>
+        <PortalSection id={`${idPrefix}-charts`} label={block.labels.charts}>
           {block.charts.length ? (
             <div className="result-chart-grid">
               {block.charts.map((chart) => (
@@ -235,7 +242,7 @@ export function PortalResultsBlock({
         </PortalSection>
       ) : null}
       {block.labels.tables ? (
-        <PortalSection id="portal-tables" label={block.labels.tables}>
+        <PortalSection id={`${idPrefix}-tables`} label={block.labels.tables}>
           {block.tables.length ? (
             block.tables.map((table) => (
               <PortalTableView key={table.id} table={table} />

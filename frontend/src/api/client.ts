@@ -623,6 +623,28 @@ export interface ConsoleRunDetail {
   results_block: PortalResultsBlockPayload | null;
 }
 
+export interface ConsoleComparisonSide {
+  run: ConsoleRunEntry;
+  results_state: "available" | "unavailable";
+  results_block: PortalResultsBlockPayload | null;
+}
+
+export interface ConsoleKpiDifference {
+  id: string;
+  label: string;
+  unit: string | null;
+  decimals: number;
+  left: number;
+  right: number;
+  difference: number;
+}
+
+export interface ConsoleRunComparison {
+  left: ConsoleComparisonSide;
+  right: ConsoleComparisonSide;
+  kpi_differences: ConsoleKpiDifference[];
+}
+
 export type PortalConfigurationStatus = "draft" | "active";
 
 export interface PortalConfiguration {
@@ -2467,6 +2489,22 @@ export async function getConsoleRun(
 ): Promise<ConsoleRunDetail> {
   return requestJson<ConsoleRunDetail>(
     `/api/console/${consoleId}/runs/${runId}`,
+    { signal },
+  );
+}
+
+export async function getConsoleRunComparison(
+  consoleId: number,
+  left: number,
+  right: number,
+  signal?: AbortSignal,
+): Promise<ConsoleRunComparison> {
+  const query = new URLSearchParams({
+    left: String(left),
+    right: String(right),
+  });
+  return requestJson<ConsoleRunComparison>(
+    `/api/console/${consoleId}/run-comparison?${query}`,
     { signal },
   );
 }

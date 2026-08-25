@@ -73,6 +73,7 @@ from app.surface_payloads import (
     build_console_lease,
     build_console_list_entry,
     build_console_payload,
+    build_console_run_comparison,
     build_console_run_entry,
     build_console_save_error,
     build_console_series_options,
@@ -3322,15 +3323,63 @@ def create_app(
             ]
         }
 
-    @app.get("/api/console/{console_id}/runs/{run_id}")
-    async def get_console_run(console_id: int, run_id: int, request: Request):
-        resolved = operator_console_for_viewer(request, console_id)
+    def console_run_or_404(console_id: int, run_id: int) -> dict[str, Any]:
+        """A public history id only ever names a run of its own console."""
+
         try:
             run = analyst_store.get_run(run_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail="run not found") from error
         if int(run.get("operator_console_id") or 0) != int(console_id):
             raise HTTPException(status_code=404, detail="run not found")
+        return run
+
+    def console_results_block(
+        console: Mapping[str, Any], run: Mapping[str, Any]
+    ) -> dict[str, Any] | None:
+        """The single configured allowlist run detail and comparison share.
+
+        A run that has not succeeded, or whose artifacts cannot be read, has no
+        block at all: the technical reason stays on the internal surfaces.
+        """
+
+        if run["status"] != "succeeded":
+            return None
+        configured = console["document"].get("results") or {}
+        results_document = {
+            "sections": {
+                "kpis": {
+                    "enabled": bool(configured.get("kpis")),
+                    "label": "Indicadores" if configured.get("kpis") else "",
+                    "items": configured.get("kpis") or [],
+                },
+                "charts": {
+                    "enabled": bool(configured.get("charts")),
+                    "label": "Graficos" if configured.get("charts") else "",
+                    "items": configured.get("charts") or [],
+                },
+                "tables": {
+                    "enabled": bool(configured.get("tables")),
+                    "label": "Tablas" if configured.get("tables") else "",
+                    "items": configured.get("tables") or [],
+                },
+                "downloads": {"enabled": False, "label": ""},
+            }
+        }
+        try:
+            results = read_run_results(
+                run,
+                analyst_store.list_run_artifacts(int(run["id"])),
+                configured_artifact_root,
+            )
+        except ResultReadError:
+            return None
+        return build_results_block(results_document, results)
+
+    @app.get("/api/console/{console_id}/runs/{run_id}")
+    async def get_console_run(console_id: int, run_id: int, request: Request):
+        resolved = operator_console_for_viewer(request, console_id)
+        run = console_run_or_404(console_id, run_id)
         failure = None
         if run["status"] == "failed":
             failure = {
@@ -3338,44 +3387,28 @@ def create_app(
                 "message": "La ejecucion fallo. Comunica la referencia al ingeniero.",
                 "reference": str(run_id),
             }
-        results_block = None
-        if run["status"] == "succeeded":
-            configured = resolved["console"]["document"].get("results") or {}
-            results_document = {
-                "sections": {
-                    "kpis": {
-                        "enabled": bool(configured.get("kpis")),
-                        "label": "Indicadores" if configured.get("kpis") else "",
-                        "items": configured.get("kpis") or [],
-                    },
-                    "charts": {
-                        "enabled": bool(configured.get("charts")),
-                        "label": "Graficos" if configured.get("charts") else "",
-                        "items": configured.get("charts") or [],
-                    },
-                    "tables": {
-                        "enabled": bool(configured.get("tables")),
-                        "label": "Tablas" if configured.get("tables") else "",
-                        "items": configured.get("tables") or [],
-                    },
-                    "downloads": {"enabled": False, "label": ""},
-                }
-            }
-            try:
-                results = read_run_results(
-                    run,
-                    analyst_store.list_run_artifacts(run_id),
-                    configured_artifact_root,
-                )
-            except ResultReadError:
-                results = None
-            if results is not None:
-                results_block = build_results_block(results_document, results)
         return {
             "run": build_console_run_entry(run),
             "failure": failure,
-            "results_block": results_block,
+            "results_block": console_results_block(resolved["console"], run),
         }
+
+    @app.get("/api/console/{console_id}/run-comparison")
+    async def get_console_run_comparison(
+        console_id: int, request: Request, left: int, right: int
+    ):
+        resolved = operator_console_for_viewer(request, console_id)
+        console = resolved["console"]
+        sides = {
+            side: {"run": run, "results_block": console_results_block(console, run)}
+            for side, run in (
+                ("left", console_run_or_404(console_id, left)),
+                ("right", console_run_or_404(console_id, right)),
+            )
+        }
+        return build_console_run_comparison(
+            left=sides["left"], right=sides["right"]
+        )
 
     @app.post("/api/scenarios/{scenario_id}/versions", status_code=201)
     async def create_scenario_version(scenario_id: int, payload: ScenarioVersionCreateRequest):

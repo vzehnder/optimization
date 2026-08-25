@@ -271,6 +271,69 @@ def build_console_run_entry(run: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_console_run_comparison(
+    *,
+    left: Mapping[str, Any],
+    right: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Put two already-allowlisted run blocks side by side.
+
+    Nothing new crosses the boundary here: each side carries the reduced run
+    entry and the very block run detail returns, and a difference exists only
+    where the analyst configured a KPI and both runs produced a number for it.
+    """
+
+    sides = {
+        name: {
+            "run": build_console_run_entry(side["run"]),
+            "results_state": (
+                "available" if side.get("results_block") is not None else "unavailable"
+            ),
+            "results_block": side.get("results_block"),
+        }
+        for name, side in (("left", left), ("right", right))
+    }
+    return {
+        "left": sides["left"],
+        "right": sides["right"],
+        "kpi_differences": build_console_kpi_differences(
+            sides["left"]["results_block"], sides["right"]["results_block"]
+        ),
+    }
+
+
+def build_console_kpi_differences(
+    left_block: Mapping[str, Any] | None,
+    right_block: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Difference the KPIs both sides published, in the configured order."""
+
+    if left_block is None or right_block is None:
+        return []
+    counterparts = {kpi["id"]: kpi for kpi in right_block["kpis"]}
+    differences: list[dict[str, Any]] = []
+    for kpi in left_block["kpis"]:
+        counterpart = counterparts.get(kpi["id"])
+        if counterpart is None:
+            continue
+        left_value = parse_numeric_value(kpi["value"])
+        right_value = parse_numeric_value(counterpart["value"])
+        if left_value is None or right_value is None:
+            continue
+        differences.append(
+            {
+                "id": kpi["id"],
+                "label": kpi["label"],
+                "unit": kpi["unit"],
+                "decimals": kpi["decimals"],
+                "left": left_value,
+                "right": right_value,
+                "difference": right_value - left_value,
+            }
+        )
+    return differences
+
+
 def build_portal_downloads(
     download_section: Mapping[str, Any],
     downloads: list[Mapping[str, Any]],

@@ -3441,6 +3441,61 @@
         "summary": "Request Console Review"
       }
     },
+    "/api/console/{console_id}/run-comparison": {
+      "get": {
+        "operationId": "get_console_run_comparison_api_console__console_id__run_comparison_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "console_id",
+            "required": true,
+            "schema": {
+              "title": "Console Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "left",
+            "required": true,
+            "schema": {
+              "title": "Left",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "right",
+            "required": true,
+            "schema": {
+              "title": "Right",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Console Run Comparison"
+      }
+    },
     "/api/console/{console_id}/runs": {
       "get": {
         "operationId": "list_console_runs_api_console__console_id__runs_get",

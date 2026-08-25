@@ -17,6 +17,7 @@ import {
   createOperatorConsole,
   getConsoleGroupValues,
   getConsoleRun,
+  getConsoleRunComparison,
   getConsoleSeriesOptions,
   listCaseInputVariants,
   getConsoleShell,
@@ -30,8 +31,10 @@ import {
   saveOperatorConsole,
   saveConsoleParameters,
   saveConsoleSeriesSelections,
+  type ConsoleComparisonSide,
   type ConsoleGroup,
   type ConsoleGroupValuesSnapshot,
+  type ConsoleKpiDifference,
   type ConsoleLease,
   type ConsoleRunEntry,
   type OperatorConsole,
@@ -58,6 +61,11 @@ const consoleShellQueryKey = (consoleId: number) =>
   ["console-shell", consoleId] as const;
 const consoleRunsQueryKey = (consoleId: number) =>
   ["console-runs", consoleId] as const;
+const consoleComparisonQueryKey = (
+  consoleId: number,
+  left: number,
+  right: number,
+) => ["console-run-comparison", consoleId, left, right] as const;
 const consoleSeriesOptionsQueryKey = (consoleId: number) =>
   ["console-series-options", consoleId] as const;
 const consoleGroupValuesQueryKey = (
@@ -1335,6 +1343,10 @@ export function ConsoleShellView() {
   const [selectedStart, setSelectedStart] = useState<string | null>(null);
   const [selectedEnd, setSelectedEnd] = useState<string | null>(null);
   const [activeRunId, setActiveRunId] = useState<number | null>(null);
+  const [comparisonPicks, setComparisonPicks] = useState<number[]>([]);
+  const [comparedRuns, setComparedRuns] = useState<[number, number] | null>(
+    null,
+  );
   const [actionError, setActionError] = useState("");
   const [dirtyGroups, setDirtyGroups] = useState<Record<string, boolean>>({});
   const shell = useQuery({
@@ -1353,6 +1365,22 @@ export function ConsoleShellView() {
     queryKey: consoleRunsQueryKey(consoleId || 0),
     queryFn: ({ signal }) => listConsoleRuns(consoleId || 0, signal),
     enabled: consoleId !== null,
+    retry: false,
+  });
+  const comparison = useQuery({
+    queryKey: consoleComparisonQueryKey(
+      consoleId || 0,
+      comparedRuns?.[0] || 0,
+      comparedRuns?.[1] || 0,
+    ),
+    queryFn: ({ signal }) =>
+      getConsoleRunComparison(
+        consoleId || 0,
+        (comparedRuns || [0, 0])[0],
+        (comparedRuns || [0, 0])[1],
+        signal,
+      ),
+    enabled: consoleId !== null && comparedRuns !== null,
     retry: false,
   });
   const runDetail = useQuery({
@@ -1714,22 +1742,50 @@ export function ConsoleShellView() {
       >
         <h2 id="console-history-title">Historial reciente</h2>
         {history.data?.length ? (
-          <ul className="resource-list">
-            {history.data.map((run) => (
-              <li key={run.id}>
-                <strong>{runLabels[run.state]}</strong>{" "}
-                <span>{run.started_at}</span> <span>{run.triggered_by}</span>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  aria-label={`Abrir resultados de corrida ${run.id}`}
-                  onClick={() => setActiveRunId(run.id)}
-                >
-                  Abrir
-                </button>
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="resource-list">
+              {history.data.map((run) => (
+                <li key={run.id}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      aria-label={`Comparar corrida ${run.id}`}
+                      checked={comparisonPicks.includes(run.id)}
+                      onChange={() =>
+                        setComparisonPicks((picks) =>
+                          picks.includes(run.id)
+                            ? picks.filter((pick) => pick !== run.id)
+                            : [...picks, run.id],
+                        )
+                      }
+                    />
+                  </label>
+                  <strong>{runLabels[run.state]}</strong>{" "}
+                  <span>{run.started_at}</span> <span>{run.triggered_by}</span>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    aria-label={`Abrir resultados de corrida ${run.id}`}
+                    onClick={() => setActiveRunId(run.id)}
+                  >
+                    Abrir
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={comparisonPicks.length !== 2}
+              onClick={() =>
+                setComparedRuns(
+                  chronologicalPair(comparisonPicks, history.data || []),
+                )
+              }
+            >
+              Comparar corridas
+            </button>
+          </>
         ) : visibleRun ? (
           <p>
             <strong>{runLabels[visibleRun.state]}</strong>{" "}
@@ -1745,7 +1801,135 @@ export function ConsoleShellView() {
           </p>
         ) : null}
       </section>
+      {comparedRuns ? (
+        <ConsoleRunComparisonView
+          left={comparison.data?.left}
+          right={comparison.data?.right}
+          differences={comparison.data?.kpi_differences}
+          onClose={() => setComparedRuns(null)}
+        />
+      ) : null}
       <PortalResultsBlock block={runDetail.data?.results_block} />
     </>
+  );
+}
+
+/** Order two picked runs oldest first; the history arrives newest first. */
+function chronologicalPair(
+  picks: number[],
+  history: ConsoleRunEntry[],
+): [number, number] {
+  const [first, second] = [...picks].sort(
+    (left, right) =>
+      history.findIndex((run) => run.id === right) -
+      history.findIndex((run) => run.id === left),
+  );
+  return [first, second];
+}
+
+function formatComparisonValue(
+  value: number,
+  decimals: number,
+  unit: string | null,
+  signed = false,
+): string {
+  const magnitude = value.toFixed(decimals);
+  const signedMagnitude = signed && value > 0 ? `+${magnitude}` : magnitude;
+  return unit ? `${signedMagnitude} ${unit}` : signedMagnitude;
+}
+
+function ConsoleComparisonSideView({
+  side,
+  position,
+}: {
+  side: ConsoleComparisonSide;
+  position: "left" | "right";
+}) {
+  return (
+    <section
+      className="console-comparison-side"
+      aria-label={`Corrida ${side.run.id}`}
+    >
+      <PortalResultsBlock
+        block={side.results_block}
+        resultsState={side.results_state}
+        idPrefix={`console-comparison-${position}`}
+        unavailableMessage="Los resultados de esta corrida no estan disponibles."
+      />
+    </section>
+  );
+}
+
+function ConsoleRunComparisonView({
+  left,
+  right,
+  differences,
+  onClose,
+}: {
+  left: ConsoleComparisonSide | undefined;
+  right: ConsoleComparisonSide | undefined;
+  differences: ConsoleKpiDifference[] | undefined;
+  onClose: () => void;
+}) {
+  return (
+    <section className="content-panel" aria-label="Comparacion de corridas">
+      <h2>Comparacion de corridas</h2>
+      {left && right ? (
+        <>
+          {differences?.length ? (
+            <table aria-label="Diferencias entre corridas">
+              <thead>
+                <tr>
+                  <th scope="col">Indicador</th>
+                  <th scope="col">Corrida {left.run.id}</th>
+                  <th scope="col">Corrida {right.run.id}</th>
+                  <th scope="col">Diferencia</th>
+                </tr>
+              </thead>
+              <tbody>
+                {differences.map((difference) => (
+                  <tr key={difference.id}>
+                    <td>{difference.label}</td>
+                    <td>
+                      {formatComparisonValue(
+                        difference.left,
+                        difference.decimals,
+                        difference.unit,
+                      )}
+                    </td>
+                    <td>
+                      {formatComparisonValue(
+                        difference.right,
+                        difference.decimals,
+                        difference.unit,
+                      )}
+                    </td>
+                    <td>
+                      {formatComparisonValue(
+                        difference.difference,
+                        difference.decimals,
+                        difference.unit,
+                        true,
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="empty-state">No hay indicadores comparables.</p>
+          )}
+          <div className="console-comparison-grid">
+            <ConsoleComparisonSideView side={left} position="left" />
+            <ConsoleComparisonSideView side={right} position="right" />
+          </div>
+        </>
+      ) : (
+        <p className="empty-state">Cargando comparacion...</p>
+      )}
+      <button type="button" className="secondary-button" onClick={onClose}>
+        Cerrar comparacion
+      </button>
+    </section>
   );
 }

@@ -1552,4 +1552,224 @@ describe("the operator console shell", () => {
     ).toBeNull();
     expect(screen.getByRole("button", { name: "Ejecutar" })).toBeDisabled();
   });
+
+  it("compares two runs of the history without leaving the console", async () => {
+    window.history.replaceState({}, "", "/react/console/4");
+    const requested: string[] = [];
+    const runs = [
+      {
+        id: 91,
+        started_at: "2026-08-25T11:00:00Z",
+        state: "lista",
+        duration_seconds: 2.1,
+        triggered_by: "Pedro Operador",
+      },
+      {
+        id: 90,
+        started_at: "2026-08-25T10:00:00Z",
+        state: "lista",
+        duration_seconds: 2.5,
+        triggered_by: "Olga Operadora",
+      },
+    ];
+    const sideBlock = (objective: number, demand: number) => ({
+      labels: {
+        kpis: "Indicadores",
+        charts: "",
+        tables: "Tablas",
+        downloads: "",
+      },
+      kpis: [
+        {
+          id: "beneficio_total",
+          label: "Beneficio total",
+          value: objective,
+          unit: "USD",
+          decimals: 1,
+          sign: "auto",
+          emphasis: "strong",
+        },
+      ],
+      charts: [],
+      tables: [
+        {
+          id: "despacho_sistema",
+          label: "Despacho del sistema",
+          row_limit: 24,
+          columns: [
+            { id: "periodo", label: "Periodo", unit: null },
+            { id: "compra", label: "Compra", unit: "MW" },
+          ],
+          rows: [{ periodo: "2026-01-01T00:00:00", compra: demand }],
+        },
+      ],
+    });
+    stubApi(operatorIdentity, (path, method) => {
+      if (path === "/api/console/4" && method === "GET") {
+        return Response.json({ ...consoleShellPayload(), groups: [] });
+      }
+      if (path === "/api/console/4/runs" && method === "GET") {
+        return Response.json({ history: runs });
+      }
+      if (path.startsWith("/api/console/4/run-comparison")) {
+        requested.push(path);
+        return Response.json({
+          left: {
+            run: runs[1],
+            results_state: "available",
+            results_block: sideBlock(1000, 2.5),
+          },
+          right: {
+            run: runs[0],
+            results_state: "available",
+            results_block: sideBlock(1250.5, 1.5),
+          },
+          kpi_differences: [
+            {
+              id: "beneficio_total",
+              label: "Beneficio total",
+              unit: "USD",
+              decimals: 1,
+              left: 1000,
+              right: 1250.5,
+              difference: 250.5,
+            },
+          ],
+        });
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    const compare = await screen.findByRole("button", {
+      name: "Comparar corridas",
+    });
+    expect(compare).toBeDisabled();
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Comparar corrida 90" }),
+    );
+    expect(compare).toBeDisabled();
+    await user.click(
+      screen.getByRole("checkbox", { name: "Comparar corrida 91" }),
+    );
+    expect(compare).toBeEnabled();
+    await user.click(compare);
+
+    expect(requested).toEqual([
+      "/api/console/4/run-comparison?left=90&right=91",
+    ]);
+    const comparison = await screen.findByRole("region", {
+      name: "Comparacion de corridas",
+    });
+    const differences = within(comparison).getByRole("table", {
+      name: "Diferencias entre corridas",
+    });
+    const [, difference] = within(differences).getAllByRole("row");
+    expect(
+      within(difference)
+        .getAllByRole("cell")
+        .map((cell) => cell.textContent),
+    ).toEqual(["Beneficio total", "1000.0 USD", "1250.5 USD", "+250.5 USD"]);
+    const left = within(comparison).getByRole("region", { name: "Corrida 90" });
+    const right = within(comparison).getByRole("region", {
+      name: "Corrida 91",
+    });
+    expect(within(left).getByText("1000.0")).toBeVisible();
+    expect(within(right).getByText("1250.5")).toBeVisible();
+    expect(within(left).getByText("2.5")).toBeVisible();
+    expect(within(right).getByText("1.5")).toBeVisible();
+    expect(window.location.pathname).toBe("/react/console/4");
+  });
+
+  it("states a comparison side that has no results without explaining why", async () => {
+    window.history.replaceState({}, "", "/react/console/4");
+    const runs = [
+      {
+        id: 91,
+        started_at: "2026-08-25T11:00:00Z",
+        state: "fallida",
+        duration_seconds: null,
+        triggered_by: "Pedro Operador",
+      },
+      {
+        id: 90,
+        started_at: "2026-08-25T10:00:00Z",
+        state: "lista",
+        duration_seconds: 2.5,
+        triggered_by: "Olga Operadora",
+      },
+    ];
+    stubApi(operatorIdentity, (path, method) => {
+      if (path === "/api/console/4" && method === "GET") {
+        return Response.json({ ...consoleShellPayload(), groups: [] });
+      }
+      if (path === "/api/console/4/runs" && method === "GET") {
+        return Response.json({ history: runs });
+      }
+      if (path.startsWith("/api/console/4/run-comparison")) {
+        return Response.json({
+          left: {
+            run: runs[1],
+            results_state: "available",
+            results_block: {
+              labels: {
+                kpis: "Indicadores",
+                charts: "",
+                tables: "",
+                downloads: "",
+              },
+              kpis: [
+                {
+                  id: "beneficio_total",
+                  label: "Beneficio total",
+                  value: 1000,
+                  unit: "USD",
+                  decimals: 1,
+                  sign: "auto",
+                  emphasis: "strong",
+                },
+              ],
+              charts: [],
+              tables: [],
+            },
+          },
+          right: {
+            run: runs[0],
+            results_state: "unavailable",
+            results_block: null,
+          },
+          kpi_differences: [],
+        });
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Comparar corrida 90" }),
+    );
+    await user.click(
+      screen.getByRole("checkbox", { name: "Comparar corrida 91" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Comparar corridas" }));
+
+    const comparison = await screen.findByRole("region", {
+      name: "Comparacion de corridas",
+    });
+    const right = within(comparison).getByRole("region", {
+      name: "Corrida 91",
+    });
+    expect(
+      within(right).getByText(
+        "Los resultados de esta corrida no estan disponibles.",
+      ),
+    ).toBeVisible();
+    expect(
+      within(comparison).getByText("No hay indicadores comparables."),
+    ).toBeVisible();
+  });
 });

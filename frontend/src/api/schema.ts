@@ -475,6 +475,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/console/{console_id}/run-comparison": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Console Run Comparison */
+        get: operations["get_console_run_comparison_api_console__console_id__run_comparison_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/console/{console_id}/runs": {
         parameters: {
             query?: never;
@@ -3414,6 +3431,40 @@ export interface operations {
     request_console_review_api_console__console_id__request_review_post: {
         parameters: {
             query?: never;
+            header?: never;
+            path: {
+                console_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_console_run_comparison_api_console__console_id__run_comparison_get: {
+        parameters: {
+            query: {
+                left: number;
+                right: number;
+            };
             header?: never;
             path: {
                 console_id: number;

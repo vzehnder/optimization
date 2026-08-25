@@ -1,6 +1,6 @@
 # BESS-CONFIG-016: Compare Two Configured Console Runs Safely
 
-Status: Todo
+Status: In Review
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/capa_configuracion/architecture_configuration_layer_final.md`
@@ -15,15 +15,15 @@ logs, hashes or internal identifiers.
 
 ## Acceptance criteria
 
-- [ ] The console history lets the operator select two accessible runs and open a comparison without leaving the console root.
-- [ ] Both comparison sides are built through the configured results allowlist used by console run detail.
-- [ ] Only runs belonging to the requested console and visible to the current user can be compared.
-- [ ] A guessed, foreign, draft-console or revoked-access run returns 404 to an external user.
-- [ ] Configured KPI, chart, series, table and column ordering and labels are preserved on both sides.
-- [ ] Missing configured data is represented safely and does not reveal artifact names or technical errors.
-- [ ] Run ids used as public history references do not grant access to the internal run-detail route.
-- [ ] Negative payload tests prove that scenario versions, bindings, revisions, hashes, system cases, paths, logs, exit codes and raw errors never appear.
-- [ ] React and API tests compare runs with different parameter and series values and prove the visible differences are correct.
+- [x] The console history lets the operator select two accessible runs and open a comparison without leaving the console root.
+- [x] Both comparison sides are built through the configured results allowlist used by console run detail.
+- [x] Only runs belonging to the requested console and visible to the current user can be compared.
+- [x] A guessed, foreign, draft-console or revoked-access run returns 404 to an external user.
+- [x] Configured KPI, chart, series, table and column ordering and labels are preserved on both sides.
+- [x] Missing configured data is represented safely and does not reveal artifact names or technical errors.
+- [x] Run ids used as public history references do not grant access to the internal run-detail route.
+- [x] Negative payload tests prove that scenario versions, bindings, revisions, hashes, system cases, paths, logs, exit codes and raw errors never appear.
+- [x] React and API tests compare runs with different parameter and series values and prove the visible differences are correct.
 
 ## Blocked by
 
