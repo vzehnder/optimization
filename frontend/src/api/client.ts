@@ -541,6 +541,22 @@ export interface ConsoleGroup {
   columns: ConsoleGroupColumn[];
 }
 
+export interface ConsoleSeriesOption {
+  id: string;
+  label: string;
+}
+
+export interface ConsoleSeriesSelection {
+  group_id: string;
+  column_id: string;
+  selected_source_option_id: string | null;
+  options: ConsoleSeriesOption[];
+}
+
+export interface ConsoleSeriesOptions {
+  selections: ConsoleSeriesSelection[];
+}
+
 export interface ConsoleGroupRow {
   index: number;
   timestamp: string;
@@ -2225,6 +2241,30 @@ export async function getConsoleShell(
   signal?: AbortSignal,
 ): Promise<ConsoleShell> {
   return requestJson<ConsoleShell>(`/api/console/${consoleId}`, { signal });
+}
+
+export async function getConsoleSeriesOptions(
+  consoleId: number,
+  signal?: AbortSignal,
+): Promise<ConsoleSeriesOptions> {
+  return requestJson<ConsoleSeriesOptions>(
+    `/api/console/${consoleId}/series-options`,
+    { signal },
+  );
+}
+
+export async function saveConsoleSeriesSelections(
+  consoleId: number,
+  selections: Array<{
+    group_id: string;
+    column_id: string;
+    source_option_id: string;
+  }>,
+): Promise<ConsoleSeriesOptions> {
+  return putJsonWithCsrf<ConsoleSeriesOptions>(
+    `/api/console/${consoleId}/series-selections`,
+    { selections },
+  );
 }
 
 export async function saveConsoleParameters(

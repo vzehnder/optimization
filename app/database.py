@@ -147,6 +147,11 @@ class PostgresConnection:
     def rollback(self) -> None:
         return None
 
+    def transaction(self):
+        """Open an explicit transaction for multi-statement atomic operations."""
+
+        return self._connection.transaction()
+
     def close(self) -> None:
         self._connection.close()
 

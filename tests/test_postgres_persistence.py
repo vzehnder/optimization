@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app.auth import session_expires_at
+from app.console_series import ConsoleSeriesError
 from app.database import ID_TABLES, database_url_from_env, postgres_schema_from_sqlite
 from app.persistence import AnalystStore
 from app.time_series_catalog import (
@@ -388,6 +389,155 @@ class PostgresPersistenceTests(unittest.TestCase):
                     )
                 },
                 {copy["time_series_set_id"] for copy in copies},
+            )
+        finally:
+            if project_id:
+                store.delete_project(project_id)
+            store.close()
+
+    def test_a_rejected_series_selection_rolls_back_on_postgresql(self):
+        suffix = uuid.uuid4().hex
+        store = AnalystStore(POSTGRES_TEST_DATABASE_URL)
+        project_id = 0
+        try:
+            project = store.create_project(name=f"Console selection {suffix}")
+            project_id = project["id"]
+            scenario = store.create_scenario(
+                project_id=project_id, name=f"Scenario {suffix}"
+            )
+            case = store.get_or_create_case_for_scenario(scenario["id"])
+            variant = store.get_or_create_default_input_variant(case["id"])
+            operator = store.create_user(
+                email=f"selection-{suffix}@example.com",
+                password_hash="test-hash",
+                role="external",
+            )
+            start = datetime(2026, 1, 1)
+
+            def import_set(label: str, first_value: int):
+                prepared = prepare_time_series_catalog_import(
+                    rows=[
+                        {
+                            "period_start": (
+                                start + timedelta(hours=offset)
+                            ).isoformat(),
+                            "hours": "1.0",
+                            "demand": str(first_value + offset),
+                        }
+                        for offset in range(3)
+                    ],
+                    request=CatalogImportRequest(
+                        set_name=f"{label} {suffix}",
+                        version_label="v1",
+                        data_kind="real",
+                        timezone="America/Santiago",
+                        timestamp_column="period_start",
+                        duration_hours_column="hours",
+                        signal_mappings=[
+                            CatalogSignalMappingRequest(
+                                source_column="demand",
+                                signal_key="load_demand_mw",
+                            )
+                        ],
+                    ),
+                )
+                return store.import_time_series_catalog_set(
+                    scenario_id=scenario["id"],
+                    source={
+                        "id": f"{label}-{suffix}",
+                        "original_filename": f"{label}.csv",
+                        "media_type": "text/csv",
+                        "checksum": f"sha256:{label}-{suffix}",
+                    },
+                    prepared_import=prepared,
+                )
+
+            base_set = import_set("base", 10)
+            forecast_set = import_set("forecast", 20)
+            store.upsert_case_time_series_binding(
+                case_input_variant_id=variant["id"],
+                signal_key="load_demand_mw",
+                time_series_set_id=base_set["id"],
+            )
+            column = {
+                "id": "demanda",
+                "signal": {
+                    "entity_type": "component:load",
+                    "entity_id": "load_1",
+                    "signal_key": "load_demand_mw",
+                },
+                "label": "Demanda",
+                "editable": True,
+                "source_options": [
+                    {
+                        "id": "base",
+                        "label": "Demanda base",
+                        "time_series_set_id": base_set["id"],
+                    },
+                    {
+                        "id": "pronostico",
+                        "label": "Pronostico",
+                        "time_series_set_id": forecast_set["id"],
+                    },
+                ],
+                "default_source_option_id": "base",
+            }
+            console = store.create_operator_console(
+                case_id=case["id"],
+                source_variant_id=variant["id"],
+                document={
+                    "schema_version": "operator_console_config.v1",
+                    "public_identity": {"name": "Plan diario", "description": ""},
+                    "parameters": [],
+                    "groups": [
+                        {
+                            "id": "potencia",
+                            "label": "Potencia",
+                            "granularities": ["full_horizon"],
+                            "columns": [
+                                column,
+                                {
+                                    **column,
+                                    "id": "referencia",
+                                    "label": "Referencia",
+                                },
+                            ],
+                        }
+                    ],
+                    "results": {"kpis": [], "charts": [], "tables": []},
+                },
+                created_by_user_id=None,
+            )
+
+            with self.assertRaises(ConsoleSeriesError):
+                store.replace_operator_console_series_selections(
+                    console["id"],
+                    selections=[
+                        {
+                            "group_id": "potencia",
+                            "column_id": "demanda",
+                            "source_option_id": "pronostico",
+                        },
+                        {
+                            "group_id": "potencia",
+                            "column_id": "referencia",
+                            "source_option_id": "inventada",
+                        },
+                    ],
+                    actor_user_id=operator["id"],
+                )
+
+            self.assertEqual(
+                store.list_operator_console_series_copies(console["id"]), []
+            )
+            self.assertEqual(
+                [
+                    binding["time_series_set_id"]
+                    for binding in store.list_case_time_series_bindings(
+                        console["owned_variant_id"]
+                    )
+                ],
+                [base_set["id"]],
             )
         finally:
             if project_id:

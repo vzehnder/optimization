@@ -487,6 +487,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/console/{console_id}/series-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Console Series Options */
+        get: operations["get_console_series_options_api_console__console_id__series_options_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/console/{console_id}/series-selections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replace Console Series Selections */
+        put: operations["replace_console_series_selections_api_console__console_id__series_selections_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/dashboard-templates/{template_id}": {
         parameters: {
             query?: never;
@@ -1732,6 +1766,20 @@ export interface components {
             range_end: string;
             /** Range Start */
             range_start: string;
+        };
+        /** ConsoleSeriesSelectionRequest */
+        ConsoleSeriesSelectionRequest: {
+            /** Column Id */
+            column_id: string;
+            /** Group Id */
+            group_id: string;
+            /** Source Option Id */
+            source_option_id: string;
+        };
+        /** ConsoleSeriesSelectionsWriteRequest */
+        ConsoleSeriesSelectionsWriteRequest: {
+            /** Selections */
+            selections: components["schemas"]["ConsoleSeriesSelectionRequest"][];
         };
         /** CsrfTokenResponse */
         CsrfTokenResponse: {
@@ -3417,6 +3465,72 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_console_series_options_api_console__console_id__series_options_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                console_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replace_console_series_selections_api_console__console_id__series_selections_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                console_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleSeriesSelectionsWriteRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

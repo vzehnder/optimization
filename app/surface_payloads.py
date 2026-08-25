@@ -174,6 +174,29 @@ def build_console_group_values(group_values: Mapping[str, Any]) -> dict[str, Any
     }
 
 
+def build_console_series_options(
+    resolved: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Expose named source choices without their configured catalog targets."""
+
+    return {
+        "selections": [
+            {
+                "group_id": selection["group_id"],
+                "column_id": selection["column_id"],
+                "selected_source_option_id": selection.get(
+                    "selected_source_option_id"
+                ),
+                "options": [
+                    {"id": option["id"], "label": option["label"]}
+                    for option in selection["options"]
+                ],
+            }
+            for selection in resolved.get("selections") or []
+        ]
+    }
+
+
 def build_console_lease(lease: Mapping[str, Any]) -> dict[str, Any]:
     """The edit lock as the operator sees it: a token, a name and a deadline."""
 

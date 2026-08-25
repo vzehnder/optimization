@@ -74,6 +74,7 @@ from app.surface_payloads import (
     build_console_payload,
     build_console_run_entry,
     build_console_save_error,
+    build_console_series_options,
     build_results_block,
     build_portal_branding,
     build_portal_publication_payload,
@@ -209,6 +210,20 @@ class ConsoleParametersWriteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     parameters: list[ConsoleParameterOverrideRequest]
+
+
+class ConsoleSeriesSelectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    group_id: str = Field(min_length=1)
+    column_id: str = Field(min_length=1)
+    source_option_id: str = Field(min_length=1)
+
+
+class ConsoleSeriesSelectionsWriteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    selections: list[ConsoleSeriesSelectionRequest] = Field(min_length=1)
 
 
 class ConsoleLeaseRequest(BaseModel):
@@ -2954,6 +2969,41 @@ def create_app(
                 "tester": current_user_email(request),
             }
         return payload
+
+    @app.get("/api/console/{console_id}/series-options")
+    async def get_console_series_options(console_id: int, request: Request):
+        operator_console_for_viewer(request, console_id)
+        try:
+            resolved = analyst_store.resolve_operator_console_series_options(
+                console_id
+            )
+        except ConsoleSeriesError as error:
+            raise HTTPException(
+                status_code=error.status_code, detail=error.message
+            ) from error
+        return build_console_series_options(resolved)
+
+    @app.put("/api/console/{console_id}/series-selections")
+    async def replace_console_series_selections(
+        console_id: int,
+        payload: ConsoleSeriesSelectionsWriteRequest,
+        request: Request,
+    ):
+        operator_console_for_viewer(request, console_id)
+        try:
+            analyst_store.replace_operator_console_series_selections(
+                console_id,
+                selections=[selection.model_dump() for selection in payload.selections],
+                actor_user_id=current_user_id(request),
+            )
+            resolved = analyst_store.resolve_operator_console_series_options(
+                console_id
+            )
+        except ConsoleSeriesError as error:
+            raise HTTPException(
+                status_code=error.status_code, detail=error.message
+            ) from error
+        return build_console_series_options(resolved)
 
     @app.put("/api/console/{console_id}/parameters")
     async def replace_console_parameters(

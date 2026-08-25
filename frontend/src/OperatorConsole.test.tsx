@@ -863,6 +863,74 @@ describe("the operator console shell", () => {
     expect(detailReads).toBe(1);
   });
 
+  it("switches a named series source and reloads the table", async () => {
+    window.history.replaceState({}, "", "/react/console/4");
+    const writes: Array<Record<string, unknown>> = [];
+    let selectedSource = "base";
+    let demand = [10, 11, 12, 13];
+    const optionsPayload = () => ({
+      selections: [
+        {
+          group_id: "potencia",
+          column_id: "demanda",
+          selected_source_option_id: selectedSource,
+          options: [
+            { id: "base", label: "Demanda base" },
+            { id: "pronostico", label: "Pronostico actualizado" },
+          ],
+        },
+      ],
+    });
+    stubApi(operatorIdentity, (path, method, body) => {
+      if (path === "/api/console/4" && method === "GET") {
+        return Response.json(consoleShellPayload());
+      }
+      if (path === "/api/console/4/runs" && method === "GET") {
+        return Response.json({ history: [] });
+      }
+      if (path === "/api/console/4/series-options" && method === "GET") {
+        return Response.json(optionsPayload());
+      }
+      if (path === "/api/console/4/series-selections" && method === "PUT") {
+        writes.push(body as Record<string, unknown>);
+        selectedSource = "pronostico";
+        demand = [20, 21, 22, 23];
+        return Response.json(optionsPayload());
+      }
+      if (path.startsWith("/api/console/4/groups/potencia/values")) {
+        return Response.json(groupValuesPayload(demand), {
+          headers: { ETag: '"token-1"' },
+        });
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    const source = await screen.findByRole("combobox", {
+      name: "Fuente de Demanda",
+    });
+    expect(source).toHaveValue("base");
+
+    await user.selectOptions(source, "pronostico");
+
+    await vi.waitFor(() => expect(source).toHaveValue("pronostico"));
+    expect(writes).toEqual([
+      {
+        selections: [
+          {
+            group_id: "potencia",
+            column_id: "demanda",
+            source_option_id: "pronostico",
+          },
+        ],
+      },
+    ]);
+    const table = await screen.findByRole("table", { name: "Potencia" });
+    await vi.waitFor(() => expect(within(table).getByText("20")).toBeVisible());
+  });
+
   it("edits one exposed series and only then re-enables running", async () => {
     window.history.replaceState({}, "", "/react/console/4");
     const writes: Array<Record<string, unknown>> = [];

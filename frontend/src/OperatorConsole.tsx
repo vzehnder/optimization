@@ -17,6 +17,7 @@ import {
   createOperatorConsole,
   getConsoleGroupValues,
   getConsoleRun,
+  getConsoleSeriesOptions,
   listCaseInputVariants,
   getConsoleShell,
   getOperatorConsole,
@@ -27,6 +28,7 @@ import {
   saveConsoleGroupValues,
   saveOperatorConsole,
   saveConsoleParameters,
+  saveConsoleSeriesSelections,
   type ConsoleGroup,
   type ConsoleGroupValuesSnapshot,
   type ConsoleLease,
@@ -55,6 +57,8 @@ const consoleShellQueryKey = (consoleId: number) =>
   ["console-shell", consoleId] as const;
 const consoleRunsQueryKey = (consoleId: number) =>
   ["console-runs", consoleId] as const;
+const consoleSeriesOptionsQueryKey = (consoleId: number) =>
+  ["console-series-options", consoleId] as const;
 const consoleGroupValuesQueryKey = (
   consoleId: number,
   groupId: string,
@@ -1310,7 +1314,6 @@ export function ConsoleRootPlanIdentity() {
     enabled: consoleId !== null,
     retry: false,
   });
-
   if (consoleId !== null && shell.data) {
     return <span className="console-root-plan">{shell.data.console.name}</span>;
   }
@@ -1337,6 +1340,12 @@ export function ConsoleShellView() {
     queryKey: consoleShellQueryKey(consoleId || 0),
     queryFn: ({ signal }) => getConsoleShell(consoleId || 0, signal),
     enabled: consoleId !== null,
+    retry: false,
+  });
+  const seriesOptions = useQuery({
+    queryKey: consoleSeriesOptionsQueryKey(consoleId || 0),
+    queryFn: ({ signal }) => getConsoleSeriesOptions(consoleId || 0, signal),
+    enabled: consoleId !== null && Boolean(shell.data?.groups?.length),
     retry: false,
   });
   const history = useQuery({
@@ -1373,6 +1382,29 @@ export function ConsoleShellView() {
         shell.data ? { ...shell.data, parameters: saved } : shell.data,
       );
       setParameterValues({});
+    },
+    onError: (error) => setActionError(errorMessage(error)),
+  });
+  const selectSeriesSource = useMutation({
+    mutationFn: (selection: {
+      group_id: string;
+      column_id: string;
+      source_option_id: string;
+    }) => saveConsoleSeriesSelections(consoleId || 0, [selection]),
+    onSuccess: async (saved) => {
+      setActionError("");
+      queryClient.setQueryData(
+        consoleSeriesOptionsQueryKey(consoleId || 0),
+        saved,
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["console-group-values", consoleId || 0],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: consoleShellQueryKey(consoleId || 0),
+        }),
+      ]);
     },
     onError: (error) => setActionError(errorMessage(error)),
   });
@@ -1460,6 +1492,7 @@ export function ConsoleShellView() {
     effectiveSelectedStart &&
     effectiveSelectedEnd &&
     !saveParameters.isPending &&
+    !selectSeriesSource.isPending &&
     !enqueueRun.isPending,
   );
   const visibleRun = runDetail.data?.run || history.data?.[0];
@@ -1576,6 +1609,53 @@ export function ConsoleShellView() {
           <p className="source-note">Guarda los cambios antes de ejecutar.</p>
         ) : null}
       </section>
+      {seriesOptions.data?.selections.length ? (
+        <section
+          className="content-panel"
+          aria-labelledby="console-series-sources-title"
+        >
+          <h2 id="console-series-sources-title">Fuentes de series</h2>
+          <div className="console-parameter-grid">
+            {seriesOptions.data.selections.map((selection) => {
+              const group = groups.find(
+                (entry) => entry.id === selection.group_id,
+              );
+              const column = group?.columns.find(
+                (entry) => entry.id === selection.column_id,
+              );
+              const label = column?.label || selection.column_id;
+              const inputId = `console-source-${selection.group_id}-${selection.column_id}`;
+              return (
+                <label key={inputId} htmlFor={inputId}>
+                  Fuente de {label}
+                  <select
+                    id={inputId}
+                    value={selection.selected_source_option_id || ""}
+                    disabled={
+                      seriesDirty ||
+                      selectSeriesSource.isPending ||
+                      selection.selected_source_option_id === null
+                    }
+                    onChange={(event) =>
+                      selectSeriesSource.mutate({
+                        group_id: selection.group_id,
+                        column_id: selection.column_id,
+                        source_option_id: event.target.value,
+                      })
+                    }
+                  >
+                    {selection.options.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
       {groups.map((group) => (
         <ConsoleGroupEditor
           key={group.id}

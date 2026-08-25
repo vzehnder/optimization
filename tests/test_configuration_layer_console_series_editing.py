@@ -1060,6 +1060,83 @@ class ConsoleSeriesEditingRunTests(unittest.TestCase):
             canonical_before,
         )
 
+    def test_a_run_after_source_selection_uses_the_new_copy_and_stays_validated(self):
+        forecast_set = import_demand_set(
+            self.store,
+            self.scenario["id"],
+            name="Pronostico actualizado",
+            first_value=20,
+        )
+        document = self.console["document"]
+        group = document["groups"][0]
+        column = group["columns"][0]
+        self.console = self.store.save_operator_console(
+            self.console["id"],
+            document={
+                **document,
+                "groups": [
+                    {
+                        **group,
+                        "columns": [
+                            {
+                                **column,
+                                "source_options": [
+                                    *column["source_options"],
+                                    {
+                                        "id": "pronostico",
+                                        "label": "Pronostico actualizado",
+                                        "time_series_set_id": forecast_set["id"],
+                                    },
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+            status="active",
+            expected_revision=self.console["revision"],
+            updated_by_user_id=None,
+        )
+        self.store.validate_case_input_variant(
+            scenario_id=self.scenario["id"],
+            case_input_variant_id=self.console["owned_variant_id"],
+            range_start=self.range_start,
+            range_end=self.range_end,
+        )
+
+        self.store.replace_operator_console_series_selections(
+            self.console["id"],
+            selections=[
+                {
+                    "group_id": "potencia",
+                    "column_id": "demanda",
+                    "source_option_id": "pronostico",
+                }
+            ],
+            actor_user_id=self.operator["id"],
+        )
+
+        staleness = self.store.evaluate_case_input_variant_staleness(
+            scenario_id=self.scenario["id"],
+            case_input_variant_id=self.console["owned_variant_id"],
+        )
+        self.assertEqual(
+            {"validated": staleness["validated"], "stale": staleness["stale"]},
+            {"validated": True, "stale": False},
+        )
+        materialized = self.store.materialize_operator_console_run(
+            self.console["id"],
+            range_start=self.range_start,
+            range_end=self.range_end,
+        )
+        self.assertEqual(
+            [
+                row["load_demand_mw"]["load_1"]
+                for row in materialized["system_case"]["time_series"]
+            ],
+            [20.0, 21.0, 22.0, 23.0],
+        )
+
     def test_the_save_keeps_the_validated_console_variant_fresh(self):
         self.store.validate_case_input_variant(
             scenario_id=self.scenario["id"],
@@ -1269,6 +1346,196 @@ class ConsoleSeriesEditingApiTests(unittest.TestCase):
         headers = csrf_headers(self.client)
         headers["If-Match"] = etag
         return self.client.put(self.values_path, json=payload, headers=headers)
+
+    def add_forecast_option(self):
+        forecast_set = import_demand_set(
+            self.store,
+            self.scenario["id"],
+            name="Pronostico actualizado",
+            first_value=20,
+        )
+        document = self.console["document"]
+        group = document["groups"][0]
+        column = group["columns"][0]
+        self.console = self.store.save_operator_console(
+            self.console["id"],
+            document={
+                **document,
+                "groups": [
+                    {
+                        **group,
+                        "columns": [
+                            {
+                                **column,
+                                "source_options": [
+                                    *column["source_options"],
+                                    {
+                                        "id": "pronostico",
+                                        "label": "Pronostico actualizado",
+                                        "time_series_set_id": forecast_set["id"],
+                                    },
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+            status="active",
+            expected_revision=self.console["revision"],
+            updated_by_user_id=self.analyst["id"],
+        )
+        return forecast_set
+
+    def test_series_options_expose_only_the_configured_public_choices(self):
+        self.add_forecast_option()
+
+        response = self.client.get(
+            f"/api/console/{self.console['id']}/series-options"
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            response.json(),
+            {
+                "selections": [
+                    {
+                        "group_id": "potencia",
+                        "column_id": "demanda",
+                        "selected_source_option_id": "base",
+                        "options": [
+                            {"id": "base", "label": "Demanda base"},
+                            {
+                                "id": "pronostico",
+                                "label": "Pronostico actualizado",
+                            },
+                        ],
+                    }
+                ]
+            },
+        )
+        for forbidden in (
+            "time_series_set_id",
+            "copy_id",
+            "signal_key",
+            "binding_id",
+            "origin_set_id",
+        ):
+            self.assertNotIn(forbidden, response.text)
+
+    def test_selecting_a_public_source_updates_the_next_values_load(self):
+        self.add_forecast_option()
+
+        response = put_json_with_csrf(
+            self.client,
+            f"/api/console/{self.console['id']}/series-selections",
+            {
+                "selections": [
+                    {
+                        "group_id": "potencia",
+                        "column_id": "demanda",
+                        "source_option_id": "pronostico",
+                    }
+                ]
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            response.json()["selections"][0]["selected_source_option_id"],
+            "pronostico",
+        )
+        self.assertEqual(
+            [
+                row["values"]["demanda"]
+                for row in self.load_values().json()["group_values"]["rows"]
+            ],
+            [20.0, 21.0, 22.0, 23.0],
+        )
+        for forbidden in (
+            "time_series_set_id",
+            "copy_id",
+            "signal_key",
+            "binding_id",
+            "origin_set_id",
+        ):
+            self.assertNotIn(forbidden, response.text)
+
+    def test_duplicate_column_selections_are_rejected_without_writing(self):
+        self.add_forecast_option()
+
+        response = put_json_with_csrf(
+            self.client,
+            f"/api/console/{self.console['id']}/series-selections",
+            {
+                "selections": [
+                    {
+                        "group_id": "potencia",
+                        "column_id": "demanda",
+                        "source_option_id": "pronostico",
+                    },
+                    {
+                        "group_id": "potencia",
+                        "column_id": "demanda",
+                        "source_option_id": "base",
+                    },
+                ]
+            },
+        )
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertEqual(
+            self.store.list_operator_console_series_copies(self.console["id"]), []
+        )
+        self.assertEqual(
+            self.client.get(
+                f"/api/console/{self.console['id']}/series-options"
+            ).json()["selections"][0]["selected_source_option_id"],
+            "base",
+        )
+
+    def test_guessed_options_and_technical_selection_fields_are_refused(self):
+        self.add_forecast_option()
+        path = f"/api/console/{self.console['id']}/series-selections"
+
+        guessed = put_json_with_csrf(
+            self.client,
+            path,
+            {
+                "selections": [
+                    {
+                        "group_id": "potencia",
+                        "column_id": "demanda",
+                        "source_option_id": "inventada",
+                    }
+                ]
+            },
+        )
+        technical = put_json_with_csrf(
+            self.client,
+            path,
+            {
+                "selections": [
+                    {
+                        "group_id": "potencia",
+                        "column_id": "demanda",
+                        "source_option_id": "pronostico",
+                        "time_series_set_id": self.demand_set["id"],
+                    }
+                ]
+            },
+        )
+
+        self.assertEqual(guessed.status_code, 400, guessed.text)
+        self.assertEqual(technical.status_code, 422, technical.text)
+        self.assertEqual(
+            self.store.list_operator_console_series_copies(self.console["id"]), []
+        )
+        self.assertEqual(
+            self.client.get(
+                f"/api/console/{self.console['id']}/series-options"
+            ).json()["selections"][0]["selected_source_option_id"],
+            "base",
+        )
 
     def test_the_console_payload_announces_the_configured_groups(self):
         response = self.client.get(f"/api/console/{self.console['id']}")

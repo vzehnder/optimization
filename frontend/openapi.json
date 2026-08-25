@@ -350,6 +350,51 @@
         "title": "ConsoleRunRequest",
         "type": "object"
       },
+      "ConsoleSeriesSelectionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "column_id": {
+            "minLength": 1,
+            "title": "Column Id",
+            "type": "string"
+          },
+          "group_id": {
+            "minLength": 1,
+            "title": "Group Id",
+            "type": "string"
+          },
+          "source_option_id": {
+            "minLength": 1,
+            "title": "Source Option Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "group_id",
+          "column_id",
+          "source_option_id"
+        ],
+        "title": "ConsoleSeriesSelectionRequest",
+        "type": "object"
+      },
+      "ConsoleSeriesSelectionsWriteRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "selections": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleSeriesSelectionRequest"
+            },
+            "minItems": 1,
+            "title": "Selections",
+            "type": "array"
+          }
+        },
+        "required": [
+          "selections"
+        ],
+        "title": "ConsoleSeriesSelectionsWriteRequest",
+        "type": "object"
+      },
       "CsrfTokenResponse": {
         "properties": {
           "csrf_token": {
@@ -3484,6 +3529,90 @@
           }
         },
         "summary": "Get Console Run"
+      }
+    },
+    "/api/console/{console_id}/series-options": {
+      "get": {
+        "operationId": "get_console_series_options_api_console__console_id__series_options_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "console_id",
+            "required": true,
+            "schema": {
+              "title": "Console Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Console Series Options"
+      }
+    },
+    "/api/console/{console_id}/series-selections": {
+      "put": {
+        "operationId": "replace_console_series_selections_api_console__console_id__series_selections_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "console_id",
+            "required": true,
+            "schema": {
+              "title": "Console Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleSeriesSelectionsWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Replace Console Series Selections"
       }
     },
     "/api/dashboard-templates/{template_id}": {

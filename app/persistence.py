@@ -7979,6 +7979,302 @@ class AnalystStore:
         ).fetchone()
         return row_to_dict(row) if row is not None else None
 
+    def resolve_operator_console_series_options(
+        self, console_id: int
+    ) -> dict[str, Any]:
+        """Return named choices and the active choice in external coordinates."""
+
+        console = self.get_operator_console(console_id)
+        bindings = self.list_case_time_series_bindings(
+            int(console["owned_variant_id"])
+        )
+        active_copies = {
+            int(copy["time_series_set_id"]): copy
+            for copy in self.list_operator_console_series_copies(console_id)
+        }
+        selections: list[dict[str, Any]] = []
+        for group in console["document"].get("groups") or []:
+            for column in group["columns"]:
+                bound_set_id = self._resolve_console_column_set_id(
+                    bindings=bindings, signal=column["signal"]
+                )
+                copy = active_copies.get(bound_set_id)
+                selected_source_set_id = (
+                    int(copy["origin_set_id"]) if copy is not None else bound_set_id
+                )
+                selected_option = next(
+                    (
+                        option
+                        for option in column["source_options"]
+                        if int(option["time_series_set_id"])
+                        == selected_source_set_id
+                    ),
+                    None,
+                )
+                selections.append(
+                    {
+                        "group_id": str(group["id"]),
+                        "column_id": str(column["id"]),
+                        "selected_source_option_id": (
+                            str(selected_option["id"])
+                            if selected_option is not None
+                            else None
+                        ),
+                        "options": [
+                            {"id": str(option["id"]), "label": str(option["label"])}
+                            for option in column["source_options"]
+                        ],
+                    }
+                )
+        return {"selections": selections}
+
+    def replace_operator_console_series_selections(
+        self,
+        console_id: int,
+        *,
+        selections: list[Mapping[str, Any]],
+        actor_user_id: int | None = None,
+    ) -> None:
+        """Resolve named sources and repoint this console's bindings atomically."""
+
+        with self._lock:
+            console = self.get_operator_console(console_id)
+            location = self.get_operator_console_location(console_id)
+            bindings = self.list_case_time_series_bindings(
+                int(console["owned_variant_id"])
+            )
+            copies_by_source_id = {
+                int(copy["origin_set_id"]): copy
+                for copy in self.list_operator_console_series_copies(console_id)
+            }
+            recorded_series_ids = {
+                str(row["dependency_id"])
+                for row in self.connection.execute(
+                    """
+                    SELECT dependency_id
+                    FROM validation_dependencies
+                    WHERE owner_type = 'case_input_variant' AND owner_id = ?
+                      AND dependency_type = 'time_series_set'
+                    """,
+                    (int(console["owned_variant_id"]),),
+                ).fetchall()
+            }
+            replaced_set_ids: set[int] = set()
+            attested_copy_ids: set[int] = set()
+            period = self.resolve_operator_console_period(console_id)
+            actor = self._console_actor_identity(actor_user_id)
+            now = utc_now_iso()
+            transaction = (
+                self.connection.transaction()
+                if self.database_backend == "postgresql"
+                else self.connection
+            )
+            with transaction:
+                coordinates = [
+                    (
+                        str(selection.get("group_id") or ""),
+                        str(selection.get("column_id") or ""),
+                    )
+                    for selection in selections
+                ]
+                if len(coordinates) != len(set(coordinates)):
+                    raise ConsoleSeriesError(
+                        "cada columna debe aparecer una sola vez en la seleccion"
+                    )
+                for selection in selections:
+                    group = self._operator_console_group(
+                        console, str(selection.get("group_id") or "")
+                    )
+                    column = next(
+                        (
+                            entry
+                            for entry in group["columns"]
+                            if str(entry["id"])
+                            == str(selection.get("column_id") or "")
+                        ),
+                        None,
+                    )
+                    if column is None:
+                        raise ConsoleSeriesError("la columna de series no existe")
+                    option = next(
+                        (
+                            entry
+                            for entry in column["source_options"]
+                            if str(entry["id"])
+                            == str(selection.get("source_option_id") or "")
+                        ),
+                        None,
+                    )
+                    if option is None:
+                        raise ConsoleSeriesError("la opcion de fuente no esta permitida")
+
+                    source_set_id = int(option["time_series_set_id"])
+                    try:
+                        source_set = self.get_time_series_set(
+                            int(location["project_id"]), source_set_id
+                        )
+                    except KeyError as error:
+                        raise ConsoleSeriesError(
+                            "la opcion de fuente ya no esta disponible",
+                            status_code=409,
+                        ) from error
+                    signal = column["signal"]
+                    entity_type = normalize_optional_text(signal.get("entity_type"))
+                    entity_id = normalize_optional_text(signal.get("entity_id"))
+                    matching_signals = [
+                        entry
+                        for entry in source_set["signals"]
+                        if str(entry["signal_key"]) == str(signal["signal_key"])
+                        and normalize_optional_text(entry.get("entity_type"))
+                        in {None, entity_type}
+                        and normalize_optional_text(entry.get("entity_key"))
+                        in {None, entity_id}
+                    ]
+                    if len(matching_signals) != 1:
+                        raise ConsoleSeriesError(
+                            "la fuente elegida no es compatible con la columna"
+                        )
+                    if not period["available_start"] or not period["available_end"]:
+                        raise ConsoleSeriesError(
+                            "la consola no tiene un periodo compatible para cambiar la fuente"
+                        )
+                    try:
+                        resolve_bound_signal_series(
+                            source_set,
+                            str(signal["signal_key"]),
+                            str(period["available_start"]),
+                            str(period["available_end"]),
+                        )
+                    except InputVariantRangeError as error:
+                        raise ConsoleSeriesError(
+                            "la fuente elegida no cubre el periodo disponible"
+                        ) from error
+
+                    scoped_binding = next(
+                        (
+                            binding
+                            for binding in bindings
+                            if str(binding["signal_key"])
+                            == str(signal["signal_key"])
+                            and binding.get("entity_type") == entity_type
+                            and binding.get("entity_id") == entity_id
+                        ),
+                        None,
+                    )
+                    unscoped_binding = next(
+                        (
+                            binding
+                            for binding in bindings
+                            if str(binding["signal_key"])
+                            == str(signal["signal_key"])
+                            and binding.get("entity_type") is None
+                            and binding.get("entity_id") is None
+                        ),
+                        None,
+                    )
+                    binding = scoped_binding or unscoped_binding
+                    if binding is None:
+                        raise ConsoleSeriesError(
+                            "la columna ya no tiene una serie vinculada",
+                            status_code=409,
+                        )
+                    replaced_set_id = int(binding["time_series_set_id"])
+
+                    operational_copy = copies_by_source_id.get(source_set_id)
+                    if operational_copy is None:
+                        operational_copy = self._create_operator_console_series_copy(
+                            console_id=console_id,
+                            project_id=int(location["project_id"]),
+                            origin_set_id=source_set_id,
+                            created_by=actor["created_by"],
+                            created_by_user_id=actor_user_id,
+                            now=now,
+                        )
+                        copies_by_source_id[source_set_id] = operational_copy
+                    self.connection.execute(
+                        """
+                        UPDATE case_time_series_bindings
+                        SET time_series_set_id = ?, updated_at = ?, updated_by = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            int(operational_copy["time_series_set_id"]),
+                            now,
+                            actor["created_by"],
+                            int(binding["id"]),
+                        ),
+                    )
+                    replaced_set_ids.add(replaced_set_id)
+                    if str(replaced_set_id) in recorded_series_ids:
+                        attested_copy_ids.add(
+                            int(operational_copy["time_series_set_id"])
+                        )
+                self.connection.execute(
+                    """
+                    UPDATE operator_console_series_copies
+                    SET archived_at = ?
+                    WHERE console_id = ? AND archived_at IS NULL
+                      AND time_series_set_id NOT IN (
+                          SELECT time_series_set_id
+                          FROM case_time_series_bindings
+                          WHERE case_input_variant_id = ?
+                      )
+                    """,
+                    (now, console_id, int(console["owned_variant_id"])),
+                )
+                current_set_ids = {
+                    int(binding["time_series_set_id"])
+                    for binding in self.list_case_time_series_bindings(
+                        int(console["owned_variant_id"])
+                    )
+                }
+                for replaced_set_id in replaced_set_ids:
+                    if (
+                        str(replaced_set_id) in recorded_series_ids
+                        and replaced_set_id not in current_set_ids
+                    ):
+                        self.connection.execute(
+                            """
+                            DELETE FROM validation_dependencies
+                            WHERE owner_type = 'case_input_variant' AND owner_id = ?
+                              AND dependency_type = 'time_series_set'
+                              AND dependency_id = ?
+                            """,
+                            (
+                                int(console["owned_variant_id"]),
+                                str(replaced_set_id),
+                            ),
+                        )
+                for copied_set_id in attested_copy_ids:
+                    copied_set = self.get_time_series_set(
+                        int(location["project_id"]), copied_set_id
+                    )
+                    self.connection.execute(
+                        """
+                        DELETE FROM validation_dependencies
+                        WHERE owner_type = 'case_input_variant' AND owner_id = ?
+                          AND dependency_type = 'time_series_set'
+                          AND dependency_id = ?
+                        """,
+                        (int(console["owned_variant_id"]), str(copied_set_id)),
+                    )
+                    self.connection.execute(
+                        """
+                        INSERT INTO validation_dependencies (
+                            owner_type, owner_id, dependency_type, dependency_id,
+                            recorded_hash, created_at, updated_at
+                        )
+                        VALUES ('case_input_variant', ?, 'time_series_set', ?, ?, ?, ?)
+                        """,
+                        (
+                            int(console["owned_variant_id"]),
+                            str(copied_set_id),
+                            str(copied_set["content_hash"]),
+                            now,
+                            now,
+                        ),
+                    )
+
     def _create_operator_console_series_copy(
         self,
         *,
