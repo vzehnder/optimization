@@ -452,6 +452,22 @@ export interface OperatorConsoleBlocking {
     dependency_id: string | null;
     detail: string;
   }>;
+  action?:
+    | {
+        kind: "revalidate_variant";
+        variant_id: number;
+        range_start: string;
+        range_end: string;
+      }
+    | {
+        kind: "edit_configuration";
+        target: {
+          section: "parameters" | "groups";
+          group_id?: string;
+          id: string;
+          label: string;
+        };
+      };
 }
 
 export interface OperatorConsole {
@@ -469,6 +485,7 @@ export interface OperatorConsole {
   updated_by: string | null;
   waiting_since: string | null;
   blocking: OperatorConsoleBlocking;
+  technical_failure?: { reference: string; run_id: number } | null;
   can_force_release?: boolean;
   group_leases?: Array<{
     group_id: string;
@@ -480,6 +497,12 @@ export interface OperatorConsole {
     id: number;
     archived: boolean;
     current_revision: number;
+    origin?: {
+      name: string;
+      copied_revision: number;
+      current_revision: number;
+      old: boolean;
+    };
     revisions: Array<{
       revision_number: number;
       date: string;

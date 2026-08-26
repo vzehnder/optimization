@@ -37,12 +37,16 @@ class ConsoleSeriesError(ValueError):
         status_code: int = 400,
         cells: Sequence[Mapping[str, Any]] = (),
         total_cells: int | None = None,
+        configuration_target: Mapping[str, Any] | None = None,
     ):
         super().__init__(message)
         self.message = message
         self.status_code = status_code
         self.cells = [dict(cell) for cell in cells]
         self.total_cells = len(self.cells) if total_cells is None else total_cells
+        self.configuration_target = (
+            dict(configuration_target) if configuration_target is not None else None
+        )
 
 
 def range_hours(range_start: str, range_end: str) -> float:

@@ -2702,6 +2702,9 @@ def create_app(
                 range_start=payload.range_start,
                 range_end=payload.range_end,
             )
+            analyst_store.clear_resolved_operator_console_wait_for_variant(
+                variant_id
+            )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         except (DraftGenerationError, InputVariantRangeError, MissingRequiredSignalsError) as error:
@@ -2759,7 +2762,52 @@ def create_app(
             unavailable_series=block["unavailable_series"],
             moved_dependency=block["moved_dependency"],
         )
-        return {"reason": gate["reason"], "reasons": block["reasons"]}
+        response = {"reason": gate["reason"], "reasons": block["reasons"]}
+        if gate["reason"] == "dependencia_movida":
+            console = analyst_store.get_operator_console(console_id)
+            period = analyst_store.resolve_operator_console_period(console_id)
+            response["action"] = {
+                "kind": "revalidate_variant",
+                "variant_id": int(console["owned_variant_id"]),
+                "range_start": period["selected_start"],
+                "range_end": period["selected_end"],
+            }
+        elif gate["reason"] == "campo_no_disponible":
+            console = analyst_store.get_operator_console(console_id)
+            unavailable_parameters = analyst_store.resolve_operator_console_parameters(
+                console_id
+            )["unavailable_ids"]
+            if unavailable_parameters:
+                parameter_id = str(unavailable_parameters[0])
+                parameter = next(
+                    configured
+                    for configured in console["document"].get("parameters") or []
+                    if str(configured["id"]) == parameter_id
+                )
+                response["action"] = {
+                    "kind": "edit_configuration",
+                    "target": {
+                        "section": "parameters",
+                        "id": parameter_id,
+                        "label": str(parameter["label"]),
+                    },
+                }
+            else:
+                unavailable_columns = analyst_store.resolve_operator_console_group_metadata(
+                    console_id
+                )["unavailable_columns"]
+                if unavailable_columns:
+                    column = unavailable_columns[0]
+                    response["action"] = {
+                        "kind": "edit_configuration",
+                        "target": {
+                            "section": "groups",
+                            "group_id": column["group_id"],
+                            "id": column["column_id"],
+                            "label": column["column_label"],
+                        },
+                    }
+        return response
 
     def console_run_gate(
         console: Mapping[str, Any],
@@ -2786,6 +2834,16 @@ def create_app(
         request: Request | None = None,
     ) -> dict[str, Any]:
         owned_variant = analyst_store.get_case_input_variant(int(console["owned_variant_id"]))
+        latest_failed_run = next(
+            (
+                run
+                for run in analyst_store.list_operator_console_runs(
+                    int(console["id"])
+                )
+                if run["status"] == "failed"
+            ),
+            None,
+        )
         group_leases = []
         for group in console["document"].get("groups") or []:
             lease = analyst_store.describe_operator_console_group_lease(
@@ -2820,6 +2878,14 @@ def create_app(
             "updated_by": portal_configuration_editor_email(console["updated_by_user_id"]),
             "waiting_since": console["waiting_since"],
             "blocking": operator_console_blocking(int(console["id"])),
+            "technical_failure": (
+                {
+                    "reference": str(latest_failed_run["id"]),
+                    "run_id": int(latest_failed_run["id"]),
+                }
+                if latest_failed_run is not None
+                else None
+            ),
             "can_force_release": bool(
                 not auth_required or (viewer and viewer.get("role") == "admin")
             ),
@@ -2908,6 +2974,8 @@ def create_app(
                 expected_revision=payload.expected_revision,
                 updated_by_user_id=current_user_id(request),
             )
+            analyst_store.clear_resolved_operator_console_wait(console_id)
+            console = analyst_store.get_operator_console(console_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         except OperatorConsoleConfigurationError as error:

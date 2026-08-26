@@ -26,6 +26,7 @@ from app.surface_payloads import build_console_payload
 from app.time_series_catalog import (
     CatalogImportRequest,
     CatalogSignalMappingRequest,
+    CatalogValueEdit,
     prepare_time_series_catalog_import,
 )
 from app.validation import ValidationResult
@@ -858,6 +859,329 @@ class ConsoleFailClosedApiTests(unittest.TestCase):
             [reason["dependency_type"] for reason in entry["blocking"]["reasons"]],
             ["parameters"],
         )
+
+    def test_internal_list_offers_the_existing_variant_validation_for_a_moved_dependency(self):
+        self.move_the_case_parameter()
+        self.login("analyst@example.local", "analyst pass")
+
+        response = self.client.get(f"/api/scenarios/{self.scenario['id']}/consoles")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        entry = response.json()["operator_consoles"][0]
+        self.assertEqual(
+            entry["blocking"]["action"],
+            {
+                "kind": "revalidate_variant",
+                "variant_id": self.console["owned_variant_id"],
+                "range_start": self.range_start,
+                "range_end": self.range_end,
+            },
+        )
+
+    def test_successful_variant_validation_clears_the_moved_dependency_and_wait(self):
+        self.move_the_case_parameter()
+        self.login("operator@example.local", "operator pass")
+        requested = post_json_with_csrf(
+            self.client, f"/api/console/{self.console['id']}/request-review"
+        )
+        self.assertEqual(requested.status_code, 200, requested.text)
+        self.login("analyst@example.local", "analyst pass")
+
+        validated = post_json_with_csrf(
+            self.client,
+            (
+                f"/api/scenarios/{self.scenario['id']}/case/variants/"
+                f"{self.console['owned_variant_id']}/validate"
+            ),
+            {"range_start": self.range_start, "range_end": self.range_end},
+        )
+
+        self.assertEqual(validated.status_code, 200, validated.text)
+        entry = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/consoles"
+        ).json()["operator_consoles"][0]
+        self.assertIsNone(entry["blocking"]["reason"])
+        self.assertNotIn("action", entry["blocking"])
+        self.assertIsNone(entry["waiting_since"])
+
+    def test_variant_validation_does_not_pretend_to_repair_an_unavailable_parameter(self):
+        broken = self.create_console(
+            status="active", pointer_field="inexistent_field"
+        )
+        self.store.validate_case_input_variant(
+            scenario_id=self.scenario["id"],
+            case_input_variant_id=broken["owned_variant_id"],
+            range_start=self.range_start,
+            range_end=self.range_end,
+        )
+        self.move_the_case_parameter()
+        self.login("operator@example.local", "operator pass")
+        requested = post_json_with_csrf(
+            self.client, f"/api/console/{broken['id']}/request-review"
+        )
+        waiting_since = requested.json()["run_gate"]["review_requested_at"]
+        self.login("analyst@example.local", "analyst pass")
+
+        validated = post_json_with_csrf(
+            self.client,
+            (
+                f"/api/scenarios/{self.scenario['id']}/case/variants/"
+                f"{broken['owned_variant_id']}/validate"
+            ),
+            {"range_start": self.range_start, "range_end": self.range_end},
+        )
+
+        self.assertEqual(validated.status_code, 200, validated.text)
+        entries = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/consoles"
+        ).json()["operator_consoles"]
+        entry = next(item for item in entries if item["id"] == broken["id"])
+        self.assertEqual(entry["blocking"]["reason"], "campo_no_disponible")
+        self.assertEqual(entry["blocking"]["reasons"], [])
+        self.assertEqual(
+            entry["blocking"]["action"],
+            {
+                "kind": "edit_configuration",
+                "target": {
+                    "section": "parameters",
+                    "id": "potencia_bess",
+                    "label": "Potencia maxima BESS",
+                },
+            },
+        )
+        self.assertEqual(entry["waiting_since"], waiting_since)
+
+    def test_saving_a_corrected_parameter_clears_the_field_block_and_wait(self):
+        broken = self.create_console(
+            status="active", pointer_field="inexistent_field"
+        )
+        self.login("operator@example.local", "operator pass")
+        requested = post_json_with_csrf(
+            self.client, f"/api/console/{broken['id']}/request-review"
+        )
+        self.assertEqual(requested.status_code, 200, requested.text)
+        self.login("analyst@example.local", "analyst pass")
+
+        saved = put_json_with_csrf(
+            self.client,
+            f"/api/scenarios/{self.scenario['id']}/consoles/{broken['id']}",
+            {
+                "document": console_document(self.demand_set["id"]),
+                "status": "active",
+                "expected_revision": broken["revision"],
+            },
+        )
+
+        self.assertEqual(saved.status_code, 200, saved.text)
+        entry = saved.json()["operator_console"]
+        self.assertIsNone(entry["blocking"]["reason"])
+        self.assertIsNone(entry["waiting_since"])
+
+    def test_saving_a_corrected_parameter_does_not_attest_a_moved_dependency(self):
+        broken = self.create_console(
+            status="active", pointer_field="inexistent_field"
+        )
+        self.store.validate_case_input_variant(
+            scenario_id=self.scenario["id"],
+            case_input_variant_id=broken["owned_variant_id"],
+            range_start=self.range_start,
+            range_end=self.range_end,
+        )
+        self.move_the_case_parameter()
+        self.login("operator@example.local", "operator pass")
+        requested = post_json_with_csrf(
+            self.client, f"/api/console/{broken['id']}/request-review"
+        )
+        waiting_since = requested.json()["run_gate"]["review_requested_at"]
+        self.login("analyst@example.local", "analyst pass")
+
+        saved = put_json_with_csrf(
+            self.client,
+            f"/api/scenarios/{self.scenario['id']}/consoles/{broken['id']}",
+            {
+                "document": console_document(self.demand_set["id"]),
+                "status": "active",
+                "expected_revision": broken["revision"],
+            },
+        )
+
+        self.assertEqual(saved.status_code, 200, saved.text)
+        entry = saved.json()["operator_console"]
+        self.assertEqual(entry["blocking"]["reason"], "dependencia_movida")
+        self.assertEqual(
+            [reason["dependency_type"] for reason in entry["blocking"]["reasons"]],
+            ["parameters"],
+        )
+        self.assertEqual(entry["blocking"]["action"]["kind"], "revalidate_variant")
+        self.assertEqual(entry["waiting_since"], waiting_since)
+
+    def test_an_unavailable_series_action_names_the_exact_configured_column(self):
+        document = console_document(self.demand_set["id"])
+        document["groups"][0]["columns"][0]["signal"]["entity_id"] = "retired_load"
+        broken = self.store.create_operator_console(
+            case_id=self.case["id"],
+            source_variant_id=self.source_variant["id"],
+            document=document,
+            created_by_user_id=self.analyst["id"],
+        )
+        broken = self.store.save_operator_console(
+            broken["id"],
+            document=document,
+            status="active",
+            expected_revision=broken["revision"],
+            updated_by_user_id=self.analyst["id"],
+        )
+        self.login("analyst@example.local", "analyst pass")
+
+        entries = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/consoles"
+        ).json()["operator_consoles"]
+
+        entry = next(item for item in entries if item["id"] == broken["id"])
+        self.assertEqual(
+            entry["blocking"]["action"],
+            {
+                "kind": "edit_configuration",
+                "target": {
+                    "section": "groups",
+                    "group_id": "potencia",
+                    "id": "demanda",
+                    "label": "Demanda",
+                },
+            },
+        )
+
+    def test_a_new_canonical_revision_only_marks_the_operational_copy_as_old(self):
+        loaded = self.store.resolve_operator_console_group_values(
+            self.console["id"],
+            group_id="potencia",
+            range_start=self.range_start,
+            range_end=self.range_end,
+            granularity="full_horizon",
+        )
+        lease = self.store.acquire_operator_console_group_lease(
+            self.console["id"], group_id="potencia", user_id=self.operator["id"]
+        )
+        self.store.save_operator_console_group_values(
+            self.console["id"],
+            group_id="potencia",
+            range_start=self.range_start,
+            range_end=self.range_end,
+            granularity="full_horizon",
+            expected_token=loaded["token"],
+            lease_token=lease["token"],
+            cells=[{"column_id": "demanda", "row_index": 0, "value": 99.5}],
+            note="Valor operativo aprobado",
+            actor_user_id=self.operator["id"],
+        )
+        values_before = self.store.resolve_operator_console_group_values(
+            self.console["id"],
+            group_id="potencia",
+            range_start=self.range_start,
+            range_end=self.range_end,
+            granularity="full_horizon",
+        )["rows"]
+        audit_before = self.store.list_operator_console_series_copy_audit(
+            self.console["id"]
+        )
+
+        self.store.edit_time_series_set_values(
+            project_id=self.project["id"],
+            time_series_set_id=self.demand_set["id"],
+            edits=[
+                CatalogValueEdit(
+                    period_index=0,
+                    signal_key="load_demand_mw",
+                    value_text="777.0",
+                )
+            ],
+            created_by="engineer@example.local",
+        )
+        self.login("analyst@example.local", "analyst pass")
+
+        entries = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/consoles"
+        ).json()["operator_consoles"]
+
+        entry = next(item for item in entries if item["id"] == self.console["id"])
+        self.assertEqual(
+            entry["series_copies"][0]["origin"],
+            {
+                "name": "Demanda base",
+                "copied_revision": 1,
+                "current_revision": 2,
+                "old": True,
+            },
+        )
+        self.assertIsNone(entry["blocking"]["reason"])
+        values_after = self.store.resolve_operator_console_group_values(
+            self.console["id"],
+            group_id="potencia",
+            range_start=self.range_start,
+            range_end=self.range_end,
+            granularity="full_horizon",
+        )["rows"]
+        audit_after = self.store.list_operator_console_series_copy_audit(
+            self.console["id"]
+        )
+        self.assertEqual(values_after, values_before)
+        self.assertEqual(
+            [copy["revisions"] for copy in audit_after],
+            [copy["revisions"] for copy in audit_before],
+        )
+
+    def test_an_operator_failure_reference_links_only_internal_users_to_technical_detail(self):
+        version = self.store.create_scenario_version(
+            scenario_id=self.scenario["id"],
+            system_case_json={
+                "schema_version": "bess_system_dispatch.v2",
+                "case_name": "failed_console_case",
+                "nodes": [],
+                "edges": [],
+                "time_series": [],
+            },
+            validation_payload={"status": "ok"},
+        )
+        run = self.store.create_run(
+            scenario_version_id=version["id"],
+            triggered_by="operator@example.local",
+            trigger_type="operator_console",
+            triggered_by_user_id=self.operator["id"],
+            triggered_by_display_name="Olga Operadora",
+            operator_console_id=self.console["id"],
+            operator_console_revision=self.console["revision"],
+        )
+        self.store.mark_run_running(
+            run["id"],
+            workspace_path="C:/private/run",
+            input_snapshot_path="C:/private/run/input.json",
+        )
+        self.store.mark_run_failed(
+            run["id"],
+            exit_code=17,
+            stdout="private stdout",
+            stderr="private stderr",
+            error_payload={"message": "private failure"},
+        )
+        self.login("operator@example.local", "operator pass")
+        operator_detail = self.client.get(
+            f"/api/console/{self.console['id']}/runs/{run['id']}"
+        )
+
+        self.assertEqual(
+            operator_detail.json()["failure"]["reference"], str(run["id"])
+        )
+        self.assertEqual(self.client.get(f"/api/runs/{run['id']}").status_code, 404)
+
+        self.login("analyst@example.local", "analyst pass")
+        entry = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/consoles"
+        ).json()["operator_consoles"][0]
+        self.assertEqual(
+            entry["technical_failure"],
+            {"reference": str(run["id"]), "run_id": run["id"]},
+        )
+        self.assertEqual(self.client.get(f"/api/runs/{run['id']}").status_code, 200)
 
     def test_a_runnable_console_refuses_the_review_request_and_records_no_wait(self):
         self.login("operator@example.local", "operator pass")

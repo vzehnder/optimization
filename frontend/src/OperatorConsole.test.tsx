@@ -299,6 +299,243 @@ describe("operator consoles in the scenario workspace", () => {
     );
   });
 
+  it("revalidates the owned variant from a moved-dependency recovery row", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    const validations: unknown[] = [];
+    let blocked = true;
+    const movedConsole = {
+      ...draftConsole,
+      status: "active",
+      waiting_since: "2026-08-26T12:00:00Z",
+      blocking: {
+        reason: "dependencia_movida",
+        reasons: [
+          {
+            dependency_type: "parameters",
+            dependency_id: null,
+            detail: "case parameters changed",
+          },
+        ],
+        action: {
+          kind: "revalidate_variant",
+          variant_id: 9,
+          range_start: "2026-01-01T00:00:00-03:00",
+          range_end: "2026-01-01T04:00:00-03:00",
+        },
+      },
+    };
+    stubScenarioWorkspace((path, method, body) => {
+      if (path === "/api/scenarios/10/consoles" && method === "GET") {
+        return Response.json({
+          operator_consoles: [
+            blocked
+              ? movedConsole
+              : {
+                  ...movedConsole,
+                  waiting_since: null,
+                  blocking: { reason: null, reasons: [] },
+                },
+          ],
+        });
+      }
+      if (
+        path === "/api/scenarios/10/case/variants/9/validate" &&
+        method === "POST"
+      ) {
+        validations.push(body);
+        blocked = false;
+        return Response.json({ status: "valid", series_bindings: [] });
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    const section = await screen.findByRole("region", {
+      name: "Consolas de operador",
+    });
+    const row = await within(section).findByRole("row", {
+      name: /Plan diario Planta Norte/,
+    });
+    await user.click(
+      within(row).getByRole("button", { name: "Revalidar variante" }),
+    );
+
+    expect(validations).toEqual([
+      {
+        range_start: "2026-01-01T00:00:00-03:00",
+        range_end: "2026-01-01T04:00:00-03:00",
+      },
+    ]);
+    expect(await within(row).findByText("Ninguno")).toBeVisible();
+    expect(within(row).getByText("Sin espera")).toBeVisible();
+  });
+
+  it("links an unavailable parameter to its exact configuration target", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    const brokenConsole = {
+      ...draftConsole,
+      status: "active",
+      waiting_since: "2026-08-26T12:00:00Z",
+      blocking: {
+        reason: "campo_no_disponible",
+        reasons: [],
+        action: {
+          kind: "edit_configuration",
+          target: {
+            section: "parameters",
+            id: "potencia_bess",
+            label: "Potencia maxima BESS",
+          },
+        },
+      },
+    };
+    stubScenarioWorkspace((path, method) => {
+      if (path === "/api/scenarios/10/consoles" && method === "GET") {
+        return Response.json({ operator_consoles: [brokenConsole] });
+      }
+      return undefined;
+    });
+
+    render(<App />);
+
+    const section = await screen.findByRole("region", {
+      name: "Consolas de operador",
+    });
+    const row = await within(section).findByRole("row", {
+      name: /Plan diario Planta Norte/,
+    });
+    expect(
+      within(row).getByRole("link", {
+        name: "Corregir Potencia maxima BESS",
+      }),
+    ).toHaveAttribute(
+      "href",
+      "/react/scenarios/10/consoles/4#console-parameter-potencia_bess",
+    );
+  });
+
+  it("offers only field correction while a field and moved dependency coexist", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    const mixedConsole = {
+      ...draftConsole,
+      status: "active",
+      waiting_since: "2026-08-26T12:00:00Z",
+      blocking: {
+        reason: "campo_no_disponible",
+        reasons: [
+          {
+            dependency_type: "parameters",
+            dependency_id: null,
+            detail: "case parameters changed",
+          },
+        ],
+        action: {
+          kind: "edit_configuration",
+          target: {
+            section: "parameters",
+            id: "potencia_bess",
+            label: "Potencia maxima BESS",
+          },
+        },
+      },
+    };
+    stubScenarioWorkspace((path, method) => {
+      if (path === "/api/scenarios/10/consoles" && method === "GET") {
+        return Response.json({ operator_consoles: [mixedConsole] });
+      }
+      return undefined;
+    });
+
+    render(<App />);
+
+    const section = await screen.findByRole("region", {
+      name: "Consolas de operador",
+    });
+    const row = await within(section).findByRole("row", {
+      name: /Plan diario Planta Norte/,
+    });
+    expect(
+      within(row).getByRole("link", {
+        name: "Corregir Potencia maxima BESS",
+      }),
+    ).toBeVisible();
+    expect(
+      within(row).queryByRole("button", { name: "Revalidar variante" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows an old-origin-copy badge without presenting it as a block", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    const oldCopyConsole = {
+      ...draftConsole,
+      status: "active",
+      series_copies: [
+        {
+          id: 31,
+          archived: false,
+          current_revision: 2,
+          origin: {
+            name: "Demanda base",
+            copied_revision: 1,
+            current_revision: 2,
+            old: true,
+          },
+          revisions: [],
+        },
+      ],
+    };
+    stubScenarioWorkspace((path, method) => {
+      if (path === "/api/scenarios/10/consoles" && method === "GET") {
+        return Response.json({ operator_consoles: [oldCopyConsole] });
+      }
+      return undefined;
+    });
+
+    render(<App />);
+
+    const section = await screen.findByRole("region", {
+      name: "Consolas de operador",
+    });
+    const row = await within(section).findByRole("row", {
+      name: /Plan diario Planta Norte/,
+    });
+    expect(within(row).getByText("Ninguno")).toBeVisible();
+    expect(
+      within(row).getByText(
+        "Copia antigua: Demanda base (origen 1, vigente 2)",
+      ),
+    ).toBeVisible();
+  });
+
+  it("links the latest operator failure reference to internal run detail", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10");
+    const failedConsole = {
+      ...draftConsole,
+      status: "active",
+      technical_failure: { reference: "77", run_id: 77 },
+    };
+    stubScenarioWorkspace((path, method) => {
+      if (path === "/api/scenarios/10/consoles" && method === "GET") {
+        return Response.json({ operator_consoles: [failedConsole] });
+      }
+      return undefined;
+    });
+
+    render(<App />);
+
+    const section = await screen.findByRole("region", {
+      name: "Consolas de operador",
+    });
+    const row = await within(section).findByRole("row", {
+      name: /Plan diario Planta Norte/,
+    });
+    expect(
+      within(row).getByRole("link", { name: "Ver fallo tecnico 77" }),
+    ).toHaveAttribute("href", "/react/runs/77");
+  });
+
   it("activates a console at its current revision from the configuration editor", async () => {
     window.history.replaceState({}, "", "/react/scenarios/10/consoles/4");
     const saves: unknown[] = [];
@@ -360,6 +597,42 @@ describe("operator consoles in the scenario workspace", () => {
       "stale operator console revision",
     );
     expect(within(editor).getByText("Borrador")).toBeVisible();
+  });
+
+  it("marks the exact unavailable parameter inside the configuration editor", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/react/scenarios/10/consoles/4#console-parameter-potencia_bess",
+    );
+    const brokenConsole = {
+      ...draftConsole,
+      blocking: {
+        reason: "campo_no_disponible",
+        reasons: [],
+        action: {
+          kind: "edit_configuration",
+          target: {
+            section: "parameters",
+            id: "potencia_bess",
+            label: "Potencia maxima BESS",
+          },
+        },
+      },
+    };
+    stubScenarioWorkspace((path, method) => {
+      if (path === "/api/scenarios/10/consoles/4" && method === "GET") {
+        return Response.json({ operator_console: brokenConsole });
+      }
+      return undefined;
+    });
+
+    render(<App />);
+
+    const target = await screen.findByText(
+      "Campo a corregir: parametro Potencia maxima BESS (potencia_bess).",
+    );
+    expect(target).toHaveAttribute("id", "console-parameter-potencia_bess");
   });
 
   it("lets an administrator release a stuck group and restore an older copy revision", async () => {

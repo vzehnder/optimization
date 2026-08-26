@@ -7830,9 +7830,19 @@ class AnalystStore:
             for column in group["columns"]:
                 signal = column["signal"]
                 signal_key = str(signal["signal_key"])
-                set_id = self._resolve_console_column_set_id(
-                    bindings=bindings, signal=signal
-                )
+                try:
+                    set_id = self._resolve_console_column_set_id(
+                        bindings=bindings, signal=signal
+                    )
+                except ConsoleSeriesError as error:
+                    raise ConsoleSeriesError(
+                        error.message,
+                        status_code=error.status_code,
+                        configuration_target={
+                            "group_id": str(group["id"]),
+                            "column_id": str(column["id"]),
+                        },
+                    ) from error
                 if set_id not in sets_by_id:
                     sets_by_id[set_id] = self.get_time_series_set(
                         int(location["project_id"]), set_id
@@ -7848,6 +7858,10 @@ class AnalystStore:
                         f"column {column['id']} does not resolve to exactly one "
                         f"series in its bound set",
                         status_code=409,
+                        configuration_target={
+                            "group_id": str(group["id"]),
+                            "column_id": str(column["id"]),
+                        },
                     )
                 definition = TIME_SERIES_SIGNAL_CATALOG.get(signal_key)
                 columns.append(
@@ -7875,14 +7889,36 @@ class AnalystStore:
         console = self.get_operator_console(console_id)
         groups: list[dict[str, Any]] = []
         unavailable_ids: list[str] = []
+        unavailable_columns: list[dict[str, str]] = []
         for declared in console["document"].get("groups") or []:
             group_id = str(declared["id"])
             try:
                 entry = self._resolve_console_group_columns(
                     console_id, group_id=group_id
                 )[group_id]
-            except ConsoleSeriesError:
+            except ConsoleSeriesError as error:
                 unavailable_ids.append(group_id)
+                if error.configuration_target is not None:
+                    column_id = str(
+                        error.configuration_target.get("column_id") or ""
+                    )
+                    column = next(
+                        (
+                            item
+                            for item in declared["columns"]
+                            if str(item["id"]) == column_id
+                        ),
+                        None,
+                    )
+                    if column is not None:
+                        unavailable_columns.append(
+                            {
+                                "group_id": group_id,
+                                "group_label": str(declared["label"]),
+                                "column_id": column_id,
+                                "column_label": str(column["label"]),
+                            }
+                        )
                 continue
             groups.append(
                 {
@@ -7901,7 +7937,11 @@ class AnalystStore:
                     ],
                 }
             )
-        return {"groups": groups, "unavailable_ids": unavailable_ids}
+        return {
+            "groups": groups,
+            "unavailable_ids": unavailable_ids,
+            "unavailable_columns": unavailable_columns,
+        }
 
     def describe_operator_console_block(
         self, console_id: int, *, viewer_user_id: int | None = None
@@ -8004,6 +8044,41 @@ class AnalystStore:
             self.connection.commit()
         return self.get_operator_console(console_id)
 
+    def clear_resolved_operator_console_wait_for_variant(
+        self, case_input_variant_id: int
+    ) -> None:
+        """End a pending review only when validation left no engineer block."""
+
+        row = self.connection.execute(
+            "SELECT id FROM operator_consoles WHERE owned_variant_id = ?",
+            (case_input_variant_id,),
+        ).fetchone()
+        if row is None:
+            return
+        console_id = int(row["id"])
+        block = self.describe_operator_console_block(console_id)
+        if block["unavailable_parameter"] or block["unavailable_series"] or block["moved_dependency"]:
+            return
+        with self._lock:
+            self.connection.execute(
+                "UPDATE operator_consoles SET waiting_since = NULL WHERE id = ?",
+                (console_id,),
+            )
+            self.connection.commit()
+
+    def clear_resolved_operator_console_wait(self, console_id: int) -> None:
+        """End a pending review after a configuration save truly resolves it."""
+
+        block = self.describe_operator_console_block(console_id)
+        if block["unavailable_parameter"] or block["unavailable_series"] or block["moved_dependency"]:
+            return
+        with self._lock:
+            self.connection.execute(
+                "UPDATE operator_consoles SET waiting_since = NULL WHERE id = ?",
+                (console_id,),
+            )
+            self.connection.commit()
+
     def _operator_console_editing_holder(
         self, console: Mapping[str, Any], viewer_user_id: int | None
     ) -> str | None:
@@ -8096,8 +8171,12 @@ class AnalystStore:
         copies = self.list_operator_console_series_copies(
             console_id, include_archived=True
         )
+        location = self.get_operator_console_location(console_id)
         audit: list[dict[str, Any]] = []
         for copy in copies:
+            origin = self.get_time_series_set(
+                int(location["project_id"]), int(copy["origin_set_id"])
+            )
             rows = self.connection.execute(
                 """
                 SELECT revision_number, change_summary, created_at, created_by,
@@ -8149,6 +8228,13 @@ class AnalystStore:
                     "id": int(copy["id"]),
                     "archived": copy["archived_at"] is not None,
                     "current_revision": current_revision,
+                    "origin": {
+                        "name": str(origin["name"]),
+                        "copied_revision": int(copy["origin_revision_number"]),
+                        "current_revision": int(origin["revision_number"]),
+                        "old": int(origin["revision_number"])
+                        > int(copy["origin_revision_number"]),
+                    },
                     "revisions": revisions,
                 }
             )

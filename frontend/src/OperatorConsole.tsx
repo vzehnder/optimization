@@ -48,6 +48,7 @@ import {
   type OperatorConsoleGroup,
   type OperatorConsoleStatus,
   undoConsoleGroupSave,
+  validateCaseInputVariant,
 } from "./api/client";
 import { loadPlotly, type PlotlyTrace } from "./plotly";
 import { PortalResultsBlock } from "./PortalResults";
@@ -149,6 +150,16 @@ function blockingLabel(reason: string | null): string {
   return BLOCKING_LABELS[reason] || reason;
 }
 
+function configurationTargetId(target: {
+  section: "parameters" | "groups";
+  group_id?: string;
+  id: string;
+}): string {
+  return target.section === "parameters"
+    ? `console-parameter-${target.id}`
+    : `console-column-signal-${target.group_id}-${target.id}`;
+}
+
 export function OperatorConsolePanel({ scenarioId }: { scenarioId: number }) {
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
@@ -186,11 +197,43 @@ export function OperatorConsolePanel({ scenarioId }: { scenarioId: number }) {
     },
     onError: (mutationError) => setError(errorMessage(mutationError)),
   });
+  const revalidateMutation = useMutation({
+    mutationFn: ({
+      variantId,
+      rangeStart,
+      rangeEnd,
+    }: {
+      variantId: number;
+      rangeStart: string;
+      rangeEnd: string;
+    }) =>
+      validateCaseInputVariant(scenarioId, variantId, {
+        range_start: rangeStart,
+        range_end: rangeEnd,
+      }),
+    onSuccess: async () => {
+      setError("");
+      await queryClient.invalidateQueries({
+        queryKey: operatorConsolesQueryKey(scenarioId),
+      });
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError)),
+  });
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!name.trim() || createMutation.isPending) return;
     createMutation.mutate();
+  }
+
+  function revalidate(console: OperatorConsole) {
+    const action = console.blocking.action;
+    if (action?.kind !== "revalidate_variant") return;
+    revalidateMutation.mutate({
+      variantId: action.variant_id,
+      rangeStart: action.range_start,
+      rangeEnd: action.range_end,
+    });
   }
 
   return (
@@ -248,6 +291,7 @@ export function OperatorConsolePanel({ scenarioId }: { scenarioId: number }) {
               <th scope="col">Estado</th>
               <th scope="col">Bloqueo</th>
               <th scope="col">Espera desde</th>
+              <th scope="col">Origen de copias</th>
               <th scope="col">Acciones</th>
             </tr>
           </thead>
@@ -259,10 +303,50 @@ export function OperatorConsolePanel({ scenarioId }: { scenarioId: number }) {
                 <td>{blockingLabel(console.blocking.reason)}</td>
                 <td>{console.waiting_since || "Sin espera"}</td>
                 <td>
+                  {(console.series_copies ?? []).some(
+                    (copy) => !copy.archived && copy.origin?.old,
+                  )
+                    ? (console.series_copies ?? [])
+                        .filter((copy) => !copy.archived && copy.origin?.old)
+                        .map((copy) => (
+                          <span key={copy.id} className="role-badge">
+                            Copia antigua: {copy.origin!.name} (origen{" "}
+                            {copy.origin!.copied_revision}, vigente{" "}
+                            {copy.origin!.current_revision})
+                          </span>
+                        ))
+                    : "Al dia"}
+                </td>
+                <td>
+                  {console.blocking.action?.kind === "revalidate_variant" ? (
+                    <button
+                      type="button"
+                      disabled={revalidateMutation.isPending}
+                      onClick={() => revalidate(console)}
+                    >
+                      {revalidateMutation.isPending
+                        ? "Revalidando variante"
+                        : "Revalidar variante"}
+                    </button>
+                  ) : console.blocking.action?.kind === "edit_configuration" ? (
+                    <Link
+                      to={
+                        `/scenarios/${scenarioId}/consoles/${console.id}` +
+                        `#${configurationTargetId(console.blocking.action.target)}`
+                      }
+                    >
+                      Corregir {console.blocking.action.target.label}
+                    </Link>
+                  ) : null}{" "}
                   <Link to={`/scenarios/${scenarioId}/consoles/${console.id}`}>
                     Configurar
                   </Link>{" "}
-                  <Link to={`/console/${console.id}`}>Probar</Link>
+                  <Link to={`/console/${console.id}`}>Probar</Link>{" "}
+                  {console.technical_failure ? (
+                    <Link to={`/runs/${console.technical_failure.run_id}`}>
+                      Ver fallo tecnico {console.technical_failure.reference}
+                    </Link>
+                  ) : null}
                 </td>
               </tr>
             ))}
@@ -374,6 +458,10 @@ export function OperatorConsoleEditorView() {
 
   const console = consoleQuery.data;
   const identity = console.document.public_identity;
+  const repairTarget =
+    console.blocking.action?.kind === "edit_configuration"
+      ? console.blocking.action.target
+      : null;
 
   function save(
     document: OperatorConsoleDocument,
@@ -409,6 +497,15 @@ export function OperatorConsoleEditorView() {
         <dt>Bloqueo</dt>
         <dd>{blockingLabel(console.blocking.reason)}</dd>
       </dl>
+      {repairTarget?.section === "parameters" ? (
+        <p
+          id={configurationTargetId(repairTarget)}
+          className="stale-banner"
+          role="status"
+        >
+          Campo a corregir: parametro {repairTarget.label} ({repairTarget.id}).
+        </p>
+      ) : null}
       <ConsoleDocumentForm
         key={console.revision}
         document={console.document}
