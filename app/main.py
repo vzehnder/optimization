@@ -234,6 +234,20 @@ class ConsoleLeaseRequest(BaseModel):
     lease_token: str = Field(min_length=1)
 
 
+class ConsoleUndoRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    lease_token: str = Field(min_length=1)
+
+
+class ConsoleSeriesRestoreRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision_number: int = Field(ge=1)
+    expected_current_revision: int = Field(ge=1)
+    note: str | None = None
+
+
 class ConsoleGroupCellRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -2766,8 +2780,28 @@ def create_app(
             review_requested_at=console["waiting_since"],
         )
 
-    def operator_console_detail(scenario_id: int, console: dict[str, Any]) -> dict[str, Any]:
+    def operator_console_detail(
+        scenario_id: int,
+        console: dict[str, Any],
+        request: Request | None = None,
+    ) -> dict[str, Any]:
         owned_variant = analyst_store.get_case_input_variant(int(console["owned_variant_id"]))
+        group_leases = []
+        for group in console["document"].get("groups") or []:
+            lease = analyst_store.describe_operator_console_group_lease(
+                int(console["id"]), group_id=str(group["id"])
+            )
+            if lease["holder_user_id"] is None:
+                continue
+            group_leases.append(
+                {
+                    "group_id": str(group["id"]),
+                    "group_label": str(group.get("label") or group["id"]),
+                    "holder_name": lease["holder_name"],
+                    "expires_at": lease["expires_at"],
+                }
+            )
+        viewer = getattr(request.state, "current_user", None) if request else None
         return {
             "id": console["id"],
             "scenario_id": scenario_id,
@@ -2786,6 +2820,13 @@ def create_app(
             "updated_by": portal_configuration_editor_email(console["updated_by_user_id"]),
             "waiting_since": console["waiting_since"],
             "blocking": operator_console_blocking(int(console["id"])),
+            "can_force_release": bool(
+                not auth_required or (viewer and viewer.get("role") == "admin")
+            ),
+            "group_leases": group_leases,
+            "series_copies": analyst_store.list_operator_console_series_copy_audit(
+                int(console["id"])
+            ),
         }
 
     def get_console_for_scenario(scenario_id: int, console_id: int) -> dict[str, Any]:
@@ -2796,7 +2837,7 @@ def create_app(
         return console
 
     @app.get("/api/scenarios/{scenario_id}/consoles")
-    async def list_operator_consoles(scenario_id: int):
+    async def list_operator_consoles(scenario_id: int, request: Request):
         try:
             case = analyst_store.get_or_create_case_for_scenario(scenario_id)
             consoles = analyst_store.list_operator_consoles(case["id"])
@@ -2804,7 +2845,8 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {
             "operator_consoles": [
-                operator_console_detail(scenario_id, console) for console in consoles
+                operator_console_detail(scenario_id, console, request)
+                for console in consoles
             ]
         }
 
@@ -2828,15 +2870,25 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         except OperatorConsoleConfigurationError as error:
             raise HTTPException(status_code=error.status_code, detail=error.message) from error
-        return {"operator_console": operator_console_detail(scenario_id, console)}
+        return {
+            "operator_console": operator_console_detail(
+                scenario_id, console, request
+            )
+        }
 
     @app.get("/api/scenarios/{scenario_id}/consoles/{console_id}")
-    async def get_operator_console(scenario_id: int, console_id: int):
+    async def get_operator_console(
+        scenario_id: int, console_id: int, request: Request
+    ):
         try:
             console = get_console_for_scenario(scenario_id, console_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        return {"operator_console": operator_console_detail(scenario_id, console)}
+        return {
+            "operator_console": operator_console_detail(
+                scenario_id, console, request
+            )
+        }
 
     @app.put("/api/scenarios/{scenario_id}/consoles/{console_id}")
     async def save_operator_console(
@@ -2860,7 +2912,61 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         except OperatorConsoleConfigurationError as error:
             raise HTTPException(status_code=error.status_code, detail=error.message) from error
-        return {"operator_console": operator_console_detail(scenario_id, console)}
+        return {
+            "operator_console": operator_console_detail(
+                scenario_id, console, request
+            )
+        }
+
+    @app.delete(
+        "/api/scenarios/{scenario_id}/consoles/{console_id}"
+        "/groups/{group_id}/lease",
+        status_code=204,
+    )
+    async def force_release_console_group_lease(
+        scenario_id: int,
+        console_id: int,
+        group_id: str,
+        request: Request,
+    ):
+        require_admin_user(request)
+        try:
+            get_console_for_scenario(scenario_id, console_id)
+            analyst_store.force_release_operator_console_group_lease(
+                console_id, group_id=group_id
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return Response(status_code=204)
+
+    @app.post(
+        "/api/scenarios/{scenario_id}/consoles/{console_id}"
+        "/restore-series/{copy_id}"
+    )
+    async def restore_console_series_revision(
+        scenario_id: int,
+        console_id: int,
+        copy_id: int,
+        payload: ConsoleSeriesRestoreRequest,
+        request: Request,
+    ):
+        try:
+            get_console_for_scenario(scenario_id, console_id)
+            restored = analyst_store.restore_operator_console_series_copy_revision(
+                console_id,
+                copy_id=copy_id,
+                revision_number=payload.revision_number,
+                expected_current_revision=payload.expected_current_revision,
+                actor_user_id=current_user_id(request),
+                note=payload.note,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ConsoleSeriesError as error:
+            raise HTTPException(
+                status_code=error.status_code, detail=error.message
+            ) from error
+        return {"restored": restored}
 
     def console_preparer_name(user_id: int | None) -> str | None:
         if user_id is None:
@@ -3103,6 +3209,59 @@ def create_app(
                 },
                 status_code=400,
             )
+
+    @app.get("/api/console/{console_id}/groups/{group_id}/history")
+    async def get_console_group_history(
+        console_id: int, group_id: str, request: Request
+    ):
+        resolved = operator_console_for_viewer(request, console_id)
+        console_group_or_404(resolved["console"], group_id)
+        return {
+            "history": analyst_store.list_operator_console_group_history(
+                console_id,
+                group_id=group_id,
+                viewer_user_id=current_user_id(request),
+            )
+        }
+
+    @app.post("/api/console/{console_id}/groups/{group_id}/undo")
+    async def undo_console_group_save(
+        console_id: int,
+        group_id: str,
+        payload: ConsoleUndoRequest,
+        request: Request,
+    ):
+        resolved = operator_console_for_viewer(request, console_id)
+        console_group_or_404(resolved["console"], group_id)
+        expected_token = request.headers.get("if-match")
+        if not expected_token:
+            return JSONResponse(
+                {
+                    "save_error": build_console_save_error(
+                        message=(
+                            "vuelve a cargar el tramo antes de deshacer: falta la "
+                            "referencia de version"
+                        ),
+                        cells=[],
+                        total_cells=0,
+                    )
+                },
+                status_code=428,
+            )
+        try:
+            loaded = analyst_store.undo_operator_console_group_save(
+                console_id,
+                group_id=group_id,
+                expected_token=expected_token.strip().strip('"'),
+                actor_user_id=current_user_id(request),
+                lease_token=payload.lease_token,
+            )
+        except ConsoleSeriesError as error:
+            return console_save_failure(error)
+        return JSONResponse(
+            {"group_values": build_console_group_values(loaded)},
+            headers={"ETag": f'"{loaded["token"]}"'},
+        )
 
     @app.post("/api/console/{console_id}/groups/{group_id}/lease")
     async def acquire_console_group_lease(

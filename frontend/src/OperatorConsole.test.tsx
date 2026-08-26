@@ -94,6 +94,24 @@ function stubApi(
       if (path === "/api/auth/csrf") {
         return Response.json({ csrf_token: "csrf-token" });
       }
+      if (
+        /^\/api\/console\/\d+\/groups\/[^/]+\/history$/.test(path) &&
+        method === "GET"
+      ) {
+        return Response.json({ history: [] });
+      }
+      if (
+        /^\/api\/console\/\d+\/groups\/[^/]+\/lease$/.test(path) &&
+        method === "PUT"
+      ) {
+        return Response.json({
+          lease: {
+            token: String(body?.lease_token || "lease"),
+            expires_at: "2026-08-23T12:05:00Z",
+            holder_name: identity.display_name,
+          },
+        });
+      }
       return Response.json(
         { detail: `unhandled ${method} ${path}` },
         { status: 500 },
@@ -342,6 +360,124 @@ describe("operator consoles in the scenario workspace", () => {
       "stale operator console revision",
     );
     expect(within(editor).getByText("Borrador")).toBeVisible();
+  });
+
+  it("lets an administrator release a stuck group and restore an older copy revision", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10/consoles/4");
+    const adminIdentity = {
+      ...analystIdentity,
+      id: 1,
+      email: "admin@example.local",
+      display_name: "Adela Admin",
+      role: "admin",
+    };
+    const detail = {
+      ...draftConsole,
+      can_force_release: true,
+      group_leases: [
+        {
+          group_id: "potencia",
+          group_label: "Potencia",
+          holder_name: "Olga Operadora",
+          expires_at: "2026-08-26T12:05:00Z",
+        },
+      ],
+      series_copies: [
+        {
+          id: 31,
+          archived: false,
+          current_revision: 3,
+          revisions: [
+            {
+              revision_number: 3,
+              date: "2026-08-26T12:00:00Z",
+              actor: "Olga Operadora",
+              group_id: "potencia",
+              range: {
+                start: "2026-01-01T00:00:00-03:00",
+                end: "2026-01-01T04:00:00-03:00",
+              },
+              cell_count: 1,
+              note: "Segundo ajuste",
+              action: "save",
+              can_restore: false,
+            },
+            {
+              revision_number: 2,
+              date: "2026-08-26T11:00:00Z",
+              actor: "Olga Operadora",
+              group_id: "potencia",
+              range: {
+                start: "2026-01-01T00:00:00-03:00",
+                end: "2026-01-01T04:00:00-03:00",
+              },
+              cell_count: 1,
+              note: "Primer ajuste",
+              action: "save",
+              can_restore: true,
+            },
+          ],
+        },
+      ],
+    };
+    const releases: string[] = [];
+    const restores: unknown[] = [];
+    stubApi(adminIdentity, (path, method, body) => {
+      if (path === "/api/time-series/signal-catalog") {
+        return Response.json({ signals: signalCatalog });
+      }
+      if (path === "/api/scenarios/10/consoles/4" && method === "GET") {
+        return Response.json({ operator_console: detail });
+      }
+      if (
+        path === "/api/scenarios/10/consoles/4/groups/potencia/lease" &&
+        method === "DELETE"
+      ) {
+        releases.push(path);
+        return new Response(null, { status: 204 });
+      }
+      if (
+        path === "/api/scenarios/10/consoles/4/restore-series/31" &&
+        method === "POST"
+      ) {
+        restores.push(body);
+        return Response.json({
+          restored: {
+            copy_id: 31,
+            revision_number: 4,
+            restored_from_revision: 2,
+          },
+        });
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    const coordination = await screen.findByRole("region", {
+      name: "Coordinacion e historial de series",
+    });
+    expect(coordination).toHaveTextContent("Olga Operadora");
+    await user.click(
+      within(coordination).getByRole("button", {
+        name: "Forzar liberacion de Potencia",
+      }),
+    );
+    await user.click(
+      within(coordination).getByRole("button", {
+        name: "Restaurar revision 2",
+      }),
+    );
+
+    expect(releases).toHaveLength(1);
+    expect(restores).toEqual([
+      {
+        revision_number: 2,
+        expected_current_revision: 3,
+        note: "Restauracion desde la consola interna",
+      },
+    ]);
   });
 });
 
@@ -1011,6 +1147,139 @@ describe("the operator console shell", () => {
         name: "Demanda 2026-01-01T01:00:00-03:00",
       }),
     ).toHaveValue(99.5);
+  });
+
+  it("shows public edit history and undoes the current save while holding the lease", async () => {
+    window.history.replaceState({}, "", "/react/console/4");
+    let demand = [10, 99.5, 12, 13];
+    let token = "token-2";
+    let history = [
+      {
+        id: "change-1",
+        actor: "Olga Operadora",
+        date: "2026-01-01T12:00:00+00:00",
+        range: {
+          start: "2026-01-01T00:00:00-03:00",
+          end: "2026-01-01T04:00:00-03:00",
+        },
+        cell_count: 1,
+        note: "Ajuste manual",
+        comparison: [
+          { column_id: "demanda", row_index: 1, before: 11, after: 99.5 },
+        ],
+        can_undo: true,
+      },
+    ];
+    const undoRequests: Array<{
+      body: unknown;
+      ifMatch: string | null;
+    }> = [];
+    stubApi(operatorIdentity, (path, method, body, init) => {
+      if (path === "/api/console/4" && method === "GET") {
+        return Response.json(consoleShellPayload());
+      }
+      if (path === "/api/console/4/runs" && method === "GET") {
+        return Response.json({ history: [] });
+      }
+      if (
+        path === "/api/console/4/groups/potencia/history" &&
+        method === "GET"
+      ) {
+        return Response.json({ history });
+      }
+      if (path.startsWith("/api/console/4/groups/potencia/values")) {
+        return Response.json(groupValuesPayload(demand), {
+          headers: { ETag: `"${token}"` },
+        });
+      }
+      if (
+        path === "/api/console/4/groups/potencia/lease" &&
+        method === "POST"
+      ) {
+        return Response.json(leasePayload);
+      }
+      if (path === "/api/console/4/groups/potencia/undo" && method === "POST") {
+        undoRequests.push({
+          body,
+          ifMatch: new Headers(init?.headers).get("if-match"),
+        });
+        demand = [10, 11, 12, 13];
+        token = "token-3";
+        history = history.map((entry) => ({ ...entry, can_undo: false }));
+        return Response.json(groupValuesPayload(demand), {
+          headers: { ETag: `"${token}"` },
+        });
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    const audit = await screen.findByRole("region", {
+      name: "Historial de cambios de Potencia",
+    });
+    expect(audit).toHaveTextContent("Olga Operadora");
+    expect(audit).toHaveTextContent("Ajuste manual");
+    expect(audit).toHaveTextContent("11");
+    expect(audit).toHaveTextContent("99.5");
+
+    await user.click(screen.getByRole("button", { name: "Editar valores" }));
+    await user.click(within(audit).getByRole("button", { name: "Deshacer" }));
+
+    await vi.waitFor(() => expect(undoRequests).toHaveLength(1));
+    expect(undoRequests).toEqual([
+      { body: { lease_token: "lease-1" }, ifMatch: '"token-2"' },
+    ]);
+    await vi.waitFor(() =>
+      expect(
+        screen.getByRole("spinbutton", {
+          name: "Demanda 2026-01-01T01:00:00-03:00",
+        }),
+      ).toHaveValue(11),
+    );
+  });
+
+  it("heartbeats the group lease when editing starts", async () => {
+    window.history.replaceState({}, "", "/react/console/4");
+    const heartbeats: unknown[] = [];
+    stubApi(operatorIdentity, (path, method, body) => {
+      if (path === "/api/console/4" && method === "GET") {
+        return Response.json(consoleShellPayload());
+      }
+      if (path === "/api/console/4/runs" && method === "GET") {
+        return Response.json({ history: [] });
+      }
+      if (path === "/api/console/4/groups/potencia/history") {
+        return Response.json({ history: [] });
+      }
+      if (path.startsWith("/api/console/4/groups/potencia/values")) {
+        return Response.json(groupValuesPayload([10, 11, 12, 13]), {
+          headers: { ETag: '"token-1"' },
+        });
+      }
+      if (
+        path === "/api/console/4/groups/potencia/lease" &&
+        method === "POST"
+      ) {
+        return Response.json(leasePayload);
+      }
+      if (path === "/api/console/4/groups/potencia/lease" && method === "PUT") {
+        heartbeats.push(body);
+        return Response.json(leasePayload);
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(
+      await screen.findByRole("button", { name: "Editar valores" }),
+    );
+
+    await vi.waitFor(() =>
+      expect(heartbeats).toEqual([{ lease_token: "lease-1" }]),
+    );
   });
 
   it("pastes a rectangular block from the anchored cell and normalizes unambiguous numbers", async () => {

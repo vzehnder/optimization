@@ -5,8 +5,11 @@ edit forks a flat operational copy that belongs to the console variant; the
 canonical set and every other variant keep their ids, revisions and values.
 """
 
+import json
+import sqlite3
 import unittest
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -506,6 +509,76 @@ class ConsoleSeriesEditingPersistenceTests(unittest.TestCase):
             other["id"],
         )
 
+    def test_an_internal_force_release_frees_the_whole_group(self):
+        other = self.store.create_user(
+            email="other@example.local",
+            display_name="Otro Operador",
+            role="external",
+            password_hash="test-hash",
+        )
+        self.store.acquire_operator_console_group_lease(
+            self.console["id"], group_id="potencia", user_id=self.operator["id"]
+        )
+
+        self.store.force_release_operator_console_group_lease(
+            self.console["id"], group_id="potencia"
+        )
+        taken = self.store.acquire_operator_console_group_lease(
+            self.console["id"], group_id="potencia", user_id=other["id"]
+        )
+
+        self.assertEqual(taken["holder_name"], "Otro Operador")
+        self.assertEqual(
+            self.store.describe_operator_console_group_lease(
+                self.console["id"], group_id="potencia"
+            )["holder_user_id"],
+            other["id"],
+        )
+
+    def test_an_expired_lease_can_be_acquired_by_another_editor(self):
+        other = self.store.create_user(
+            email="other@example.local",
+            display_name="Otro Operador",
+            role="external",
+            password_hash="test-hash",
+        )
+        with patch("app.persistence.utc_now_iso", return_value="2026-01-01T12:00:00+00:00"):
+            self.store.acquire_operator_console_group_lease(
+                self.console["id"], group_id="potencia", user_id=self.operator["id"]
+            )
+
+        with patch("app.persistence.utc_now_iso", return_value="2026-01-01T12:05:01+00:00"):
+            acquired = self.store.acquire_operator_console_group_lease(
+                self.console["id"], group_id="potencia", user_id=other["id"]
+            )
+
+        self.assertEqual(acquired["holder_name"], "Otro Operador")
+
+    def test_heartbeat_keeps_the_group_owned_past_the_original_expiry(self):
+        other = self.store.create_user(
+            email="other@example.local",
+            display_name="Otro Operador",
+            role="external",
+            password_hash="test-hash",
+        )
+        with patch("app.persistence.utc_now_iso", return_value="2026-01-01T12:00:00+00:00"):
+            lease = self.store.acquire_operator_console_group_lease(
+                self.console["id"], group_id="potencia", user_id=self.operator["id"]
+            )
+        with patch("app.persistence.utc_now_iso", return_value="2026-01-01T12:04:00+00:00"):
+            self.store.heartbeat_operator_console_group_lease(
+                self.console["id"],
+                group_id="potencia",
+                user_id=self.operator["id"],
+                lease_token=lease["token"],
+            )
+
+        with patch("app.persistence.utc_now_iso", return_value="2026-01-01T12:06:00+00:00"):
+            with self.assertRaises(ConsoleSeriesError):
+                self.store.acquire_operator_console_group_lease(
+                    self.console["id"], group_id="potencia", user_id=other["id"]
+                )
+
     def test_an_unheld_group_reports_no_editing_lock(self):
         self.assertEqual(
             self.store.describe_operator_console_group_lease(
@@ -535,6 +608,135 @@ class ConsoleSeriesEditingPersistenceTests(unittest.TestCase):
             [row["values"]["demanda"] for row in self.load()["rows"]],
             [21.0, 11.0, 22.0, 13.0],
         )
+
+    def test_group_history_reduces_a_save_to_public_audit_fields(self):
+        self.save([{"column_id": "demanda", "row_index": 1, "value": 99.5}])
+
+        history = self.store.list_operator_console_group_history(
+            self.console["id"],
+            group_id="potencia",
+            viewer_user_id=self.operator["id"],
+        )
+
+        self.assertEqual(len(history), 1)
+        entry = history[0]
+        self.assertEqual(
+            set(entry),
+            {
+                "id",
+                "actor",
+                "date",
+                "range",
+                "cell_count",
+                "note",
+                "comparison",
+                "can_undo",
+            },
+        )
+        self.assertTrue(entry["id"])
+        self.assertEqual(entry["actor"], "Olga Operadora")
+        self.assertTrue(entry["date"])
+        self.assertEqual(
+            entry["range"],
+            {
+                "start": self.demand_set["horizon"]["start"],
+                "end": self.demand_set["horizon"]["end"],
+            },
+        )
+        self.assertEqual(entry["cell_count"], 1)
+        self.assertEqual(entry["note"], "Ajuste manual")
+        self.assertEqual(
+            entry["comparison"],
+            [
+                {
+                    "column_id": "demanda",
+                    "row_index": 1,
+                    "before": 11.0,
+                    "after": 99.5,
+                }
+            ],
+        )
+        self.assertTrue(entry["can_undo"])
+
+    def test_the_operator_can_undo_their_current_save_as_a_new_revision(self):
+        loaded = self.load()
+        lease = self.store.acquire_operator_console_group_lease(
+            self.console["id"], group_id="potencia", user_id=self.operator["id"]
+        )
+        saved = self.save(
+            [{"column_id": "demanda", "row_index": 1, "value": 99.5}],
+            expected_token=loaded["token"],
+            lease_token=lease["token"],
+        )
+        copy = self.store.list_operator_console_series_copies(self.console["id"])[0]
+
+        restored = self.store.undo_operator_console_group_save(
+            self.console["id"],
+            group_id="potencia",
+            expected_token=saved["token"],
+            actor_user_id=self.operator["id"],
+            lease_token=lease["token"],
+        )
+
+        self.assertEqual(
+            [row["values"]["demanda"] for row in restored["rows"]],
+            [10.0, 11.0, 12.0, 13.0],
+        )
+        revisions = self.store.list_time_series_set_revisions(
+            self.project["id"], copy["time_series_set_id"]
+        )
+        self.assertEqual([row["revision_number"] for row in revisions], [3, 2, 1])
+        history = self.store.list_operator_console_group_history(
+            self.console["id"],
+            group_id="potencia",
+            viewer_user_id=self.operator["id"],
+        )
+        self.assertEqual(history[0]["comparison"][0]["before"], 99.5)
+        self.assertEqual(history[0]["comparison"][0]["after"], 11.0)
+        self.assertFalse(any(entry["can_undo"] for entry in history))
+
+    def test_internal_restore_materializes_an_older_revision_as_a_new_one(self):
+        loaded = self.load()
+        lease = self.store.acquire_operator_console_group_lease(
+            self.console["id"], group_id="potencia", user_id=self.operator["id"]
+        )
+        first = self.save(
+            [{"column_id": "demanda", "row_index": 1, "value": 99.5}],
+            expected_token=loaded["token"],
+            lease_token=lease["token"],
+        )
+        self.save(
+            [{"column_id": "demanda", "row_index": 1, "value": 55.0}],
+            expected_token=first["token"],
+            lease_token=lease["token"],
+        )
+        self.store.release_operator_console_group_lease(
+            self.console["id"],
+            group_id="potencia",
+            user_id=self.operator["id"],
+            lease_token=lease["token"],
+        )
+        copy = self.store.list_operator_console_series_copies(self.console["id"])[0]
+
+        restored = self.store.restore_operator_console_series_copy_revision(
+            self.console["id"],
+            copy_id=copy["id"],
+            revision_number=2,
+            expected_current_revision=3,
+            actor_user_id=self.analyst["id"],
+            note="Recuperar ajuste aprobado",
+        )
+
+        self.assertEqual(restored["revision_number"], 4)
+        self.assertEqual(restored["restored_from_revision"], 2)
+        self.assertEqual(
+            [row["values"]["demanda"] for row in self.load()["rows"]],
+            [10.0, 99.5, 12.0, 13.0],
+        )
+        revisions = self.store.list_time_series_set_revisions(
+            self.project["id"], copy["time_series_set_id"]
+        )
+        self.assertEqual([row["revision_number"] for row in revisions], [4, 3, 2, 1])
 
 CONSOLE_DRAFT_DOCUMENT = {
     "schema_version": "bess_editor_draft.v1",
@@ -719,6 +921,45 @@ class ConsoleMultiSetPersistenceTests(unittest.TestCase):
                 )
                 self.assertEqual(len(loaded["rows"]), 4)
 
+    def test_group_lease_acquisition_rolls_back_if_one_copy_cannot_be_locked(self):
+        other = self.store.create_user(
+            email="other@example.local",
+            display_name="Otro Operador",
+            role="external",
+            password_hash="test-hash",
+        )
+        self.store.connection.execute(
+            f"""
+            CREATE TRIGGER fail_price_group_lease
+            BEFORE INSERT ON operator_console_series_leases
+            WHEN NEW.origin_set_id = {int(self.price_set['id'])}
+            BEGIN
+                SELECT RAISE(FAIL, 'simulated second-copy lease failure');
+            END
+            """
+        )
+        self.store.connection.commit()
+
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.store.acquire_operator_console_group_lease(
+                self.console["id"],
+                group_id="potencia",
+                user_id=self.operator["id"],
+            )
+
+        self.assertEqual(
+            self.store.describe_operator_console_group_lease(
+                self.console["id"], group_id="potencia"
+            )["holder_user_id"],
+            None,
+        )
+        self.store.connection.execute("DROP TRIGGER fail_price_group_lease")
+        self.store.connection.commit()
+        acquired = self.store.acquire_operator_console_group_lease(
+            self.console["id"], group_id="potencia", user_id=other["id"]
+        )
+        self.assertEqual(acquired["holder_name"], "Otro Operador")
+
     def test_one_save_creates_a_revision_and_new_hash_for_each_touched_copy(self):
         self.store.validate_case_input_variant(
             scenario_id=self.scenario["id"],
@@ -788,6 +1029,61 @@ class ConsoleMultiSetPersistenceTests(unittest.TestCase):
                 dependencies[("time_series_set", str(copy["time_series_set_id"]))],
                 copied_set["content_hash"],
             )
+
+    def test_multi_copy_undo_rolls_back_every_copy_if_one_revision_fails(self):
+        loaded = self.load()
+        lease = self.store.acquire_operator_console_group_lease(
+            self.console["id"], group_id="potencia", user_id=self.operator["id"]
+        )
+        saved = self.store.save_operator_console_group_values(
+            self.console["id"],
+            group_id="potencia",
+            range_start=self.range_start,
+            range_end=self.range_end,
+            granularity="full_horizon",
+            expected_token=loaded["token"],
+            lease_token=lease["token"],
+            cells=[
+                {"column_id": "demanda", "row_index": 1, "value": 101.5},
+                {"column_id": "precio", "row_index": 2, "value": 88.25},
+            ],
+            note="Ajuste conjunto",
+            actor_user_id=self.operator["id"],
+        )
+        copies = self.store.list_operator_console_series_copies(self.console["id"])
+        price_copy = next(
+            copy for copy in copies if copy["origin_set_id"] == self.price_set["id"]
+        )
+        self.store.connection.execute(
+            f"""
+            CREATE TRIGGER fail_price_undo_revision
+            BEFORE INSERT ON time_series_set_revisions
+            WHEN NEW.time_series_set_id = {int(price_copy['time_series_set_id'])}
+                 AND NEW.revision_number = 3
+            BEGIN
+                SELECT RAISE(FAIL, 'simulated undo failure');
+            END
+            """
+        )
+        self.store.connection.commit()
+
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.store.undo_operator_console_group_save(
+                self.console["id"],
+                group_id="potencia",
+                expected_token=saved["token"],
+                actor_user_id=self.operator["id"],
+                lease_token=lease["token"],
+            )
+
+        current = self.load()
+        self.assertEqual(current["rows"][1]["values"]["demanda"], 101.5)
+        self.assertEqual(current["rows"][2]["values"]["precio"], 88.25)
+        for copy in copies:
+            revisions = self.store.list_time_series_set_revisions(
+                self.project["id"], copy["time_series_set_id"]
+            )
+            self.assertEqual([row["revision_number"] for row in revisions], [2, 1])
 
     def test_one_invalid_cell_leaves_both_existing_copies_and_dependencies_unchanged(self):
         self.store.validate_case_input_variant(
@@ -1236,6 +1532,12 @@ class ConsoleSeriesEditingApiTests(unittest.TestCase):
             display_name="Ana Analista",
             role="analyst",
             password_hash=hash_password("analyst pass"),
+        )
+        self.admin = self.store.create_user(
+            email="admin@example.local",
+            display_name="Adela Admin",
+            role="admin",
+            password_hash=hash_password("admin pass"),
         )
         self.operator = self.store.create_user(
             email="operator@example.local",
@@ -1772,6 +2074,30 @@ class ConsoleSeriesEditingApiTests(unittest.TestCase):
             None,
         )
 
+    def test_only_an_admin_can_force_release_a_group_from_the_internal_api(self):
+        self.take_lease()
+        path = (
+            f"/api/scenarios/{self.scenario['id']}/consoles/{self.console['id']}"
+            "/groups/potencia/lease"
+        )
+
+        self.login("analyst@example.local", "analyst pass")
+        refused = delete_with_csrf(self.client, path)
+        self.assertEqual(refused.status_code, 403, refused.text)
+        self.assertEqual(
+            self.store.describe_operator_console_group_lease(
+                self.console["id"], group_id="potencia"
+            )["holder_name"],
+            "Olga Operadora",
+        )
+
+        self.login("admin@example.local", "admin pass")
+        released = delete_with_csrf(self.client, path)
+        self.assertEqual(released.status_code, 204, released.text)
+
+        self.login("other@example.local", "other pass")
+        self.assertEqual(post_json_with_csrf(self.client, self.lease_path).status_code, 200)
+
     def test_the_holder_extends_the_lease_with_a_heartbeat(self):
         lease_token = self.take_lease()
 
@@ -1814,6 +2140,222 @@ class ConsoleSeriesEditingApiTests(unittest.TestCase):
             for key in forbidden:
                 with self.subTest(response=name, key=key):
                     self.assertNotIn(key, response.text)
+
+    def test_group_history_is_public_and_marks_the_current_operators_save_undoable(self):
+        loaded = self.load_values()
+        lease_token = self.take_lease()
+        saved = self.put_values(
+            [{"column_id": "demanda", "row_index": 1, "value": 99.5}],
+            etag=loaded.headers["etag"],
+            lease_token=lease_token,
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+
+        response = self.client.get(
+            f"/api/console/{self.console['id']}/groups/potencia/history"
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        entry = response.json()["history"][0]
+        self.assertEqual(entry["actor"], "Olga Operadora")
+        self.assertEqual(entry["cell_count"], 1)
+        self.assertEqual(
+            entry["comparison"],
+            [
+                {
+                    "column_id": "demanda",
+                    "row_index": 1,
+                    "before": 11.0,
+                    "after": 99.5,
+                }
+            ],
+        )
+        self.assertTrue(entry["can_undo"])
+        serialized = json.dumps(response.json())
+        for forbidden in (
+            "copy_id",
+            "set_id",
+            "content_hash",
+            "revision_number",
+            "signal_key",
+            "period_index",
+        ):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_the_holder_can_undo_their_current_save_over_http(self):
+        loaded = self.load_values()
+        lease_token = self.take_lease()
+        saved = self.put_values(
+            [{"column_id": "demanda", "row_index": 1, "value": 99.5}],
+            etag=loaded.headers["etag"],
+            lease_token=lease_token,
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        headers = csrf_headers(self.client)
+        headers["If-Match"] = saved.headers["etag"]
+
+        undone = self.client.post(
+            f"/api/console/{self.console['id']}/groups/potencia/undo",
+            json={"lease_token": lease_token},
+            headers=headers,
+        )
+
+        self.assertEqual(undone.status_code, 200, undone.text)
+        self.assertEqual(
+            [
+                row["values"]["demanda"]
+                for row in undone.json()["group_values"]["rows"]
+            ],
+            [10.0, 11.0, 12.0, 13.0],
+        )
+        self.assertNotEqual(undone.headers["etag"], saved.headers["etag"])
+        history = self.client.get(
+            f"/api/console/{self.console['id']}/groups/potencia/history"
+        ).json()["history"]
+        self.assertEqual(len(history), 2)
+        self.assertFalse(any(entry["can_undo"] for entry in history))
+
+    def test_a_non_holder_can_read_but_cannot_undo_another_operators_save(self):
+        loaded = self.load_values()
+        lease_token = self.take_lease()
+        saved = self.put_values(
+            [{"column_id": "demanda", "row_index": 1, "value": 99.5}],
+            etag=loaded.headers["etag"],
+            lease_token=lease_token,
+        )
+        self.login("other@example.local", "other pass")
+        readable = self.load_values()
+        headers = csrf_headers(self.client)
+        headers["If-Match"] = saved.headers["etag"]
+
+        refused = self.client.post(
+            f"/api/console/{self.console['id']}/groups/potencia/undo",
+            json={"lease_token": lease_token},
+            headers=headers,
+        )
+
+        self.assertEqual(readable.status_code, 200, readable.text)
+        self.assertEqual(refused.status_code, 409, refused.text)
+        history = self.client.get(
+            f"/api/console/{self.console['id']}/groups/potencia/history"
+        ).json()["history"]
+        self.assertFalse(history[0]["can_undo"])
+
+    def test_undo_rejects_a_stale_values_etag_even_for_the_lease_holder(self):
+        loaded = self.load_values()
+        lease_token = self.take_lease()
+        saved = self.put_values(
+            [{"column_id": "demanda", "row_index": 1, "value": 99.5}],
+            etag=loaded.headers["etag"],
+            lease_token=lease_token,
+        )
+        copy = self.store.list_operator_console_series_copies(self.console["id"])[0]
+        self.store.edit_time_series_set_values(
+            project_id=self.project["id"],
+            time_series_set_id=copy["time_series_set_id"],
+            edits=[
+                CatalogValueEdit(
+                    period_index=1,
+                    signal_key="load_demand_mw",
+                    value_text="70.0",
+                )
+            ],
+            created_by="engineer@example.local",
+        )
+        headers = csrf_headers(self.client)
+        headers["If-Match"] = saved.headers["etag"]
+
+        refused = self.client.post(
+            f"/api/console/{self.console['id']}/groups/potencia/undo",
+            json={"lease_token": lease_token},
+            headers=headers,
+        )
+
+        self.assertEqual(refused.status_code, 412, refused.text)
+        self.assertEqual(
+            self.load_values().json()["group_values"]["rows"][1]["values"]["demanda"],
+            70.0,
+        )
+
+    def test_an_internal_user_can_restore_an_older_copy_revision_over_http(self):
+        loaded = self.load_values()
+        lease_token = self.take_lease()
+        first = self.put_values(
+            [{"column_id": "demanda", "row_index": 1, "value": 99.5}],
+            etag=loaded.headers["etag"],
+            lease_token=lease_token,
+        )
+        second = self.put_values(
+            [{"column_id": "demanda", "row_index": 1, "value": 55.0}],
+            etag=first.headers["etag"],
+            lease_token=lease_token,
+        )
+        self.assertEqual(second.status_code, 200, second.text)
+        delete_with_csrf(
+            self.client, f"{self.lease_path}?lease_token={lease_token}"
+        )
+        copy = self.store.list_operator_console_series_copies(self.console["id"])[0]
+        self.login("analyst@example.local", "analyst pass")
+
+        response = post_json_with_csrf(
+            self.client,
+            (
+                f"/api/scenarios/{self.scenario['id']}/consoles/{self.console['id']}"
+                f"/restore-series/{copy['id']}"
+            ),
+            {
+                "revision_number": 2,
+                "expected_current_revision": 3,
+                "note": "Recuperar ajuste aprobado",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["restored"]["revision_number"], 4)
+        self.login("operator@example.local", "operator pass")
+        values = self.load_values().json()["group_values"]["rows"]
+        self.assertEqual([row["values"]["demanda"] for row in values], [10.0, 99.5, 12.0, 13.0])
+
+    def test_internal_console_detail_exposes_lease_and_auditable_copy_history(self):
+        loaded = self.load_values()
+        lease_token = self.take_lease()
+        saved = self.put_values(
+            [{"column_id": "demanda", "row_index": 1, "value": 99.5}],
+            etag=loaded.headers["etag"],
+            lease_token=lease_token,
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.login("admin@example.local", "admin pass")
+
+        response = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/consoles/{self.console['id']}"
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        detail = response.json()["operator_console"]
+        self.assertTrue(detail["can_force_release"])
+        self.assertEqual(
+            detail["group_leases"],
+            [
+                {
+                    "group_id": "potencia",
+                    "group_label": "Potencia",
+                    "holder_name": "Olga Operadora",
+                    "expires_at": detail["group_leases"][0]["expires_at"],
+                }
+            ],
+        )
+        self.assertEqual(len(detail["series_copies"]), 1)
+        copy = detail["series_copies"][0]
+        self.assertEqual(copy["current_revision"], 2)
+        self.assertEqual(
+            [revision["revision_number"] for revision in copy["revisions"]],
+            [2, 1],
+        )
+        self.assertEqual(copy["revisions"][0]["actor"], "Olga Operadora")
+        self.assertEqual(copy["revisions"][0]["cell_count"], 1)
+        self.assertTrue(copy["revisions"][1]["can_restore"])
+        self.assertFalse(copy["revisions"][0]["can_restore"])
 
     def test_a_column_whose_series_is_unbound_closes_the_console_actionably(self):
         document = self.store.get_operator_console(self.console["id"])["document"]

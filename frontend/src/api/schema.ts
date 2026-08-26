@@ -398,6 +398,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/console/{console_id}/groups/{group_id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Console Group History */
+        get: operations["get_console_group_history_api_console__console_id__groups__group_id__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/console/{console_id}/groups/{group_id}/lease": {
         parameters: {
             query?: never;
@@ -412,6 +429,23 @@ export interface paths {
         post: operations["acquire_console_group_lease_api_console__console_id__groups__group_id__lease_post"];
         /** Release Console Group Lease */
         delete: operations["release_console_group_lease_api_console__console_id__groups__group_id__lease_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/console/{console_id}/groups/{group_id}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Undo Console Group Save */
+        post: operations["undo_console_group_save_api_console__console_id__groups__group_id__undo_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1356,6 +1390,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scenarios/{scenario_id}/consoles/{console_id}/groups/{group_id}/lease": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Force Release Console Group Lease */
+        delete: operations["force_release_console_group_lease_api_scenarios__scenario_id__consoles__console_id__groups__group_id__lease_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/consoles/{console_id}/restore-series/{copy_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore Console Series Revision */
+        post: operations["restore_console_series_revision_api_scenarios__scenario_id__consoles__console_id__restore_series__copy_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scenarios/{scenario_id}/draft": {
         parameters: {
             query?: never;
@@ -1807,6 +1875,15 @@ export interface components {
             /** Range Start */
             range_start: string;
         };
+        /** ConsoleSeriesRestoreRequest */
+        ConsoleSeriesRestoreRequest: {
+            /** Expected Current Revision */
+            expected_current_revision: number;
+            /** Note */
+            note?: string | null;
+            /** Revision Number */
+            revision_number: number;
+        };
         /** ConsoleSeriesSelectionRequest */
         ConsoleSeriesSelectionRequest: {
             /** Column Id */
@@ -1820,6 +1897,11 @@ export interface components {
         ConsoleSeriesSelectionsWriteRequest: {
             /** Selections */
             selections: components["schemas"]["ConsoleSeriesSelectionRequest"][];
+        };
+        /** ConsoleUndoRequest */
+        ConsoleUndoRequest: {
+            /** Lease Token */
+            lease_token: string;
         };
         /** CsrfTokenResponse */
         CsrfTokenResponse: {
@@ -3221,6 +3303,38 @@ export interface operations {
             };
         };
     };
+    get_console_group_history_api_console__console_id__groups__group_id__history_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                console_id: number;
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     heartbeat_console_group_lease_api_console__console_id__groups__group_id__lease_put: {
         parameters: {
             query?: never;
@@ -3309,6 +3423,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    undo_console_group_save_api_console__console_id__groups__group_id__undo_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                console_id: number;
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleUndoRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
             };
             /** @description Validation Error */
             422: {
@@ -5550,6 +5700,74 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["OperatorConsoleWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    force_release_console_group_lease_api_scenarios__scenario_id__consoles__console_id__groups__group_id__lease_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+                console_id: number;
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_console_series_revision_api_scenarios__scenario_id__consoles__console_id__restore_series__copy_id__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+                console_id: number;
+                copy_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleSeriesRestoreRequest"];
             };
         };
         responses: {

@@ -8088,6 +8088,72 @@ class AnalystStore:
         rows = self.connection.execute(sql + " ORDER BY id", (console_id,)).fetchall()
         return [row_to_dict(row) for row in rows]
 
+    def list_operator_console_series_copy_audit(
+        self, console_id: int
+    ) -> list[dict[str, Any]]:
+        """Return the technical copy revision history for internal recovery."""
+
+        copies = self.list_operator_console_series_copies(
+            console_id, include_archived=True
+        )
+        audit: list[dict[str, Any]] = []
+        for copy in copies:
+            rows = self.connection.execute(
+                """
+                SELECT revision_number, change_summary, created_at, created_by,
+                       metadata_json
+                FROM time_series_set_revisions
+                WHERE time_series_set_id = ?
+                ORDER BY revision_number DESC
+                """,
+                (int(copy["time_series_set_id"]),),
+            ).fetchall()
+            current_revision = int(rows[0]["revision_number"]) if rows else 0
+            revisions = []
+            for row in rows:
+                try:
+                    metadata = json.loads(str(row["metadata_json"] or "{}"))
+                except json.JSONDecodeError:
+                    metadata = {}
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                actor = metadata.get("actor")
+                actor_name = (
+                    str(actor.get("name") or "")
+                    if isinstance(actor, dict)
+                    else str(row["created_by"] or "")
+                )
+                range_value = (
+                    metadata.get("range")
+                    if isinstance(metadata.get("range"), dict)
+                    else None
+                )
+                revision_number = int(row["revision_number"])
+                revisions.append(
+                    {
+                        "revision_number": revision_number,
+                        "date": str(row["created_at"]),
+                        "actor": actor_name,
+                        "group_id": metadata.get("group_id"),
+                        "range": range_value,
+                        "cell_count": int(metadata.get("cell_count") or 0),
+                        "note": str(
+                            metadata.get("note") or row["change_summary"] or ""
+                        ),
+                        "action": str(metadata.get("action") or "copy"),
+                        "can_restore": revision_number < current_revision,
+                    }
+                )
+            audit.append(
+                {
+                    "id": int(copy["id"]),
+                    "archived": copy["archived_at"] is not None,
+                    "current_revision": current_revision,
+                    "revisions": revisions,
+                }
+            )
+        return audit
+
     def _active_console_series_copy(
         self, console_id: int, time_series_set_id: int
     ) -> dict[str, Any] | None:
@@ -8712,25 +8778,40 @@ class AnalystStore:
                 )
             token = uuid.uuid4().hex
             expires_at = iso_timestamp_plus_seconds(now, CONSOLE_LEASE_SECONDS)
-            for set_id in set_ids:
-                self.connection.execute(
-                    """
-                    DELETE FROM operator_console_series_leases
-                    WHERE console_id = ? AND origin_set_id = ?
-                    """,
-                    (console_id, set_id),
-                )
-                self.connection.execute(
-                    """
-                    INSERT INTO operator_console_series_leases (
-                        console_id, origin_set_id, lease_token, holder_user_id,
-                        acquired_at, heartbeat_at, expires_at
+            transaction = (
+                self.connection.transaction()
+                if self.database_backend == "postgresql"
+                else self.connection
+            )
+            with transaction:
+                for set_id in set_ids:
+                    self.connection.execute(
+                        """
+                        INSERT INTO operator_console_series_leases (
+                            console_id, origin_set_id, lease_token, holder_user_id,
+                            acquired_at, heartbeat_at, expires_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(console_id, origin_set_id) DO UPDATE SET
+                            lease_token = excluded.lease_token,
+                            holder_user_id = excluded.holder_user_id,
+                            acquired_at = excluded.acquired_at,
+                            heartbeat_at = excluded.heartbeat_at,
+                            expires_at = excluded.expires_at
+                        WHERE operator_console_series_leases.expires_at <= excluded.acquired_at
+                           OR operator_console_series_leases.holder_user_id = excluded.holder_user_id
+                        """,
+                        (console_id, set_id, token, user_id, now, now, expires_at),
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (console_id, set_id, token, user_id, now, now, expires_at),
+                # The conditional upsert makes a concurrent live lease win
+                # instead of letting a later request overwrite it.
+                self._require_console_group_lease(
+                    console_id=console_id,
+                    set_ids=set_ids,
+                    user_id=user_id,
+                    lease_token=token,
+                    now=now,
                 )
-            self.connection.commit()
         actor = self._console_actor_identity(user_id)
         return {
             "token": token,
@@ -8757,16 +8838,28 @@ class AnalystStore:
                 now=now,
             )
             expires_at = iso_timestamp_plus_seconds(now, CONSOLE_LEASE_SECONDS)
-            for set_id in set_ids:
-                self.connection.execute(
-                    """
-                    UPDATE operator_console_series_leases
-                    SET heartbeat_at = ?, expires_at = ?
-                    WHERE console_id = ? AND origin_set_id = ? AND lease_token = ?
-                    """,
-                    (now, expires_at, console_id, set_id, str(lease_token)),
+            transaction = (
+                self.connection.transaction()
+                if self.database_backend == "postgresql"
+                else self.connection
+            )
+            with transaction:
+                for set_id in set_ids:
+                    self.connection.execute(
+                        """
+                        UPDATE operator_console_series_leases
+                        SET heartbeat_at = ?, expires_at = ?
+                        WHERE console_id = ? AND origin_set_id = ? AND lease_token = ?
+                        """,
+                        (now, expires_at, console_id, set_id, str(lease_token)),
+                    )
+                self._require_console_group_lease(
+                    console_id=console_id,
+                    set_ids=set_ids,
+                    user_id=user_id,
+                    lease_token=lease_token,
+                    now=now,
                 )
-            self.connection.commit()
         actor = self._console_actor_identity(user_id)
         return {
             "token": str(lease_token),
@@ -8783,16 +8876,46 @@ class AnalystStore:
         with self._lock:
             console = self.get_operator_console(console_id)
             self._operator_console_group(console, group_id)
-            for set_id in self._console_group_lease_set_ids(console_id, group_id):
-                self.connection.execute(
-                    """
-                    DELETE FROM operator_console_series_leases
-                    WHERE console_id = ? AND origin_set_id = ? AND lease_token = ?
-                      AND holder_user_id = ?
-                    """,
-                    (console_id, set_id, str(lease_token), int(user_id)),
-                )
-            self.connection.commit()
+            transaction = (
+                self.connection.transaction()
+                if self.database_backend == "postgresql"
+                else self.connection
+            )
+            with transaction:
+                for set_id in self._console_group_lease_set_ids(console_id, group_id):
+                    self.connection.execute(
+                        """
+                        DELETE FROM operator_console_series_leases
+                        WHERE console_id = ? AND origin_set_id = ? AND lease_token = ?
+                          AND holder_user_id = ?
+                        """,
+                        (console_id, set_id, str(lease_token), int(user_id)),
+                    )
+
+    def force_release_operator_console_group_lease(
+        self, console_id: int, *, group_id: str
+    ) -> None:
+        """Release every copy lease for a group on an administrator's behalf."""
+
+        with self._lock:
+            console = self.get_operator_console(console_id)
+            self._operator_console_group(console, group_id)
+            set_ids = self._console_group_lease_set_ids(console_id, group_id)
+            transaction = (
+                self.connection.transaction()
+                if self.database_backend == "postgresql"
+                else self.connection
+            )
+            with transaction:
+                if set_ids:
+                    placeholders = ", ".join("?" for _ in set_ids)
+                    self.connection.execute(
+                        f"""
+                        DELETE FROM operator_console_series_leases
+                        WHERE console_id = ? AND origin_set_id IN ({placeholders})
+                        """,
+                        (console_id, *set_ids),
+                    )
 
     def describe_operator_console_group_lease(
         self, console_id: int, *, group_id: str
@@ -8975,7 +9098,13 @@ class AnalystStore:
                     for edit in column_edits
                 )
 
-            try:
+            operation_id = uuid.uuid4().hex
+            transaction = (
+                self.connection.transaction()
+                if self.database_backend == "postgresql"
+                else self.connection
+            )
+            with transaction:
                 copies: list[dict[str, Any]] = []
                 for resolved_set_id, entry in sorted(touched.items()):
                     copy = self._active_console_series_copy(console_id, resolved_set_id)
@@ -9004,7 +9133,10 @@ class AnalystStore:
                         group_id=str(group_id),
                         range_start=range_start,
                         range_end=range_end,
+                        granularity=granularity,
                         note=note,
+                        operation_id=operation_id,
+                        action="save",
                         now=now,
                     )
                     copies.append(copy)
@@ -9014,10 +9146,6 @@ class AnalystStore:
                     copies=copies,
                     now=now,
                 )
-            except Exception:
-                self.connection.rollback()
-                raise
-            self.connection.commit()
 
         return self.resolve_operator_console_group_values(
             console_id,
@@ -9136,7 +9264,10 @@ class AnalystStore:
         group_id: str,
         range_start: str,
         range_end: str,
+        granularity: str,
         note: str | None,
+        operation_id: str,
+        action: str,
         now: str,
     ) -> None:
         """Write one auditable revision of an operational copy."""
@@ -9260,14 +9391,19 @@ class AnalystStore:
                 "revision": int(console["revision"]),
             },
             "actor": {"user_id": actor["user_id"], "name": actor["name"]},
+            "operation_id": str(operation_id),
+            "action": str(action),
             "group_id": str(group_id),
             "range": {"start": range_start, "end": range_end},
+            "granularity": str(granularity),
             "note": (note or "").strip(),
             "cell_count": len(edits),
             "edits": [
                 {
                     "column_id": edit["column_id"],
                     "row_index": int(edit["row_index"]),
+                    "period_index": int(edit["period_index"]),
+                    "signal_key": str(edit["signal_key"]),
                     "previous_value": edit["previous_value"],
                     "new_value": float(edit["new_value"]),
                 }
@@ -9308,6 +9444,532 @@ class AnalystStore:
             """,
             (content_hash, now, actor["created_by"], time_series_set_id),
         )
+
+    def list_operator_console_group_history(
+        self,
+        console_id: int,
+        *,
+        group_id: str,
+        viewer_user_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return group edits only in coordinates meaningful to an operator."""
+
+        console = self.get_operator_console(console_id)
+        self._operator_console_group(console, group_id)
+        rows = self.connection.execute(
+            """
+            SELECT operator_console_series_copies.id AS copy_id,
+                   revisions.id AS revision_id,
+                   revisions.revision_number AS revision_number,
+                   revisions.created_at AS created_at,
+                   revisions.metadata_json AS metadata_json,
+                   latest.revision_number AS latest_revision_number
+            FROM operator_console_series_copies
+            JOIN time_series_set_revisions AS revisions
+              ON revisions.time_series_set_id =
+                 operator_console_series_copies.time_series_set_id
+            JOIN (
+                SELECT time_series_set_id, MAX(revision_number) AS revision_number
+                FROM time_series_set_revisions
+                GROUP BY time_series_set_id
+            ) AS latest
+              ON latest.time_series_set_id =
+                 operator_console_series_copies.time_series_set_id
+            WHERE operator_console_series_copies.console_id = ?
+            ORDER BY revisions.created_at DESC, revisions.revision_number DESC,
+                     operator_console_series_copies.id
+            """,
+            (console_id,),
+        ).fetchall()
+        operations: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            try:
+                metadata = json.loads(str(row["metadata_json"] or "{}"))
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(metadata, dict):
+                continue
+            if str(metadata.get("group_id") or "") != str(group_id):
+                continue
+            edits = metadata.get("edits")
+            if not isinstance(edits, list) or not edits:
+                continue
+            actor = metadata.get("actor") if isinstance(metadata.get("actor"), dict) else {}
+            range_value = (
+                metadata.get("range")
+                if isinstance(metadata.get("range"), dict)
+                else {"start": None, "end": None}
+            )
+            operation_id = str(metadata.get("operation_id") or "")
+            if not operation_id:
+                legacy_key = json.dumps(
+                    {
+                        "console_id": int(console_id),
+                        "created_at": row["created_at"],
+                        "actor": actor,
+                        "group_id": str(group_id),
+                        "range": range_value,
+                        "note": metadata.get("note"),
+                    },
+                    sort_keys=True,
+                )
+                operation_id = hashlib.sha256(legacy_key.encode("utf-8")).hexdigest()
+            operation = operations.setdefault(
+                operation_id,
+                {
+                    "id": operation_id,
+                    "actor": str(actor.get("name") or ""),
+                    "actor_user_id": actor.get("user_id"),
+                    "date": str(row["created_at"]),
+                    "range": {
+                        "start": range_value.get("start"),
+                        "end": range_value.get("end"),
+                    },
+                    "cell_count": 0,
+                    "note": str(metadata.get("note") or ""),
+                    "comparison": [],
+                    "action": str(metadata.get("action") or "save"),
+                    "revisions_current": True,
+                    "sequence": int(row["revision_id"]),
+                },
+            )
+            operation["sequence"] = max(
+                int(operation["sequence"]), int(row["revision_id"])
+            )
+            operation["cell_count"] += int(metadata.get("cell_count") or len(edits))
+            operation["revisions_current"] = bool(operation["revisions_current"]) and (
+                int(row["revision_number"]) == int(row["latest_revision_number"])
+            )
+            for edit in edits:
+                if not isinstance(edit, dict):
+                    continue
+                operation["comparison"].append(
+                    {
+                        "column_id": str(edit.get("column_id") or ""),
+                        "row_index": int(edit.get("row_index") or 0),
+                        "before": edit.get("previous_value"),
+                        "after": edit.get("new_value"),
+                    }
+                )
+
+        history = sorted(
+            operations.values(),
+            key=lambda item: (item["date"], item["sequence"]),
+            reverse=True,
+        )
+        latest_save_for_viewer = next(
+            (
+                item["id"]
+                for item in history
+                if item["action"] == "save"
+                and viewer_user_id is not None
+                and item["actor_user_id"] is not None
+                and int(item["actor_user_id"]) == int(viewer_user_id)
+            ),
+            None,
+        )
+        public: list[dict[str, Any]] = []
+        for item in history:
+            item["comparison"].sort(
+                key=lambda edit: (edit["row_index"], edit["column_id"])
+            )
+            public.append(
+                {
+                    "id": item["id"],
+                    "actor": item["actor"],
+                    "date": item["date"],
+                    "range": item["range"],
+                    "cell_count": item["cell_count"],
+                    "note": item["note"],
+                    "comparison": item["comparison"],
+                    "can_undo": bool(
+                        item["id"] == latest_save_for_viewer
+                        and item["action"] == "save"
+                        and item["revisions_current"]
+                    ),
+                }
+            )
+        return public
+
+    def undo_operator_console_group_save(
+        self,
+        console_id: int,
+        *,
+        group_id: str,
+        expected_token: str,
+        actor_user_id: int,
+        lease_token: str,
+    ) -> dict[str, Any]:
+        """Reverse the caller's latest still-current save as a new operation."""
+
+        with self._lock:
+            console = self.get_operator_console(console_id)
+            location = self.get_operator_console_location(console_id)
+            group = self._operator_console_group(console, group_id)
+            resolved = self._resolve_console_group_columns(
+                console_id, group_id=str(group_id)
+            )[str(group_id)]
+            columns = resolved["columns"]
+            current_token = console_group_values_token(
+                [
+                    (column["time_series_set_id"], str(column["set"]["content_hash"]))
+                    for column in columns
+                ]
+            )
+            if str(expected_token) != current_token:
+                raise ConsoleSeriesError(
+                    "los datos cambiaron mientras editabas; vuelve a cargar el tramo",
+                    status_code=412,
+                )
+            self._require_console_group_lease(
+                console_id=console_id,
+                set_ids=self._console_group_lease_set_ids(console_id, str(group_id)),
+                user_id=actor_user_id,
+                lease_token=lease_token,
+                now=utc_now_iso(),
+            )
+
+            rows = self.connection.execute(
+                """
+                SELECT revisions.id AS revision_id,
+                       revisions.revision_number AS revision_number,
+                       revisions.metadata_json AS metadata_json,
+                       copies.id AS copy_id,
+                       copies.time_series_set_id AS time_series_set_id,
+                       copies.archived_at AS archived_at,
+                       latest.revision_number AS latest_revision_number
+                FROM operator_console_series_copies AS copies
+                JOIN time_series_set_revisions AS revisions
+                  ON revisions.time_series_set_id = copies.time_series_set_id
+                JOIN (
+                    SELECT time_series_set_id, MAX(revision_number) AS revision_number
+                    FROM time_series_set_revisions
+                    GROUP BY time_series_set_id
+                ) AS latest
+                  ON latest.time_series_set_id = copies.time_series_set_id
+                WHERE copies.console_id = ?
+                ORDER BY revisions.id DESC
+                """,
+                (console_id,),
+            ).fetchall()
+            operations: dict[str, dict[str, Any]] = {}
+            for row in rows:
+                try:
+                    metadata = json.loads(str(row["metadata_json"] or "{}"))
+                except json.JSONDecodeError:
+                    continue
+                actor = metadata.get("actor") if isinstance(metadata, dict) else None
+                if (
+                    not isinstance(actor, dict)
+                    or actor.get("user_id") is None
+                    or int(actor["user_id"]) != int(actor_user_id)
+                    or str(metadata.get("group_id") or "") != str(group_id)
+                    or str(metadata.get("action") or "save") != "save"
+                ):
+                    continue
+                operation_id = str(metadata.get("operation_id") or row["revision_id"])
+                operation = operations.setdefault(
+                    operation_id,
+                    {
+                        "operation_id": operation_id,
+                        "sequence": int(row["revision_id"]),
+                        "metadata": metadata,
+                        "revisions": [],
+                    },
+                )
+                operation["sequence"] = max(
+                    int(operation["sequence"]), int(row["revision_id"])
+                )
+                operation["revisions"].append(
+                    {
+                        "copy_id": int(row["copy_id"]),
+                        "time_series_set_id": int(row["time_series_set_id"]),
+                        "revision_number": int(row["revision_number"]),
+                        "latest_revision_number": int(row["latest_revision_number"]),
+                        "archived_at": row["archived_at"],
+                        "metadata": metadata,
+                    }
+                )
+            if not operations:
+                raise ConsoleSeriesError(
+                    "no tienes un guardado vigente para deshacer", status_code=409
+                )
+            target = max(operations.values(), key=lambda item: item["sequence"])
+            active_set_ids = {int(column["time_series_set_id"]) for column in columns}
+            if any(
+                revision["revision_number"] != revision["latest_revision_number"]
+                or revision["archived_at"] is not None
+                or revision["time_series_set_id"] not in active_set_ids
+                for revision in target["revisions"]
+            ):
+                raise ConsoleSeriesError(
+                    "ese guardado ya no es la revision vigente", status_code=409
+                )
+
+            actor = self._console_actor_identity(actor_user_id)
+            now = utc_now_iso()
+            operation_id = uuid.uuid4().hex
+            copies_by_set = {
+                int(copy["time_series_set_id"]): copy
+                for copy in self.list_operator_console_series_copies(console_id)
+            }
+            touched_copies: list[dict[str, Any]] = []
+            transaction = (
+                self.connection.transaction()
+                if self.database_backend == "postgresql"
+                else self.connection
+            )
+            with transaction:
+                for revision in sorted(
+                    target["revisions"], key=lambda item: item["time_series_set_id"]
+                ):
+                    metadata = revision["metadata"]
+                    reverse_edits = []
+                    for edit in metadata.get("edits") or []:
+                        if not isinstance(edit, dict):
+                            continue
+                        reverse_edits.append(
+                            {
+                                "period_index": int(edit["period_index"]),
+                                "signal_key": str(edit["signal_key"]),
+                                "column_id": str(edit["column_id"]),
+                                "row_index": int(edit["row_index"]),
+                                "previous_value": edit.get("new_value"),
+                                "new_value": edit.get("previous_value"),
+                            }
+                        )
+                    if not reverse_edits:
+                        raise ConsoleSeriesError(
+                            "ese guardado no conserva una comparacion deshacible",
+                            status_code=409,
+                        )
+                    original_note = str(metadata.get("note") or "").strip()
+                    self._write_console_series_revision(
+                        project_id=int(location["project_id"]),
+                        time_series_set_id=revision["time_series_set_id"],
+                        edits=reverse_edits,
+                        actor=actor,
+                        console=console,
+                        group_id=str(group_id),
+                        range_start=str(metadata["range"]["start"]),
+                        range_end=str(metadata["range"]["end"]),
+                        granularity=str(
+                            metadata.get("granularity")
+                            or group["granularities"][0]
+                        ),
+                        note=(
+                            f"Deshacer: {original_note}"
+                            if original_note
+                            else "Deshacer ultimo guardado"
+                        ),
+                        operation_id=operation_id,
+                        action="undo",
+                        now=now,
+                    )
+                    touched_copies.append(
+                        copies_by_set[revision["time_series_set_id"]]
+                    )
+                self._refresh_console_variant_series_dependencies(
+                    project_id=int(location["project_id"]),
+                    case_input_variant_id=int(console["owned_variant_id"]),
+                    copies=touched_copies,
+                    now=now,
+                )
+
+        metadata = target["metadata"]
+        return self.resolve_operator_console_group_values(
+            console_id,
+            group_id=str(group_id),
+            range_start=str(metadata["range"]["start"]),
+            range_end=str(metadata["range"]["end"]),
+            granularity=str(
+                metadata.get("granularity") or group["granularities"][0]
+            ),
+        )
+
+    def restore_operator_console_series_copy_revision(
+        self,
+        console_id: int,
+        *,
+        copy_id: int,
+        revision_number: int,
+        expected_current_revision: int,
+        actor_user_id: int,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        """Materialize an older operational-copy revision as a new revision."""
+
+        with self._lock:
+            console = self.get_operator_console(console_id)
+            location = self.get_operator_console_location(console_id)
+            copy = next(
+                (
+                    row
+                    for row in self.list_operator_console_series_copies(
+                        console_id, include_archived=True
+                    )
+                    if int(row["id"]) == int(copy_id)
+                ),
+                None,
+            )
+            if copy is None:
+                raise KeyError(f"operator console series copy {copy_id} not found")
+            live = self._live_console_series_leases(
+                console_id, [int(copy["origin_set_id"])], utc_now_iso()
+            )
+            if live:
+                actor = self._console_actor_identity(live[0]["holder_user_id"])
+                raise ConsoleSeriesError(
+                    f"{actor['name']} esta editando este grupo", status_code=409
+                )
+
+            revision_rows = self.connection.execute(
+                """
+                SELECT id, revision_number, metadata_json
+                FROM time_series_set_revisions
+                WHERE time_series_set_id = ?
+                ORDER BY revision_number DESC
+                """,
+                (int(copy["time_series_set_id"]),),
+            ).fetchall()
+            if not revision_rows:
+                raise KeyError(f"time-series copy {copy_id} has no revisions")
+            current_revision = int(revision_rows[0]["revision_number"])
+            if int(expected_current_revision) != current_revision:
+                raise ConsoleSeriesError(
+                    "la copia cambio mientras revisabas el historial",
+                    status_code=412,
+                )
+            known_revisions = {int(row["revision_number"]) for row in revision_rows}
+            if int(revision_number) not in known_revisions:
+                raise KeyError(
+                    f"revision {revision_number} not found for console series copy {copy_id}"
+                )
+            if int(revision_number) >= current_revision:
+                raise ConsoleSeriesError(
+                    "elige una revision anterior a la vigente", status_code=409
+                )
+
+            target_values: dict[tuple[int, str], Any] = {}
+            descriptors: dict[tuple[int, str], dict[str, Any]] = {}
+            context: dict[str, Any] | None = None
+            for row in revision_rows:
+                if int(row["revision_number"]) <= int(revision_number):
+                    continue
+                try:
+                    metadata = json.loads(str(row["metadata_json"] or "{}"))
+                except json.JSONDecodeError:
+                    metadata = {}
+                if not isinstance(metadata, dict):
+                    continue
+                edits = metadata.get("edits")
+                if not isinstance(edits, list):
+                    continue
+                if context is None:
+                    context = metadata
+                for edit in edits:
+                    if not isinstance(edit, dict):
+                        continue
+                    try:
+                        key = (int(edit["period_index"]), str(edit["signal_key"]))
+                    except (KeyError, TypeError, ValueError):
+                        raise ConsoleSeriesError(
+                            "esa revision no conserva detalle restaurable",
+                            status_code=409,
+                        )
+                    target_values[key] = edit.get("previous_value")
+                    descriptors[key] = edit
+            if not target_values or context is None:
+                raise ConsoleSeriesError(
+                    "esa revision no conserva detalle restaurable", status_code=409
+                )
+
+            current_rows = self.connection.execute(
+                """
+                SELECT periods.period_index AS period_index,
+                       signals.signal_key AS signal_key,
+                       series_values.value_numeric AS value_numeric
+                FROM time_series_values AS series_values
+                JOIN time_series_periods AS periods
+                  ON periods.id = series_values.time_series_period_id
+                JOIN time_series_signals AS signals
+                  ON signals.id = series_values.time_series_signal_id
+                WHERE series_values.time_series_set_id = ?
+                """,
+                (int(copy["time_series_set_id"]),),
+            ).fetchall()
+            current_values = {
+                (int(row["period_index"]), str(row["signal_key"])): row["value_numeric"]
+                for row in current_rows
+            }
+            edits = []
+            for key, target_value in sorted(target_values.items()):
+                if key not in current_values:
+                    raise ConsoleSeriesError(
+                        "la copia vigente ya no contiene una celda historica",
+                        status_code=409,
+                    )
+                current_value = current_values[key]
+                if current_value == target_value:
+                    continue
+                descriptor = descriptors[key]
+                edits.append(
+                    {
+                        "period_index": key[0],
+                        "signal_key": key[1],
+                        "column_id": str(descriptor.get("column_id") or ""),
+                        "row_index": int(descriptor.get("row_index") or 0),
+                        "previous_value": current_value,
+                        "new_value": target_value,
+                    }
+                )
+            if not edits:
+                raise ConsoleSeriesError(
+                    "la revision elegida no cambia los valores vigentes",
+                    status_code=409,
+                )
+            group_id = str(context.get("group_id") or "")
+            range_value = context.get("range")
+            if not group_id or not isinstance(range_value, dict):
+                raise ConsoleSeriesError(
+                    "esa revision no conserva contexto restaurable", status_code=409
+                )
+
+            actor = self._console_actor_identity(actor_user_id)
+            now = utc_now_iso()
+            transaction = (
+                self.connection.transaction()
+                if self.database_backend == "postgresql"
+                else self.connection
+            )
+            with transaction:
+                self._write_console_series_revision(
+                    project_id=int(location["project_id"]),
+                    time_series_set_id=int(copy["time_series_set_id"]),
+                    edits=edits,
+                    actor=actor,
+                    console=console,
+                    group_id=group_id,
+                    range_start=str(range_value["start"]),
+                    range_end=str(range_value["end"]),
+                    granularity=str(context.get("granularity") or "full_horizon"),
+                    note=(note or f"Restaurar revision {revision_number}").strip(),
+                    operation_id=uuid.uuid4().hex,
+                    action="restore",
+                    now=now,
+                )
+                if copy["archived_at"] is None:
+                    self._refresh_console_variant_series_dependencies(
+                        project_id=int(location["project_id"]),
+                        case_input_variant_id=int(console["owned_variant_id"]),
+                        copies=[copy],
+                        now=now,
+                    )
+        return {
+            "copy_id": int(copy_id),
+            "revision_number": current_revision + 1,
+            "restored_from_revision": int(revision_number),
+        }
 
     def materialize_operator_console_run(
         self,

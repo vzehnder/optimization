@@ -15,6 +15,8 @@ import {
   acquireConsoleGroupLease,
   createConsoleRun,
   createOperatorConsole,
+  forceReleaseOperatorConsoleGroupLease,
+  getConsoleGroupHistory,
   getConsoleGroupValues,
   getConsoleRun,
   getConsoleRunComparison,
@@ -22,17 +24,20 @@ import {
   listCaseInputVariants,
   getConsoleShell,
   getOperatorConsole,
+  heartbeatConsoleGroupLease,
   listOperableConsoles,
   listConsoleRuns,
   listOperatorConsoles,
   releaseConsoleGroupLease,
   requestConsoleReview,
+  restoreOperatorConsoleSeriesRevision,
   saveConsoleGroupValues,
   saveOperatorConsole,
   saveConsoleParameters,
   saveConsoleSeriesSelections,
   type ConsoleComparisonSide,
   type ConsoleGroup,
+  type ConsoleGroupHistoryEntry,
   type ConsoleGroupValuesSnapshot,
   type ConsoleKpiDifference,
   type ConsoleLease,
@@ -42,6 +47,7 @@ import {
   type OperatorConsoleDocument,
   type OperatorConsoleGroup,
   type OperatorConsoleStatus,
+  undoConsoleGroupSave,
 } from "./api/client";
 import { loadPlotly, type PlotlyTrace } from "./plotly";
 import { PortalResultsBlock } from "./PortalResults";
@@ -83,6 +89,8 @@ const consoleGroupValuesQueryKey = (
     end,
     granularity,
   ] as const;
+const consoleGroupHistoryQueryKey = (consoleId: number, groupId: string) =>
+  ["console-group-history", consoleId, groupId] as const;
 
 const STATUS_LABELS: Record<OperatorConsoleStatus, string> = {
   draft: "Borrador",
@@ -300,6 +308,49 @@ export function OperatorConsoleEditorView() {
     },
     onError: (mutationError) => setError(errorMessage(mutationError)),
   });
+  const forceRelease = useMutation({
+    mutationFn: (groupId: string) =>
+      forceReleaseOperatorConsoleGroupLease(
+        scenarioId || 0,
+        consoleId || 0,
+        groupId,
+      ),
+    onSuccess: async () => {
+      setError("");
+      await queryClient.invalidateQueries({
+        queryKey: operatorConsoleQueryKey(scenarioId || 0, consoleId || 0),
+      });
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError)),
+  });
+  const restoreSeries = useMutation({
+    mutationFn: ({
+      copyId,
+      revisionNumber,
+      currentRevision,
+    }: {
+      copyId: number;
+      revisionNumber: number;
+      currentRevision: number;
+    }) =>
+      restoreOperatorConsoleSeriesRevision(
+        scenarioId || 0,
+        consoleId || 0,
+        copyId,
+        {
+          revision_number: revisionNumber,
+          expected_current_revision: currentRevision,
+          note: "Restauracion desde la consola interna",
+        },
+      ),
+    onSuccess: async () => {
+      setError("");
+      await queryClient.invalidateQueries({
+        queryKey: operatorConsoleQueryKey(scenarioId || 0, consoleId || 0),
+      });
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError)),
+  });
 
   if (scenarioId === null || consoleId === null) {
     return (
@@ -368,6 +419,75 @@ export function OperatorConsoleEditorView() {
         disabled={saveMutation.isPending}
         onSave={(document) => save(document, console.status)}
       />
+      <section
+        className="content-panel console-series-coordination"
+        aria-labelledby="console-series-coordination-title"
+      >
+        <h2 id="console-series-coordination-title">
+          Coordinacion e historial de series
+        </h2>
+        {console.group_leases?.length ? (
+          <ul className="resource-list">
+            {console.group_leases.map((lease) => (
+              <li key={lease.group_id}>
+                <strong>{lease.group_label}</strong>: {lease.holder_name} edita
+                hasta {lease.expires_at}.
+                {console.can_force_release ? (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={forceRelease.isPending}
+                    onClick={() => forceRelease.mutate(lease.group_id)}
+                  >
+                    Forzar liberacion de {lease.group_label}
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="empty-state">No hay grupos bloqueados.</p>
+        )}
+        {console.series_copies?.length ? (
+          console.series_copies.map((copy) => (
+            <article key={copy.id} className="console-copy-history">
+              <h3>
+                Copia operativa {copy.id} · revision vigente{" "}
+                {copy.current_revision}
+              </h3>
+              {copy.archived ? <p className="source-note">Archivada</p> : null}
+              <ol className="resource-list">
+                {copy.revisions.map((revision) => (
+                  <li key={revision.revision_number}>
+                    <strong>Revision {revision.revision_number}</strong> ·{" "}
+                    {revision.actor} · {revision.date} · {revision.cell_count}{" "}
+                    {revision.cell_count === 1 ? "celda" : "celdas"}
+                    <p>{revision.note}</p>
+                    {revision.can_restore ? (
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={restoreSeries.isPending}
+                        onClick={() =>
+                          restoreSeries.mutate({
+                            copyId: copy.id,
+                            revisionNumber: revision.revision_number,
+                            currentRevision: copy.current_revision,
+                          })
+                        }
+                      >
+                        Restaurar revision {revision.revision_number}
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ol>
+            </article>
+          ))
+        ) : (
+          <p className="empty-state">Todavia no hay copias operativas.</p>
+        )}
+      </section>
       <div className="inline-actions">
         {console.status === "draft" ? (
           <button
@@ -831,6 +951,12 @@ export function ConsoleGroupEditor({
     enabled,
     retry: false,
   });
+  const history = useQuery({
+    queryKey: consoleGroupHistoryQueryKey(consoleId, group.id),
+    queryFn: ({ signal }) =>
+      getConsoleGroupHistory(consoleId, group.id, signal),
+    retry: false,
+  });
 
   const rows = values.data?.values.rows ?? [];
   const columns = values.data?.values.columns ?? group.columns;
@@ -871,6 +997,18 @@ export function ConsoleGroupEditor({
     onSuccess: (acquired) => {
       setSaveError(null);
       setLease(acquired);
+      void heartbeatConsoleGroupLease(consoleId, group.id, acquired.token)
+        .then((renewed) =>
+          setLease((current) =>
+            current?.token === acquired.token ? renewed : current,
+          ),
+        )
+        .catch((error: Error) => {
+          setLease((current) =>
+            current?.token === acquired.token ? null : current,
+          );
+          setSaveError(error);
+        });
     },
     onError: (error: Error) => setSaveError(error),
   });
@@ -913,9 +1051,49 @@ export function ConsoleGroupEditor({
       setPasteWarnings([]);
       setReviewOpen(false);
       queryClient.setQueryData(queryKey, saved);
+      void queryClient.invalidateQueries({
+        queryKey: consoleGroupHistoryQueryKey(consoleId, group.id),
+      });
     },
     onError: (error: Error) => setSaveError(error),
   });
+  const undo = useMutation({
+    mutationFn: () =>
+      undoConsoleGroupSave(
+        consoleId,
+        group.id,
+        lease?.token || "",
+        values.data?.etag || "",
+      ),
+    onSuccess: (restored) => {
+      setSaveError(null);
+      queryClient.setQueryData(queryKey, restored);
+      void queryClient.invalidateQueries({
+        queryKey: consoleGroupHistoryQueryKey(consoleId, group.id),
+      });
+    },
+    onError: (error: Error) => setSaveError(error),
+  });
+
+  const activeLeaseToken = lease?.token;
+  useEffect(() => {
+    if (!activeLeaseToken) return undefined;
+    const timer = window.setInterval(() => {
+      void heartbeatConsoleGroupLease(consoleId, group.id, activeLeaseToken)
+        .then((renewed) =>
+          setLease((current) =>
+            current?.token === activeLeaseToken ? renewed : current,
+          ),
+        )
+        .catch((error: Error) => {
+          setLease((current) =>
+            current?.token === activeLeaseToken ? null : current,
+          );
+          setSaveError(error);
+        });
+    }, 120_000);
+    return () => window.clearInterval(timer);
+  }, [activeLeaseToken, consoleId, group.id]);
 
   useEffect(() => {
     onDirtyChange(dirty || save.isPending);
@@ -1270,6 +1448,75 @@ export function ConsoleGroupEditor({
           <ConsoleGroupChart group={group} snapshot={values.data} />
         </>
       ) : null}
+      <section
+        className="console-change-history"
+        aria-labelledby={`console-change-history-${group.id}`}
+      >
+        <h3 id={`console-change-history-${group.id}`}>
+          Historial de cambios de {group.label}
+        </h3>
+        {history.isPending ? <p role="status">Cargando historial</p> : null}
+        {history.isError ? (
+          <p role="alert">{errorMessage(history.error)}</p>
+        ) : null}
+        {history.data?.length === 0 ? (
+          <p className="empty-state">Todavia no hay cambios guardados.</p>
+        ) : null}
+        {history.data?.length ? (
+          <ol className="resource-list">
+            {history.data.map((entry: ConsoleGroupHistoryEntry) => (
+              <li key={entry.id}>
+                <p>
+                  <strong>{entry.actor || "Usuario interno"}</strong> ·{" "}
+                  {entry.date}
+                </p>
+                <p className="source-note">
+                  {entry.range.start} a {entry.range.end} · {entry.cell_count}{" "}
+                  {entry.cell_count === 1 ? "celda" : "celdas"}
+                </p>
+                {entry.note ? <p>{entry.note}</p> : null}
+                <details>
+                  <summary>Ver comparacion</summary>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th scope="col">Columna</th>
+                        <th scope="col">Fila</th>
+                        <th scope="col">Anterior</th>
+                        <th scope="col">Nuevo</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {entry.comparison.map((change) => (
+                        <tr key={`${change.column_id}-${change.row_index}`}>
+                          <th scope="row">
+                            {columns.find(
+                              (column) => column.id === change.column_id,
+                            )?.label || change.column_id}
+                          </th>
+                          <td>{change.row_index + 1}</td>
+                          <td>{change.before ?? ""}</td>
+                          <td>{change.after ?? ""}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </details>
+                {entry.can_undo && editing ? (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={dirty || save.isPending || undo.isPending}
+                    onClick={() => undo.mutate()}
+                  >
+                    Deshacer
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        ) : null}
+      </section>
     </section>
   );
 }

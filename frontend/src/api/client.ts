@@ -469,6 +469,29 @@ export interface OperatorConsole {
   updated_by: string | null;
   waiting_since: string | null;
   blocking: OperatorConsoleBlocking;
+  can_force_release?: boolean;
+  group_leases?: Array<{
+    group_id: string;
+    group_label: string;
+    holder_name: string;
+    expires_at: string;
+  }>;
+  series_copies?: Array<{
+    id: number;
+    archived: boolean;
+    current_revision: number;
+    revisions: Array<{
+      revision_number: number;
+      date: string;
+      actor: string;
+      group_id: string | null;
+      range: { start: string; end: string } | null;
+      cell_count: number;
+      note: string;
+      action: string;
+      can_restore: boolean;
+    }>;
+  }>;
 }
 
 export interface OperatorConsoleCreatePayload {
@@ -582,6 +605,22 @@ export interface ConsoleLease {
   token: string;
   expires_at: string;
   holder_name: string;
+}
+
+export interface ConsoleGroupHistoryEntry {
+  id: string;
+  actor: string;
+  date: string;
+  range: { start: string; end: string };
+  cell_count: number;
+  note: string;
+  comparison: Array<{
+    column_id: string;
+    row_index: number;
+    before: number | null;
+    after: number | null;
+  }>;
+  can_undo: boolean;
 }
 
 export interface ConsoleSaveErrorCell {
@@ -2258,6 +2297,50 @@ export async function saveOperatorConsole(
   return response.operator_console;
 }
 
+export async function forceReleaseOperatorConsoleGroupLease(
+  scenarioId: number,
+  consoleId: number,
+  groupId: string,
+): Promise<void> {
+  const csrfToken = await getCsrfToken();
+  const response = await fetch(
+    `/api/scenarios/${scenarioId}/consoles/${consoleId}/groups/${encodeURIComponent(groupId)}/lease`,
+    {
+      method: "DELETE",
+      credentials: "same-origin",
+      headers: { Accept: "application/json", "X-CSRF-Token": csrfToken },
+    },
+  );
+  if (!response.ok) throw await errorFromResponse(response);
+}
+
+export async function restoreOperatorConsoleSeriesRevision(
+  scenarioId: number,
+  consoleId: number,
+  copyId: number,
+  payload: {
+    revision_number: number;
+    expected_current_revision: number;
+    note: string;
+  },
+): Promise<{
+  copy_id: number;
+  revision_number: number;
+  restored_from_revision: number;
+}> {
+  const response = await postJsonWithCsrf<{
+    restored: {
+      copy_id: number;
+      revision_number: number;
+      restored_from_revision: number;
+    };
+  }>(
+    `/api/scenarios/${scenarioId}/consoles/${consoleId}/restore-series/${copyId}`,
+    payload,
+  );
+  return response.restored;
+}
+
 export async function listOperableConsoles(
   signal?: AbortSignal,
 ): Promise<ConsoleListEntry[]> {
@@ -2417,6 +2500,18 @@ export async function acquireConsoleGroupLease(
   return body.lease;
 }
 
+export async function heartbeatConsoleGroupLease(
+  consoleId: number,
+  groupId: string,
+  leaseToken: string,
+): Promise<ConsoleLease> {
+  const response = await putJsonWithCsrf<{ lease: ConsoleLease }>(
+    consoleGroupLeasePath(consoleId, groupId),
+    { lease_token: leaseToken },
+  );
+  return response.lease;
+}
+
 export async function releaseConsoleGroupLease(
   consoleId: number,
   groupId: string,
@@ -2456,6 +2551,43 @@ export async function saveConsoleGroupValues(
     },
     body: JSON.stringify(payload),
   });
+  if (!response.ok) throw await consoleErrorFromResponse(response);
+  return consoleGroupValuesSnapshot(response);
+}
+
+export async function getConsoleGroupHistory(
+  consoleId: number,
+  groupId: string,
+  signal?: AbortSignal,
+): Promise<ConsoleGroupHistoryEntry[]> {
+  const response = await requestJson<{ history: ConsoleGroupHistoryEntry[] }>(
+    `/api/console/${consoleId}/groups/${encodeURIComponent(groupId)}/history`,
+    { signal },
+  );
+  return response.history;
+}
+
+export async function undoConsoleGroupSave(
+  consoleId: number,
+  groupId: string,
+  leaseToken: string,
+  etag: string,
+): Promise<ConsoleGroupValuesSnapshot> {
+  const csrfToken = await getCsrfToken();
+  const response = await fetch(
+    `/api/console/${consoleId}/groups/${encodeURIComponent(groupId)}/undo`,
+    {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrfToken,
+        "If-Match": etag,
+      },
+      body: JSON.stringify({ lease_token: leaseToken }),
+    },
+  );
   if (!response.ok) throw await consoleErrorFromResponse(response);
   return consoleGroupValuesSnapshot(response);
 }
