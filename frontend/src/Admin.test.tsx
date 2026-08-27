@@ -114,7 +114,7 @@ describe("external project capabilities", () => {
             ...body,
             assigned_at: "2026-08-23T12:01:00Z",
             assigned_by: "admin@example.local",
-            updated_at: "2026-08-23T12:05:00Z",
+            updated_at: "2026-08-23T12:01:00Z",
             updated_by: "admin@example.local",
           };
           assignments = [
@@ -129,7 +129,7 @@ describe("external project capabilities", () => {
             ...assignments.find((candidate) => candidate.user_id === userId)!,
             portal_view: false,
             operate: false,
-            updated_at: "2026-08-23T12:06:00Z",
+            updated_at: "2026-08-23T12:01:00Z",
             updated_by: "admin@example.local",
           };
           assignments = [

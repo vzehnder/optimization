@@ -36,6 +36,17 @@ async function postWithCsrf(
   });
 }
 
+async function putWithCsrf(
+  api: APIRequestContext,
+  path: string,
+  data?: unknown,
+) {
+  return api.put(path, {
+    data,
+    headers: { "X-CSRF-Token": await csrfToken(api) },
+  });
+}
+
 /**
  * Runs an automated WCAG 2.0/2.1 A and AA accessibility audit and fails on any
  * violation of serious or critical impact. The descriptive label and rendered
@@ -131,7 +142,7 @@ test("representative React pages pass automated accessibility and keyboard smoke
   const clientResponse = await postWithCsrf(api, "/api/admin/users", {
     email: clientEmail,
     display_name: "A11y Client",
-    role: "client",
+    role: "external",
     password: "client-pass",
   });
   expect(clientResponse.status()).toBe(201);
@@ -198,16 +209,18 @@ test("representative React pages pass automated accessibility and keyboard smoke
   );
   expect(publishResponse.ok()).toBeTruthy();
 
-  const assignResponse = await postWithCsrf(
+  const assignResponse = await putWithCsrf(
     api,
-    `/api/admin/projects/${project.id}/client-access`,
-    { user_id: clientUser.id },
+    `/api/admin/projects/${project.id}/external-access/${clientUser.id}`,
+    { portal_view: true, operate: false },
   );
-  expect(assignResponse.status()).toBe(201);
+  expect(assignResponse.status()).toBe(200);
 
   // Admin page.
   await page.goto("/react/admin/users");
-  await expect(page.getByRole("heading", { name: "Usuarios" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Administracion" }),
+  ).toBeVisible();
   await expectNoSeriousAccessibilityViolations(page, "admin");
   await expectKeyboardReachesInteractiveControls(page, "admin");
 
@@ -227,7 +240,7 @@ test("representative React pages pass automated accessibility and keyboard smoke
   await expectNoSeriousAccessibilityViolations(page, "results");
   await expectKeyboardReachesInteractiveControls(page, "results");
 
-  // Client page: switch to the read-only client role.
+  // Client page: switch to the external identity with portal_view.
   await page.getByRole("button", { name: "Salir" }).click();
   await expect(
     page.getByRole("heading", { name: "Iniciar sesion" }),

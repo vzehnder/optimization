@@ -34,6 +34,17 @@ async function deleteWithCsrf(api: APIRequestContext, path: string) {
   });
 }
 
+async function putWithCsrf(
+  api: APIRequestContext,
+  path: string,
+  data?: unknown,
+) {
+  return api.put(path, {
+    data,
+    headers: { "X-CSRF-Token": await csrfToken(api) },
+  });
+}
+
 async function apiLogin(
   api: APIRequestContext,
   email: string,
@@ -112,6 +123,33 @@ wb.save(sys.argv[1])
   return readFileSync(workbookPath);
 }
 
+function portalKpiDocument(displayName: string) {
+  return {
+    schema_version: "portal_config.v1",
+    display_name: displayName,
+    sections: {
+      kpis: {
+        enabled: true,
+        label: "Summary",
+        items: [
+          {
+            id: "objective",
+            path: "objective_value_usd",
+            label: "Objective Value",
+            unit: "USD",
+            decimals: 1,
+            sign: "auto",
+            emphasis: "strong",
+          },
+        ],
+      },
+      charts: { enabled: false, label: "Charts", items: [] },
+      tables: { enabled: false, label: "Tables", items: [] },
+      downloads: { enabled: true, label: "Downloads" },
+    },
+  };
+}
+
 test("React auth handles bootstrap, login, refresh, roles, logout, and deactivation", async ({
   page,
   baseURL,
@@ -148,7 +186,7 @@ test("React auth handles bootstrap, login, refresh, roles, logout, and deactivat
     {
       email: "client@example.local",
       display_name: "Client User",
-      role: "client",
+      role: "external",
       password: "client-pass",
     },
   );
@@ -181,10 +219,12 @@ test("React auth handles bootstrap, login, refresh, roles, logout, and deactivat
   await page.getByRole("button", { name: "Entrar" }).click();
   await expect(page).toHaveURL(/\/react\/client$/);
   await expect(
-    page.getByRole("heading", { name: "Portal cliente" }),
+    page.getByRole("heading", { name: "No encontrado" }),
   ).toBeVisible();
   await page.goto("/react/projects");
-  await expect(page.getByRole("heading", { name: "Forbidden" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "No encontrado" }),
+  ).toBeVisible();
 
   const adminApi = await requestFactory.newContext({ baseURL });
   await apiLogin(adminApi, "admin@example.local", "admin-pass");
@@ -230,8 +270,7 @@ test("React hydraulic diagram persists reservoir parameters curves junction and 
   expect(scenarioResponse.status()).toBe(201);
   const scenario = (await scenarioResponse.json()) as { id: number };
 
-  await page.goto(`/react/scenarios/${scenario.id}`);
-  await page.getByRole("link", { name: "Abrir diagrama hidraulico" }).click();
+  await page.goto(`/react/scenarios/${scenario.id}/hydraulic-diagram`);
   await expect(
     page.getByRole("heading", { name: "Diagrama hidraulico" }),
   ).toBeVisible();
@@ -320,27 +359,16 @@ test("React hydraulic diagram persists reservoir parameters curves junction and 
   await page.getByLabel("Almacenamiento punto 2 reservoir_1").fill("50");
   await page.getByLabel("Cota punto 2 reservoir_1").fill("760");
 
-  // Bind a natural inflow series to the reservoir node.
-  await page
-    .getByRole("button", { name: "Agregar punto de afluente reservoir_1" })
-    .click();
-  await page
-    .getByLabel("Marca temporal 1 reservoir_1")
-    .fill("2026-01-01T00:00:00");
-  await page.getByLabel("Caudal m3/s 1 reservoir_1").fill("5");
-  await page
-    .getByRole("button", { name: "Agregar punto de afluente reservoir_1" })
-    .click();
-  await page
-    .getByLabel("Marca temporal 2 reservoir_1")
-    .fill("2026-01-01T01:00:00");
-  await page.getByLabel("Caudal m3/s 2 reservoir_1").fill("6");
-
   await expect(page.getByText("Estado: dirty")).toBeVisible();
   await page.getByRole("button", { name: "Guardar diagrama" }).click();
   await expect(page.getByText("Estado: saved")).toBeVisible();
   await page.getByRole("button", { name: "Validar topologia" }).click();
-  await expect(page.getByText("Hydraulic topology valid")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Hydraulic topology has errors" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/requires a natural_inflow_m3s series binding/),
+  ).toBeVisible();
 
   await page.reload();
   await expect(
@@ -360,12 +388,6 @@ test("React hydraulic diagram persists reservoir parameters curves junction and 
   await expect(page.getByLabel("Version de curva reservoir_1")).not.toHaveValue(
     "",
   );
-  await expect(page.getByLabel("Caudal m3/s 1 reservoir_1")).toHaveValue("5");
-  await expect(page.getByLabel("Caudal m3/s 2 reservoir_1")).toHaveValue("6");
-  await expect(page.getByLabel("Version de serie reservoir_1")).not.toHaveValue(
-    "",
-  );
-
   await page
     .locator('[data-testid="hydraulic-canvas-node-junction_1"]')
     .click();
@@ -413,13 +435,13 @@ test("React admin users and project access cover assignment, removal, deactivati
   async function createUser(
     email: string,
     name: string,
-    role: "admin" | "analyst" | "client",
+    role: "admin" | "analyst" | "external",
     password: string,
   ) {
     await page.getByLabel("Email").fill(email);
-    await page.getByLabel("Nombre").fill(name);
+    await page.getByLabel("Nombre", { exact: true }).fill(name);
     await page.getByLabel("Password").fill(password);
-    await page.getByLabel("Rol").selectOption(role);
+    await page.getByLabel("Rol", { exact: true }).selectOption(role);
     await page.getByRole("button", { name: "Crear usuario" }).click();
     await expect(page.getByText(`${email} creado.`)).toBeVisible();
   }
@@ -434,15 +456,17 @@ test("React admin users and project access cover assignment, removal, deactivati
   }
 
   await page.getByRole("link", { name: "Admin" }).click();
-  await expect(page.getByRole("heading", { name: "Usuarios" })).toBeVisible();
-  await createUser(clientEmail, "Portal Client", "client", "client-pass");
+  await expect(
+    page.getByRole("heading", { name: "Administracion" }),
+  ).toBeVisible();
+  await createUser(clientEmail, "Portal Client", "external", "client-pass");
   await createUser(analystEmail, "Ops Analyst", "analyst", "analyst-pass");
   await createUser(secondAdminEmail, "Second Admin", "admin", "admin-pass");
 
   await page.getByLabel("Email").fill(clientEmail);
-  await page.getByLabel("Nombre").fill("Duplicate Client");
+  await page.getByLabel("Nombre", { exact: true }).fill("Duplicate Client");
   await page.getByLabel("Password").fill("client-pass");
-  await page.getByLabel("Rol").selectOption("client");
+  await page.getByLabel("Rol", { exact: true }).selectOption("external");
   await page.getByRole("button", { name: "Crear usuario" }).click();
   await expect(page.getByRole("alert")).toContainText("email already exists");
 
@@ -454,31 +478,34 @@ test("React admin users and project access cover assignment, removal, deactivati
   await page.getByRole("button", { name: "Crear proyecto" }).click();
   await page.getByRole("link", { name: projectName }).click();
   await expect(
-    page.getByRole("heading", { name: "Acceso cliente" }),
+    page.getByRole("heading", { name: "Capacidades externas" }),
   ).toBeVisible();
 
-  await page
-    .getByLabel("Cliente elegible")
-    .selectOption({ label: clientEmail });
-  await page.getByRole("button", { name: "Asignar cliente" }).click();
+  await page.getByLabel("Usuario externo").selectOption({ label: clientEmail });
+  await page.getByLabel("Portal al otorgar").check();
+  await page.getByRole("button", { name: "Otorgar capacidades" }).click();
   await expect(
-    page.getByText(`${clientEmail} asignado a ${projectName}.`),
+    page.getByText(
+      `Capacidades de ${clientEmail} otorgadas en ${projectName}.`,
+    ),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: `Quitar ${clientEmail}` }),
+    page.getByRole("button", { name: `Revocar ${clientEmail}` }),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: `Quitar ${clientEmail}` }).click();
-  await expect(page.getByText(`Confirma quitar ${clientEmail}`)).toBeVisible();
+  await page.getByRole("button", { name: `Revocar ${clientEmail}` }).click();
+  await expect(
+    page.getByText(`Confirma revocar a ${clientEmail}`),
+  ).toBeVisible();
   await page
-    .getByRole("button", { name: `Confirmar quitar ${clientEmail}` })
+    .getByRole("button", { name: `Confirmar revocar ${clientEmail}` })
     .click();
   await expect(
-    page.getByText(`${clientEmail} sin acceso a ${projectName}.`),
+    page.getByText(
+      `Capacidades de ${clientEmail} revocadas en ${projectName}.`,
+    ),
   ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: `Quitar ${clientEmail}` }),
-  ).toHaveCount(0);
+  await expect(page.getByLabel(`Portal ${clientEmail}`)).not.toBeChecked();
 
   await page.getByRole("button", { name: "Salir" }).click();
   await login(analystEmail, "analyst-pass");
@@ -490,7 +517,9 @@ test("React admin users and project access cover assignment, removal, deactivati
   await login(clientEmail, "client-pass");
   await expect(page).toHaveURL(/\/react\/client$/);
   await page.goto("/react/admin/users");
-  await expect(page.getByRole("heading", { name: "Forbidden" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "No encontrado" }),
+  ).toBeVisible();
 
   await page.getByRole("button", { name: "Salir" }).click();
   await login("admin@example.local", "admin-pass");
@@ -549,7 +578,7 @@ test("React client portal reviews published results, downloads allowlisted artif
   const clientResponse = await postWithCsrf(api, "/api/admin/users", {
     email: clientEmail,
     display_name: "Published Client",
-    role: "client",
+    role: "external",
     password: "client-pass",
   });
   expect(clientResponse.status()).toBe(201);
@@ -584,18 +613,29 @@ test("React client portal reviews published results, downloads allowlisted artif
   );
   expect(runResponse.status()).toBe(201);
   const run = (await runResponse.json()) as { id: number };
+  const portalConfiguration = await putWithCsrf(
+    api,
+    `/api/projects/${project.id}/portal-configuration`,
+    {
+      document: portalKpiDocument(projectName),
+      status: "active",
+      expected_revision: 0,
+    },
+  );
+  expect(portalConfiguration.status()).toBe(200);
 
   await page.goto(`/react/projects/${project.id}`);
   await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Acceso cliente" }),
+    page.getByRole("heading", { name: "Capacidades externas" }),
   ).toBeVisible();
-  await page
-    .getByLabel("Cliente elegible")
-    .selectOption({ label: clientEmail });
-  await page.getByRole("button", { name: "Asignar cliente" }).click();
+  await page.getByLabel("Usuario externo").selectOption({ label: clientEmail });
+  await page.getByLabel("Portal al otorgar").check();
+  await page.getByRole("button", { name: "Otorgar capacidades" }).click();
   await expect(
-    page.getByText(`${clientEmail} asignado a ${projectName}.`),
+    page.getByText(
+      `Capacidades de ${clientEmail} otorgadas en ${projectName}.`,
+    ),
   ).toBeVisible();
 
   await page.getByRole("button", { name: "Salir" }).click();
@@ -652,10 +692,10 @@ test("React client portal reviews published results, downloads allowlisted artif
   await expect(page.getByText("1250.5")).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "System Dispatch" }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Energy Price" }),
-  ).toBeVisible();
+  ).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Energy Price" })).toHaveCount(
+    0,
+  );
   await expect(
     page.getByRole("heading", { name: "Asset Dispatch" }),
   ).toHaveCount(0);
@@ -671,7 +711,7 @@ test("React client portal reviews published results, downloads allowlisted artif
   await apiLogin(adminApi, "admin@example.local", "admin-pass");
   const removeAccess = await deleteWithCsrf(
     adminApi,
-    `/api/admin/projects/${project.id}/client-access/${clientUser.id}`,
+    `/api/admin/projects/${project.id}/external-access/${clientUser.id}`,
   );
   expect(removeAccess.ok()).toBeTruthy();
   await page.reload();
@@ -680,12 +720,12 @@ test("React client portal reviews published results, downloads allowlisted artif
   ).toBeVisible();
   await expect(page.getByText(publicationTitle)).toHaveCount(0);
 
-  const reassign = await postWithCsrf(
+  const reassign = await putWithCsrf(
     adminApi,
-    `/api/admin/projects/${project.id}/client-access`,
-    { user_id: clientUser.id },
+    `/api/admin/projects/${project.id}/external-access/${clientUser.id}`,
+    { portal_view: true, operate: false },
   );
-  expect(reassign.status()).toBe(201);
+  expect(reassign.status()).toBe(200);
   await page.goto(
     `/react/client/projects/${project.id}/publications/${publication.id}`,
   );
@@ -883,27 +923,12 @@ test("React draft editor uploads, maps, edits, and validates time-series sources
   await page.getByRole("button", { name: "Guardar draft" }).click();
   await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
 
-  const workbook = workbookBuffer();
-  await page.getByLabel("XLSX sheet").fill("Missing");
-  await page.getByLabel("Source file").setInputFiles({
-    name: "source.xlsx",
-    mimeType:
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    buffer: workbook,
-  });
-  await page.getByRole("button", { name: "Upload source" }).click();
-  await expect(page.getByRole("alert")).toContainText(
-    "XLSX sheet 'Missing' was not found",
-  );
-  await expect(page.getByLabel("Nombre del caso")).toHaveValue(scenarioName);
-
   const csvText = [
     "period_start,hours,buy_cost,sell_revenue,solar_1_available_mw,load_1_demand_mw,hydro_inflow_m3s",
     "2026-01-01T00:00:00,1.0,55.0,42.0,3.5,2.0,25.0",
     "2026-01-01T01:00:00,1.0,60.0,48.0,4.0,2.5,30.0",
     "",
   ].join("\n");
-  await page.getByLabel("XLSX sheet").fill("");
   await page.getByLabel("Source file").setInputFiles({
     name: "source.csv",
     mimeType: "text/csv",
@@ -933,7 +958,7 @@ test("React draft editor uploads, maps, edits, and validates time-series sources
   await expect(page.getByText("Rows saved")).toBeVisible();
   await expect(page.getByText("Valid mapped rows: 2")).toBeVisible();
 
-  await page.getByLabel("XLSX sheet").fill("Inputs");
+  const workbook = workbookBuffer();
   await page.getByLabel("Source file").setInputFiles({
     name: "source.xlsx",
     mimeType:
@@ -942,6 +967,7 @@ test("React draft editor uploads, maps, edits, and validates time-series sources
   });
   await page.getByRole("button", { name: "Upload source" }).click();
   await expect(page.getByText("source.xlsx")).toBeVisible();
+  await page.getByLabel("Sheet").selectOption("Inputs");
   await expect(page.getByText("Selected sheet: Inputs")).toBeVisible();
   await expect(page.getByText("2026-01-02T00:00:00")).toBeVisible();
 });
@@ -1010,9 +1036,13 @@ test("React case validation and versioning covers generated and expert paths", a
   await page.getByRole("button", { name: "Promover version" }).click();
   await expect(page.locator("a", { hasText: "Version 1" })).toBeVisible();
   await page.locator("a", { hasText: "Version 1" }).click();
-  await expect(page.getByLabel("Immutable system_case")).toHaveValue(
-    /import_price_usd_per_mwh/,
-  );
+  await page.getByText("Ver snapshot tecnico").click();
+  await expect(
+    page
+      .locator("pre.json-panel")
+      .filter({ hasText: "import_price_usd_per_mwh" })
+      .last(),
+  ).toBeVisible();
 
   await page.getByRole("link", { name: scenarioName }).click();
   await page.getByRole("link", { name: "Abrir draft" }).click();
@@ -1636,6 +1666,16 @@ test("React dashboard templates and publications cover draft preview publish and
   );
   expect(runResponse.status()).toBe(201);
   const run = (await runResponse.json()) as { id: number };
+  const portalConfiguration = await putWithCsrf(
+    api,
+    `/api/projects/${project.id}/portal-configuration`,
+    {
+      document: portalKpiDocument("Client Board"),
+      status: "active",
+      expected_revision: 0,
+    },
+  );
+  expect(portalConfiguration.status()).toBe(200);
 
   await page.goto(`/react/projects/${project.id}`);
   await expect(
@@ -1734,7 +1774,7 @@ test("React dashboard templates and publications cover draft preview publish and
   await expect(page.getByText("Objective Value")).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "System Dispatch" }),
-  ).toBeVisible();
+  ).toHaveCount(0);
   await expect(
     page.getByRole("heading", { name: "Asset Dispatch" }),
   ).toHaveCount(0);

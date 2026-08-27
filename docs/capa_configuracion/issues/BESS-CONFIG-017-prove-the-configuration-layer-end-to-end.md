@@ -1,6 +1,6 @@
 # BESS-CONFIG-017: Prove The Configuration Layer End To End
 
-Status: Todo
+Status: In Review
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/capa_configuracion/architecture_configuration_layer_final.md`
@@ -20,21 +20,46 @@ specification.
 
 ## Acceptance criteria
 
-- [ ] Migration proof shows a legacy client becomes `external` plus `portal_view`, sees the same publications and gains no console access.
-- [ ] Capability proof covers `portal_view`, `operate`, both, neither, revocation on the next request, landing precedence and external 404 behavior.
-- [ ] Configuration proof covers structural rejection without writes, active revision increments, semantic fail-closed loading and faithful preview.
-- [ ] Portal proof covers configured results, allowlisted downloads, current branding, conscious removal of project description and product marks, and inaccessible foreign content.
-- [ ] Parameter proof shows isolation from the analyst draft and base hash while the immutable run contains effective values and real actor lineage.
-- [ ] Series proof covers first operational copy, canonical isolation, source switching, atomic multi-set save, parser ambiguity, truncation, cell errors and unchanged state after failure.
-- [ ] Concurrency proof covers atomic group leases, heartbeat, expiry, stale ETag, read-only contention, undo, internal restore and complete audit attribution.
-- [ ] Staleness proof distinguishes own and external changes, proves both recovery gestures, records review requests and keeps old-origin copies non-blocking.
-- [ ] Execution proof covers common Julia/indexing reuse, safe pre-engine and Julia failures, configured run detail and two-run comparison.
-- [ ] Payload-boundary proof injects sensitive database columns, unknown result keys and server paths into both surfaces and proves none escape.
-- [ ] Signal-catalog proof shows a declarative new entry reaches the internal console editor without changing table, parser, external payload or frontend unit mapping.
-- [ ] React tests cover all three roots, fixed-shell states, editing gestures, branding, results, recovery and authorization guards.
-- [ ] Browser verification completes operator login, landing, lease, paste, save, run, result, comparison and engineer recovery; it also completes client login, publication, branding, results and authorized download.
-- [ ] Full backend, frontend, schema-drift, production-build and relevant engine regression suites pass.
-- [ ] Final documentation records verification commands and results and confirms that every explicitly out-of-scope item remains out of the implementation.
+- [x] Migration proof shows a legacy client becomes `external` plus `portal_view`, sees the same publications and gains no console access.
+- [x] Capability proof covers `portal_view`, `operate`, both, neither, revocation on the next request, landing precedence and external 404 behavior.
+- [x] Configuration proof covers structural rejection without writes, active revision increments, semantic fail-closed loading and faithful preview.
+- [x] Portal proof covers configured results, allowlisted downloads, current branding, conscious removal of project description and product marks, and inaccessible foreign content.
+- [x] Parameter proof shows isolation from the analyst draft and base hash while the immutable run contains effective values and real actor lineage.
+- [x] Series proof covers first operational copy, canonical isolation, source switching, atomic multi-set save, parser ambiguity, truncation, cell errors and unchanged state after failure.
+- [x] Concurrency proof covers atomic group leases, heartbeat, expiry, stale ETag, read-only contention, undo, internal restore and complete audit attribution.
+- [x] Staleness proof distinguishes own and external changes, proves both recovery gestures, records review requests and keeps old-origin copies non-blocking.
+- [x] Execution proof covers common Julia/indexing reuse, safe pre-engine and Julia failures, configured run detail and two-run comparison.
+- [x] Payload-boundary proof injects sensitive database columns, unknown result keys and server paths into both surfaces and proves none escape.
+- [x] Signal-catalog proof shows a declarative new entry reaches the internal console editor without changing table, parser, external payload or frontend unit mapping.
+- [x] React tests cover all three roots, fixed-shell states, editing gestures, branding, results, recovery and authorization guards.
+- [x] Browser verification completes operator login, landing, lease, paste, save, run, result, comparison and engineer recovery; it also completes client login, publication, branding, results and authorized download.
+- [x] Full backend, frontend, schema-drift, production-build and relevant engine regression suites pass.
+- [x] Final documentation records verification commands and results and confirms that every explicitly out-of-scope item remains out of the implementation.
+
+## Implementation
+
+- Added `tests/test_configuration_layer_acceptance.py` as the closing backend
+  narrative across migration, authorization, operator editing, immutable runs,
+  recovery, safe results, comparison, portal configuration and payload bounds.
+- Added `scripts/run_configuration_acceptance_app.py` as a repeatable local
+  fixture for the visible Chrome narrative, using the real FastAPI/React
+  boundaries, SQLite in memory and the existing synchronous smoke run queue.
+- Migrated the historical Playwright scenarios from the retired `client` and
+  `client-access` contracts to `external` capabilities, active portal
+  configuration and current visible UI controls.
+- Fixed same-timestamp capability revocation in React so a returned capability
+  change resets the editor even when `updated_at` has not advanced.
+
+## Verification
+
+Commands, results, coverage mapping and the browser narrative are recorded in
+[the final configuration-layer verification](../verification_configuration_layer_final.md).
+
+## Scope closure
+
+No accepted contract was weakened to make the proof pass. The complete
+architecture `Fuera de alcance` list is repeated and confirmed unchanged in
+the verification report.
 
 ## Blocked by
 

@@ -673,7 +673,9 @@ function AssignmentList({
   return (
     <ul className="resource-list">
       {assignments.map((assignment) => (
-        <li key={`${assignment.user_id}:${assignment.updated_at}`}>
+        <li
+          key={`${assignment.user_id}:${assignment.updated_at}:${assignment.portal_view}:${assignment.operate}`}
+        >
           <ExternalCapabilityEditor
             assignment={assignment}
             projectId={projectId}
