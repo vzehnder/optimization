@@ -60,8 +60,8 @@ matrix names the levels that prove it.
 | ID | Title | Type | Triage | Status | Blocked by | Issue file |
 | --- | --- | --- | --- | --- | --- | --- |
 | TS7-001 | Seed The Persistent Classification Catalogs And Compatibility Matrix | AFK | ready-for-agent | In Review | None | [TS7-001-seed-the-persistent-classification-catalogs-and-compatibility-matrix.md](TS7-001-seed-the-persistent-classification-catalogs-and-compatibility-matrix.md) |
-| TS7-002 | Land The Canonical Content Model With Sealed Revisions | AFK | ready-for-agent | Todo | TS7-001 | [TS7-002-land-the-canonical-content-model-with-sealed-revisions.md](TS7-002-land-the-canonical-content-model-with-sealed-revisions.md) |
-| TS7-003 | Register Every Linkable Object And Materialize Components | AFK | ready-for-agent | Todo | TS7-002 | [TS7-003-register-every-linkable-object-and-materialize-components.md](TS7-003-register-every-linkable-object-and-materialize-components.md) |
+| TS7-002 | Land The Canonical Content Model With Sealed Revisions | AFK | ready-for-agent | In Review | TS7-001 | [TS7-002-land-the-canonical-content-model-with-sealed-revisions.md](TS7-002-land-the-canonical-content-model-with-sealed-revisions.md) |
+| TS7-003 | Register Every Linkable Object And Materialize Components | AFK | ready-for-agent | In Review | TS7-002 | [TS7-003-register-every-linkable-object-and-materialize-components.md](TS7-003-register-every-linkable-object-and-materialize-components.md) |
 | TS7-004 | Land The Link Layer Tables And Immutable Ledgers | AFK | ready-for-agent | Todo | TS7-003 | [TS7-004-land-the-link-layer-tables-and-immutable-ledgers.md](TS7-004-land-the-link-layer-tables-and-immutable-ledgers.md) |
 | TS7-005 | Project The Catalog Transactionally With Its Performance Fixture | AFK | ready-for-agent | Todo | TS7-004 | [TS7-005-project-the-catalog-transactionally-with-its-performance-fixture.md](TS7-005-project-the-catalog-transactionally-with-its-performance-fixture.md) |
 | TS7-006 | Read The Global Catalog Signal First | AFK | ready-for-agent | Todo | TS7-005 | [TS7-006-read-the-global-catalog-signal-first.md](TS7-006-read-the-global-catalog-signal-first.md) |
@@ -150,5 +150,7 @@ only after the full acceptance, performance and browser narratives pass.
 
 | Date | Issue | Status change | Notes |
 | --- | --- | --- | --- |
+| 2026-08-31 | TS7-003 | Todo -> In Review | Closed register of linkable objects landed in `ts_next` / `_next`: one typed foreign key per row with the object type derived from the real object and verified by a portable guard, deterministic component materialization out of cases and drafts with no fuzzy matching, case-scoped references resolved through their own foreign key to the base entity, cascade-closed orphans and the composite owner reference TS7-002 carried forward. |
+| 2026-08-31 | TS7-002 | Todo -> In Review | Canonical content model landed in `ts_next` / `_next` beside the intact legacy tables, with the atomic revision protocol as the only writer, portable sealed/pointer/identity/ledger guards, and a streaming canonical hash proven equal on SQLite and PostgreSQL. |
 | 2026-08-31 | TS7-001 | Todo -> In Review | Persistent classification catalogs, versioned convergent seed, immutable contracts, fail-closed compatibility evaluator, database-backed legacy adapter and protected custom semantic-type creation implemented and verified on SQLite and PostgreSQL. |
 | 2026-08-30 | All | Created | Twenty-three AFK issues published from the accepted TS-7 specification after the Wayfinder map closed. Sequenced as expand/backfill/verify/cutover because chapter 11.1 forbids exposing a new surface before the canonical writer exists. TS7-001 and TS7-015 are the initial frontier. |

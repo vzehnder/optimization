@@ -51,6 +51,36 @@ from app.time_series_catalog import (
     validate_catalog_value_edits,
     validate_program_metadata,
 )
+from app.linkable_objects import (
+    BASE_HYDRAULIC_REFERENCES,
+    CASE_SCOPED_HYDRAULIC_REFERENCES,
+    LINKABLE_COMPONENT_TYPES,
+    LINKABLE_OBJECT_BRANCHES,
+    NON_LINKABLE_FAMILIES,
+    SYSTEM_SLOT_KEY,
+    LinkableObjectError,
+    canonical_owner_object_reference_script,
+    case_component_appearances,
+    draft_component_appearances,
+    group_component_appearances,
+    linkable_object_projection_sql,
+    linkable_object_guard_script,
+    linkable_object_schema_statements,
+    linkable_object_table_name,
+    linkable_object_table_names,
+    subtype_lookup_sql,
+)
+from app.time_series_canonical import (
+    CanonicalContentHash,
+    CanonicalRevisionError,
+    canonical_guard_script,
+    canonical_schema_statements,
+    canonical_table_name,
+    canonical_table_names,
+    canonical_value_records,
+    normalize_canonical_periods,
+    normalize_canonical_signals,
+)
 from app.time_series_classification import (
     CLASSIFICATION_CONTRACT_VERSION,
     CLASSIFICATION_SEED_TABLES,
@@ -178,6 +208,16 @@ HYDRAULIC_GENERIC_SERIES_DATA_KIND = "real"
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+# Values are streamed into the snapshot in chunks, so a source that dies
+# halfway leaves the transaction to roll back rather than a half revision.
+CANONICAL_VALUE_CHUNK_SIZE = 500
+
+
+def _is_canonical_duplicate_value(error: Exception) -> bool:
+    text = str(error).lower()
+    return "unique" in text or "duplicate key" in text
 
 
 CONSOLE_LEASE_SECONDS = 300
@@ -1254,6 +1294,9 @@ class AnalystStore:
         self._ensure_time_series_classification_immutability_guards()
         with self._database_transaction():
             self._seed_time_series_classification_catalog()
+        self._ensure_linkable_object_register()
+        self._ensure_canonical_content_model()
+        self._ensure_canonical_owner_object_reference()
         self._ensure_external_user_role_constraint()
         self._ensure_column(
             "project_client_access", "portal_view", "INTEGER NOT NULL DEFAULT 1"
@@ -1557,6 +1600,1648 @@ class AnalystStore:
                                 "actual": actual_value,
                             }
                         )
+
+    def _ensure_canonical_content_model(self) -> None:
+        for statement in canonical_schema_statements(self.database_backend):
+            self.connection.execute(statement)
+        self.connection.executescript(canonical_guard_script(self.database_backend))
+
+    def _ensure_linkable_object_register(self) -> None:
+        # The register lands before the content model because a canonical set
+        # owned by an object references ``linkable_objects(id, project_id)``.
+        for statement in linkable_object_schema_statements(self.database_backend):
+            self.connection.execute(statement)
+        self.connection.executescript(
+            linkable_object_guard_script(self.database_backend)
+        )
+
+    def _ensure_canonical_owner_object_reference(self) -> None:
+        script = canonical_owner_object_reference_script(self.database_backend)
+        if script is not None:
+            self.connection.executescript(script)
+
+    def canonical_table_names(self) -> dict[str, str]:
+        """Physical name of every canonical table on the configured engine."""
+
+        return canonical_table_names(self.database_backend)
+
+    def linkable_object_table_names(self) -> dict[str, str]:
+        """Physical name of every register table on the configured engine."""
+
+        return linkable_object_table_names(self.database_backend)
+
+    # -- Closed register of linkable objects (TS7-003) ----------------------
+    #
+    # Every link target - the project ``system`` slot, an electrical component,
+    # a hydraulic system, node, reach, plant or unit - is registered once, with
+    # a real typed foreign key into its subtype table. The parent and the
+    # subtype are written in the same transaction, and the object type is
+    # derived from the real object: the caller never declares it.
+
+    def _linkable(self, logical: str) -> str:
+        return linkable_object_table_name(logical, self.database_backend)
+
+    def _read_linkable_subtype(self, object_kind: str, subtype_id: int):
+        return self.connection.execute(
+            subtype_lookup_sql(object_kind, self.linkable_object_table_names()),
+            (subtype_id,),
+        ).fetchone()
+
+    def _linkable_object_type(self, object_type_key: str):
+        return self.connection.execute(
+            """
+            SELECT id, object_type_key, object_kind, status
+            FROM linkable_object_types
+            WHERE object_type_key = ? AND status = 'active'
+            """,
+            (object_type_key,),
+        ).fetchone()
+
+    def register_linkable_object(
+        self,
+        *,
+        project_id: int,
+        object_kind: str,
+        subtype_id: int,
+        actor: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        """Register one real object as a link target, or return the existing row."""
+
+        if object_kind not in LINKABLE_OBJECT_BRANCHES:
+            raise LinkableObjectError(
+                "TS_OBJECT_FAMILY_NOT_LINKABLE",
+                object_kind=object_kind,
+                reason=(
+                    "never_a_link_target"
+                    if object_kind in NON_LINKABLE_FAMILIES
+                    else "unknown_family"
+                ),
+            )
+        with self._lock:
+            with self._database_transaction():
+                return self._register_linkable_object(
+                    project_id=project_id,
+                    object_kind=object_kind,
+                    subtype_id=int(subtype_id),
+                    actor=actor,
+                )
+
+    def _register_linkable_object(
+        self, *, project_id: int, object_kind: str, subtype_id: int, actor: str
+    ) -> dict[str, Any]:
+        subtype = self._read_linkable_subtype(object_kind, subtype_id)
+        if subtype is None:
+            raise LinkableObjectError(
+                "TS_OBJECT_SUBTYPE_NOT_FOUND",
+                object_kind=object_kind,
+                subtype_id=subtype_id,
+            )
+        if int(subtype["project_id"]) != int(project_id):
+            raise LinkableObjectError(
+                "TS_OBJECT_PROJECT_MISMATCH",
+                object_kind=object_kind,
+                subtype_id=subtype_id,
+                project_id=int(project_id),
+                object_project_id=int(subtype["project_id"]),
+            )
+        object_type_key = str(subtype["object_type_key"])
+        object_type = self._linkable_object_type(object_type_key)
+        if object_type is None:
+            # ``component:bus`` and any slot that is not ``system`` land here:
+            # the closed catalog does not carry them, so they are not targets.
+            raise LinkableObjectError(
+                "TS_OBJECT_FAMILY_NOT_LINKABLE",
+                object_kind=object_kind,
+                object_type_key=object_type_key,
+                subtype_id=subtype_id,
+            )
+        branch = LINKABLE_OBJECT_BRANCHES[object_kind]
+        register = self._linkable("linkable_objects")
+        existing = self.connection.execute(
+            f"SELECT id FROM {register} WHERE {branch} = ?", (subtype_id,)
+        ).fetchone()
+        if existing is not None:
+            return self._read_linkable_object(int(existing["id"]))
+        registered_id = self._insert_canonical_row(
+            f"""
+            INSERT INTO {register} (
+                project_id, object_kind, object_type_id, {branch},
+                status, created_at, created_by
+            ) VALUES (?, ?, ?, ?, 'active', ?, ?)
+            """,
+            (
+                int(project_id),
+                object_kind,
+                int(object_type["id"]),
+                subtype_id,
+                utc_now_iso(),
+                actor,
+            ),
+        )
+        return self._read_linkable_object(registered_id)
+
+    def _read_linkable_object(self, linkable_object_id: int) -> dict[str, Any]:
+        row = self.connection.execute(
+            f"""
+            {linkable_object_projection_sql(self.linkable_object_table_names())}
+            WHERE registered.id = ?
+            """,
+            (int(linkable_object_id),),
+        ).fetchone()
+        if row is None:
+            raise LinkableObjectError(
+                "TS_OBJECT_NOT_REGISTERED", linkable_object_id=int(linkable_object_id)
+            )
+        return dict(row)
+
+    def get_linkable_object(self, linkable_object_id: int) -> dict[str, Any]:
+        return self._read_linkable_object(int(linkable_object_id))
+
+    def list_linkable_objects(
+        self, *, project_id: int, include_archived: bool = False
+    ) -> list[dict[str, Any]]:
+        status_filter = "" if include_archived else " AND registered.status = 'active'"
+        return [
+            dict(row)
+            for row in self.connection.execute(
+                f"""
+                {linkable_object_projection_sql(self.linkable_object_table_names())}
+                WHERE registered.project_id = ?{status_filter}
+                ORDER BY registered.object_kind, object_key, registered.id
+                """,
+                (int(project_id),),
+            ).fetchall()
+        ]
+
+    def ensure_global_signal_slot(
+        self,
+        *,
+        project_id: int,
+        slot_key: str = SYSTEM_SLOT_KEY,
+        display_name: str = "",
+        actor: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        """The project-wide destination for signals without a physical asset."""
+
+        with self._lock:
+            with self._database_transaction():
+                slot_id = self._ensure_global_signal_slot_row(
+                    project_id=int(project_id),
+                    slot_key=slot_key,
+                    display_name=display_name,
+                    actor=actor,
+                )
+                return self._register_linkable_object(
+                    project_id=int(project_id),
+                    object_kind="global_signal_slot",
+                    subtype_id=slot_id,
+                    actor=actor,
+                )
+
+    def ensure_project_component(
+        self,
+        *,
+        project_id: int,
+        component_key: str,
+        component_type: str,
+        display_name: str = "",
+        external_reference: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        actor: str = "internal_analyst",
+    ) -> dict[str, Any]:
+        """Materialize one component of a project and register it as a target."""
+
+        with self._lock:
+            with self._database_transaction():
+                component_id = self._materialize_component(
+                    project_id=int(project_id),
+                    component_key=component_key,
+                    component_type=component_type,
+                    display_name=display_name,
+                    external_reference=external_reference,
+                    metadata=metadata,
+                    actor=actor,
+                )
+                return self._register_linkable_object(
+                    project_id=int(project_id),
+                    object_kind="component",
+                    subtype_id=component_id,
+                    actor=actor,
+                )
+
+    def archive_linkable_object(
+        self,
+        *,
+        linkable_object_id: int,
+        actor: str = "internal_analyst",
+        reason_text: str = "",
+    ) -> dict[str, Any]:
+        """Retire an object without erasing it (chapter 2.4).
+
+        Withdrawal is expressed as ``status = 'archived'``, never as a physical
+        delete, and the real object is deactivated in the same transaction so
+        the register and the object can never disagree about being retired.
+        """
+
+        register = self._linkable("linkable_objects")
+        components = self._linkable("components")
+        with self._lock:
+            with self._database_transaction():
+                registered = self._read_linkable_object(int(linkable_object_id))
+                if registered["status"] == "archived":
+                    return registered
+                self.connection.execute(
+                    f"""
+                    UPDATE {register}
+                    SET status = 'archived', archived_at = ?, archived_by = ?
+                    WHERE id = ?
+                    """,
+                    (utc_now_iso(), actor, int(linkable_object_id)),
+                )
+                if registered["object_kind"] == "component":
+                    # The register row is already archived, so the guard that
+                    # refuses retiring a component behind the register's back
+                    # lets this one through.
+                    self.connection.execute(
+                        f"""
+                        UPDATE {components}
+                        SET is_active = 0, updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (utc_now_iso(), int(registered["subtype_id"])),
+                    )
+                archived = self._read_linkable_object(int(linkable_object_id))
+                archived["archived_reason_text"] = reason_text
+                return archived
+
+    def resolve_linkable_object_reference(
+        self, *, project_id: int, entity_type: str, entity_id: Any
+    ) -> dict[str, Any]:
+        """Turn a legacy text pair into a registered object, or refuse.
+
+        The pair is a lookup key and nothing else. The project of the route is
+        the authority (chapter 5.3): an object of another project is refused
+        before any series is resolved, and a case-scoped reference is followed
+        through its own foreign key to the base entity, never taken as the id
+        of a link target.
+        """
+
+        project_id = int(project_id)
+        object_kind, subtype_id = self._resolve_reference_subtype(
+            project_id=project_id, entity_type=entity_type, entity_id=entity_id
+        )
+        branch = LINKABLE_OBJECT_BRANCHES[object_kind]
+        register = self._linkable("linkable_objects")
+        row = self.connection.execute(
+            f"SELECT id FROM {register} WHERE {branch} = ? AND status = 'active'",
+            (subtype_id,),
+        ).fetchone()
+        if row is None:
+            raise LinkableObjectError(
+                "TS_OBJECT_NOT_REGISTERED",
+                entity_type=entity_type,
+                entity_id=entity_id,
+                object_kind=object_kind,
+                subtype_id=subtype_id,
+            )
+        registered = self._read_linkable_object(int(row["id"]))
+        return self.authorize_linkable_object_project(
+            linkable_object=registered, project_id=project_id
+        )
+
+    def authorize_linkable_object_project(
+        self, *, linkable_object: Mapping[str, Any], project_id: int
+    ) -> dict[str, Any]:
+        """Every linkable object has one owning project; the route must match."""
+
+        if int(linkable_object["project_id"]) != int(project_id):
+            raise LinkableObjectError(
+                "TS_COMPAT_PROJECT_CONTEXT_MISMATCH",
+                linkable_object_id=int(linkable_object["id"]),
+                project_id=int(project_id),
+                object_project_id=int(linkable_object["project_id"]),
+            )
+        return dict(linkable_object)
+
+    def _resolve_reference_subtype(
+        self, *, project_id: int, entity_type: str, entity_id: Any
+    ) -> tuple[str, int]:
+        reference = str(entity_type or "").strip()
+
+        if reference in CASE_SCOPED_HYDRAULIC_REFERENCES:
+            case_table, foreign_key = CASE_SCOPED_HYDRAULIC_REFERENCES[reference]
+            row = self.connection.execute(
+                f"SELECT {foreign_key} AS base_id FROM {case_table} WHERE id = ?",
+                (int(entity_id),),
+            ).fetchone()
+            if row is None or row["base_id"] is None:
+                raise LinkableObjectError(
+                    "TS_OBJECT_NOT_REGISTERED",
+                    entity_type=reference,
+                    entity_id=entity_id,
+                    reason="case_copy_not_found",
+                )
+            return BASE_HYDRAULIC_REFERENCES[reference[len("case_") :]], int(
+                row["base_id"]
+            )
+
+        if reference in BASE_HYDRAULIC_REFERENCES:
+            return reference, int(entity_id)
+
+        if reference == "component" or reference.startswith("component:"):
+            declared_type = (
+                reference.split(":", 1)[1] if ":" in reference else None
+            )
+            return "component", self._resolve_component_reference(
+                project_id=project_id,
+                component_key=str(entity_id or "").strip(),
+                declared_type=declared_type,
+            )
+
+        if reference in ("global", "global_signal_slot") or reference.startswith(
+            "global:"
+        ):
+            slot_key = (
+                reference.split(":", 1)[1] if ":" in reference else SYSTEM_SLOT_KEY
+            )
+            slots = self._linkable("global_signal_slots")
+            row = self.connection.execute(
+                f"SELECT id FROM {slots} WHERE project_id = ? AND slot_key = ?",
+                (project_id, slot_key),
+            ).fetchone()
+            if row is None:
+                raise LinkableObjectError(
+                    "TS_OBJECT_NOT_REGISTERED",
+                    entity_type=reference,
+                    project_id=project_id,
+                    slot_key=slot_key,
+                )
+            return "global_signal_slot", int(row["id"])
+
+        raise LinkableObjectError(
+            "TS_OBJECT_FAMILY_NOT_LINKABLE",
+            object_kind=reference,
+            entity_id=entity_id,
+        )
+
+    def _resolve_component_reference(
+        self, *, project_id: int, component_key: str, declared_type: str | None
+    ) -> int:
+        components = self._linkable("components")
+        rows = self.connection.execute(
+            f"""
+            SELECT id, project_id, component_type
+            FROM {components}
+            WHERE component_key = ?
+            ORDER BY project_id, id
+            """,
+            (component_key,),
+        ).fetchall()
+        if not rows:
+            raise LinkableObjectError(
+                "TS_OBJECT_NOT_REGISTERED",
+                entity_type="component",
+                component_key=component_key,
+                project_id=project_id,
+            )
+        own = [row for row in rows if int(row["project_id"]) == project_id]
+        if not own:
+            # The key exists, but under another project: the route decides.
+            raise LinkableObjectError(
+                "TS_COMPAT_PROJECT_CONTEXT_MISMATCH",
+                component_key=component_key,
+                project_id=project_id,
+                object_project_id=int(rows[0]["project_id"]),
+            )
+        if len(own) > 1:
+            raise LinkableObjectError(
+                "TS_MIGRATION_OBJECT_AMBIGUOUS",
+                component_key=component_key,
+                project_id=project_id,
+                reason="more_than_one_component",
+            )
+        component = own[0]
+        if declared_type is not None and str(
+            component["component_type"]
+        ) != declared_type:
+            # The declared text is checked against the real object, never
+            # trusted: it names a type the component does not have.
+            raise LinkableObjectError(
+                "TS_OBJECT_TYPE_MISMATCH",
+                component_key=component_key,
+                declared_type=declared_type,
+                component_type=str(component["component_type"]),
+            )
+        return int(component["id"])
+
+    def materialize_project_linkable_objects(
+        self, *, project_id: int, actor: str = "internal_analyst"
+    ) -> dict[str, Any]:
+        """Register every link target a project already has (chapter 10.4).
+
+        Repeatable by construction: identities come from stable keys, so a
+        second pass creates no row and moves no key. It refuses rather than
+        guesses, and one refusal leaves the whole pass unwritten.
+        """
+
+        with self._lock:
+            with self._database_transaction():
+                return self._materialize_project_linkable_objects(
+                    project_id=int(project_id), actor=actor
+                )
+
+    def _materialize_project_linkable_objects(
+        self, *, project_id: int, actor: str
+    ) -> dict[str, Any]:
+        appearances = self._project_component_appearances(project_id)
+        groups, skipped = group_component_appearances(appearances)
+
+        before = self._registered_object_ids(project_id)
+        objects = [
+            self._register_linkable_object(
+                project_id=project_id,
+                object_kind="global_signal_slot",
+                subtype_id=self._ensure_global_signal_slot_row(
+                    project_id=project_id, slot_key=SYSTEM_SLOT_KEY, actor=actor
+                ),
+                actor=actor,
+            )
+        ]
+        for component_key in sorted(groups):
+            group = groups[component_key]
+            if group["component_type"] not in LINKABLE_COMPONENT_TYPES:
+                # ``bus`` is topology, not a link target (chapter 2.4).
+                continue
+            component_id = self._materialize_component(
+                project_id=project_id,
+                component_key=component_key,
+                component_type=group["component_type"],
+                display_name=group["display_name"],
+                metadata={"origins": sorted(set(group["origins"]))},
+                actor=actor,
+            )
+            objects.append(
+                self._register_linkable_object(
+                    project_id=project_id,
+                    object_kind="component",
+                    subtype_id=component_id,
+                    actor=actor,
+                )
+            )
+        objects.extend(
+            self._register_project_hydraulic_objects(project_id=project_id, actor=actor)
+        )
+
+        created = sorted({entry["id"] for entry in objects} - before)
+        return {
+            "project_id": project_id,
+            "created": len(created),
+            "unchanged": len(objects) - len(created),
+            "skipped": sorted({str(entry["skipped"]) for entry in skipped}),
+            "skipped_count": len(skipped),
+            "objects": objects,
+        }
+
+    def _registered_object_ids(self, project_id: int) -> set[int]:
+        register = self._linkable("linkable_objects")
+        return {
+            int(row["id"])
+            for row in self.connection.execute(
+                f"SELECT id FROM {register} WHERE project_id = ?", (project_id,)
+            ).fetchall()
+        }
+
+    def _project_component_appearances(self, project_id: int) -> list[dict[str, Any]]:
+        """Every authoritative appearance of a component in the project."""
+
+        appearances: list[dict[str, Any]] = []
+        for row in self.connection.execute(
+            """
+            SELECT version.id AS version_id, version.system_case_json AS document
+            FROM scenario_versions AS version
+            JOIN scenarios ON scenarios.id = version.scenario_id
+            WHERE scenarios.project_id = ?
+            ORDER BY version.id
+            """,
+            (project_id,),
+        ).fetchall():
+            appearances.extend(
+                case_component_appearances(
+                    json.loads(row["document"]), origin=f"case:{row['version_id']}"
+                )
+            )
+        for row in self.connection.execute(
+            """
+            SELECT draft.id AS draft_id, draft.document_json AS document
+            FROM scenario_drafts AS draft
+            JOIN scenarios ON scenarios.id = draft.scenario_id
+            WHERE scenarios.project_id = ?
+            ORDER BY draft.id
+            """,
+            (project_id,),
+        ).fetchall():
+            appearances.extend(
+                draft_component_appearances(
+                    json.loads(row["document"]), origin=f"draft:{row['draft_id']}"
+                )
+            )
+        return appearances
+
+    def _register_project_hydraulic_objects(
+        self, *, project_id: int, actor: str
+    ) -> list[dict[str, Any]]:
+        """The hydraulic base entities are already stable rows; register them.
+
+        The case copies are deliberately absent: a case-scoped row is a copy of
+        the base entity, never a link target of its own.
+        """
+
+        sources = (
+            (
+                "hydraulic_system",
+                """
+                SELECT system.id AS id FROM hydraulic_systems AS system
+                WHERE system.project_id = ? ORDER BY system.id
+                """,
+            ),
+            (
+                "hydraulic_node",
+                """
+                SELECT node.id AS id FROM hydraulic_nodes AS node
+                JOIN hydraulic_systems AS system
+                  ON system.id = node.hydraulic_system_id
+                WHERE system.project_id = ? ORDER BY node.id
+                """,
+            ),
+            (
+                "hydraulic_reach",
+                """
+                SELECT reach.id AS id FROM hydraulic_reaches AS reach
+                JOIN hydraulic_systems AS system
+                  ON system.id = reach.hydraulic_system_id
+                WHERE system.project_id = ? ORDER BY reach.id
+                """,
+            ),
+            (
+                "hydraulic_plant",
+                """
+                SELECT plant.id AS id FROM hydraulic_plants AS plant
+                JOIN hydraulic_systems AS system
+                  ON system.id = plant.hydraulic_system_id
+                WHERE system.project_id = ? ORDER BY plant.id
+                """,
+            ),
+            (
+                "hydraulic_unit",
+                """
+                SELECT unit.id AS id FROM hydraulic_units AS unit
+                JOIN hydraulic_plants AS plant
+                  ON plant.id = unit.hydraulic_plant_id
+                JOIN hydraulic_systems AS system
+                  ON system.id = plant.hydraulic_system_id
+                WHERE system.project_id = ? ORDER BY unit.id
+                """,
+            ),
+        )
+        registered: list[dict[str, Any]] = []
+        for object_kind, sql in sources:
+            for row in self.connection.execute(sql, (project_id,)).fetchall():
+                registered.append(
+                    self._register_linkable_object(
+                        project_id=project_id,
+                        object_kind=object_kind,
+                        subtype_id=int(row["id"]),
+                        actor=actor,
+                    )
+                )
+        return registered
+
+    def _ensure_global_signal_slot_row(
+        self, *, project_id: int, slot_key: str, actor: str, display_name: str = ""
+    ) -> int:
+        slots = self._linkable("global_signal_slots")
+        existing = self.connection.execute(
+            f"SELECT id FROM {slots} WHERE project_id = ? AND slot_key = ?",
+            (project_id, slot_key),
+        ).fetchone()
+        if existing is not None:
+            return int(existing["id"])
+        return self._insert_canonical_row(
+            f"""
+            INSERT INTO {slots} (
+                project_id, slot_key, display_name, created_at, created_by
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                project_id,
+                slot_key,
+                display_name or slot_key.replace("_", " ").title(),
+                utc_now_iso(),
+                actor,
+            ),
+        )
+
+    def _materialize_component(
+        self,
+        *,
+        project_id: int,
+        component_key: str,
+        component_type: str,
+        display_name: str = "",
+        external_reference: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        actor: str,
+    ) -> int:
+        """Create the component once; a second pass changes neither key nor type."""
+
+        components = self._linkable("components")
+        existing = self.connection.execute(
+            f"""
+            SELECT id, component_type
+            FROM {components}
+            WHERE project_id = ? AND component_key = ?
+            """,
+            (project_id, component_key),
+        ).fetchone()
+        if existing is not None:
+            if str(existing["component_type"]) != component_type:
+                raise LinkableObjectError(
+                    "TS_MIGRATION_OBJECT_AMBIGUOUS",
+                    project_id=project_id,
+                    component_key=component_key,
+                    component_types=sorted(
+                        {str(existing["component_type"]), component_type}
+                    ),
+                    reason="component_type_conflict",
+                )
+            return int(existing["id"])
+        now = utc_now_iso()
+        return self._insert_canonical_row(
+            f"""
+            INSERT INTO {components} (
+                project_id, component_key, component_type, display_name,
+                external_reference, is_active, metadata_json,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
+            """,
+            (
+                project_id,
+                component_key,
+                component_type,
+                display_name or component_key,
+                external_reference,
+                json.dumps(metadata or {}, ensure_ascii=False),
+                now,
+                now,
+            ),
+        )
+
+    # -- Canonical content model (TS7-002) ---------------------------------
+    #
+    # The atomic revision protocol of chapter 2.7 is the only way canonical
+    # content is written. There is deliberately no in-place value edit path:
+    # editing a value, reclassifying a signal, changing a unit or adding and
+    # retiring a signal all publish a complete new set revision.
+
+    def _canonical(self, logical: str) -> str:
+        return canonical_table_name(logical, self.database_backend)
+
+    def _canonical_classification(self, signals: list[dict], data_class_key: str) -> dict:
+        data_class = self.connection.execute(
+            """
+            SELECT id, data_class_key, status
+            FROM time_series_data_classes
+            WHERE data_class_key = ?
+            """,
+            (data_class_key,),
+        ).fetchone()
+        if data_class is None or data_class["status"] != "active":
+            raise CanonicalRevisionError(
+                "TS_INGEST_SIGNAL_SET_INCOMPLETE",
+                data_class_key=data_class_key,
+                reason="unknown_data_class",
+            )
+
+        resolved: dict[str, dict] = {}
+        for signal in signals:
+            semantic_type = self.connection.execute(
+                """
+                SELECT id, semantic_key, dimension_id, canonical_unit_id,
+                       default_aggregation, status
+                FROM time_series_semantic_types
+                WHERE semantic_key = ?
+                """,
+                (signal["semantic_type_key"],),
+            ).fetchone()
+            if semantic_type is None or semantic_type["status"] != "active":
+                raise CanonicalRevisionError(
+                    "TS_INGEST_SIGNAL_SET_INCOMPLETE",
+                    series_key=signal["series_key"],
+                    semantic_type_key=signal["semantic_type_key"],
+                    reason="semantic_type_inactive",
+                )
+            unit = self.connection.execute(
+                """
+                SELECT id, unit_key, dimension_id, status
+                FROM measurement_units
+                WHERE unit_key = ?
+                """,
+                (signal["unit_key"],),
+            ).fetchone()
+            if unit is None or unit["status"] != "active":
+                raise CanonicalRevisionError(
+                    "TS_INGEST_SIGNAL_SET_INCOMPLETE",
+                    series_key=signal["series_key"],
+                    unit_key=signal["unit_key"],
+                    reason="unit_inactive",
+                )
+            # Chapter 3.1: the unit is an exact match of the canonical unit of
+            # the semantic type, never an implicit conversion.
+            if unit["id"] != semantic_type["canonical_unit_id"]:
+                raise CanonicalRevisionError(
+                    "TS_INGEST_SIGNAL_SET_INCOMPLETE",
+                    series_key=signal["series_key"],
+                    unit_key=signal["unit_key"],
+                    semantic_type_key=signal["semantic_type_key"],
+                    reason="unit_is_not_canonical",
+                )
+            signal_data_class_key = signal["data_class_key"] or data_class_key
+            signal_data_class = self.connection.execute(
+                """
+                SELECT id, data_class_key, status
+                FROM time_series_data_classes
+                WHERE data_class_key = ?
+                """,
+                (signal_data_class_key,),
+            ).fetchone()
+            if signal_data_class is None or signal_data_class["status"] != "active":
+                raise CanonicalRevisionError(
+                    "TS_INGEST_SIGNAL_SET_INCOMPLETE",
+                    series_key=signal["series_key"],
+                    data_class_key=signal_data_class_key,
+                    reason="unknown_data_class",
+                )
+            resolved[signal["series_key"]] = {
+                "semantic_type_id": int(semantic_type["id"]),
+                "semantic_type_key": semantic_type["semantic_key"],
+                "unit_id": int(unit["id"]),
+                "unit_key": unit["unit_key"],
+                "data_class_id": int(signal_data_class["id"]),
+                "data_class_key": signal_data_class["data_class_key"],
+                "aggregation": signal["aggregation"]
+                or semantic_type["default_aggregation"],
+            }
+        return {
+            "data_class_id": int(data_class["id"]),
+            "data_class_key": data_class["data_class_key"],
+            "signals": resolved,
+        }
+
+    def _insert_canonical_row(self, sql: str, parameters: tuple) -> int:
+        row = self.connection.execute(
+            f"{sql.rstrip().rstrip(';')} RETURNING id", parameters
+        ).fetchone()
+        return int(row["id"])
+
+    def _lock_canonical_set(self, set_id: int):
+        sql = f"SELECT * FROM {self._canonical('time_series_sets')} WHERE id = ?"
+        if self.database_backend == "postgresql":
+            sql = f"{sql} FOR UPDATE"
+        return self.connection.execute(sql, (set_id,)).fetchone()
+
+    def publish_canonical_set_revision(
+        self,
+        *,
+        project_id: int,
+        name: str,
+        signals,
+        periods,
+        values,
+        data_class_key: str,
+        timezone: str = "UTC",
+        timestamp_convention: str = "period_start",
+        version_label: str | None = None,
+        description: str = "",
+        source: dict[str, Any] | None = None,
+        change_summary: str = "",
+        metadata: dict[str, Any] | None = None,
+        lineage: list[dict[str, Any]] | None = None,
+        actor: str,
+        set_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Publish one complete set revision inside a single transaction."""
+
+        normalized_signals = normalize_canonical_signals(signals)
+        normalized_periods = normalize_canonical_periods(periods)
+        with self._lock:
+            with self._database_transaction():
+                return self._publish_canonical_set_revision(
+                    project_id=project_id,
+                    name=name,
+                    signals=normalized_signals,
+                    periods=normalized_periods,
+                    values=values,
+                    data_class_key=data_class_key,
+                    revision_timezone=timezone,
+                    timestamp_convention=timestamp_convention,
+                    version_label=version_label,
+                    description=description,
+                    source=source,
+                    change_summary=change_summary,
+                    metadata=metadata or {},
+                    lineage=lineage or [],
+                    actor=actor,
+                    set_id=set_id,
+                )
+
+    def _publish_canonical_set_revision(
+        self,
+        *,
+        project_id: int,
+        name: str,
+        signals: list[dict],
+        periods: list[dict],
+        values,
+        data_class_key: str,
+        revision_timezone: str,
+        timestamp_convention: str,
+        version_label: str | None,
+        description: str,
+        source: dict[str, Any] | None,
+        change_summary: str,
+        metadata: dict[str, Any],
+        lineage: list[dict[str, Any]],
+        actor: str,
+        set_id: int | None,
+    ) -> dict[str, Any]:
+        sets_table = self._canonical("time_series_sets")
+        signals_table = self._canonical("time_series_signals")
+        revisions_table = self._canonical("time_series_set_revisions")
+        revision_signals_table = self._canonical("time_series_revision_signals")
+        periods_table = self._canonical("time_series_periods")
+        values_table = self._canonical("time_series_values")
+
+        classification = self._canonical_classification(signals, data_class_key)
+        now = utc_now_iso()
+
+        # 1. Reserve the set and the next revision number under its lock.
+        existing_set = None
+        if set_id is not None:
+            existing_set = self._lock_canonical_set(set_id)
+            if existing_set is None:
+                raise CanonicalRevisionError("TS_SET_NOT_FOUND", set_id=set_id)
+        else:
+            candidate = self.connection.execute(
+                f"""
+                SELECT id
+                FROM {sets_table}
+                WHERE owner_project_id = ? AND name = ? AND series_kind = 'catalog'
+                ORDER BY version_number DESC
+                LIMIT 1
+                """,
+                (project_id, name),
+            ).fetchone()
+            if candidate is not None:
+                existing_set = self._lock_canonical_set(int(candidate["id"]))
+
+        if existing_set is None:
+            resolved_set_id = self._insert_canonical_row(
+                f"""
+                INSERT INTO {sets_table} (
+                    owner_project_id, name, version_number, version_label,
+                    visibility_scope, series_kind, status, description,
+                    data_kind, timezone, created_at, updated_at,
+                    created_by, updated_by
+                ) VALUES (?, ?, 1, ?, 'project', 'catalog', 'draft', ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    project_id,
+                    name,
+                    version_label or "v1",
+                    description,
+                    data_class_key,
+                    revision_timezone,
+                    now,
+                    now,
+                    actor,
+                    actor,
+                ),
+            )
+            previous_revision_id = None
+            next_revision_number = 1
+        else:
+            resolved_set_id = int(existing_set["id"])
+            previous_revision_id = existing_set["current_revision_id"]
+            highest = self.connection.execute(
+                f"""
+                SELECT MAX(revision_number) AS highest
+                FROM {revisions_table}
+                WHERE time_series_set_id = ?
+                """,
+                (resolved_set_id,),
+            ).fetchone()
+            next_revision_number = int(highest["highest"] or 0) + 1
+
+        source_id = self._register_canonical_source(project_id, source, actor, now)
+
+        # 2. Open the building revision. ``content_hash`` stays null until the
+        #    snapshot is complete and verified (P-03).
+        revision_id = self._insert_canonical_row(
+            f"""
+            INSERT INTO {revisions_table} (
+                time_series_set_id, revision_number, supersedes_revision_id,
+                time_series_source_id, data_class_id, timezone,
+                timestamp_convention, state, change_summary, metadata_json,
+                created_at, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'building', ?, ?, ?, ?)
+            """,
+            (
+                resolved_set_id,
+                next_revision_number,
+                previous_revision_id,
+                source_id,
+                classification["data_class_id"],
+                revision_timezone,
+                timestamp_convention,
+                change_summary,
+                json.dumps(metadata, sort_keys=True),
+                now,
+                actor,
+            ),
+        )
+
+        # 3. Reuse identities by series_key; never recycle an archived one.
+        signal_ids = self._resolve_canonical_signal_identities(
+            set_id=resolved_set_id, signals=signals, actor=actor, now=now
+        )
+
+        # 4. Freeze the snapshot: contract, coverage and values.
+        self.connection.executemany(
+            f"""
+            INSERT INTO {revision_signals_table} (
+                set_revision_id, signal_id, time_series_set_id, semantic_type_id,
+                unit_id, data_class_id, signal_role, aggregation, ordinal,
+                metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    revision_id,
+                    signal_ids[signal["series_key"]],
+                    resolved_set_id,
+                    classification["signals"][signal["series_key"]]["semantic_type_id"],
+                    classification["signals"][signal["series_key"]]["unit_id"],
+                    classification["signals"][signal["series_key"]]["data_class_id"],
+                    signal["signal_role"],
+                    classification["signals"][signal["series_key"]]["aggregation"],
+                    signal["ordinal"],
+                    json.dumps(signal["metadata"], sort_keys=True),
+                )
+                for signal in signals
+            ],
+        )
+        self.connection.executemany(
+            f"""
+            INSERT INTO {periods_table} (
+                set_revision_id, period_index, timestamp_start, timestamp_end,
+                duration_hours
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    revision_id,
+                    period["period_index"],
+                    period["timestamp_start"],
+                    period["timestamp_end"],
+                    period["duration_hours"],
+                )
+                for period in periods
+            ],
+        )
+        period_ids = {
+            int(row["period_index"]): int(row["id"])
+            for row in self.connection.execute(
+                f"""
+                SELECT id, period_index
+                FROM {periods_table}
+                WHERE set_revision_id = ?
+                """,
+                (revision_id,),
+            ).fetchall()
+        }
+        self._insert_canonical_values(
+            values_table=values_table,
+            revision_id=revision_id,
+            values=values,
+            signal_ids=signal_ids,
+            period_ids=period_ids,
+        )
+
+        # 5. Verify the snapshot, then compute the canonical hash in streaming
+        #    order. A doubtful revision is never made visible first.
+        signal_count = len(signals)
+        period_count = len(periods)
+        value_count = int(
+            self.connection.execute(
+                f"SELECT COUNT(*) AS total FROM {values_table} WHERE set_revision_id = ?",
+                (revision_id,),
+            ).fetchone()["total"]
+        )
+        if value_count != signal_count * period_count:
+            raise CanonicalRevisionError(
+                "TS_REVISION_VALUE_COUNT_MISMATCH",
+                signal_count=signal_count,
+                period_count=period_count,
+                value_count=value_count,
+            )
+        content_hash = self._stream_canonical_content_hash(
+            revision_id=revision_id,
+            revision_timezone=revision_timezone,
+            timestamp_convention=timestamp_convention,
+            data_class_key=classification["data_class_key"],
+        )
+
+        # 6. Seal and move the current pointer inside the same transaction.
+        validation_payload = {
+            "signal_count": signal_count,
+            "period_count": period_count,
+            "value_count": value_count,
+            "coverage_start": periods[0]["timestamp_start"],
+            "coverage_end": periods[-1]["timestamp_end"],
+        }
+        self.connection.execute(
+            f"""
+            UPDATE {revisions_table}
+            SET state = 'sealed', content_hash = ?, validation_payload_json = ?
+            WHERE id = ?
+            """,
+            (content_hash, json.dumps(validation_payload, sort_keys=True), revision_id),
+        )
+        self.connection.execute(
+            f"""
+            UPDATE {sets_table}
+            SET current_revision_id = ?, content_hash = ?, data_kind = ?,
+                timezone = ?, status = 'validated', updated_at = ?, updated_by = ?
+            WHERE id = ?
+            """,
+            (
+                revision_id,
+                content_hash,
+                classification["data_class_key"],
+                revision_timezone,
+                now,
+                actor,
+                resolved_set_id,
+            ),
+        )
+
+        # 7. Record the lineage of a derived revision in the same transaction.
+        self._record_canonical_lineage(
+            revision_id=revision_id,
+            signal_ids=signal_ids,
+            lineage=lineage,
+            actor=actor,
+            now=now,
+        )
+        return {
+            "set_id": resolved_set_id,
+            "name": name,
+            "revision_id": revision_id,
+            "revision_number": next_revision_number,
+            "supersedes_revision_id": previous_revision_id,
+            "state": "sealed",
+            "content_hash": content_hash,
+            "signal_count": signal_count,
+            "period_count": period_count,
+            "value_count": value_count,
+            "time_series_source_id": source_id,
+            "signal_ids": dict(signal_ids),
+        }
+
+    def _record_canonical_lineage(
+        self,
+        *,
+        revision_id: int,
+        signal_ids: dict[str, int],
+        lineage: list[dict[str, Any]],
+        actor: str,
+        now: str,
+    ) -> None:
+        if not lineage:
+            return
+        rows = []
+        for entry in lineage:
+            series_key = str(entry["series_key"])
+            derived_signal_id = signal_ids.get(series_key)
+            if derived_signal_id is None:
+                raise CanonicalRevisionError(
+                    "TS_INGEST_SIGNAL_SET_INCOMPLETE",
+                    series_key=series_key,
+                    reason="lineage_target_not_in_revision",
+                )
+            rows.append(
+                (
+                    revision_id,
+                    derived_signal_id,
+                    int(entry["source_set_revision_id"]),
+                    int(entry["source_signal_id"]),
+                    str(entry["lineage_kind"]),
+                    str(entry["source_content_hash"]),
+                    entry.get("source_owner_linkable_object_id"),
+                    entry.get("target_owner_linkable_object_id"),
+                    entry.get("transformation_id"),
+                    now,
+                    actor,
+                    str(entry.get("reason_code") or "TS_LINEAGE_RECORDED"),
+                    entry.get("reason_text"),
+                )
+            )
+        self.connection.executemany(
+            f"""
+            INSERT INTO {self._canonical('time_series_revision_lineage')} (
+                derived_set_revision_id, derived_signal_id, source_set_revision_id,
+                source_signal_id, lineage_kind, source_content_hash,
+                source_owner_linkable_object_id, target_owner_linkable_object_id,
+                transformation_id, created_at, created_by, reason_code, reason_text
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+
+    def _register_canonical_source(
+        self, project_id: int, source: dict[str, Any] | None, actor: str, now: str
+    ) -> int | None:
+        if not source:
+            return None
+        sources_table = self._canonical("time_series_sources")
+        source_key = str(source["source_key"])
+        existing = self.connection.execute(
+            f"SELECT id FROM {sources_table} WHERE project_id = ? AND source_key = ?",
+            (project_id, source_key),
+        ).fetchone()
+        if existing is not None:
+            return int(existing["id"])
+        return self._insert_canonical_row(
+            f"""
+            INSERT INTO {sources_table} (
+                project_id, source_key, kind, original_filename, media_type,
+                checksum, stored_path, selected_sheet, metadata_json,
+                created_at, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                project_id,
+                source_key,
+                str(source.get("kind") or "api"),
+                str(source.get("original_filename") or ""),
+                str(source.get("media_type") or ""),
+                str(source.get("checksum") or ""),
+                str(source.get("stored_path") or ""),
+                source.get("selected_sheet"),
+                json.dumps(source.get("metadata") or {}, sort_keys=True),
+                now,
+                actor,
+            ),
+        )
+
+    def _resolve_canonical_signal_identities(
+        self, *, set_id: int, signals: list[dict], actor: str, now: str
+    ) -> dict[str, int]:
+        signals_table = self._canonical("time_series_signals")
+        known = {
+            row["series_key"]: row
+            for row in self.connection.execute(
+                f"""
+                SELECT id, series_key, status
+                FROM {signals_table}
+                WHERE time_series_set_id = ?
+                """,
+                (set_id,),
+            ).fetchall()
+        }
+        resolved: dict[str, int] = {}
+        for signal in signals:
+            series_key = signal["series_key"]
+            existing = known.get(series_key)
+            if existing is not None:
+                # An archived identity is history, never a slot to recycle.
+                if existing["status"] != "active":
+                    raise CanonicalRevisionError(
+                        "TS_OBJECT_SERIES_KEY_CONFLICT",
+                        series_key=series_key,
+                        signal_id=int(existing["id"]),
+                        status=existing["status"],
+                    )
+                resolved[series_key] = int(existing["id"])
+                continue
+            resolved[series_key] = self._insert_canonical_row(
+                f"""
+                INSERT INTO {signals_table} (
+                    time_series_set_id, series_kind, series_key, display_name,
+                    description, status, created_at, created_by
+                ) VALUES (?, 'catalog', ?, ?, ?, 'active', ?, ?)
+                """,
+                (
+                    set_id,
+                    series_key,
+                    signal["display_name"],
+                    signal["description"],
+                    now,
+                    actor,
+                ),
+            )
+        return resolved
+
+    def _insert_canonical_values(
+        self,
+        *,
+        values_table: str,
+        revision_id: int,
+        values,
+        signal_ids: dict[str, int],
+        period_ids: dict[int, int],
+    ) -> None:
+        chunk: list[tuple] = []
+        for record in canonical_value_records(values):
+            series_key, period_index, value, quality_flag, source_row_number = record
+            signal_id = signal_ids.get(series_key)
+            if signal_id is None:
+                raise CanonicalRevisionError(
+                    "TS_INGEST_VALUE_INVALID",
+                    series_key=series_key,
+                    reason="unknown_series_key",
+                )
+            period_id = period_ids.get(
+                period_index if period_index is None else int(period_index)
+            )
+            if period_id is None:
+                raise CanonicalRevisionError(
+                    "TS_INGEST_VALUE_INVALID",
+                    series_key=series_key,
+                    period_index=period_index,
+                    reason="unknown_period_index",
+                )
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError) as error:
+                raise CanonicalRevisionError(
+                    "TS_INGEST_VALUE_INVALID",
+                    series_key=series_key,
+                    period_index=period_index,
+                    reason="not_numeric",
+                ) from error
+            if not math.isfinite(numeric):
+                raise CanonicalRevisionError(
+                    "TS_INGEST_VALUE_INVALID",
+                    series_key=series_key,
+                    period_index=period_index,
+                    reason="not_finite",
+                )
+            chunk.append(
+                (
+                    revision_id,
+                    signal_id,
+                    period_id,
+                    numeric,
+                    quality_flag,
+                    source_row_number,
+                )
+            )
+            if len(chunk) >= CANONICAL_VALUE_CHUNK_SIZE:
+                self._flush_canonical_values(values_table, chunk)
+                chunk = []
+        if chunk:
+            self._flush_canonical_values(values_table, chunk)
+
+    def _flush_canonical_values(self, values_table: str, chunk: list[tuple]) -> None:
+        try:
+            self.connection.executemany(
+                f"""
+                INSERT INTO {values_table} (
+                    set_revision_id, signal_id, time_series_period_id,
+                    value_numeric, quality_flag, source_row_number
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                chunk,
+            )
+        except Exception as error:
+            if _is_canonical_duplicate_value(error):
+                raise CanonicalRevisionError(
+                    "TS_INGEST_VALUE_INVALID", reason="duplicated_value"
+                ) from error
+            raise
+
+    def _stream_canonical_content_hash(
+        self,
+        *,
+        revision_id: int,
+        revision_timezone: str,
+        timestamp_convention: str,
+        data_class_key: str,
+    ) -> str:
+        revision_signals_table = self._canonical("time_series_revision_signals")
+        periods_table = self._canonical("time_series_periods")
+        values_table = self._canonical("time_series_values")
+        digest = CanonicalContentHash(
+            timezone=revision_timezone,
+            timestamp_convention=timestamp_convention,
+            data_class_key=data_class_key,
+        )
+        for row in self._stream_canonical_rows(
+            f"""
+            SELECT revision_signal.ordinal AS ordinal,
+                   signal.series_key AS series_key,
+                   semantic_type.semantic_key AS semantic_key,
+                   unit.unit_key AS unit_key,
+                   data_class.data_class_key AS data_class_key,
+                   revision_signal.signal_role AS signal_role,
+                   revision_signal.aggregation AS aggregation
+            FROM {revision_signals_table} AS revision_signal
+            JOIN {self._canonical('time_series_signals')} AS signal
+              ON signal.id = revision_signal.signal_id
+            JOIN time_series_semantic_types AS semantic_type
+              ON semantic_type.id = revision_signal.semantic_type_id
+            JOIN measurement_units AS unit ON unit.id = revision_signal.unit_id
+            JOIN time_series_data_classes AS data_class
+              ON data_class.id = revision_signal.data_class_id
+            WHERE revision_signal.set_revision_id = ?
+            ORDER BY revision_signal.ordinal
+            """,
+            (revision_id,),
+        ):
+            digest.add_signal(
+                ordinal=int(row["ordinal"]),
+                series_key=row["series_key"],
+                semantic_type_key=row["semantic_key"],
+                unit_key=row["unit_key"],
+                data_class_key=row["data_class_key"],
+                signal_role=row["signal_role"],
+                aggregation=row["aggregation"],
+            )
+        for row in self._stream_canonical_rows(
+            f"""
+            SELECT period_index, timestamp_start, timestamp_end, duration_hours
+            FROM {periods_table}
+            WHERE set_revision_id = ?
+            ORDER BY period_index
+            """,
+            (revision_id,),
+        ):
+            digest.add_period(
+                period_index=int(row["period_index"]),
+                timestamp_start=row["timestamp_start"],
+                timestamp_end=row["timestamp_end"],
+                duration_hours=float(row["duration_hours"]),
+            )
+        for row in self._stream_canonical_rows(
+            f"""
+            SELECT revision_signal.ordinal AS ordinal,
+                   period.period_index AS period_index,
+                   value.value_numeric AS value_numeric
+            FROM {values_table} AS value
+            JOIN {revision_signals_table} AS revision_signal
+              ON revision_signal.set_revision_id = value.set_revision_id
+             AND revision_signal.signal_id = value.signal_id
+            JOIN {periods_table} AS period
+              ON period.id = value.time_series_period_id
+            WHERE value.set_revision_id = ?
+            ORDER BY revision_signal.ordinal, period.period_index
+            """,
+            (revision_id,),
+        ):
+            digest.add_value(
+                ordinal=int(row["ordinal"]),
+                period_index=int(row["period_index"]),
+                value=float(row["value_numeric"]),
+            )
+        return digest.seal()
+
+    def _stream_canonical_rows(self, sql: str, parameters: tuple):
+        cursor = self.connection.execute(sql, parameters)
+        while True:
+            row = cursor.fetchone()
+            if row is None:
+                return
+            yield row
+
+    def list_canonical_signal_identities(self, set_id: int) -> list[dict[str, Any]]:
+        """Every identity the set ever had, current or historical.
+
+        A signal that disappears from a revision keeps its identity: it leaves
+        the current view but stays readable as history, and it is never
+        redirected to another signal of the same type (chapter 2.7).
+        """
+
+        sets_table = self._canonical("time_series_sets")
+        signals_table = self._canonical("time_series_signals")
+        revision_signals_table = self._canonical("time_series_revision_signals")
+        revisions_table = self._canonical("time_series_set_revisions")
+        current = self.connection.execute(
+            f"SELECT current_revision_id FROM {sets_table} WHERE id = ?", (set_id,)
+        ).fetchone()
+        if current is None:
+            raise CanonicalRevisionError("TS_SET_NOT_FOUND", set_id=set_id)
+        current_revision_id = current["current_revision_id"]
+        identities = []
+        for row in self.connection.execute(
+            f"""
+            SELECT signal.id AS signal_id,
+                   signal.series_key AS series_key,
+                   signal.display_name AS display_name,
+                   signal.status AS status,
+                   signal.created_at AS created_at,
+                   signal.archived_at AS archived_at,
+                   signal.archived_by AS archived_by,
+                   MIN(revision.revision_number) AS first_revision_number,
+                   MAX(revision.revision_number) AS last_revision_number,
+                   COUNT(revision_signal.set_revision_id) AS revision_count
+            FROM {signals_table} AS signal
+            LEFT JOIN {revision_signals_table} AS revision_signal
+              ON revision_signal.signal_id = signal.id
+            LEFT JOIN {revisions_table} AS revision
+              ON revision.id = revision_signal.set_revision_id
+             AND revision.state = 'sealed'
+            WHERE signal.time_series_set_id = ?
+            GROUP BY signal.id, signal.series_key, signal.display_name,
+                     signal.status, signal.created_at, signal.archived_at,
+                     signal.archived_by
+            ORDER BY signal.id
+            """,
+            (set_id,),
+        ).fetchall():
+            identity = dict(row)
+            identity["signal_id"] = int(identity["signal_id"])
+            identity["in_current_revision"] = current_revision_id is not None and bool(
+                self.connection.execute(
+                    f"""
+                    SELECT 1 AS present
+                    FROM {revision_signals_table}
+                    WHERE set_revision_id = ? AND signal_id = ?
+                    """,
+                    (current_revision_id, identity["signal_id"]),
+                ).fetchone()
+            )
+            identities.append(identity)
+        return identities
+
+    def archive_canonical_signal_identity(
+        self,
+        *,
+        set_id: int,
+        series_key: str,
+        actor: str,
+        reason_text: str = "",
+    ) -> dict[str, Any]:
+        """Retire an identity without erasing the history that used it."""
+
+        signals_table = self._canonical("time_series_signals")
+        with self._lock:
+            with self._database_transaction():
+                row = self.connection.execute(
+                    f"""
+                    SELECT id, status
+                    FROM {signals_table}
+                    WHERE time_series_set_id = ? AND series_key = ?
+                    """,
+                    (set_id, series_key),
+                ).fetchone()
+                if row is None:
+                    raise CanonicalRevisionError(
+                        "TS_SET_NOT_FOUND", set_id=set_id, series_key=series_key
+                    )
+                if row["status"] == "archived":
+                    return {
+                        "signal_id": int(row["id"]),
+                        "series_key": series_key,
+                        "status": "archived",
+                    }
+                self.connection.execute(
+                    f"""
+                    UPDATE {signals_table}
+                    SET status = 'archived', archived_at = ?, archived_by = ?,
+                        description = ?
+                    WHERE id = ?
+                    """,
+                    (utc_now_iso(), actor, reason_text, int(row["id"])),
+                )
+                return {
+                    "signal_id": int(row["id"]),
+                    "series_key": series_key,
+                    "status": "archived",
+                }
+
+    def read_canonical_set(self, set_id: int) -> dict[str, Any]:
+        """The set, its current sealed revision and the signals it shows."""
+
+        sets_table = self._canonical("time_series_sets")
+        row = self.connection.execute(
+            f"SELECT * FROM {sets_table} WHERE id = ?", (set_id,)
+        ).fetchone()
+        if row is None:
+            raise CanonicalRevisionError("TS_SET_NOT_FOUND", set_id=set_id)
+        set_view = dict(row)
+        current_revision_id = set_view.get("current_revision_id")
+        set_view["current_revision"] = (
+            self.read_canonical_revision(int(current_revision_id), with_values=False)
+            if current_revision_id is not None
+            else None
+        )
+        set_view["signals"] = (
+            set_view["current_revision"]["signals"]
+            if set_view["current_revision"] is not None
+            else []
+        )
+        return set_view
+
+    def read_canonical_revision(
+        self, revision_id: int, *, with_values: bool = True
+    ) -> dict[str, Any]:
+        """One revision as the frozen snapshot it is."""
+
+        revisions_table = self._canonical("time_series_set_revisions")
+        row = self.connection.execute(
+            f"""
+            SELECT revision.*, data_class.data_class_key AS data_class_key
+            FROM {revisions_table} AS revision
+            JOIN time_series_data_classes AS data_class
+              ON data_class.id = revision.data_class_id
+            WHERE revision.id = ?
+            """,
+            (revision_id,),
+        ).fetchone()
+        if row is None:
+            raise CanonicalRevisionError("TS_SET_NOT_FOUND", revision_id=revision_id)
+        revision = dict(row)
+        revision["signals"] = [
+            dict(signal)
+            for signal in self.connection.execute(
+                f"""
+                SELECT revision_signal.ordinal AS ordinal,
+                       revision_signal.signal_id AS signal_id,
+                       signal.series_key AS series_key,
+                       signal.display_name AS display_name,
+                       signal.status AS signal_status,
+                       semantic_type.semantic_key AS semantic_type_key,
+                       unit.unit_key AS unit_key,
+                       data_class.data_class_key AS data_class_key,
+                       revision_signal.signal_role AS signal_role,
+                       revision_signal.aggregation AS aggregation
+                FROM {self._canonical('time_series_revision_signals')} AS revision_signal
+                JOIN {self._canonical('time_series_signals')} AS signal
+                  ON signal.id = revision_signal.signal_id
+                JOIN time_series_semantic_types AS semantic_type
+                  ON semantic_type.id = revision_signal.semantic_type_id
+                JOIN measurement_units AS unit ON unit.id = revision_signal.unit_id
+                JOIN time_series_data_classes AS data_class
+                  ON data_class.id = revision_signal.data_class_id
+                WHERE revision_signal.set_revision_id = ?
+                ORDER BY revision_signal.ordinal
+                """,
+                (revision_id,),
+            ).fetchall()
+        ]
+        revision["periods"] = [
+            dict(period)
+            for period in self.connection.execute(
+                f"""
+                SELECT id, period_index, timestamp_start, timestamp_end,
+                       duration_hours
+                FROM {self._canonical('time_series_periods')}
+                WHERE set_revision_id = ?
+                ORDER BY period_index
+                """,
+                (revision_id,),
+            ).fetchall()
+        ]
+        revision["signal_count"] = len(revision["signals"])
+        revision["period_count"] = len(revision["periods"])
+        if not with_values:
+            return revision
+        matrix: dict[str, list[float]] = {
+            signal["series_key"]: [] for signal in revision["signals"]
+        }
+        for row in self._stream_canonical_rows(
+            f"""
+            SELECT signal.series_key AS series_key,
+                   period.period_index AS period_index,
+                   value.value_numeric AS value_numeric
+            FROM {self._canonical('time_series_values')} AS value
+            JOIN {self._canonical('time_series_revision_signals')} AS revision_signal
+              ON revision_signal.set_revision_id = value.set_revision_id
+             AND revision_signal.signal_id = value.signal_id
+            JOIN {self._canonical('time_series_signals')} AS signal
+              ON signal.id = value.signal_id
+            JOIN {self._canonical('time_series_periods')} AS period
+              ON period.id = value.time_series_period_id
+            WHERE value.set_revision_id = ?
+            ORDER BY revision_signal.ordinal, period.period_index
+            """,
+            (revision_id,),
+        ):
+            matrix[row["series_key"]].append(float(row["value_numeric"]))
+        revision["values"] = matrix
+        revision["value_count"] = sum(len(column) for column in matrix.values())
+        return revision
 
     def _database_transaction(self):
         if self.database_backend == "postgresql":
