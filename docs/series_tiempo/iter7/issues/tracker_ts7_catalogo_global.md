@@ -1,0 +1,153 @@
+# TS-7 Global Catalog And Object Specific Series Issue Tracker
+
+This document is the local implementation tracker for the global catalog of
+generic series and the object-specific series defined by
+`docs/series_tiempo/iter7/spec_ts7_catalogo_global_y_series_especificas.md`.
+
+External issue tracker integration has not been configured, so each issue is
+stored as a Markdown file in this folder. All issues are AFK slices and carry
+the `ready-for-agent` triage label.
+
+The accepted specification is normative, and its chapter 13 decides which
+resolution wins when two overlap. Implementation issues may surface evidence
+that a contract is impossible, but they must not silently reopen or weaken a
+decision from the closed Wayfinder map
+[Catalogo global y series especificas vinculadas a objetos](../../../wayfinder/catalogo-global-series-genericas.md).
+Reopening one means returning to the map and recording the substitution.
+
+## Why These Slices Are Not All Vertical
+
+The usual rule is one tracer bullet per issue, demoable on its own. Chapter 11.1
+of the specification overrides it: the cut is **one single visible delivery that
+lands at the C6 cutover**, and no new surface is exposed to a user before the
+canonical writer exists, because a catalog that can be read and not mutated
+teaches a model that does not yet exist.
+
+So this register is sequenced as **expand, backfill, verify, cut over,
+contract**. TS7-001 to TS7-005 expand the schema additively beside the current
+tables, which stay the write source. TS7-006 to TS7-014 build the canonical
+behaviour behind it. TS7-019 to TS7-021 build the React surfaces, reachable only
+by the verification accounts until TS7-022 flips the cutover. Every issue is
+still verifiable on its own, by N1/N2 tests rather than by a user-visible demo,
+until the cutover makes the whole delivery visible at once.
+
+`C7` (contraction) is destructive and is **not** authorized inside this cut.
+
+## Status Vocabulary
+
+- `Todo`: not started.
+- `In Progress`: actively being implemented.
+- `Blocked`: waiting on a dependency or newly discovered impossibility.
+- `In Review`: implementation is ready for review.
+- `Done`: merged or accepted.
+
+## Evidence Levels
+
+Taken from chapter 11.5 of the specification; each acceptance criterion in the
+matrix names the levels that prove it.
+
+- `N1`: `unittest` domain tests, no HTTP.
+- `N2`: `unittest` HTTP contract tests against the development PostgreSQL.
+- `N3`: `vitest` plus `tsc`, `eslint` and the frontend `build`.
+- `N4`: manual Chrome verification with the real `.env` credentials
+  (`MAIL_USUARIO_TEST`, `PASSWORD_MAIL_USUARIO_TEST`); no test administrators
+  are created and authentication is never disabled.
+- `N5`: PostgreSQL performance fixture with reference `EXPLAIN (ANALYZE, BUFFERS)`.
+- `N6`: migrator execution with manifest, convergence and shadow comparison.
+
+## Issue Register
+
+| ID | Title | Type | Triage | Status | Blocked by | Issue file |
+| --- | --- | --- | --- | --- | --- | --- |
+| TS7-001 | Seed The Persistent Classification Catalogs And Compatibility Matrix | AFK | ready-for-agent | Todo | None | [TS7-001-seed-the-persistent-classification-catalogs-and-compatibility-matrix.md](TS7-001-seed-the-persistent-classification-catalogs-and-compatibility-matrix.md) |
+| TS7-002 | Land The Canonical Content Model With Sealed Revisions | AFK | ready-for-agent | Todo | TS7-001 | [TS7-002-land-the-canonical-content-model-with-sealed-revisions.md](TS7-002-land-the-canonical-content-model-with-sealed-revisions.md) |
+| TS7-003 | Register Every Linkable Object And Materialize Components | AFK | ready-for-agent | Todo | TS7-002 | [TS7-003-register-every-linkable-object-and-materialize-components.md](TS7-003-register-every-linkable-object-and-materialize-components.md) |
+| TS7-004 | Land The Link Layer Tables And Immutable Ledgers | AFK | ready-for-agent | Todo | TS7-003 | [TS7-004-land-the-link-layer-tables-and-immutable-ledgers.md](TS7-004-land-the-link-layer-tables-and-immutable-ledgers.md) |
+| TS7-005 | Project The Catalog Transactionally With Its Performance Fixture | AFK | ready-for-agent | Todo | TS7-004 | [TS7-005-project-the-catalog-transactionally-with-its-performance-fixture.md](TS7-005-project-the-catalog-transactionally-with-its-performance-fixture.md) |
+| TS7-006 | Read The Global Catalog Signal First | AFK | ready-for-agent | Todo | TS7-005 | [TS7-006-read-the-global-catalog-signal-first.md](TS7-006-read-the-global-catalog-signal-first.md) |
+| TS7-007 | Associate A Generic Signal With An Object Atomically | AFK | ready-for-agent | Todo | TS7-006 | [TS7-007-associate-a-generic-signal-with-an-object-atomically.md](TS7-007-associate-a-generic-signal-with-an-object-atomically.md) |
+| TS7-008 | Pin A Binding To An Exact Revision And Detect Staleness | AFK | ready-for-agent | Todo | TS7-007 | [TS7-008-pin-a-binding-to-an-exact-revision-and-detect-staleness.md](TS7-008-pin-a-binding-to-an-exact-revision-and-detect-staleness.md) |
+| TS7-009 | Materialize A Run From Its Bindings | AFK | ready-for-agent | Todo | TS7-008 | [TS7-009-materialize-a-run-from-its-bindings.md](TS7-009-materialize-a-run-from-its-bindings.md) |
+| TS7-010 | Create An Object Specific Series And Ingest It By API | AFK | ready-for-agent | Todo | TS7-006 | [TS7-010-create-an-object-specific-series-and-ingest-it-by-api.md](TS7-010-create-an-object-specific-series-and-ingest-it-by-api.md) |
+| TS7-011 | Ingest An Object Specific Revision By CSV And XLSX | AFK | ready-for-agent | Todo | TS7-010 | [TS7-011-ingest-an-object-specific-revision-by-csv-and-xlsx.md](TS7-011-ingest-an-object-specific-revision-by-csv-and-xlsx.md) |
+| TS7-012 | Bind, Read And Archive An Object Specific Series | AFK | ready-for-agent | Todo | TS7-008, TS7-010 | [TS7-012-bind-read-and-archive-an-object-specific-series.md](TS7-012-bind-read-and-archive-an-object-specific-series.md) |
+| TS7-013 | Update A Shared Generic Source From The Object Or Derive A Local Copy | AFK | ready-for-agent | Todo | TS7-011, TS7-012 | [TS7-013-update-a-shared-generic-source-or-derive-a-local-copy.md](TS7-013-update-a-shared-generic-source-or-derive-a-local-copy.md) |
+| TS7-014 | Promote And Demote A Set Scope Administratively | AFK | ready-for-agent | Todo | TS7-007 | [TS7-014-promote-and-demote-a-set-scope-administratively.md](TS7-014-promote-and-demote-a-set-scope-administratively.md) |
+| TS7-015 | Take The C0 Inventory, Manifest And Proven Restore | AFK | ready-for-agent | Todo | None | [TS7-015-take-the-c0-inventory-manifest-and-proven-restore.md](TS7-015-take-the-c0-inventory-manifest-and-proven-restore.md) |
+| TS7-016 | Backfill Catalogs, Objects And Canonical Content (C2-C3) | AFK | ready-for-agent | Todo | TS7-005, TS7-015 | [TS7-016-backfill-catalogs-objects-and-canonical-content.md](TS7-016-backfill-catalogs-objects-and-canonical-content.md) |
+| TS7-017 | Resolve Associations And Bindings With Typed Anomalies (C4) | AFK | ready-for-agent | Todo | TS7-008, TS7-016 | [TS7-017-resolve-associations-and-bindings-with-typed-anomalies.md](TS7-017-resolve-associations-and-bindings-with-typed-anomalies.md) |
+| TS7-018 | Compare Canonical Reads In Shadow And Prove Convergence (C5) | AFK | ready-for-agent | Todo | TS7-017 | [TS7-018-compare-canonical-reads-in-shadow-and-prove-convergence.md](TS7-018-compare-canonical-reads-in-shadow-and-prove-convergence.md) |
+| TS7-019 | Build The Layered Read Catalog For Verification Accounts | AFK | ready-for-agent | Todo | TS7-006 | [TS7-019-build-the-layered-read-catalog-for-verification-accounts.md](TS7-019-build-the-layered-read-catalog-for-verification-accounts.md) |
+| TS7-020 | Build The Contextual Object Summary | AFK | ready-for-agent | Todo | TS7-012, TS7-019 | [TS7-020-build-the-contextual-object-summary.md](TS7-020-build-the-contextual-object-summary.md) |
+| TS7-021 | Build The Single Protected Mutation Journey | AFK | ready-for-agent | Todo | TS7-013, TS7-014, TS7-020 | [TS7-021-build-the-single-protected-mutation-journey.md](TS7-021-build-the-single-protected-mutation-journey.md) |
+| TS7-022 | Cut Over To The Single Canonical Writer (C6) | AFK | ready-for-agent | Todo | TS7-009, TS7-018, TS7-021 | [TS7-022-cut-over-to-the-single-canonical-writer.md](TS7-022-cut-over-to-the-single-canonical-writer.md) |
+| TS7-023 | Prove TS-7 End To End | AFK | ready-for-agent | Todo | TS7-022 | [TS7-023-prove-ts7-end-to-end.md](TS7-023-prove-ts7-end-to-end.md) |
+
+## Initial Frontier
+
+Two issues can start immediately and in parallel:
+
+- [Seed The Persistent Classification Catalogs And Compatibility Matrix](TS7-001-seed-the-persistent-classification-catalogs-and-compatibility-matrix.md)
+  opens the expansion chain.
+- [Take The C0 Inventory, Manifest And Proven Restore](TS7-015-take-the-c0-inventory-manifest-and-proven-restore.md)
+  is deliberately unblocked: C0 runs against the current source before any DDL,
+  and it carries its own additive migration control tables.
+
+Every other issue has at least one open blocker.
+
+## Dependency Waves
+
+1. TS7-001 and TS7-015.
+2. TS7-002.
+3. TS7-003.
+4. TS7-004.
+5. TS7-005.
+6. TS7-006 and TS7-016.
+7. TS7-007, TS7-010 and TS7-019.
+8. TS7-008, TS7-011 and TS7-014.
+9. TS7-009, TS7-012 and TS7-017.
+10. TS7-013, TS7-018 and TS7-020.
+11. TS7-021.
+12. TS7-022.
+13. TS7-023.
+
+Issues in the same wave are independent according to the accepted dependency
+graph and may be implemented in parallel.
+
+## Story Coverage
+
+Every observable story of chapter 11.4 lands in at least one issue.
+
+| Stories | Issues |
+| --- | --- |
+| H-01 to H-03 catalog search, detail and preview | TS7-006, TS7-019 |
+| H-04, H-05 associations and blocked candidates | TS7-007, TS7-021 |
+| H-06, H-07 bindings, pinning and staleness | TS7-008, TS7-009, TS7-021 |
+| H-08 to H-11 object-specific series | TS7-010, TS7-011, TS7-012, TS7-020 |
+| H-12 to H-14 shared source from the object | TS7-013, TS7-021 |
+| H-15 promotion and demotion | TS7-014 |
+| H-16 external is refused everywhere | TS7-006, TS7-022 |
+| H-17, H-18 migrator convergence and no legacy writes | TS7-015 to TS7-018, TS7-022 |
+
+## Regression Guard
+
+No existing suite is edited to make it pass. If a contract change turns out to
+be unavoidable, the cut stops, the change is documented, and an adapter test
+preserving the previous shape is added. A test edited without that record
+invalidates the acceptance (chapter 11.6).
+
+Every slice preserves the TS-2 to TS-6 contracts, the immutable scenario-version
+and run history, hydraulic behaviour, the publication artifact allowlists and
+both supported database engines where persistence changes.
+
+Backend changes run the relevant focused tests and the full Python suite.
+Frontend changes run Vitest, TypeScript, ESLint, API schema checks and the
+production build. Julia tests are required when a slice changes generated case
+payloads, artifact contracts or optimizer behaviour. TS7-023 closes the effort
+only after the full acceptance, performance and browser narratives pass.
+
+## Progress Log
+
+| Date | Issue | Status change | Notes |
+| --- | --- | --- | --- |
+| 2026-08-30 | All | Created | Twenty-three AFK issues published from the accepted TS-7 specification after the Wayfinder map closed. Sequenced as expand/backfill/verify/cutover because chapter 11.1 forbids exposing a new surface before the canonical writer exists. TS7-001 and TS7-015 are the initial frontier. |
