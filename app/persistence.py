@@ -81,6 +81,13 @@ from app.time_series_canonical import (
     normalize_canonical_periods,
     normalize_canonical_signals,
 )
+from app.time_series_links import (
+    link_history_guard_script,
+    link_layer_constraint_upgrade_script,
+    link_layer_guard_script,
+    link_layer_schema_statements,
+    link_layer_table_names,
+)
 from app.time_series_classification import (
     CLASSIFICATION_CONTRACT_VERSION,
     CLASSIFICATION_SEED_TABLES,
@@ -1297,6 +1304,10 @@ class AnalystStore:
         self._ensure_linkable_object_register()
         self._ensure_canonical_content_model()
         self._ensure_canonical_owner_object_reference()
+        self._ensure_column(
+            "case_input_variants", "bindings_revision", "INTEGER NOT NULL DEFAULT 0"
+        )
+        self._ensure_link_layer()
         self._ensure_external_user_role_constraint()
         self._ensure_column(
             "project_client_access", "portal_view", "INTEGER NOT NULL DEFAULT 1"
@@ -1620,6 +1631,17 @@ class AnalystStore:
         if script is not None:
             self.connection.executescript(script)
 
+    def _ensure_link_layer(self) -> None:
+        for statement in link_layer_schema_statements(self.database_backend):
+            self.connection.execute(statement)
+        constraint_upgrade = link_layer_constraint_upgrade_script(
+            self.database_backend
+        )
+        if constraint_upgrade is not None:
+            self.connection.executescript(constraint_upgrade)
+        self.connection.executescript(link_layer_guard_script(self.database_backend))
+        self.connection.executescript(link_history_guard_script(self.database_backend))
+
     def canonical_table_names(self) -> dict[str, str]:
         """Physical name of every canonical table on the configured engine."""
 
@@ -1629,6 +1651,11 @@ class AnalystStore:
         """Physical name of every register table on the configured engine."""
 
         return linkable_object_table_names(self.database_backend)
+
+    def link_layer_table_names(self) -> dict[str, str]:
+        """Physical name of every TS7-004 table on the configured engine."""
+
+        return link_layer_table_names(self.database_backend)
 
     # -- Closed register of linkable objects (TS7-003) ----------------------
     #
