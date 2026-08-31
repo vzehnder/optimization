@@ -47,6 +47,8 @@ ID_TABLES = {
     "hydraulic_time_series_set_migrations",
     "hydraulic_time_series_sets",
     "hydraulic_units",
+    "measurement_dimensions",
+    "measurement_units",
     "operator_console_series_copies",
     "operator_consoles",
     "optimization_cases",
@@ -64,6 +66,10 @@ ID_TABLES = {
     "scenario_versions",
     "scenarios",
     "time_series_periods",
+    "time_series_binding_roles",
+    "time_series_data_classes",
+    "time_series_role_compatibilities",
+    "time_series_semantic_types",
     "time_series_set_extractions",
     "time_series_set_revisions",
     "time_series_sets",
@@ -72,6 +78,7 @@ ID_TABLES = {
     "time_series_values",
     "users",
     "validation_dependencies",
+    "linkable_object_types",
 }
 
 

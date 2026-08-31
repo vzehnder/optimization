@@ -92,7 +92,6 @@ from app.time_series_catalog import (
     CatalogValueEdit,
     TimeSeriesCatalogError,
     prepare_time_series_catalog_import,
-    signal_catalog_entries,
 )
 from app.transformations import TransformationError
 from app.runner import JuliaRunExecutor, LocalRunQueue
@@ -138,6 +137,17 @@ class UserCreateRequest(BaseModel):
     password: str = Field(min_length=1)
     role: Literal["admin", "analyst", "external"]
     display_name: str = ""
+
+
+class CustomSemanticTypeCreateRequest(BaseModel):
+    semantic_key: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    dimension_key: str = Field(min_length=1)
+    canonical_unit_key: str = Field(min_length=1)
+    value_kind: str = Field(min_length=1)
+    default_aggregation: str = Field(min_length=1)
+    validation_rules: dict[str, Any]
 
 
 class BootstrapAdminRequest(BaseModel):
@@ -1433,9 +1443,33 @@ def create_app(
 
     @app.get("/api/time-series/signal-catalog")
     async def get_signal_catalog():
-        """Expose the canonical signal registry to internal surfaces only."""
+        """Expose the DB-backed legacy signal adapter to internal surfaces."""
 
-        return {"signals": signal_catalog_entries()}
+        return {"signals": analyst_store.signal_catalog_entries()}
+
+    @app.post("/api/admin/time-series/semantic-types", status_code=201)
+    async def admin_create_custom_time_series_semantic_type(
+        request: Request,
+        payload: CustomSemanticTypeCreateRequest,
+    ):
+        require_admin_user(request)
+        try:
+            semantic_type = analyst_store.create_custom_time_series_semantic_type(
+                semantic_key=payload.semantic_key,
+                display_name=payload.display_name,
+                description=payload.description,
+                dimension_key=payload.dimension_key,
+                canonical_unit_key=payload.canonical_unit_key,
+                value_kind=payload.value_kind,
+                default_aggregation=payload.default_aggregation,
+                validation_rules=payload.validation_rules,
+                created_by=(request.state.current_user or {}).get(
+                    "email", "internal_admin"
+                ),
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return {"semantic_type": semantic_type}
 
     @app.get("/api/projects/{project_id}/portal-configuration")
     async def get_portal_configuration(project_id: int):

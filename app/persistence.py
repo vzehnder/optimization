@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import sqlite3
 import threading
 import uuid
@@ -36,6 +37,7 @@ from app.schedules import (
     resolve_schedule_range,
 )
 from app.time_series_catalog import (
+    TIME_SERIES_DATA_KINDS,
     TIME_SERIES_SIGNAL_CATALOG,
     CatalogPeriod,
     CatalogSignal,
@@ -48,6 +50,21 @@ from app.time_series_catalog import (
     normalize_optional_text,
     validate_catalog_value_edits,
     validate_program_metadata,
+)
+from app.time_series_classification import (
+    CLASSIFICATION_CONTRACT_VERSION,
+    CLASSIFICATION_SEED_TABLES,
+    ClassificationContractDriftError,
+    LINKABLE_OBJECT_TYPE_SEED,
+    MEASUREMENT_DIMENSION_SEED,
+    MEASUREMENT_UNIT_SEED,
+    SIGNAL_SEMANTIC_TYPE_KEYS,
+    TIME_SERIES_BINDING_ROLE_SEED,
+    TIME_SERIES_DATA_CLASS_SEED,
+    TIME_SERIES_ROLE_COMPATIBILITY_SEED,
+    TIME_SERIES_SEMANTIC_TYPE_SEED,
+    compatibility_error,
+    validate_signal_registry_contract,
 )
 from app.transformations import (
     TransformationDefinition,
@@ -186,7 +203,11 @@ class AnalystStore:
         self.database_url = database_url or database_url_from_env()
         self._lock = threading.RLock()
         self.database_backend, self.database_path, self.connection = connect_database(self.database_url)
-        self._initialize_schema()
+        try:
+            self._initialize_schema()
+        except Exception:
+            self.close()
+            raise
 
     def close(self) -> None:
         connection = getattr(self, "connection", None)
@@ -617,6 +638,120 @@ class AnalystStore:
                 FOREIGN KEY (scenario_id) REFERENCES scenarios(id) ON DELETE CASCADE,
                 FOREIGN KEY (source_version_id) REFERENCES scenario_versions(id) ON DELETE SET NULL
             );
+
+            CREATE TABLE IF NOT EXISTS measurement_dimensions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                dimension_key TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL,
+                value_kind TEXT NOT NULL DEFAULT 'numeric',
+                status TEXT NOT NULL,
+                CHECK (status IN ('active', 'archived'))
+            );
+
+            CREATE TABLE IF NOT EXISTS measurement_units (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                unit_key TEXT NOT NULL UNIQUE,
+                symbol TEXT NOT NULL,
+                dimension_id INTEGER NOT NULL,
+                physical_dimension TEXT,
+                status TEXT NOT NULL,
+                FOREIGN KEY (dimension_id) REFERENCES measurement_dimensions(id),
+                UNIQUE (id, dimension_id),
+                CHECK (status IN ('active', 'archived'))
+            );
+
+            CREATE TABLE IF NOT EXISTS time_series_data_classes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                data_class_key TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL,
+                status TEXT NOT NULL,
+                CHECK (status IN ('active', 'archived'))
+            );
+
+            CREATE TABLE IF NOT EXISTS time_series_semantic_types (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                semantic_key TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                dimension_id INTEGER NOT NULL,
+                canonical_unit_id INTEGER NOT NULL,
+                value_kind TEXT NOT NULL DEFAULT 'numeric',
+                default_aggregation TEXT NOT NULL,
+                validation_rules_json TEXT NOT NULL DEFAULT '{}',
+                is_system INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (dimension_id) REFERENCES measurement_dimensions(id),
+                FOREIGN KEY (canonical_unit_id, dimension_id)
+                    REFERENCES measurement_units(id, dimension_id),
+                CHECK (is_system IN (0, 1)),
+                CHECK (status IN ('active', 'archived'))
+            );
+
+            CREATE TABLE IF NOT EXISTS time_series_binding_roles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                role_key TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL,
+                dimension_id INTEGER NOT NULL,
+                canonical_unit_id INTEGER NOT NULL,
+                association_allowed INTEGER NOT NULL DEFAULT 1,
+                execution_allowed INTEGER NOT NULL DEFAULT 1,
+                execution_contract_key TEXT,
+                is_system INTEGER NOT NULL DEFAULT 1,
+                status TEXT NOT NULL,
+                FOREIGN KEY (dimension_id) REFERENCES measurement_dimensions(id),
+                FOREIGN KEY (canonical_unit_id, dimension_id)
+                    REFERENCES measurement_units(id, dimension_id),
+                CHECK (association_allowed IN (0, 1)),
+                CHECK (execution_allowed IN (0, 1)),
+                CHECK (is_system IN (0, 1)),
+                CHECK (status IN ('active', 'archived'))
+            );
+
+            CREATE TABLE IF NOT EXISTS linkable_object_types (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                object_type_key TEXT NOT NULL UNIQUE,
+                object_kind TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                is_system INTEGER NOT NULL DEFAULT 1,
+                status TEXT NOT NULL,
+                CHECK (is_system IN (0, 1)),
+                CHECK (status IN ('active', 'archived'))
+            );
+
+            CREATE TABLE IF NOT EXISTS time_series_role_compatibilities (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                semantic_type_id INTEGER NOT NULL,
+                binding_role_id INTEGER NOT NULL,
+                object_type_id INTEGER NOT NULL,
+                association_allowed INTEGER NOT NULL DEFAULT 1,
+                execution_allowed INTEGER NOT NULL DEFAULT 0,
+                rule_version INTEGER NOT NULL DEFAULT 1,
+                status TEXT NOT NULL,
+                supersedes_rule_id INTEGER,
+                created_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                archived_at TEXT,
+                archived_by TEXT,
+                FOREIGN KEY (semantic_type_id) REFERENCES time_series_semantic_types(id),
+                FOREIGN KEY (binding_role_id) REFERENCES time_series_binding_roles(id),
+                FOREIGN KEY (object_type_id) REFERENCES linkable_object_types(id),
+                FOREIGN KEY (supersedes_rule_id)
+                    REFERENCES time_series_role_compatibilities(id),
+                CHECK (association_allowed IN (0, 1)),
+                CHECK (execution_allowed IN (0, 1)),
+                CHECK (rule_version > 0),
+                CHECK (status IN ('active', 'archived'))
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS one_active_compatibility_rule
+                ON time_series_role_compatibilities (
+                    semantic_type_id, binding_role_id, object_type_id
+                )
+                WHERE status = 'active';
 
             CREATE TABLE IF NOT EXISTS time_series_sources (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1116,6 +1251,9 @@ class AnalystStore:
         if self.database_backend == "postgresql":
             schema = postgres_schema_from_sqlite(schema)
         self.connection.executescript(schema)
+        self._ensure_time_series_classification_immutability_guards()
+        with self._database_transaction():
+            self._seed_time_series_classification_catalog()
         self._ensure_external_user_role_constraint()
         self._ensure_column(
             "project_client_access", "portal_view", "INTEGER NOT NULL DEFAULT 1"
@@ -1172,6 +1310,687 @@ class AnalystStore:
             PORTAL_CONFIGURATION_MIGRATION,
             self.migrate_dashboard_templates_to_portal_configurations,
         )
+
+    def _ensure_time_series_classification_immutability_guards(self) -> None:
+        immutable_fields_by_table = {
+            "measurement_dimensions": ("id", "dimension_key", "value_kind"),
+            "measurement_units": (
+                "id",
+                "unit_key",
+                "symbol",
+                "dimension_id",
+                "physical_dimension",
+            ),
+            "time_series_data_classes": ("id", "data_class_key"),
+            "time_series_semantic_types": (
+                "id",
+                "semantic_key",
+                "dimension_id",
+                "canonical_unit_id",
+                "value_kind",
+                "default_aggregation",
+                "validation_rules_json",
+                "is_system",
+            ),
+            "time_series_binding_roles": (
+                "id",
+                "role_key",
+                "dimension_id",
+                "canonical_unit_id",
+                "association_allowed",
+                "execution_allowed",
+                "execution_contract_key",
+                "is_system",
+            ),
+            "linkable_object_types": (
+                "id",
+                "object_type_key",
+                "object_kind",
+                "is_system",
+            ),
+            "time_series_role_compatibilities": (
+                "id",
+                "semantic_type_id",
+                "binding_role_id",
+                "object_type_id",
+                "association_allowed",
+                "execution_allowed",
+                "rule_version",
+                "supersedes_rule_id",
+                "created_at",
+                "created_by",
+            ),
+        }
+        if self.database_backend == "postgresql":
+            statements = [
+                """
+                CREATE OR REPLACE FUNCTION reject_classification_contract_delete()
+                RETURNS trigger AS $$
+                BEGIN
+                    RAISE EXCEPTION 'TS_CLASSIFICATION_IMMUTABLE';
+                END;
+                $$ LANGUAGE plpgsql;
+                """
+            ]
+            for index, (table_name, fields) in enumerate(
+                immutable_fields_by_table.items(), start=1
+            ):
+                condition = " OR ".join(
+                    f"OLD.{field} IS DISTINCT FROM NEW.{field}" for field in fields
+                )
+                statements.append(
+                    f"""
+                    CREATE OR REPLACE FUNCTION reject_classification_contract_update_{index}()
+                    RETURNS trigger AS $$
+                    BEGIN
+                        IF {condition} THEN
+                            RAISE EXCEPTION 'TS_CLASSIFICATION_IMMUTABLE';
+                        END IF;
+                        RETURN NEW;
+                    END;
+                    $$ LANGUAGE plpgsql;
+
+                    DROP TRIGGER IF EXISTS ts_classification_contract_update_{index}
+                        ON {table_name};
+                    CREATE TRIGGER ts_classification_contract_update_{index}
+                    BEFORE UPDATE ON {table_name}
+                    FOR EACH ROW EXECUTE FUNCTION
+                        reject_classification_contract_update_{index}();
+
+                    DROP TRIGGER IF EXISTS ts_classification_contract_delete_{index}
+                        ON {table_name};
+                    CREATE TRIGGER ts_classification_contract_delete_{index}
+                    BEFORE DELETE ON {table_name}
+                    FOR EACH ROW EXECUTE FUNCTION reject_classification_contract_delete();
+                    """
+                )
+            self.connection.executescript("\n".join(statements))
+            return
+
+        statements = [
+            "DROP TRIGGER IF EXISTS time_series_semantic_types_immutable_contract;"
+        ]
+        for index, (table_name, fields) in enumerate(
+            immutable_fields_by_table.items(), start=1
+        ):
+            condition = " OR ".join(
+                f"OLD.{field} IS NOT NEW.{field}" for field in fields
+            )
+            statements.append(
+                f"""
+                DROP TRIGGER IF EXISTS ts_classification_contract_update_{index};
+                CREATE TRIGGER ts_classification_contract_update_{index}
+                BEFORE UPDATE ON {table_name}
+                FOR EACH ROW
+                WHEN {condition}
+                BEGIN
+                    SELECT RAISE(ABORT, 'TS_CLASSIFICATION_IMMUTABLE');
+                END;
+
+                DROP TRIGGER IF EXISTS ts_classification_contract_delete_{index};
+                CREATE TRIGGER ts_classification_contract_delete_{index}
+                BEFORE DELETE ON {table_name}
+                FOR EACH ROW
+                BEGIN
+                    SELECT RAISE(ABORT, 'TS_CLASSIFICATION_IMMUTABLE');
+                END;
+                """
+            )
+        self.connection.executescript("\n".join(statements))
+
+    def _seed_time_series_classification_catalog(self) -> None:
+        validate_signal_registry_contract(TIME_SERIES_SIGNAL_CATALOG)
+        expected_data_classes = {
+            row["data_class_key"] for row in TIME_SERIES_DATA_CLASS_SEED
+        }
+        if set(TIME_SERIES_DATA_KINDS) != expected_data_classes:
+            raise ClassificationContractDriftError(
+                context={
+                    "catalog": "TIME_SERIES_DATA_KINDS",
+                    "key": "*",
+                    "field": "keys",
+                    "expected": sorted(expected_data_classes),
+                    "actual": sorted(TIME_SERIES_DATA_KINDS),
+                }
+            )
+        self._assert_persisted_time_series_classification_contract()
+        self.connection.executemany(
+            """
+            INSERT INTO measurement_dimensions (
+                id, dimension_key, display_name, value_kind, status
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (dimension_key) DO NOTHING
+            """,
+            [
+                (
+                    row["id"],
+                    row["dimension_key"],
+                    row["display_name"],
+                    row["value_kind"],
+                    row["status"],
+                )
+                for row in MEASUREMENT_DIMENSION_SEED
+            ],
+        )
+        self.connection.executemany(
+            """
+            INSERT INTO measurement_units (
+                id, unit_key, symbol, dimension_id, physical_dimension, status
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT (unit_key) DO NOTHING
+            """,
+            [tuple(row.values()) for row in MEASUREMENT_UNIT_SEED],
+        )
+        self.connection.executemany(
+            """
+            INSERT INTO time_series_data_classes (
+                id, data_class_key, display_name, status
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT (data_class_key) DO NOTHING
+            """,
+            [tuple(row.values()) for row in TIME_SERIES_DATA_CLASS_SEED],
+        )
+        self.connection.executemany(
+            """
+            INSERT INTO time_series_semantic_types (
+                id, semantic_key, display_name, description, dimension_id,
+                canonical_unit_id, value_kind, default_aggregation,
+                validation_rules_json, is_system, status, created_at, updated_at,
+                created_by, updated_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (semantic_key) DO NOTHING
+            """,
+            [tuple(row.values()) for row in TIME_SERIES_SEMANTIC_TYPE_SEED],
+        )
+        self.connection.executemany(
+            """
+            INSERT INTO time_series_binding_roles (
+                id, role_key, display_name, dimension_id, canonical_unit_id,
+                association_allowed, execution_allowed, execution_contract_key,
+                is_system, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (role_key) DO NOTHING
+            """,
+            [tuple(row.values()) for row in TIME_SERIES_BINDING_ROLE_SEED],
+        )
+        self.connection.executemany(
+            """
+            INSERT INTO linkable_object_types (
+                id, object_type_key, object_kind, display_name, is_system, status
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT (object_type_key) DO NOTHING
+            """,
+            [tuple(row.values()) for row in LINKABLE_OBJECT_TYPE_SEED],
+        )
+        self.connection.executemany(
+            """
+            INSERT INTO time_series_role_compatibilities (
+                id, semantic_type_id, binding_role_id, object_type_id,
+                association_allowed, execution_allowed, rule_version, status,
+                supersedes_rule_id, created_at, created_by, archived_at, archived_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT DO NOTHING
+            """,
+            [tuple(row.values()) for row in TIME_SERIES_ROLE_COMPATIBILITY_SEED],
+        )
+
+    def _assert_persisted_time_series_classification_contract(self) -> None:
+        for table_name, key_column, seed_rows, immutable_fields in CLASSIFICATION_SEED_TABLES:
+            for expected in seed_rows:
+                key = expected[key_column]
+                existing = self.connection.execute(
+                    f"SELECT * FROM {table_name} WHERE {key_column} = ?",
+                    (key,),
+                ).fetchone()
+                if existing is None:
+                    continue
+                for field in immutable_fields:
+                    actual_value = existing[field]
+                    expected_value = expected[field]
+                    if actual_value != expected_value:
+                        raise ClassificationContractDriftError(
+                            context={
+                                "catalog": table_name,
+                                "key": key,
+                                "field": field,
+                                "expected": expected_value,
+                                "actual": actual_value,
+                            }
+                        )
+
+    def _database_transaction(self):
+        if self.database_backend == "postgresql":
+            return self.connection.transaction()
+        return self.connection
+
+    def seed_time_series_classification_catalog(self) -> dict[str, Any]:
+        with self._lock:
+            before = self._time_series_classification_row_count()
+            with self._database_transaction():
+                self._seed_time_series_classification_catalog()
+            inserted_rows = self._time_series_classification_row_count() - before
+        return {
+            "contract_version": CLASSIFICATION_CONTRACT_VERSION,
+            "status": "converged" if inserted_rows == 0 else "seeded",
+            "inserted_rows": inserted_rows,
+        }
+
+    def _time_series_classification_row_count(self) -> int:
+        tables = (
+            "measurement_dimensions",
+            "measurement_units",
+            "time_series_data_classes",
+            "time_series_semantic_types",
+            "time_series_binding_roles",
+            "linkable_object_types",
+            "time_series_role_compatibilities",
+        )
+        return sum(
+            int(
+                self.connection.execute(
+                    f"SELECT COUNT(*) AS row_count FROM {table_name}"
+                ).fetchone()["row_count"]
+            )
+            for table_name in tables
+        )
+
+    def get_time_series_classification_catalog(self) -> dict[str, Any]:
+        tables_and_keys = (
+            ("measurement_dimensions", "dimension_key"),
+            ("measurement_units", "unit_key"),
+            ("time_series_data_classes", "data_class_key"),
+            ("time_series_semantic_types", "semantic_key"),
+            ("time_series_binding_roles", "role_key"),
+            ("linkable_object_types", "object_type_key"),
+        )
+        catalog = {
+            table_name: [
+                dict(row)
+                for row in self.connection.execute(
+                    f"SELECT * FROM {table_name} ORDER BY {key_column}"
+                ).fetchall()
+            ]
+            for table_name, key_column in tables_and_keys
+        }
+        catalog["time_series_role_compatibilities"] = [
+            dict(row)
+            for row in self.connection.execute(
+                """
+                SELECT *
+                FROM time_series_role_compatibilities
+                ORDER BY id
+                """
+            ).fetchall()
+        ]
+        return catalog
+
+    def signal_catalog_entries(self) -> list[dict[str, Any]]:
+        entries = []
+        for signal_key, definition in TIME_SERIES_SIGNAL_CATALOG.items():
+            semantic_key = SIGNAL_SEMANTIC_TYPE_KEYS.get(signal_key)
+            if semantic_key is None:
+                # Compatibility adapter only: an unknown legacy declaration is
+                # visible to its old callers but never creates canonical rows.
+                entries.append(
+                    {
+                        "signal_key": definition.signal_key,
+                        "unit": definition.unit,
+                        "entity_type": definition.entity_type,
+                        "nonnegative": definition.nonnegative,
+                    }
+                )
+                continue
+            classification = self.connection.execute(
+                """
+                SELECT units.symbol, semantic_types.validation_rules_json
+                FROM time_series_semantic_types AS semantic_types
+                JOIN measurement_units AS units
+                  ON units.id = semantic_types.canonical_unit_id
+                WHERE semantic_types.semantic_key = ?
+                  AND semantic_types.status = 'active'
+                """,
+                (semantic_key,),
+            ).fetchone()
+            if classification is None:
+                raise ClassificationContractDriftError(
+                    context={
+                        "catalog": "time_series_semantic_types",
+                        "key": semantic_key,
+                        "field": "status",
+                        "expected": "active",
+                        "actual": None,
+                    }
+                )
+            object_types = self.connection.execute(
+                """
+                SELECT DISTINCT object_types.object_type_key
+                FROM time_series_role_compatibilities AS compatibility
+                JOIN time_series_semantic_types AS semantic_types
+                  ON semantic_types.id = compatibility.semantic_type_id
+                JOIN linkable_object_types AS object_types
+                  ON object_types.id = compatibility.object_type_id
+                WHERE semantic_types.semantic_key = ?
+                  AND compatibility.status = 'active'
+                ORDER BY object_types.object_type_key
+                """,
+                (semantic_key,),
+            ).fetchall()
+            entity_type = (
+                None
+                if not object_types
+                or object_types[0]["object_type_key"] == "global:system"
+                else object_types[0]["object_type_key"]
+            )
+            validation_rules = json.loads(classification["validation_rules_json"])
+            entries.append(
+                {
+                    "signal_key": signal_key,
+                    "unit": classification["symbol"],
+                    "entity_type": entity_type,
+                    "nonnegative": validation_rules.get("minimum") == 0,
+                }
+            )
+        return entries
+
+    def create_custom_time_series_semantic_type(
+        self,
+        *,
+        semantic_key: str,
+        display_name: str,
+        description: str,
+        dimension_key: str,
+        canonical_unit_key: str,
+        value_kind: str,
+        default_aggregation: str,
+        validation_rules: dict[str, Any],
+        created_by: str,
+    ) -> dict[str, Any]:
+        semantic_key = str(semantic_key).strip()
+        display_name = str(display_name).strip()
+        description = str(description).strip()
+        dimension_key = str(dimension_key).strip()
+        canonical_unit_key = str(canonical_unit_key).strip()
+        value_kind = str(value_kind).strip()
+        default_aggregation = str(default_aggregation).strip()
+        created_by = str(created_by).strip()
+        required_text = {
+            "semantic_key": semantic_key,
+            "display_name": display_name,
+            "description": description,
+            "dimension_key": dimension_key,
+            "canonical_unit_key": canonical_unit_key,
+            "value_kind": value_kind,
+            "default_aggregation": default_aggregation,
+            "created_by": created_by,
+        }
+        missing = [key for key, value in required_text.items() if not value]
+        if missing:
+            raise ValueError(
+                "custom semantic type requires " + ", ".join(sorted(missing))
+            )
+        if not re.fullmatch(r"[a-z][a-z0-9_]*", semantic_key):
+            raise ValueError(
+                "semantic_key must start with a lowercase letter and contain only "
+                "lowercase letters, numbers and underscores"
+            )
+        if not isinstance(validation_rules, dict):
+            raise ValueError("validation_rules must be an object")
+        forbidden_rule_keys = {"code", "expression", "formula", "script"}
+        if any(str(key).lower() in forbidden_rule_keys for key in validation_rules):
+            raise ValueError("validation_rules cannot contain executable code or formulas")
+        try:
+            validation_rules_json = json.dumps(
+                validation_rules, sort_keys=True, separators=(",", ":")
+            )
+        except (TypeError, ValueError) as error:
+            raise ValueError("validation_rules must be valid JSON") from error
+
+        dimension = self.connection.execute(
+            """
+            SELECT id
+            FROM measurement_dimensions
+            WHERE dimension_key = ? AND status = 'active'
+            """,
+            (dimension_key,),
+        ).fetchone()
+        if dimension is None:
+            raise ValueError(f"unknown active dimension_key {dimension_key!r}")
+        unit = self.connection.execute(
+            """
+            SELECT id, dimension_id
+            FROM measurement_units
+            WHERE unit_key = ? AND status = 'active'
+            """,
+            (canonical_unit_key,),
+        ).fetchone()
+        if unit is None:
+            raise ValueError(f"unknown active canonical_unit_key {canonical_unit_key!r}")
+        if int(unit["dimension_id"]) != int(dimension["id"]):
+            raise ValueError("canonical unit must belong to the semantic type dimension")
+        existing = self.connection.execute(
+            "SELECT 1 FROM time_series_semantic_types WHERE semantic_key = ?",
+            (semantic_key,),
+        ).fetchone()
+        if existing is not None:
+            raise ValueError(f"semantic_key {semantic_key!r} already exists")
+
+        timestamp = utc_now_iso()
+        with self._lock:
+            with self._database_transaction():
+                cursor = self.connection.execute(
+                    """
+                    INSERT INTO time_series_semantic_types (
+                        semantic_key, display_name, description, dimension_id,
+                        canonical_unit_id, value_kind, default_aggregation,
+                        validation_rules_json, is_system, status, created_at,
+                        updated_at, created_by, updated_by
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'active', ?, ?, ?, ?)
+                    """,
+                    (
+                        semantic_key,
+                        display_name,
+                        description,
+                        dimension["id"],
+                        unit["id"],
+                        value_kind,
+                        default_aggregation,
+                        validation_rules_json,
+                        timestamp,
+                        timestamp,
+                        created_by,
+                        created_by,
+                    ),
+                )
+                semantic_type_id = int(cursor.lastrowid)
+        return self.get_time_series_semantic_type(semantic_type_id)
+
+    def get_time_series_semantic_type(self, semantic_type_id: int) -> dict[str, Any]:
+        row = self.connection.execute(
+            """
+            SELECT
+                semantic_types.*,
+                dimensions.dimension_key,
+                units.unit_key AS canonical_unit_key
+            FROM time_series_semantic_types AS semantic_types
+            JOIN measurement_dimensions AS dimensions
+              ON dimensions.id = semantic_types.dimension_id
+            JOIN measurement_units AS units
+              ON units.id = semantic_types.canonical_unit_id
+            WHERE semantic_types.id = ?
+            """,
+            (semantic_type_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"time-series semantic type {semantic_type_id} was not found")
+        result = dict(row)
+        result["is_system"] = bool(result["is_system"])
+        result["validation_rules"] = json.loads(result.pop("validation_rules_json"))
+        return result
+
+    def evaluate_time_series_compatibility(
+        self,
+        *,
+        semantic_type_key: str,
+        binding_role_key: str,
+        object_type_key: str,
+        unit_key: str,
+        usage: str,
+    ) -> dict[str, Any]:
+        if usage not in {"association", "execution"}:
+            raise ValueError("usage must be 'association' or 'execution'")
+        semantic_type = self.connection.execute(
+            """
+            SELECT
+                semantic_types.*,
+                dimensions.dimension_key,
+                units.unit_key
+            FROM time_series_semantic_types AS semantic_types
+            JOIN measurement_dimensions AS dimensions
+              ON dimensions.id = semantic_types.dimension_id
+            JOIN measurement_units AS units
+              ON units.id = semantic_types.canonical_unit_id
+            WHERE semantic_types.semantic_key = ?
+            """,
+            (semantic_type_key,),
+        ).fetchone()
+        role = self.connection.execute(
+            """
+            SELECT
+                roles.*,
+                dimensions.dimension_key,
+                units.unit_key
+            FROM time_series_binding_roles AS roles
+            JOIN measurement_dimensions AS dimensions
+              ON dimensions.id = roles.dimension_id
+            JOIN measurement_units AS units
+              ON units.id = roles.canonical_unit_id
+            WHERE roles.role_key = ?
+            """,
+            (binding_role_key,),
+        ).fetchone()
+        object_type = self.connection.execute(
+            """
+            SELECT *
+            FROM linkable_object_types
+            WHERE object_type_key = ?
+            """,
+            (object_type_key,),
+        ).fetchone()
+
+        base_context = {
+            "semantic_type_key": semantic_type_key,
+            "role_key": binding_role_key,
+            "object_type_key": object_type_key,
+            "usage": usage,
+        }
+        errors = []
+        if semantic_type is None or semantic_type["status"] != "active":
+            errors.append(
+                compatibility_error(
+                    "TS_COMPAT_SEMANTIC_TYPE_INACTIVE", dict(base_context)
+                )
+            )
+        if role is None or role["status"] != "active":
+            errors.append(
+                compatibility_error("TS_COMPAT_ROLE_INACTIVE", dict(base_context))
+            )
+        if object_type is None or object_type["status"] != "active":
+            errors.append(
+                compatibility_error(
+                    "TS_COMPAT_OBJECT_UNAVAILABLE", dict(base_context)
+                )
+            )
+
+        rule = None
+        if (
+            semantic_type is not None
+            and semantic_type["status"] == "active"
+            and role is not None
+            and role["status"] == "active"
+            and object_type is not None
+            and object_type["status"] == "active"
+        ):
+            if not bool(role[f"{usage}_allowed"]):
+                errors.append(
+                    compatibility_error(
+                        "TS_COMPAT_ROLE_USAGE_NOT_ALLOWED", dict(base_context)
+                    )
+                )
+
+            rules = self.connection.execute(
+                """
+                SELECT compatibility.*, object_types.object_type_key
+                FROM time_series_role_compatibilities AS compatibility
+                JOIN linkable_object_types AS object_types
+                  ON object_types.id = compatibility.object_type_id
+                WHERE compatibility.semantic_type_id = ?
+                  AND compatibility.binding_role_id = ?
+                  AND compatibility.status = 'active'
+                ORDER BY compatibility.id
+                """,
+                (semantic_type["id"], role["id"]),
+            ).fetchall()
+            usage_rules = [row for row in rules if bool(row[f"{usage}_allowed"])]
+            if not usage_rules:
+                errors.append(
+                    compatibility_error(
+                        "TS_COMPAT_SEMANTIC_TYPE_NOT_ALLOWED", dict(base_context)
+                    )
+                )
+            else:
+                rule = next(
+                    (
+                        row
+                        for row in usage_rules
+                        if row["object_type_key"] == object_type_key
+                    ),
+                    None,
+                )
+                if rule is None:
+                    errors.append(
+                        compatibility_error(
+                            "TS_COMPAT_OBJECT_TYPE_NOT_ALLOWED", dict(base_context)
+                        )
+                    )
+
+            if semantic_type["dimension_id"] != role["dimension_id"]:
+                errors.append(
+                    compatibility_error(
+                        "TS_COMPAT_DIMENSION_MISMATCH",
+                        {
+                            **base_context,
+                            "semantic_dimension_key": semantic_type["dimension_key"],
+                            "role_dimension_key": role["dimension_key"],
+                        },
+                    )
+                )
+            expected_unit_key = semantic_type["unit_key"]
+            if (
+                semantic_type["canonical_unit_id"] != role["canonical_unit_id"]
+                or unit_key != expected_unit_key
+            ):
+                errors.append(
+                    compatibility_error(
+                        "TS_COMPAT_UNIT_MISMATCH",
+                        {
+                            **base_context,
+                            "expected_unit_key": expected_unit_key,
+                            "actual_unit_key": unit_key,
+                        },
+                    )
+                )
+
+        allowed = rule is not None and not errors
+        return {
+            "allowed": allowed,
+            "compatibility_rule_id": (
+                int(rule["id"]) if rule is not None else None
+            ),
+            "rule_version": int(rule["rule_version"]) if rule is not None else None,
+            "contract_version": CLASSIFICATION_CONTRACT_VERSION,
+            "errors": errors,
+            "primary_error": errors[0] if errors else None,
+        }
 
     def _ensure_external_user_role_constraint(self) -> None:
         if self.database_backend == "postgresql":
