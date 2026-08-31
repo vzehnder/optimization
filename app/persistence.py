@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import math
+import os
+import secrets
 import re
 import sqlite3
 import threading
+import time
 import uuid
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
@@ -80,6 +84,30 @@ from app.time_series_canonical import (
     canonical_value_records,
     normalize_canonical_periods,
     normalize_canonical_signals,
+)
+from app.time_series_catalog_projection import (
+    CATALOG_ENTRY_COLUMNS,
+    CATALOG_SECTION_INPUTS,
+    CatalogQueryError,
+    catalog_projection_content_hash,
+    IDEMPOTENCY_LEASE_SECONDS,
+    IDEMPOTENCY_RETENTION_HOURS,
+    PUBLISH_OPERATION_KIND,
+    catalog_projection_schema_statements,
+    catalog_projection_table_names,
+    idempotency_request_hash,
+    normalize_search_text,
+    normalize_sort_text,
+    catalog_page_sql,
+    decode_catalog_cursor,
+    encode_catalog_cursor,
+    normalize_catalog_limit,
+    normalize_catalog_order,
+    object_context_page_sql,
+    parse_catalog_order,
+    publish_request_payload,
+    publish_scope_key,
+    summarize_coverage,
 )
 from app.time_series_links import (
     link_history_guard_script,
@@ -249,6 +277,14 @@ class AnalystStore:
     def __init__(self, database_url: str | None = None):
         self.database_url = database_url or database_url_from_env()
         self._lock = threading.RLock()
+        # Catalog cursors are opaque and signed. A deployment that spans
+        # several workers sets the secret so a cursor stays readable across
+        # them; otherwise each process signs with its own key and an old
+        # cursor is refused as a mismatch rather than silently trusted.
+        self._catalog_cursor_secret = (
+            os.environ.get("TS_CATALOG_CURSOR_SECRET", "").encode("utf-8")
+            or secrets.token_bytes(32)
+        )
         self.database_backend, self.database_path, self.connection = connect_database(self.database_url)
         try:
             self._initialize_schema()
@@ -1308,6 +1344,7 @@ class AnalystStore:
             "case_input_variants", "bindings_revision", "INTEGER NOT NULL DEFAULT 0"
         )
         self._ensure_link_layer()
+        self._ensure_catalog_projection()
         self._ensure_external_user_role_constraint()
         self._ensure_column(
             "project_client_access", "portal_view", "INTEGER NOT NULL DEFAULT 1"
@@ -1641,6 +1678,15 @@ class AnalystStore:
             self.connection.executescript(constraint_upgrade)
         self.connection.executescript(link_layer_guard_script(self.database_backend))
         self.connection.executescript(link_history_guard_script(self.database_backend))
+
+    def _ensure_catalog_projection(self) -> None:
+        for statement in catalog_projection_schema_statements(self.database_backend):
+            self.connection.execute(statement)
+
+    def catalog_projection_table_names(self) -> dict[str, str]:
+        """Physical name of every TS7-005 table on the configured engine."""
+
+        return catalog_projection_table_names(self.database_backend)
 
     def canonical_table_names(self) -> dict[str, str]:
         """Physical name of every canonical table on the configured engine."""
@@ -2455,14 +2501,47 @@ class AnalystStore:
         lineage: list[dict[str, Any]] | None = None,
         actor: str,
         set_id: int | None = None,
+        idempotency_key: str | None = None,
+        request_fingerprint: str | None = None,
     ) -> dict[str, Any]:
-        """Publish one complete set revision inside a single transaction."""
+        """Publish one complete set revision inside a single transaction.
+
+        With an ``idempotency_key`` the claim, the mutation and the stored
+        result share that transaction (chapter 9.7), so a retry either finds a
+        completed record and returns exactly its saved result, or it repeats a
+        publication that never happened.
+        """
 
         normalized_signals = normalize_canonical_signals(signals)
         normalized_periods = normalize_canonical_periods(periods)
         with self._lock:
             with self._database_transaction():
-                return self._publish_canonical_set_revision(
+                claim = None
+                if idempotency_key is not None:
+                    claim = self._claim_idempotency(
+                        actor_id=actor,
+                        operation_kind=PUBLISH_OPERATION_KIND,
+                        scope_key=publish_scope_key(
+                            project_id=project_id, set_id=set_id, name=name
+                        ),
+                        idempotency_key=idempotency_key,
+                        request_hash=idempotency_request_hash(
+                            publish_request_payload(
+                                project_id=project_id,
+                                set_id=set_id,
+                                name=name,
+                                data_class_key=data_class_key,
+                                timezone_name=timezone,
+                                timestamp_convention=timestamp_convention,
+                                signals=normalized_signals,
+                                periods=normalized_periods,
+                                request_fingerprint=request_fingerprint,
+                            )
+                        ),
+                    )
+                    if claim["state"] == "completed":
+                        return claim["response"]
+                receipt = self._publish_canonical_set_revision(
                     project_id=project_id,
                     name=name,
                     signals=normalized_signals,
@@ -2480,6 +2559,13 @@ class AnalystStore:
                     actor=actor,
                     set_id=set_id,
                 )
+                if claim is not None:
+                    self._complete_idempotency(
+                        claim_id=claim["id"],
+                        response=receipt,
+                        http_status=200 if receipt["outcome"] == "unchanged" else 201,
+                    )
+                return receipt
 
     def _publish_canonical_set_revision(
         self,
@@ -2569,7 +2655,9 @@ class AnalystStore:
             ).fetchone()
             next_revision_number = int(highest["highest"] or 0) + 1
 
-        source_id = self._register_canonical_source(project_id, source, actor, now)
+        source_id, source_created = self._register_canonical_source(
+            project_id, source, actor, now
+        )
 
         # 2. Open the building revision. ``content_hash`` stays null until the
         #    snapshot is complete and verified (P-03).
@@ -2688,6 +2776,47 @@ class AnalystStore:
             data_class_key=classification["data_class_key"],
         )
 
+        # 5b. A republication whose content equals the current revision is a
+        #     no-op (chapter 9.7): no revision is created, the pointer does not
+        #     move, no binding turns stale and the generation does not rise.
+        if previous_revision_id is not None:
+            current_revision = self.connection.execute(
+                f"""
+                SELECT id, revision_number, supersedes_revision_id, content_hash
+                FROM {revisions_table}
+                WHERE id = ?
+                """,
+                (previous_revision_id,),
+            ).fetchone()
+            if (
+                current_revision is not None
+                and current_revision["content_hash"] == content_hash
+            ):
+                self._discard_building_revision(
+                    revision_id=revision_id,
+                    source_id=source_id if source_created else None,
+                )
+                return {
+                    "set_id": resolved_set_id,
+                    "name": name,
+                    "revision_id": int(current_revision["id"]),
+                    "revision_number": int(current_revision["revision_number"]),
+                    "supersedes_revision_id": current_revision[
+                        "supersedes_revision_id"
+                    ],
+                    "state": "sealed",
+                    "content_hash": content_hash,
+                    "signal_count": signal_count,
+                    "period_count": period_count,
+                    "value_count": value_count,
+                    "time_series_source_id": (
+                        None if source_created else source_id
+                    ),
+                    "signal_ids": dict(signal_ids),
+                    "catalog_generation": self.catalog_generation(),
+                    "outcome": "unchanged",
+                }
+
         # 6. Seal and move the current pointer inside the same transaction.
         validation_payload = {
             "signal_count": signal_count,
@@ -2722,6 +2851,11 @@ class AnalystStore:
             ),
         )
 
+        # 7. Maintain the read model inside the same transaction that sealed
+        #    the revision, so no background worker can leave it stale.
+        self._project_catalog_entries(set_id=resolved_set_id, now=now)
+        catalog_generation = self._raise_catalog_generation(now=now)
+
         # 7. Record the lineage of a derived revision in the same transaction.
         self._record_canonical_lineage(
             revision_id=revision_id,
@@ -2743,6 +2877,8 @@ class AnalystStore:
             "value_count": value_count,
             "time_series_source_id": source_id,
             "signal_ids": dict(signal_ids),
+            "catalog_generation": catalog_generation,
+            "outcome": "published",
         }
 
     def _record_canonical_lineage(
@@ -2795,11 +2931,822 @@ class AnalystStore:
             rows,
         )
 
+    def _discard_building_revision(
+        self, *, revision_id: int, source_id: int | None
+    ) -> None:
+        """Remove a staged revision that turned out to change nothing.
+
+        Only a ``building`` revision reaches this path, so the sealed guards
+        never fire and no published history is touched.
+        """
+
+        for logical in (
+            "time_series_values",
+            "time_series_periods",
+            "time_series_revision_signals",
+        ):
+            self.connection.execute(
+                f"DELETE FROM {self._canonical(logical)} WHERE set_revision_id = ?",
+                (revision_id,),
+            )
+        self.connection.execute(
+            f"DELETE FROM {self._canonical('time_series_set_revisions')} WHERE id = ?",
+            (revision_id,),
+        )
+        if source_id is not None:
+            self.connection.execute(
+                f"DELETE FROM {self._canonical('time_series_sources')} WHERE id = ?",
+                (source_id,),
+            )
+
+    # -- Catalog read model (TS7-005, chapters 9.3 to 9.5) ------------------
+
+    def read_catalog_page(
+        self,
+        *,
+        limit: int | None = None,
+        order: str | None = None,
+        cursor: str | None = None,
+        include_total: bool = False,
+        section: str = CATALOG_SECTION_INPUTS,
+    ) -> dict[str, Any]:
+        """One keyset page of the catalog, read only from the projection.
+
+        The page never joins periods or values: everything it needs was written
+        by the transaction that sealed the revision (chapter 9.3).
+        """
+
+        resolved_limit = normalize_catalog_limit(limit)
+        canonical_order = normalize_catalog_order(order)
+        order_terms = parse_catalog_order(order)
+        entries_table = self._projection("time_series_catalog_entries")
+
+        with self._read_only_transaction():
+            generation = self.catalog_generation(section)
+            cursor_key = None
+            if cursor is not None:
+                cursor_key = decode_catalog_cursor(
+                    cursor,
+                    self._catalog_cursor_secret,
+                    section=section,
+                    order=canonical_order,
+                    limit=resolved_limit,
+                    generation=generation,
+                )
+            sql, parameters = catalog_page_sql(
+                entries_table=entries_table,
+                order_terms=order_terms,
+                cursor_key=cursor_key,
+                limit=resolved_limit,
+            )
+            rows = [
+                dict(row)
+                for row in self.connection.execute(sql, parameters).fetchall()
+            ]
+            total_count = None
+            if include_total:
+                total_count = int(
+                    self.connection.execute(
+                        f"SELECT COUNT(*) AS total FROM {entries_table}"
+                    ).fetchone()["total"]
+                )
+
+        has_more = len(rows) > resolved_limit
+        items = rows[:resolved_limit]
+        next_cursor = None
+        if has_more and items:
+            next_cursor = encode_catalog_cursor(
+                {
+                    "s": section,
+                    "o": canonical_order,
+                    "l": resolved_limit,
+                    "g": generation,
+                    "k": [items[-1][column] for column, _ in order_terms],
+                    "t": int(time.time()),
+                },
+                self._catalog_cursor_secret,
+            )
+        return {
+            "items": items,
+            "page": {
+                "limit": resolved_limit,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+            },
+            "summary": None if total_count is None else {"total_count": total_count},
+            "facets": None,
+            "meta": {"section": section, "catalog_generation": generation},
+        }
+
+    def explain_catalog_page(
+        self,
+        *,
+        limit: int | None = None,
+        order: str | None = None,
+        cursor_key: list | None = None,
+        analyze: bool = False,
+    ) -> dict[str, Any]:
+        """Reference plan of the catalog page query (AC-CAT-04, chapter 9.2).
+
+        PostgreSQL answers with ``EXPLAIN (ANALYZE, BUFFERS)`` when asked to
+        analyze; SQLite answers with ``EXPLAIN QUERY PLAN``, which is enough to
+        prove no plan ever walks periods or values.
+        """
+
+        resolved_limit = normalize_catalog_limit(limit)
+        sql, parameters = catalog_page_sql(
+            entries_table=self._projection("time_series_catalog_entries"),
+            order_terms=parse_catalog_order(order),
+            cursor_key=cursor_key,
+            limit=resolved_limit,
+        )
+        return self._explain(sql, parameters, analyze=analyze)
+
+    def explain_object_context_page(
+        self,
+        *,
+        linkable_object_id: int,
+        limit: int | None = None,
+        analyze: bool = False,
+    ) -> dict[str, Any]:
+        """Reference plan of the contextual object list (AC-PER-02)."""
+
+        resolved_limit = normalize_catalog_limit(limit)
+        sql, parameters = object_context_page_sql(
+            entries_table=self._projection("time_series_catalog_entries"),
+            associations_table=link_layer_table_names(self.database_backend)[
+                "time_series_catalog_associations"
+            ],
+            sets_table=self._canonical("time_series_sets"),
+            signals_table=self._canonical("time_series_signals"),
+            linkable_object_id=linkable_object_id,
+            cursor_key=None,
+            limit=resolved_limit,
+        )
+        return self._explain(sql, parameters, analyze=analyze)
+
+    def _explain(self, sql: str, parameters: tuple, *, analyze: bool) -> dict[str, Any]:
+        if self.database_backend == "postgresql":
+            prefix = "EXPLAIN (ANALYZE, BUFFERS)" if analyze else "EXPLAIN (BUFFERS)"
+            rows = self.connection.execute(f"{prefix} {sql}", parameters).fetchall()
+            plan = [str(row["QUERY PLAN"]) for row in rows]
+        else:
+            rows = self.connection.execute(
+                f"EXPLAIN QUERY PLAN {sql}", parameters
+            ).fetchall()
+            plan = [str(row["detail"]) for row in rows]
+        return {
+            "engine": self.database_backend,
+            "sql": sql,
+            "plan": plan,
+            "tables": self._plan_tables(plan),
+        }
+
+    def _plan_tables(self, plan: list[str]) -> list[str]:
+        """Tables a plan names, out of every table this store owns.
+
+        PostgreSQL prints a relation without its schema, so the comparison uses
+        the bare physical name on both engines.
+        """
+
+        haystack = " ".join(plan)
+        candidates = set(self.canonical_table_names().values())
+        candidates.update(self.catalog_projection_table_names().values())
+        candidates.update(self.link_layer_table_names().values())
+        candidates.update(self.linkable_object_table_names().values())
+        bare = {name.split(".")[-1] for name in candidates}
+        return sorted(name for name in bare if name in haystack)
+
+    def read_object_context_page(
+        self,
+        *,
+        linkable_object_id: int,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """One keyset page of everything an object can see (chapter 9.5).
+
+        The root is always the object, never a signal ID looked up in the
+        global projection, so a local series stays unreachable from there.
+        """
+
+        resolved_limit = normalize_catalog_limit(limit)
+        section = f"object:{int(linkable_object_id)}"
+        with self._read_only_transaction():
+            generation = self.catalog_generation()
+            cursor_key = None
+            if cursor is not None:
+                cursor_key = decode_catalog_cursor(
+                    cursor,
+                    self._catalog_cursor_secret,
+                    section=section,
+                    order="-updated_at",
+                    limit=resolved_limit,
+                    generation=generation,
+                )
+            sql, parameters = object_context_page_sql(
+                entries_table=self._projection("time_series_catalog_entries"),
+                associations_table=link_layer_table_names(self.database_backend)[
+                    "time_series_catalog_associations"
+                ],
+                sets_table=self._canonical("time_series_sets"),
+                signals_table=self._canonical("time_series_signals"),
+                linkable_object_id=linkable_object_id,
+                cursor_key=cursor_key,
+                limit=resolved_limit,
+            )
+            rows = [
+                dict(row)
+                for row in self.connection.execute(sql, parameters).fetchall()
+            ]
+
+        has_more = len(rows) > resolved_limit
+        items = rows[:resolved_limit]
+        next_cursor = None
+        if has_more and items:
+            next_cursor = encode_catalog_cursor(
+                {
+                    "s": section,
+                    "o": "-updated_at",
+                    "l": resolved_limit,
+                    "g": generation,
+                    "k": [items[-1]["updated_at"], items[-1]["signal_id"]],
+                    "t": int(time.time()),
+                },
+                self._catalog_cursor_secret,
+            )
+        return {
+            "items": items,
+            "page": {
+                "limit": resolved_limit,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+            },
+            "meta": {
+                "linkable_object_id": int(linkable_object_id),
+                "catalog_generation": generation,
+            },
+        }
+
+    def _read_only_transaction(self):
+        """Read a page and its summary from one snapshot (chapter 9.8)."""
+
+        if self.database_backend == "postgresql":
+            return self.connection.transaction()
+        return contextlib.nullcontext()
+
+    # -- Durable idempotency (TS7-005, chapter 9.7) -------------------------
+
+    def _claim_idempotency(
+        self,
+        *,
+        actor_id: str,
+        operation_kind: str,
+        scope_key: str,
+        idempotency_key: str,
+        request_hash: str,
+    ) -> dict[str, Any]:
+        """Reserve one operation key, or hand back the result it already has.
+
+        A key reused for a different request is refused; the uniqueness of
+        ``(actor, operation, scope, key)`` resolves the final race.
+        """
+
+        table = self._projection("time_series_operation_idempotency")
+        now = utc_now_iso()
+        existing = self.connection.execute(
+            f"""
+            SELECT * FROM {table}
+            WHERE actor_id = ? AND operation_kind = ? AND scope_key = ?
+              AND idempotency_key = ?
+            """,
+            (actor_id, operation_kind, scope_key, idempotency_key),
+        ).fetchone()
+        if existing is not None:
+            if existing["request_hash"] != request_hash:
+                raise CanonicalRevisionError(
+                    "TS_IDEMPOTENCY_KEY_CONFLICT",
+                    operation_kind=operation_kind,
+                    scope_key=scope_key,
+                    idempotency_key=idempotency_key,
+                )
+            if existing["state"] == "completed":
+                return {
+                    "id": int(existing["id"]),
+                    "state": "completed",
+                    "response": json.loads(existing["response_json"]),
+                }
+            if (
+                existing["state"] == "reserved"
+                and existing["lease_expires_at"] is not None
+                and existing["lease_expires_at"] > now
+            ):
+                raise CanonicalRevisionError(
+                    "TS_IDEMPOTENCY_IN_FLIGHT",
+                    operation_kind=operation_kind,
+                    scope_key=scope_key,
+                    idempotency_key=idempotency_key,
+                )
+            # The previous attempt died before commit; take its lease over.
+            self.connection.execute(
+                f"""
+                UPDATE {table}
+                SET state = 'reserved', lease_owner = ?, lease_expires_at = ?,
+                    completed_at = NULL, http_status = NULL,
+                    response_json = '{{}}', resource_refs_json = '{{}}'
+                WHERE id = ?
+                """,
+                (
+                    actor_id,
+                    self._lease_deadline(now, seconds=IDEMPOTENCY_LEASE_SECONDS),
+                    int(existing["id"]),
+                ),
+            )
+            return {"id": int(existing["id"]), "state": "reserved", "response": None}
+
+        claim_id = self._insert_canonical_row(
+            f"""
+            INSERT INTO {table} (
+                actor_id, operation_kind, scope_key, idempotency_key,
+                request_hash, state, lease_owner, lease_expires_at,
+                created_at, expires_at
+            ) VALUES (?, ?, ?, ?, ?, 'reserved', ?, ?, ?, ?)
+            """,
+            (
+                actor_id,
+                operation_kind,
+                scope_key,
+                idempotency_key,
+                request_hash,
+                actor_id,
+                self._lease_deadline(now, seconds=IDEMPOTENCY_LEASE_SECONDS),
+                now,
+                self._lease_deadline(now, hours=IDEMPOTENCY_RETENTION_HOURS),
+            ),
+        )
+        return {"id": claim_id, "state": "reserved", "response": None}
+
+    def _complete_idempotency(
+        self, *, claim_id: int, response: dict[str, Any], http_status: int
+    ) -> None:
+        table = self._projection("time_series_operation_idempotency")
+        self.connection.execute(
+            f"""
+            UPDATE {table}
+            SET state = 'completed', http_status = ?, response_json = ?,
+                resource_refs_json = ?, completed_at = ?,
+                lease_owner = NULL, lease_expires_at = NULL
+            WHERE id = ?
+            """,
+            (
+                http_status,
+                json.dumps(response, sort_keys=True, ensure_ascii=False),
+                json.dumps(
+                    {
+                        "set_id": response.get("set_id"),
+                        "revision_id": response.get("revision_id"),
+                    },
+                    sort_keys=True,
+                ),
+                utc_now_iso(),
+                claim_id,
+            ),
+        )
+
+    @staticmethod
+    def _lease_deadline(now: str, *, seconds: int = 0, hours: int = 0) -> str:
+        moment = datetime.fromisoformat(now) + timedelta(seconds=seconds, hours=hours)
+        return moment.isoformat(timespec="seconds")
+
+    # -- Transactional catalog projection (TS7-005) -------------------------
+    #
+    # ``time_series_catalog_entries`` is derived from ``current_revision_id``
+    # through ``time_series_revision_signals``. Chapter 9.3 requires it to be
+    # written by the same transaction that changes its source, so every writer
+    # below is called from inside an open transaction and never from a queue.
+
+    def _projection(self, logical: str) -> str:
+        return catalog_projection_table_names(self.database_backend)[logical]
+
+    def _catalog_revision_coverage(self, revision_id: int) -> dict[str, Any]:
+        """Coverage and resolution of a revision, from its period durations."""
+
+        periods_table = self._canonical("time_series_periods")
+        bounds = self.connection.execute(
+            f"""
+            SELECT MIN(timestamp_start) AS coverage_start,
+                   MAX(timestamp_end) AS coverage_end,
+                   COUNT(*) AS period_count
+            FROM {periods_table}
+            WHERE set_revision_id = ?
+            """,
+            (revision_id,),
+        ).fetchone()
+        histogram = {
+            float(row["duration_hours"]): int(row["occurrences"])
+            for row in self.connection.execute(
+                f"""
+                SELECT duration_hours, COUNT(*) AS occurrences
+                FROM {periods_table}
+                WHERE set_revision_id = ?
+                GROUP BY duration_hours
+                """,
+                (revision_id,),
+            ).fetchall()
+        }
+        return summarize_coverage(
+            coverage_start=bounds["coverage_start"],
+            coverage_end=bounds["coverage_end"],
+            period_count=int(bounds["period_count"] or 0),
+            duration_histogram=histogram,
+        )
+
+    def _catalog_entry_rows(self, set_id: int) -> list[dict[str, Any]]:
+        """Project the visible signals of one set from its current revision."""
+
+        sets_table = self._canonical("time_series_sets")
+        set_row = self.connection.execute(
+            f"""
+            SELECT the_set.*, project.name AS owner_project_name,
+                   source.kind AS source_kind
+            FROM {sets_table} AS the_set
+            JOIN projects AS project ON project.id = the_set.owner_project_id
+            LEFT JOIN {self._canonical('time_series_set_revisions')} AS revision
+              ON revision.id = the_set.current_revision_id
+            LEFT JOIN {self._canonical('time_series_sources')} AS source
+              ON source.id = revision.time_series_source_id
+            WHERE the_set.id = ?
+            """,
+            (set_id,),
+        ).fetchone()
+        if (
+            set_row is None
+            or set_row["series_kind"] != "catalog"
+            or set_row["current_revision_id"] is None
+        ):
+            return []
+
+        revision_id = int(set_row["current_revision_id"])
+        coverage = self._catalog_revision_coverage(revision_id)
+        revision = self.connection.execute(
+            f"""
+            SELECT revision_number
+            FROM {self._canonical('time_series_set_revisions')}
+            WHERE id = ?
+            """,
+            (revision_id,),
+        ).fetchone()
+        source_kind = set_row["source_kind"] or "api"
+        project_name_sort = normalize_sort_text(set_row["owner_project_name"])
+
+        contract = self.connection.execute(
+            f"""
+            SELECT signal.id AS signal_id, signal.series_key AS series_key,
+                   signal.display_name AS display_name,
+                   signal.status AS signal_status,
+                   revision_signal.semantic_type_id AS semantic_type_id,
+                   semantic_type.semantic_key AS semantic_type_key,
+                   revision_signal.data_class_id AS data_class_id,
+                   data_class.data_class_key AS data_class_key,
+                   revision_signal.unit_id AS unit_id,
+                   unit.unit_key AS unit_key
+            FROM {self._canonical('time_series_revision_signals')} AS revision_signal
+            JOIN {self._canonical('time_series_signals')} AS signal
+              ON signal.id = revision_signal.signal_id
+            JOIN time_series_semantic_types AS semantic_type
+              ON semantic_type.id = revision_signal.semantic_type_id
+            JOIN time_series_data_classes AS data_class
+              ON data_class.id = revision_signal.data_class_id
+            JOIN measurement_units AS unit ON unit.id = revision_signal.unit_id
+            WHERE revision_signal.set_revision_id = ?
+            ORDER BY revision_signal.ordinal
+            """,
+            (revision_id,),
+        ).fetchall()
+        signal_ids = [int(signal["signal_id"]) for signal in contract]
+        association_counts = self._catalog_link_counts(
+            "time_series_catalog_associations", signal_ids
+        )
+        binding_counts = self._catalog_link_counts(
+            "case_time_series_bindings", signal_ids
+        )
+
+        rows: list[dict[str, Any]] = []
+        for signal in contract:
+            rows.append(
+                {
+                    "signal_id": int(signal["signal_id"]),
+                    "time_series_set_id": set_id,
+                    "owner_project_id": int(set_row["owner_project_id"]),
+                    "owner_project_name_sort": project_name_sort,
+                    "visibility_scope": set_row["visibility_scope"],
+                    "set_status": set_row["status"],
+                    "signal_status": signal["signal_status"],
+                    "series_key": signal["series_key"],
+                    "display_name": signal["display_name"],
+                    "display_name_sort": normalize_sort_text(signal["display_name"]),
+                    "search_text_normalized": normalize_search_text(
+                        signal["display_name"],
+                        signal["series_key"],
+                        set_row["name"],
+                        set_row["version_label"],
+                        set_row["owner_project_name"],
+                        source_kind,
+                    ),
+                    "semantic_type_id": int(signal["semantic_type_id"]),
+                    "semantic_type_key": signal["semantic_type_key"],
+                    "data_class_id": int(signal["data_class_id"]),
+                    "data_class_key": signal["data_class_key"],
+                    "unit_id": int(signal["unit_id"]),
+                    "unit_key": signal["unit_key"],
+                    "source_kind": source_kind,
+                    "current_revision_id": revision_id,
+                    "revision_number": int(revision["revision_number"]),
+                    "coverage_start": coverage["coverage_start"],
+                    "coverage_end": coverage["coverage_end"],
+                    "period_count": coverage["period_count"],
+                    # One value per signal and period is already enforced by the
+                    # revision protocol, so the count never reads the cells.
+                    "value_count": coverage["period_count"],
+                    "nominal_resolution_seconds": coverage[
+                        "nominal_resolution_seconds"
+                    ],
+                    "min_resolution_seconds": coverage["min_resolution_seconds"],
+                    "max_resolution_seconds": coverage["max_resolution_seconds"],
+                    "regularity": coverage["regularity"],
+                    "updated_at": set_row["updated_at"],
+                    "association_count": association_counts.get(
+                        int(signal["signal_id"]), 0
+                    ),
+                    "binding_count": binding_counts.get(
+                        int(signal["signal_id"]), 0
+                    ),
+                }
+            )
+        return rows
+
+    def _catalog_link_counts(
+        self, logical: str, signal_ids: list[int]
+    ) -> dict[int, int]:
+        """Active links of a whole revision, counted once through their index.
+
+        One grouped read per revision rather than one per signal: the counts sit
+        on the publication path, and a set of fifty signals should not cost a
+        hundred round trips to project.
+        """
+
+        if not signal_ids:
+            return {}
+        table = link_layer_table_names(self.database_backend)[logical]
+        placeholders = ", ".join("?" for _ in signal_ids)
+        return {
+            int(row["signal_id"]): int(row["total"])
+            for row in self.connection.execute(
+                f"""
+                SELECT signal_id, COUNT(*) AS total FROM {table}
+                WHERE status = 'active' AND signal_id IN ({placeholders})
+                GROUP BY signal_id
+                """,
+                tuple(signal_ids),
+            ).fetchall()
+        }
+
+    def _project_catalog_entries(self, *, set_id: int, now: str) -> int:
+        """Rewrite the projection rows of one set. Returns the rows written."""
+
+        entries_table = self._projection("time_series_catalog_entries")
+        rows = self._catalog_entry_rows(set_id)
+        keep = [row["signal_id"] for row in rows]
+        if keep:
+            placeholders = ", ".join("?" for _ in keep)
+            self.connection.execute(
+                f"""
+                DELETE FROM {entries_table}
+                WHERE time_series_set_id = ?
+                  AND signal_id NOT IN ({placeholders})
+                """,
+                (set_id, *keep),
+            )
+        else:
+            self.connection.execute(
+                f"DELETE FROM {entries_table} WHERE time_series_set_id = ?",
+                (set_id,),
+            )
+        for row in rows:
+            self._upsert_catalog_entry(entries_table, row)
+        return len(rows)
+
+    def catalog_generation(self, section: str = CATALOG_SECTION_INPUTS) -> int:
+        """Monotonic generation of one catalog section (chapter 6.2)."""
+
+        row = self.connection.execute(
+            f"""
+            SELECT generation
+            FROM {self._projection('time_series_catalog_generations')}
+            WHERE section = ?
+            """,
+            (section,),
+        ).fetchone()
+        return 0 if row is None else int(row["generation"])
+
+    def _raise_catalog_generation(
+        self, *, now: str, section: str = CATALOG_SECTION_INPUTS
+    ) -> int:
+        """Raise the section generation once, at the end of a mutation.
+
+        Chapter 9.3 raises it a single time per transaction that can change
+        membership, ordering, summary or representation. A no-op publication
+        never reaches this call.
+        """
+
+        generations = self._projection("time_series_catalog_generations")
+        self.connection.execute(
+            f"""
+            INSERT INTO {generations} (section, generation, updated_at)
+            VALUES (?, 1, ?)
+            ON CONFLICT (section) DO UPDATE SET
+                generation = {generations}.generation + 1,
+                updated_at = EXCLUDED.updated_at
+            """,
+            (section, now),
+        )
+        return self.catalog_generation(section)
+
+    def _projected_catalog_set_ids(self) -> list[int]:
+        """Every catalog set that owes the projection rows."""
+
+        return [
+            int(row["id"])
+            for row in self.connection.execute(
+                f"""
+                SELECT id
+                FROM {self._canonical('time_series_sets')}
+                WHERE series_kind = 'catalog' AND current_revision_id IS NOT NULL
+                ORDER BY id
+                """
+            ).fetchall()
+        ]
+
+    def _catalog_projection_content_hash(self, table_name: str) -> str:
+        rows = self.connection.execute(
+            f"SELECT * FROM {table_name} ORDER BY signal_id"
+        ).fetchall()
+        return catalog_projection_content_hash(rows)
+
+    def rebuild_catalog_projection(
+        self, *, section: str = CATALOG_SECTION_INPUTS
+    ) -> dict[str, Any]:
+        """Rebuild the whole projection through a shadow table (chapter 9.3).
+
+        The shadow is filled and compared by counts and content hash before any
+        swap. A rebuild that finds the live table already correct changes
+        nothing and does not raise the generation.
+        """
+
+        entries_table = self._projection("time_series_catalog_entries")
+        shadow_table = f"{entries_table}_shadow"
+        columns = ", ".join(CATALOG_ENTRY_COLUMNS)
+        with self._lock:
+            divergence_before = self.catalog_projection_divergence(section=section)
+            with self._database_transaction():
+                rows_before = int(
+                    self.connection.execute(
+                        f"SELECT COUNT(*) AS total FROM {entries_table}"
+                    ).fetchone()["total"]
+                )
+                previous_hash = self._catalog_projection_content_hash(entries_table)
+
+                self.connection.execute(f"DROP TABLE IF EXISTS {shadow_table}")
+                self.connection.execute(
+                    f"""
+                    CREATE TABLE {shadow_table} AS
+                    SELECT {columns} FROM {entries_table} WHERE 1 = 0
+                    """
+                )
+                shadow_rows = 0
+                for set_id in self._projected_catalog_set_ids():
+                    for row in self._catalog_entry_rows(set_id):
+                        self.connection.execute(
+                            f"""
+                            INSERT INTO {shadow_table} ({columns})
+                            VALUES ({", ".join("?" for _ in CATALOG_ENTRY_COLUMNS)})
+                            """,
+                            tuple(row[column] for column in CATALOG_ENTRY_COLUMNS),
+                        )
+                        shadow_rows += 1
+                content_hash = self._catalog_projection_content_hash(shadow_table)
+
+                replaced_rows = 0
+                generation = self.catalog_generation(section)
+                if content_hash == previous_hash:
+                    outcome = "unchanged"
+                else:
+                    # Readers keep the old snapshot until this commit, then see
+                    # the whole new one.
+                    self.connection.execute(f"DELETE FROM {entries_table}")
+                    self.connection.execute(
+                        f"""
+                        INSERT INTO {entries_table} ({columns})
+                        SELECT {columns} FROM {shadow_table}
+                        """
+                    )
+                    replaced_rows = shadow_rows
+                    generation = self._raise_catalog_generation(
+                        now=utc_now_iso(), section=section
+                    )
+                    outcome = "rebuilt"
+                self.connection.execute(f"DROP TABLE IF EXISTS {shadow_table}")
+
+        return {
+            "section": section,
+            "outcome": outcome,
+            "rows_before": rows_before,
+            "shadow_rows": shadow_rows,
+            "replaced_rows": replaced_rows,
+            "previous_content_hash": previous_hash,
+            "content_hash": content_hash,
+            "divergence_before": divergence_before,
+            "shadow_dropped": True,
+            "catalog_generation": generation,
+        }
+
+    def catalog_projection_divergence(
+        self, *, section: str = CATALOG_SECTION_INPUTS
+    ) -> dict[str, Any]:
+        """Compare the projection against the canonical model (chapter 9.10).
+
+        The reconciliation reports divergence; it never repairs silently, and a
+        leaked ``object_specific`` row is reported on its own because the global
+        list must never be able to see one.
+        """
+
+        entries_table = self._projection("time_series_catalog_entries")
+        expected = {
+            row["signal_id"]: row
+            for set_id in self._projected_catalog_set_ids()
+            for row in self._catalog_entry_rows(set_id)
+        }
+        actual = {
+            int(row["signal_id"]): dict(row)
+            for row in self.connection.execute(
+                f"SELECT * FROM {entries_table}"
+            ).fetchall()
+        }
+        stale = sorted(
+            signal_id
+            for signal_id, row in expected.items()
+            if signal_id in actual
+            and any(
+                actual[signal_id][column] != value for column, value in row.items()
+            )
+        )
+        leaked = sorted(
+            int(row["signal_id"])
+            for row in self.connection.execute(
+                f"""
+                SELECT entry.signal_id
+                FROM {entries_table} AS entry
+                JOIN {self._canonical('time_series_sets')} AS the_set
+                  ON the_set.id = entry.time_series_set_id
+                WHERE the_set.series_kind <> 'catalog'
+                """
+            ).fetchall()
+        )
+        missing = sorted(set(expected) - set(actual))
+        unexpected = sorted(set(actual) - set(expected))
+        return {
+            "section": section,
+            "missing": missing,
+            "unexpected": unexpected,
+            "stale": stale,
+            "object_specific": leaked,
+            "converged": not (missing or unexpected or stale or leaked),
+        }
+
+    def _upsert_catalog_entry(self, entries_table: str, row: dict[str, Any]) -> None:
+        columns = CATALOG_ENTRY_COLUMNS
+        assignments = ", ".join(
+            f"{column} = EXCLUDED.{column}" for column in columns[1:]
+        )
+        self.connection.execute(
+            f"""
+            INSERT INTO {entries_table} (
+                {", ".join(columns)}, series_kind
+            ) VALUES ({", ".join("?" for _ in columns)}, 'catalog')
+            ON CONFLICT (signal_id) DO UPDATE SET
+                {assignments},
+                projection_revision = {entries_table}.projection_revision + 1
+            """,
+            tuple(row[column] for column in columns),
+        )
+
     def _register_canonical_source(
         self, project_id: int, source: dict[str, Any] | None, actor: str, now: str
-    ) -> int | None:
+    ) -> tuple[int | None, bool]:
+        """Resolve the source row, reporting whether this call created it."""
+
         if not source:
-            return None
+            return None, False
         sources_table = self._canonical("time_series_sources")
         source_key = str(source["source_key"])
         existing = self.connection.execute(
@@ -2807,7 +3754,7 @@ class AnalystStore:
             (project_id, source_key),
         ).fetchone()
         if existing is not None:
-            return int(existing["id"])
+            return int(existing["id"]), False
         return self._insert_canonical_row(
             f"""
             INSERT INTO {sources_table} (
@@ -2829,7 +3776,7 @@ class AnalystStore:
                 now,
                 actor,
             ),
-        )
+        ), True
 
     def _resolve_canonical_signal_identities(
         self, *, set_id: int, signals: list[dict], actor: str, now: str

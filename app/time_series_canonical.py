@@ -730,6 +730,16 @@ CANONICAL_ERROR_CATALOG = {
         "lineage",
         "El linaje solo admite INSERT.",
     ),
+    "TS_IDEMPOTENCY_KEY_CONFLICT": (
+        "timeseries.idempotency.key_conflict",
+        "idempotency_key",
+        "La clave de idempotencia ya se uso para otra solicitud.",
+    ),
+    "TS_IDEMPOTENCY_IN_FLIGHT": (
+        "timeseries.idempotency.in_flight",
+        "idempotency_key",
+        "La misma solicitud sigue en curso.",
+    ),
     "TS_SET_NOT_FOUND": (
         "timeseries.set.not_found",
         "set_id",

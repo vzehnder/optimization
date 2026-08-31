@@ -1,0 +1,93 @@
+{
+  "captured_at": "2026-08-31T22:33:41+00:00",
+  "engine": "sqlite",
+  "committed": true,
+  "plan": {
+    "scale": 0.001,
+    "sets": 2,
+    "signals_per_set": 50,
+    "entries": 100,
+    "periods": 24,
+    "cells": 2400,
+    "objects": 10,
+    "associations": 1000,
+    "variants": 1,
+    "active_bindings": 10,
+    "binding_history_depth": 100,
+    "bindings": 1000
+  },
+  "built": {
+    "signal_count": 100,
+    "association_count": 1000,
+    "binding_count": 1000,
+    "build_seconds": 0.257
+  },
+  "budgets": {
+    "AC-PER-01": {
+      "description": "50 row catalog page without facets",
+      "budget_ms": 300,
+      "p95_ms": 1.569,
+      "samples": 30
+    },
+    "AC-PER-02": {
+      "description": "contextual object list",
+      "budget_ms": 300,
+      "p95_ms": 1.179,
+      "samples": 30
+    },
+    "AC-PER-07": {
+      "description": "synchronous publication of 1200 cells",
+      "budget_ms": 5000,
+      "p95_ms": 87.073,
+      "samples": 2
+    }
+  },
+  "reference_plans": {
+    "catalog_page": {
+      "engine": "sqlite",
+      "sql": "SELECT * FROM time_series_catalog_entries_next  ORDER BY updated_at DESC, display_name_sort ASC, signal_id ASC LIMIT ?",
+      "plan": [
+        "SCAN time_series_catalog_entries_next USING INDEX time_series_catalog_entries_next_updated_at_idx"
+      ],
+      "tables": [
+        "time_series_catalog_entries_next"
+      ]
+    },
+    "object_context_page": {
+      "engine": "sqlite",
+      "sql": "\n        SELECT * FROM (\n            \n        SELECT * FROM (\n            SELECT 'catalog' AS source, entry.signal_id AS signal_id,\n                   entry.series_key AS series_key,\n                   entry.display_name AS display_name,\n                   entry.time_series_set_id AS time_series_set_id,\n                   entry.semantic_type_key AS semantic_type_key,\n                   entry.unit_key AS unit_key,\n                   entry.updated_at AS updated_at,\n                   association.binding_role_id AS binding_role_id\n            FROM time_series_catalog_associations_next AS association\n            JOIN time_series_catalog_entries_next AS entry\n              ON entry.signal_id = association.signal_id\n            WHERE association.linkable_object_id = ?\n              AND association.status = 'active'\n              \n            ORDER BY updated_at DESC, signal_id ASC\n            LIMIT ?\n        ) AS catalog_arm\n    \n            UNION ALL\n            \n        SELECT * FROM (\n            SELECT 'object_specific' AS source,\n                   signal.id AS signal_id,\n                   signal.series_key AS series_key,\n                   signal.display_name AS display_name,\n                   the_set.id AS time_series_set_id,\n                   -- Each arm is its own subquery, so an untyped NULL would\n                   -- settle on a type before the union and stop matching.\n                   CAST(NULL AS TEXT) AS semantic_type_key,\n                   CAST(NULL AS TEXT) AS unit_key,\n                   the_set.updated_at AS updated_at,\n                   CAST(NULL AS BIGINT) AS binding_role_id\n            FROM time_series_sets_next AS the_set\n            JOIN time_series_signals_next AS signal\n              ON signal.id = the_set.object_specific_signal_id\n            WHERE the_set.owner_linkable_object_id = ?\n              AND the_set.series_kind = 'object_specific'\n              \n            ORDER BY the_set.updated_at DESC, signal.id ASC\n            LIMIT ?\n        ) AS local_arm\n    \n        ) AS object_context\n        ORDER BY updated_at DESC, signal_id ASC\n        LIMIT ?\n    ",
+      "plan": [
+        "MERGE (UNION ALL)",
+        "LEFT",
+        "CO-ROUTINE catalog_arm",
+        "SCAN association USING COVERING INDEX time_series_catalog_associations_next_one_active_uk",
+        "SEARCH entry USING INTEGER PRIMARY KEY (rowid=?)",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "SCAN catalog_arm",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "RIGHT",
+        "CO-ROUTINE local_arm",
+        "SEARCH the_set USING INDEX time_series_sets_next_object_series_key_uk (owner_linkable_object_id=?)",
+        "SEARCH signal USING INTEGER PRIMARY KEY (rowid=?)",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "SCAN local_arm",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "tables": [
+        "time_series_catalog_associations_next",
+        "time_series_sets_next"
+      ]
+    },
+    "catalog_page_keyset": {
+      "engine": "sqlite",
+      "sql": "SELECT * FROM time_series_catalog_entries_next WHERE updated_at <= ? AND ((updated_at < ?) OR (updated_at = ? AND display_name_sort > ?) OR (updated_at = ? AND display_name_sort = ? AND signal_id > ?)) ORDER BY updated_at DESC, display_name_sort ASC, signal_id ASC LIMIT ?",
+      "plan": [
+        "SEARCH time_series_catalog_entries_next USING INDEX time_series_catalog_entries_next_updated_at_idx (updated_at<?)"
+      ],
+      "tables": [
+        "time_series_catalog_entries_next"
+      ]
+    }
+  },
+  "reads_periods_or_values": false
+}
