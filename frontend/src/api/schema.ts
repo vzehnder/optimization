@@ -1736,6 +1736,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/time-series/catalog/association-batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Commit Global Time Series Catalog Associations */
+        post: operations["commit_global_time_series_catalog_associations_api_time_series_catalog_association_batches_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/time-series/catalog/association-prevalidations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prevalidate Global Time Series Catalog Associations */
+        post: operations["prevalidate_global_time_series_catalog_associations_api_time_series_catalog_association_prevalidations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/time-series/catalog/associations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Global Time Series Catalog Associations */
+        get: operations["get_global_time_series_catalog_associations_api_time_series_catalog_associations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/time-series/catalog/associations/{association_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Global Time Series Catalog Association */
+        get: operations["get_global_time_series_catalog_association_api_time_series_catalog_associations__association_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/time-series/catalog/associations/{association_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Global Time Series Catalog Association Events */
+        get: operations["get_global_time_series_catalog_association_events_api_time_series_catalog_associations__association_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/time-series/catalog/descriptors": {
         parameters: {
             query?: never;
@@ -2050,6 +2135,112 @@ export interface components {
             signal_key: string;
             /** Time Series Set Id */
             time_series_set_id: number;
+        };
+        /** CatalogAssociationAddRequest */
+        CatalogAssociationAddRequest: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            action: "add";
+            /** Binding Role Key */
+            binding_role_key: string;
+            /** Client Operation Id */
+            client_operation_id: string;
+            /**
+             * Expected Absent
+             * @constant
+             */
+            expected_absent: true;
+            /** Linkable Object Id */
+            linkable_object_id: number;
+            /** Reason Code */
+            reason_code: string;
+            /** Reason Text */
+            reason_text?: string | null;
+            /** Signal Id */
+            signal_id: number;
+        };
+        /** CatalogAssociationArchiveRequest */
+        CatalogAssociationArchiveRequest: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            action: "archive";
+            /** Association Id */
+            association_id: number;
+            /** Client Operation Id */
+            client_operation_id: string;
+            /** Expected Lifecycle Revision */
+            expected_lifecycle_revision: number;
+            /** Reason Code */
+            reason_code: string;
+            /** Reason Text */
+            reason_text: string;
+        };
+        /** CatalogAssociationCommitRequest */
+        CatalogAssociationCommitRequest: {
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Operations */
+            operations: (components["schemas"]["CatalogAssociationAddRequest"] | components["schemas"]["CatalogAssociationReplaceRequest"] | components["schemas"]["CatalogAssociationArchiveRequest"] | components["schemas"]["CatalogAssociationRevalidateRequest"])[];
+            /** Prevalidation Token */
+            prevalidation_token: string;
+            /** Target Project Id */
+            target_project_id: number;
+        };
+        /** CatalogAssociationPrevalidationRequest */
+        CatalogAssociationPrevalidationRequest: {
+            /** Operations */
+            operations: (components["schemas"]["CatalogAssociationAddRequest"] | components["schemas"]["CatalogAssociationReplaceRequest"] | components["schemas"]["CatalogAssociationArchiveRequest"] | components["schemas"]["CatalogAssociationRevalidateRequest"])[];
+            /** Target Project Id */
+            target_project_id: number;
+        };
+        /** CatalogAssociationReplaceRequest */
+        CatalogAssociationReplaceRequest: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            action: "replace";
+            /** Association Id */
+            association_id: number;
+            /** Binding Role Key */
+            binding_role_key: string;
+            /** Client Operation Id */
+            client_operation_id: string;
+            /** Expected Lifecycle Revision */
+            expected_lifecycle_revision: number;
+            /** Linkable Object Id */
+            linkable_object_id: number;
+            /** Reason Code */
+            reason_code: string;
+            /** Reason Text */
+            reason_text?: string | null;
+            /** Signal Id */
+            signal_id: number;
+        };
+        /** CatalogAssociationRevalidateRequest */
+        CatalogAssociationRevalidateRequest: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            action: "revalidate";
+            /** Association Id */
+            association_id: number;
+            /** Client Operation Id */
+            client_operation_id: string;
+            /** Expected Lifecycle Revision */
+            expected_lifecycle_revision: number;
+            /** Reason Code */
+            reason_code: string;
+            /** Reason Text */
+            reason_text?: string | null;
         };
         /** ConsoleGroupCellRequest */
         ConsoleGroupCellRequest: {
@@ -6808,6 +6999,219 @@ export interface operations {
                 "application/json": components["schemas"]["SystemCaseValidationRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    commit_global_time_series_catalog_associations_api_time_series_catalog_association_batches_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "If-Match": string;
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CatalogAssociationCommitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Association batch created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Stable payload refusal */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Confirmation or idempotency conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Prevalidation expired */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Observed precondition changed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Domain batch rejection */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Required commit guard missing */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    prevalidate_global_time_series_catalog_associations_api_time_series_catalog_association_prevalidations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CatalogAssociationPrevalidationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Stable payload refusal */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_global_time_series_catalog_associations_api_time_series_catalog_associations_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_global_time_series_catalog_association_api_time_series_catalog_associations__association_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                association_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_global_time_series_catalog_association_events_api_time_series_catalog_associations__association_id__events_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                association_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

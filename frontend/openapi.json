@@ -201,6 +201,336 @@
         "title": "CaseTimeSeriesBindingRequest",
         "type": "object"
       },
+      "CatalogAssociationAddRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "const": "add",
+            "title": "Action",
+            "type": "string"
+          },
+          "binding_role_key": {
+            "minLength": 1,
+            "title": "Binding Role Key",
+            "type": "string"
+          },
+          "client_operation_id": {
+            "minLength": 1,
+            "title": "Client Operation Id",
+            "type": "string"
+          },
+          "expected_absent": {
+            "const": true,
+            "title": "Expected Absent",
+            "type": "boolean"
+          },
+          "linkable_object_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Linkable Object Id",
+            "type": "integer"
+          },
+          "reason_code": {
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "reason_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Text"
+          },
+          "signal_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Signal Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "client_operation_id",
+          "reason_code",
+          "action",
+          "signal_id",
+          "linkable_object_id",
+          "binding_role_key",
+          "expected_absent"
+        ],
+        "title": "CatalogAssociationAddRequest",
+        "type": "object"
+      },
+      "CatalogAssociationArchiveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "const": "archive",
+            "title": "Action",
+            "type": "string"
+          },
+          "association_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Association Id",
+            "type": "integer"
+          },
+          "client_operation_id": {
+            "minLength": 1,
+            "title": "Client Operation Id",
+            "type": "string"
+          },
+          "expected_lifecycle_revision": {
+            "exclusiveMinimum": 0.0,
+            "title": "Expected Lifecycle Revision",
+            "type": "integer"
+          },
+          "reason_code": {
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "reason_text": {
+            "minLength": 1,
+            "title": "Reason Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_operation_id",
+          "reason_code",
+          "reason_text",
+          "action",
+          "association_id",
+          "expected_lifecycle_revision"
+        ],
+        "title": "CatalogAssociationArchiveRequest",
+        "type": "object"
+      },
+      "CatalogAssociationCommitRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmed": {
+            "default": false,
+            "title": "Confirmed",
+            "type": "boolean"
+          },
+          "operations": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "add": "#/components/schemas/CatalogAssociationAddRequest",
+                  "archive": "#/components/schemas/CatalogAssociationArchiveRequest",
+                  "replace": "#/components/schemas/CatalogAssociationReplaceRequest",
+                  "revalidate": "#/components/schemas/CatalogAssociationRevalidateRequest"
+                },
+                "propertyName": "action"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/CatalogAssociationAddRequest"
+                },
+                {
+                  "$ref": "#/components/schemas/CatalogAssociationReplaceRequest"
+                },
+                {
+                  "$ref": "#/components/schemas/CatalogAssociationArchiveRequest"
+                },
+                {
+                  "$ref": "#/components/schemas/CatalogAssociationRevalidateRequest"
+                }
+              ]
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Operations",
+            "type": "array"
+          },
+          "prevalidation_token": {
+            "minLength": 1,
+            "title": "Prevalidation Token",
+            "type": "string"
+          },
+          "target_project_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Target Project Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "target_project_id",
+          "operations",
+          "prevalidation_token"
+        ],
+        "title": "CatalogAssociationCommitRequest",
+        "type": "object"
+      },
+      "CatalogAssociationPrevalidationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "operations": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "add": "#/components/schemas/CatalogAssociationAddRequest",
+                  "archive": "#/components/schemas/CatalogAssociationArchiveRequest",
+                  "replace": "#/components/schemas/CatalogAssociationReplaceRequest",
+                  "revalidate": "#/components/schemas/CatalogAssociationRevalidateRequest"
+                },
+                "propertyName": "action"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/CatalogAssociationAddRequest"
+                },
+                {
+                  "$ref": "#/components/schemas/CatalogAssociationReplaceRequest"
+                },
+                {
+                  "$ref": "#/components/schemas/CatalogAssociationArchiveRequest"
+                },
+                {
+                  "$ref": "#/components/schemas/CatalogAssociationRevalidateRequest"
+                }
+              ]
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Operations",
+            "type": "array"
+          },
+          "target_project_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Target Project Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "target_project_id",
+          "operations"
+        ],
+        "title": "CatalogAssociationPrevalidationRequest",
+        "type": "object"
+      },
+      "CatalogAssociationReplaceRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "const": "replace",
+            "title": "Action",
+            "type": "string"
+          },
+          "association_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Association Id",
+            "type": "integer"
+          },
+          "binding_role_key": {
+            "minLength": 1,
+            "title": "Binding Role Key",
+            "type": "string"
+          },
+          "client_operation_id": {
+            "minLength": 1,
+            "title": "Client Operation Id",
+            "type": "string"
+          },
+          "expected_lifecycle_revision": {
+            "exclusiveMinimum": 0.0,
+            "title": "Expected Lifecycle Revision",
+            "type": "integer"
+          },
+          "linkable_object_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Linkable Object Id",
+            "type": "integer"
+          },
+          "reason_code": {
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "reason_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Text"
+          },
+          "signal_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Signal Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "client_operation_id",
+          "reason_code",
+          "action",
+          "association_id",
+          "expected_lifecycle_revision",
+          "signal_id",
+          "linkable_object_id",
+          "binding_role_key"
+        ],
+        "title": "CatalogAssociationReplaceRequest",
+        "type": "object"
+      },
+      "CatalogAssociationRevalidateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "const": "revalidate",
+            "title": "Action",
+            "type": "string"
+          },
+          "association_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Association Id",
+            "type": "integer"
+          },
+          "client_operation_id": {
+            "minLength": 1,
+            "title": "Client Operation Id",
+            "type": "string"
+          },
+          "expected_lifecycle_revision": {
+            "exclusiveMinimum": 0.0,
+            "title": "Expected Lifecycle Revision",
+            "type": "integer"
+          },
+          "reason_code": {
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "reason_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Text"
+          }
+        },
+        "required": [
+          "client_operation_id",
+          "reason_code",
+          "action",
+          "association_id",
+          "expected_lifecycle_revision"
+        ],
+        "title": "CatalogAssociationRevalidateRequest",
+        "type": "object"
+      },
       "ConsoleGroupCellRequest": {
         "additionalProperties": false,
         "properties": {
@@ -7557,6 +7887,266 @@
           }
         },
         "summary": "Validate System Case"
+      }
+    },
+    "/api/time-series/catalog/association-batches": {
+      "post": {
+        "operationId": "commit_global_time_series_catalog_associations_api_time_series_catalog_association_batches_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "title": "If-Match",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogAssociationCommitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "201": {
+            "description": "Association batch created"
+          },
+          "400": {
+            "description": "Stable payload refusal"
+          },
+          "409": {
+            "description": "Confirmation or idempotency conflict"
+          },
+          "410": {
+            "description": "Prevalidation expired"
+          },
+          "412": {
+            "description": "Observed precondition changed"
+          },
+          "422": {
+            "description": "Domain batch rejection"
+          },
+          "428": {
+            "description": "Required commit guard missing"
+          }
+        },
+        "summary": "Commit Global Time Series Catalog Associations"
+      }
+    },
+    "/api/time-series/catalog/association-prevalidations": {
+      "post": {
+        "operationId": "prevalidate_global_time_series_catalog_associations_api_time_series_catalog_association_prevalidations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogAssociationPrevalidationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "description": "Stable payload refusal"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Prevalidate Global Time Series Catalog Associations"
+      }
+    },
+    "/api/time-series/catalog/associations": {
+      "get": {
+        "operationId": "get_global_time_series_catalog_associations_api_time_series_catalog_associations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Global Time Series Catalog Associations"
+      }
+    },
+    "/api/time-series/catalog/associations/{association_id}": {
+      "get": {
+        "operationId": "get_global_time_series_catalog_association_api_time_series_catalog_associations__association_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "association_id",
+            "required": true,
+            "schema": {
+              "title": "Association Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Global Time Series Catalog Association"
+      }
+    },
+    "/api/time-series/catalog/associations/{association_id}/events": {
+      "get": {
+        "operationId": "get_global_time_series_catalog_association_events_api_time_series_catalog_associations__association_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "association_id",
+            "required": true,
+            "schema": {
+              "title": "Association Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Global Time Series Catalog Association Events"
       }
     },
     "/api/time-series/catalog/descriptors": {

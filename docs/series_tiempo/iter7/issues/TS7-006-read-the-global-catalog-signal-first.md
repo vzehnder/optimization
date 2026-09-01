@@ -1,6 +1,6 @@
 # TS7-006: Read The Global Catalog Signal First
 
-Status: Todo
+Status: In Review
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter7/spec_ts7_catalogo_global_y_series_especificas.md` (6.1-6.11)

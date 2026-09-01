@@ -7,10 +7,21 @@ import secrets
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import quote
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi import (
+    FastAPI,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+)
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from plotly.offline import get_plotlyjs
 from pydantic import BaseModel, ConfigDict, Field
@@ -104,6 +115,11 @@ from app.time_series_catalog_read import (
     parse_preview_query,
     parse_result_filters,
 )
+from app.time_series_associations import (
+    AssociationMutationError,
+    association_detail_etag,
+    association_error_payload,
+)
 from app.transformations import TransformationError
 from app.runner import JuliaRunExecutor, LocalRunQueue
 from app.time_series_ingestion import (
@@ -159,6 +175,67 @@ class CustomSemanticTypeCreateRequest(BaseModel):
     value_kind: str = Field(min_length=1)
     default_aggregation: str = Field(min_length=1)
     validation_rules: dict[str, Any]
+
+
+class CatalogAssociationOperationBase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    client_operation_id: str = Field(min_length=1)
+    reason_code: str = Field(min_length=1)
+    reason_text: str | None = None
+
+
+class CatalogAssociationAddRequest(CatalogAssociationOperationBase):
+    action: Literal["add"]
+    signal_id: int = Field(gt=0)
+    linkable_object_id: int = Field(gt=0)
+    binding_role_key: str = Field(min_length=1)
+    expected_absent: Literal[True]
+
+
+class CatalogAssociationReplaceRequest(CatalogAssociationOperationBase):
+    action: Literal["replace"]
+    association_id: int = Field(gt=0)
+    expected_lifecycle_revision: int = Field(gt=0)
+    signal_id: int = Field(gt=0)
+    linkable_object_id: int = Field(gt=0)
+    binding_role_key: str = Field(min_length=1)
+
+
+class CatalogAssociationArchiveRequest(CatalogAssociationOperationBase):
+    action: Literal["archive"]
+    association_id: int = Field(gt=0)
+    expected_lifecycle_revision: int = Field(gt=0)
+    reason_text: str = Field(min_length=1)
+
+
+class CatalogAssociationRevalidateRequest(CatalogAssociationOperationBase):
+    action: Literal["revalidate"]
+    association_id: int = Field(gt=0)
+    expected_lifecycle_revision: int = Field(gt=0)
+
+
+CatalogAssociationOperationRequest = Annotated[
+    CatalogAssociationAddRequest
+    | CatalogAssociationReplaceRequest
+    | CatalogAssociationArchiveRequest
+    | CatalogAssociationRevalidateRequest,
+    Field(discriminator="action"),
+]
+
+
+class CatalogAssociationPrevalidationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_project_id: int = Field(gt=0)
+    operations: list[CatalogAssociationOperationRequest] = Field(
+        min_length=1, max_length=200
+    )
+
+
+class CatalogAssociationCommitRequest(CatalogAssociationPrevalidationRequest):
+    prevalidation_token: str = Field(min_length=1)
+    confirmed: bool = False
 
 
 class BootstrapAdminRequest(BaseModel):
@@ -638,6 +715,58 @@ def create_app(
     app.state.analyst_store = analyst_store
     app.state.auth_enabled = auth_required
     authorization = AuthorizationService(analyst_store)
+
+    @app.exception_handler(RequestValidationError)
+    async def stable_association_request_validation(
+        request: Request, error: RequestValidationError
+    ):
+        if request.url.path not in {
+            "/api/time-series/catalog/association-prevalidations",
+            "/api/time-series/catalog/association-batches",
+        }:
+            return await request_validation_exception_handler(request, error)
+        location = list(error.errors()[0].get("loc", ()))
+        missing_commit_precondition = (
+            request.url.path
+            == "/api/time-series/catalog/association-batches"
+            and any(
+                str(part).lower()
+                in {"prevalidation_token", "if-match", "idempotency-key"}
+                for part in location
+            )
+        )
+        location = [
+            part
+            for part in location
+            if part
+            not in {
+                "body",
+                "header",
+                "add",
+                "replace",
+                "archive",
+                "revalidate",
+            }
+        ]
+        field = ""
+        for part in location:
+            if isinstance(part, int):
+                field += f"[{part}]"
+            else:
+                field += ("." if field else "") + str(part)
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        refusal = AssociationMutationError(
+            "TS_PRECONDITION_REQUIRED"
+            if missing_commit_precondition
+            else "TS_LINK_PAYLOAD_INVALID",
+            field=field or "body",
+            reason="request_validation",
+        )
+        return JSONResponse(
+            association_error_payload(refusal, request_id=request_id),
+            status_code=428 if missing_commit_precondition else 400,
+            headers={"Cache-Control": "private, no-store"},
+        )
 
     def current_user_from_request(request: Request) -> dict[str, Any] | None:
         token = request.cookies.get(session_cookie_name)
@@ -1732,6 +1861,213 @@ def create_app(
         return JSONResponse(
             page,
             headers={"Cache-Control": "private, must-revalidate"},
+        )
+
+    @app.get("/api/time-series/catalog/associations")
+    async def get_global_time_series_catalog_associations(
+        request: Request, limit: int = 50, cursor: str | None = None
+    ):
+        user = request.state.current_user or {}
+        actor_class = f"{user.get('role', 'analyst')}:{user.get('id', 'auth-disabled')}"
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            page = analyst_store.read_catalog_associations(
+                limit=limit, cursor=cursor, actor_class=actor_class
+            )
+        except CatalogQueryError as error:
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=410 if error.code == "TS_QUERY_CURSOR_EXPIRED" else 400,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        page["meta"]["request_id"] = request_id
+        return JSONResponse(
+            page,
+            headers={"Cache-Control": "private, must-revalidate"},
+        )
+
+    @app.get("/api/time-series/catalog/associations/{association_id}")
+    async def get_global_time_series_catalog_association(
+        association_id: int, request: Request
+    ):
+        user = request.state.current_user or {}
+        actor_class = f"{user.get('role', 'analyst')}:{user.get('id', 'auth-disabled')}"
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            detail = analyst_store.read_catalog_association(association_id)
+        except KeyError:
+            return JSONResponse(
+                {"detail": "not found"},
+                status_code=404,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        etag = association_detail_etag(detail, actor_class=actor_class)
+        if request.headers.get("if-none-match") == etag:
+            return Response(
+                status_code=304,
+                headers={"ETag": etag, "Cache-Control": "private, must-revalidate"},
+            )
+        detail["request_id"] = request_id
+        return JSONResponse(
+            detail,
+            headers={"ETag": etag, "Cache-Control": "private, must-revalidate"},
+        )
+
+    @app.get("/api/time-series/catalog/associations/{association_id}/events")
+    async def get_global_time_series_catalog_association_events(
+        association_id: int,
+        request: Request,
+        limit: int = 50,
+        cursor: str | None = None,
+    ):
+        user = request.state.current_user or {}
+        actor_class = f"{user.get('role', 'analyst')}:{user.get('id', 'auth-disabled')}"
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            page = analyst_store.read_catalog_association_events(
+                association_id,
+                limit=limit,
+                cursor=cursor,
+                actor_class=actor_class,
+            )
+        except KeyError:
+            return JSONResponse(
+                {"detail": "not found"},
+                status_code=404,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        except CatalogQueryError as error:
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=410 if error.code == "TS_QUERY_CURSOR_EXPIRED" else 400,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        page["meta"]["request_id"] = request_id
+        return JSONResponse(
+            page,
+            headers={"Cache-Control": "private, must-revalidate"},
+        )
+
+    @app.post(
+        "/api/time-series/catalog/association-prevalidations",
+        responses={400: {"description": "Stable payload refusal"}},
+    )
+    async def prevalidate_global_time_series_catalog_associations(
+        payload: CatalogAssociationPrevalidationRequest, request: Request
+    ):
+        user = request.state.current_user or {}
+        actor_class = f"{user.get('role', 'analyst')}:{user.get('id', 'auth-disabled')}"
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            document = payload.model_dump(exclude_none=True)
+            result = analyst_store.prevalidate_catalog_association_batch(
+                document, actor_class=actor_class
+            )
+        except (AssociationMutationError, ValueError, TypeError) as error:
+            if not isinstance(error, AssociationMutationError):
+                error = AssociationMutationError(
+                    "TS_LINK_PAYLOAD_INVALID", field="body"
+                )
+            return JSONResponse(
+                association_error_payload(error, request_id=request_id),
+                status_code=400,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        except KeyError:
+            error = AssociationMutationError(
+                "TS_LINK_PAYLOAD_INVALID", field="target_project_id"
+            )
+            return JSONResponse(
+                association_error_payload(error, request_id=request_id),
+                status_code=404,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        result["request_id"] = request_id
+        return JSONResponse(
+            result,
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+    @app.post(
+        "/api/time-series/catalog/association-batches",
+        responses={
+            201: {"description": "Association batch created"},
+            400: {"description": "Stable payload refusal"},
+            409: {"description": "Confirmation or idempotency conflict"},
+            410: {"description": "Prevalidation expired"},
+            412: {"description": "Observed precondition changed"},
+            422: {"description": "Domain batch rejection"},
+            428: {"description": "Required commit guard missing"},
+        },
+    )
+    async def commit_global_time_series_catalog_associations(
+        payload: CatalogAssociationCommitRequest,
+        request: Request,
+        if_match: str = Header(alias="If-Match"),
+        idempotency_key: str = Header(alias="Idempotency-Key"),
+    ):
+        user = request.state.current_user or {
+            "id": None,
+            "email": "internal_analyst",
+            "role": "analyst",
+        }
+        actor_class = f"{user.get('role', 'analyst')}:{user.get('id', 'auth-disabled')}"
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        document = payload.model_dump(
+            exclude={"prevalidation_token", "confirmed"}, exclude_none=True
+        )
+        try:
+            token = payload.prevalidation_token.strip()
+            if_match = str(if_match or "").strip()
+            idempotency_key = str(idempotency_key or "").strip()
+            if not token or not if_match or not idempotency_key:
+                missing = (
+                    "prevalidation_token"
+                    if not token
+                    else "If-Match"
+                    if not if_match
+                    else "Idempotency-Key"
+                )
+                raise AssociationMutationError(
+                    "TS_PRECONDITION_REQUIRED", field=missing
+                )
+            result, replayed = analyst_store.commit_catalog_association_batch(
+                document,
+                actor_user=user,
+                actor_class=actor_class,
+                request_id=request_id,
+                prevalidation_token=token,
+                if_match=if_match,
+                idempotency_key=idempotency_key,
+                confirmed=payload.confirmed,
+            )
+        except (AssociationMutationError, ValueError, TypeError) as error:
+            if not isinstance(error, AssociationMutationError):
+                error = AssociationMutationError(
+                    "TS_LINK_PAYLOAD_INVALID", field="body"
+                )
+            error.context.setdefault("normalized_request", document)
+            status_by_code = {
+                "TS_PRECONDITION_REQUIRED": 428,
+                "TS_LINK_PREVALIDATION_EXPIRED": 410,
+                "TS_LINK_PRECONDITION_CHANGED": 412,
+                "TS_COMPAT_SCOPE_NOT_ACCESSIBLE": 412,
+                "TS_LINK_BATCH_REJECTED": 422,
+                "TS_LINK_CONFLICT": 409,
+                "TS_LINK_CONFIRMATION_REQUIRED": 409,
+                "TS_IDEMPOTENCY_CONFLICT": 409,
+            }
+            return JSONResponse(
+                association_error_payload(error, request_id=request_id),
+                status_code=status_by_code.get(error.code, 400),
+                headers={"Cache-Control": "private, no-store"},
+            )
+        return JSONResponse(
+            result,
+            status_code=(
+                200 if replayed or result.get("outcome") == "unchanged" else 201
+            ),
+            headers={"Cache-Control": "private, no-store"},
         )
 
     @app.get("/api/time-series/catalog/results")

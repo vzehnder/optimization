@@ -115,6 +115,14 @@ from app.time_series_catalog_read import (
     input_filters_sql,
     sample_preview_rows,
 )
+from app.time_series_associations import (
+    AssociationMutationError,
+    association_commit_etag,
+    association_request_hash,
+    issue_prevalidation_token,
+    normalize_association_request,
+    verify_prevalidation_token,
+)
 from app.time_series_links import (
     link_history_guard_script,
     link_layer_constraint_upgrade_script,
@@ -4128,6 +4136,1610 @@ class AnalystStore:
                 "section": "object_candidates",
                 "signal_id": signal_id,
                 "target_project_id": target_project_id,
+                "catalog_generation": generation,
+            },
+        }
+
+    # -- Atomic catalog associations (TS7-007) ----------------------------
+
+    def _prevalidate_catalog_association_add(
+        self,
+        operation: dict[str, Any],
+        *,
+        target_project_id: int,
+        batch_cache: dict[str, dict[Any, Any]] | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        cache = batch_cache or {
+            "linkable": {},
+            "compatibility": {},
+            "role": {},
+        }
+        entry = self.connection.execute(
+            f"""
+            SELECT entry.*, canonical_set.scope_revision,
+                   revision.content_hash AS revision_content_hash,
+                   revision_signal.signal_role
+            FROM {self._projection('time_series_catalog_entries')} AS entry
+            JOIN {self._canonical('time_series_sets')} AS canonical_set
+              ON canonical_set.id = entry.time_series_set_id
+            JOIN {self._canonical('time_series_set_revisions')} AS revision
+              ON revision.id = entry.current_revision_id
+            JOIN {self._canonical('time_series_revision_signals')} AS revision_signal
+              ON revision_signal.set_revision_id = entry.current_revision_id
+             AND revision_signal.signal_id = entry.signal_id
+            WHERE entry.signal_id = ?
+            """,
+            (operation["signal_id"],),
+        ).fetchone()
+        linkable_cache = cache["linkable"]
+        linkable_id = operation["linkable_object_id"]
+        if linkable_id not in linkable_cache:
+            try:
+                linkable_cache[linkable_id] = self.get_linkable_object(linkable_id)
+            except LinkableObjectError:
+                linkable_cache[linkable_id] = None
+        linkable = linkable_cache[linkable_id]
+
+        errors: list[dict[str, Any]] = []
+        decision: dict[str, Any]
+        if entry is None:
+            errors.append(
+                compatibility_error(
+                    "TS_COMPAT_SIGNAL_UNAVAILABLE",
+                    {"signal_id": operation["signal_id"], "usage": "association"},
+                )
+            )
+            decision = {
+                "allowed": False,
+                "compatibility_rule_id": None,
+                "rule_version": None,
+                "contract_version": CLASSIFICATION_CONTRACT_VERSION,
+                "errors": list(errors),
+                "primary_error": errors[0],
+            }
+        elif linkable is None:
+            errors.append(
+                compatibility_error(
+                    "TS_COMPAT_OBJECT_UNAVAILABLE",
+                    {
+                        "linkable_object_id": operation["linkable_object_id"],
+                        "usage": "association",
+                    },
+                )
+            )
+            decision = {
+                "allowed": False,
+                "compatibility_rule_id": None,
+                "rule_version": None,
+                "contract_version": CLASSIFICATION_CONTRACT_VERSION,
+                "errors": list(errors),
+                "primary_error": errors[0],
+            }
+        else:
+            entry = dict(entry)
+            compatibility_key = (
+                entry["semantic_type_key"],
+                operation["binding_role_key"],
+                linkable["object_type_key"],
+                entry["unit_key"],
+            )
+            compatibility_cache = cache["compatibility"]
+            if compatibility_key not in compatibility_cache:
+                compatibility_cache[compatibility_key] = (
+                    self.evaluate_time_series_compatibility(
+                        semantic_type_key=entry["semantic_type_key"],
+                        binding_role_key=operation["binding_role_key"],
+                        object_type_key=linkable["object_type_key"],
+                        unit_key=entry["unit_key"],
+                        usage="association",
+                    )
+                )
+            cached_decision = compatibility_cache[compatibility_key]
+            decision = {
+                **cached_decision,
+                "errors": list(cached_decision["errors"]),
+                "primary_error": cached_decision["primary_error"],
+            }
+            if entry["set_status"] == "archived" or entry["signal_status"] == "archived":
+                errors.append(
+                    compatibility_error(
+                        "TS_COMPAT_SIGNAL_UNAVAILABLE",
+                        {"signal_id": operation["signal_id"], "usage": "association"},
+                    )
+                )
+            if linkable["status"] != "active":
+                errors.append(
+                    compatibility_error(
+                        "TS_COMPAT_OBJECT_UNAVAILABLE",
+                        {
+                            "linkable_object_id": operation["linkable_object_id"],
+                            "usage": "association",
+                        },
+                    )
+                )
+            if int(linkable["project_id"]) != int(target_project_id):
+                errors.append(
+                    compatibility_error(
+                        "TS_COMPAT_PROJECT_CONTEXT_MISMATCH",
+                        {
+                            "linkable_object_id": operation["linkable_object_id"],
+                            "target_project_id": target_project_id,
+                            "object_project_id": int(linkable["project_id"]),
+                        },
+                    )
+                )
+            if (
+                entry["visibility_scope"] == "project"
+                and int(entry["owner_project_id"]) != int(target_project_id)
+            ):
+                errors.append(
+                    compatibility_error(
+                        "TS_COMPAT_SCOPE_NOT_ACCESSIBLE",
+                        {
+                            "signal_id": operation["signal_id"],
+                            "owner_project_id": int(entry["owner_project_id"]),
+                            "target_project_id": target_project_id,
+                        },
+                    )
+                )
+            if errors:
+                decision = {
+                    **decision,
+                    "allowed": False,
+                    "errors": [*errors, *decision["errors"]],
+                    "primary_error": errors[0],
+                }
+
+        active_association = None
+        role = None
+        if entry is not None and linkable is not None and decision["compatibility_rule_id"]:
+            role_cache = cache["role"]
+            role_key = operation["binding_role_key"]
+            if role_key not in role_cache:
+                role_cache[role_key] = self.connection.execute(
+                    "SELECT id FROM time_series_binding_roles WHERE role_key = ?",
+                    (role_key,),
+                ).fetchone()
+            role = role_cache[role_key]
+            if role is not None:
+                active_association = self.connection.execute(
+                    f"""
+                    SELECT id, lifecycle_revision, status
+                    FROM {self.link_layer_table_names()['time_series_catalog_associations']}
+                    WHERE signal_id = ? AND linkable_object_id = ?
+                      AND binding_role_id = ? AND status = 'active'
+                    """,
+                    (
+                        operation["signal_id"],
+                        operation["linkable_object_id"],
+                        int(role["id"]),
+                    ),
+                ).fetchone()
+        observation = {
+            "signal": (
+                {
+                    "signal_id": int(entry["signal_id"]),
+                    "time_series_set_id": int(entry["time_series_set_id"]),
+                    "current_revision_id": int(entry["current_revision_id"]),
+                    "content_hash": entry["revision_content_hash"],
+                    "visibility_scope": entry["visibility_scope"],
+                    "owner_project_id": int(entry["owner_project_id"]),
+                    "semantic_type_key": entry["semantic_type_key"],
+                    "data_class_key": entry["data_class_key"],
+                    "unit_key": entry["unit_key"],
+                    "signal_role": entry["signal_role"],
+                    "scope_revision": int(entry["scope_revision"]),
+                    "set_status": entry["set_status"],
+                    "signal_status": entry["signal_status"],
+                }
+                if entry is not None
+                else None
+            ),
+            "object": (
+                {
+                    "id": int(linkable["id"]),
+                    "project_id": int(linkable["project_id"]),
+                    "object_type_key": linkable["object_type_key"],
+                    "status": linkable["status"],
+                }
+                if linkable is not None
+                else None
+            ),
+            "compatibility_rule_id": decision["compatibility_rule_id"],
+            "binding_role_id": int(role["id"]) if role is not None else None,
+            "rule_version": decision["rule_version"],
+            "active_association": (
+                {
+                    "id": int(active_association["id"]),
+                    "lifecycle_revision": int(active_association["lifecycle_revision"]),
+                    "status": active_association["status"],
+                }
+                if active_association is not None
+                else None
+            ),
+        }
+        result = {
+            "client_operation_id": operation["client_operation_id"],
+            "action": operation["action"],
+            "normalized_operation": operation,
+            "verdict": "accepted" if decision["allowed"] else "rejected",
+            "compatibility_decision": decision,
+            "errors": decision["errors"],
+            "observed_state": observation,
+            "comparison": {
+                "before": observation["active_association"],
+                "after": operation,
+            },
+        }
+        return result, observation
+
+    @staticmethod
+    def _association_operation_error(
+        code: str, *, field: str | None = None, **context: Any
+    ) -> dict[str, Any]:
+        error = AssociationMutationError(code, **context)
+        return {
+            "code": error.code,
+            "message_key": error.message_key,
+            "message": error.message,
+            "field": field if field is not None else error.field,
+            "context": context,
+        }
+
+    def _prevalidate_catalog_association_replace(
+        self,
+        operation: dict[str, Any],
+        *,
+        target_project_id: int,
+        batch_cache: dict[str, dict[Any, Any]] | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        target_result, observation = self._prevalidate_catalog_association_add(
+            operation,
+            target_project_id=target_project_id,
+            batch_cache=batch_cache,
+        )
+        try:
+            previous = self.read_catalog_association(operation["association_id"])
+        except KeyError:
+            previous = None
+        precondition_errors: list[dict[str, Any]] = []
+        if previous is None:
+            precondition_errors.append(
+                self._association_operation_error(
+                    "TS_LINK_PRECONDITION_CHANGED",
+                    field="association_id",
+                    association_id=operation["association_id"],
+                    reason="not_found",
+                )
+            )
+        elif (
+            previous["status"] != "active"
+            or previous["lifecycle_revision"]
+            != operation["expected_lifecycle_revision"]
+        ):
+            precondition_errors.append(
+                self._association_operation_error(
+                    "TS_LINK_PRECONDITION_CHANGED",
+                    field="expected_lifecycle_revision",
+                    association_id=operation["association_id"],
+                    expected_lifecycle_revision=operation[
+                        "expected_lifecycle_revision"
+                    ],
+                    actual_lifecycle_revision=previous["lifecycle_revision"],
+                    actual_status=previous["status"],
+                )
+            )
+        elif previous["object"]["project_id"] != int(target_project_id):
+            precondition_errors.append(
+                compatibility_error(
+                    "TS_COMPAT_PROJECT_CONTEXT_MISMATCH",
+                    {
+                        "linkable_object_id": previous["object"]["id"],
+                        "target_project_id": target_project_id,
+                        "object_project_id": previous["object"]["project_id"],
+                    },
+                )
+            )
+        errors = [*precondition_errors, *target_result["errors"]]
+        allowed = not errors
+        observation["previous_association"] = (
+            {
+                "association_id": previous["association_id"],
+                "signal_id": previous["signal_id"],
+                "time_series_set_id": previous["set"]["id"],
+                "linkable_object_id": previous["object"]["id"],
+                "binding_role_id": previous["binding_role"]["id"],
+                "binding_role_key": previous["binding_role"]["key"],
+                "compatibility_rule_id": previous["compatibility_rule_id"],
+                "lifecycle_revision": previous["lifecycle_revision"],
+                "status": previous["status"],
+                "validation": previous["validation"],
+            }
+            if previous is not None
+            else None
+        )
+        target_result.update(
+            {
+                "action": "replace",
+                "normalized_operation": operation,
+                "verdict": "confirmation_required" if allowed else "rejected",
+                "errors": errors,
+                "observed_state": observation,
+                "comparison": {"before": previous, "after": operation},
+            }
+        )
+        if precondition_errors:
+            target_result["compatibility_decision"] = {
+                **target_result["compatibility_decision"],
+                "allowed": False,
+                "errors": errors,
+                "primary_error": errors[0],
+            }
+        return target_result, observation
+
+    def _prevalidate_existing_catalog_association(
+        self,
+        operation: dict[str, Any],
+        *,
+        target_project_id: int,
+        batch_cache: dict[str, dict[Any, Any]] | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        try:
+            previous = self.read_catalog_association(operation["association_id"])
+        except KeyError:
+            previous = None
+        errors: list[dict[str, Any]] = []
+        if previous is None:
+            errors.append(
+                self._association_operation_error(
+                    "TS_LINK_PRECONDITION_CHANGED",
+                    field="association_id",
+                    association_id=operation["association_id"],
+                    reason="not_found",
+                )
+            )
+        elif (
+            previous["status"] != "active"
+            or previous["lifecycle_revision"]
+            != operation["expected_lifecycle_revision"]
+        ):
+            errors.append(
+                self._association_operation_error(
+                    "TS_LINK_PRECONDITION_CHANGED",
+                    field="expected_lifecycle_revision",
+                    association_id=operation["association_id"],
+                    expected_lifecycle_revision=operation[
+                        "expected_lifecycle_revision"
+                    ],
+                    actual_lifecycle_revision=previous["lifecycle_revision"],
+                    actual_status=previous["status"],
+                )
+            )
+        elif previous["object"]["project_id"] != int(target_project_id):
+            errors.append(
+                compatibility_error(
+                    "TS_COMPAT_PROJECT_CONTEXT_MISMATCH",
+                    {
+                        "linkable_object_id": previous["object"]["id"],
+                        "target_project_id": target_project_id,
+                        "object_project_id": previous["object"]["project_id"],
+                    },
+                )
+            )
+
+        observation: dict[str, Any] = {
+            "previous_association": (
+                {
+                    "association_id": previous["association_id"],
+                    "signal_id": previous["signal_id"],
+                    "time_series_set_id": previous["set"]["id"],
+                    "linkable_object_id": previous["object"]["id"],
+                    "binding_role_id": previous["binding_role"]["id"],
+                    "binding_role_key": previous["binding_role"]["key"],
+                    "compatibility_rule_id": previous["compatibility_rule_id"],
+                    "lifecycle_revision": previous["lifecycle_revision"],
+                    "status": previous["status"],
+                    "validation": previous["validation"],
+                }
+                if previous is not None
+                else None
+            )
+        }
+        decision = {
+            "allowed": not errors,
+            "compatibility_rule_id": (
+                previous["compatibility_rule_id"] if previous is not None else None
+            ),
+            "rule_version": None,
+            "contract_version": CLASSIFICATION_CONTRACT_VERSION,
+            "errors": list(errors),
+            "primary_error": errors[0] if errors else None,
+        }
+        if previous is not None and operation["action"] == "revalidate":
+            target_operation = {
+                **operation,
+                "signal_id": previous["signal_id"],
+                "linkable_object_id": previous["object"]["id"],
+                "binding_role_key": previous["binding_role"]["key"],
+            }
+            target_result, target_observation = (
+                self._prevalidate_catalog_association_add(
+                    target_operation,
+                    target_project_id=target_project_id,
+                    batch_cache=batch_cache,
+                )
+            )
+            observation.update(target_observation)
+            errors.extend(target_result["errors"])
+            decision = target_result["compatibility_decision"]
+        allowed = not errors
+        verdict = (
+            "rejected"
+            if not allowed
+            else "confirmation_required"
+            if operation["action"] == "archive"
+            else "accepted"
+        )
+        result = {
+            "client_operation_id": operation["client_operation_id"],
+            "action": operation["action"],
+            "normalized_operation": operation,
+            "verdict": verdict,
+            "compatibility_decision": {
+                **decision,
+                "allowed": allowed,
+                "errors": errors,
+                "primary_error": errors[0] if errors else None,
+            },
+            "errors": errors,
+            "observed_state": observation,
+            "comparison": {"before": previous, "after": operation},
+        }
+        return result, observation
+
+    def prevalidate_catalog_association_batch(
+        self, document: Mapping[str, Any], *, actor_class: str
+    ) -> dict[str, Any]:
+        """Evaluate a complete batch without reserving or writing anything."""
+
+        normalized = normalize_association_request(document)
+        self.get_project(normalized["target_project_id"])
+        results: list[dict[str, Any]] = []
+        observations: list[dict[str, Any]] = []
+        batch_cache: dict[str, dict[Any, Any]] = {
+            "linkable": {},
+            "compatibility": {},
+            "role": {},
+        }
+        claimed_targets: dict[tuple[int, int, str], str] = {}
+        claimed_associations: dict[int, str] = {}
+        for operation in normalized["operations"]:
+            if operation["action"] == "add":
+                result, observation = self._prevalidate_catalog_association_add(
+                    operation,
+                    target_project_id=normalized["target_project_id"],
+                    batch_cache=batch_cache,
+                )
+            elif operation["action"] == "replace":
+                result, observation = self._prevalidate_catalog_association_replace(
+                    operation,
+                    target_project_id=normalized["target_project_id"],
+                    batch_cache=batch_cache,
+                )
+            elif operation["action"] in {"archive", "revalidate"}:
+                result, observation = self._prevalidate_existing_catalog_association(
+                    operation,
+                    target_project_id=normalized["target_project_id"],
+                    batch_cache=batch_cache,
+                )
+            else:
+                raise AssociationMutationError(
+                    "TS_LINK_PAYLOAD_INVALID",
+                    field="operations.action",
+                    reason="not_implemented",
+                )
+            conflicting_with = None
+            if operation["action"] in {"add", "replace"}:
+                target = (
+                    operation["signal_id"],
+                    operation["linkable_object_id"],
+                    operation["binding_role_key"],
+                )
+                conflicting_with = claimed_targets.get(target)
+                claimed_targets.setdefault(target, operation["client_operation_id"])
+            if operation["action"] in {"replace", "archive", "revalidate"}:
+                association_id = operation["association_id"]
+                conflicting_with = (
+                    conflicting_with
+                    or claimed_associations.get(association_id)
+                )
+                claimed_associations.setdefault(
+                    association_id, operation["client_operation_id"]
+                )
+            if conflicting_with is not None:
+                conflict = self._association_operation_error(
+                    "TS_LINK_CONFLICT",
+                    field="client_operation_id",
+                    client_operation_id=operation["client_operation_id"],
+                    conflicts_with=conflicting_with,
+                )
+                result["verdict"] = "rejected"
+                result["errors"] = [conflict, *result["errors"]]
+                result["compatibility_decision"] = {
+                    **result["compatibility_decision"],
+                    "allowed": False,
+                    "errors": result["errors"],
+                    "primary_error": conflict,
+                }
+                observation["batch_conflict"] = {
+                    "conflicts_with": conflicting_with
+                }
+            results.append(result)
+            observations.append(observation)
+        request_hash = association_request_hash(normalized)
+        commit_etag = association_commit_etag(
+            normalized, observations, actor_class=actor_class
+        )
+        token, expires_at = issue_prevalidation_token(
+            request_hash=request_hash,
+            commit_etag=commit_etag,
+            actor_class=actor_class,
+            secret=self._catalog_cursor_secret,
+        )
+        requires_confirmation = any(
+            item["verdict"] == "confirmation_required" for item in results
+        )
+        return {
+            "normalized_request": normalized,
+            "request_hash": request_hash,
+            "operations": results,
+            "can_commit": all(item["verdict"] != "rejected" for item in results),
+            "requires_confirmation": requires_confirmation,
+            "expires_at": expires_at,
+            "prevalidation_token": token,
+            "commit_etag": commit_etag,
+        }
+
+    @staticmethod
+    def _association_fingerprint(value: Mapping[str, Any]) -> str:
+        encoded = json.dumps(value, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    def _catalog_association_fingerprints(
+        self,
+        *,
+        observed: Mapping[str, Any],
+        binding_role_key: str,
+        contract_version: int,
+    ) -> tuple[str, str]:
+        signal = observed["signal"]
+        linkable = observed["object"]
+        compatibility_fingerprint = self._association_fingerprint(
+            {
+                "signal_role": signal["signal_role"],
+                "semantic_type_key": signal["semantic_type_key"],
+                "data_class_key": signal["data_class_key"],
+                "unit_key": signal["unit_key"],
+                "binding_role_key": binding_role_key,
+                "object_type_key": linkable["object_type_key"],
+                "visibility_scope": signal["visibility_scope"],
+                "owner_project_id": signal["owner_project_id"],
+                "compatibility_rule_id": observed["compatibility_rule_id"],
+                "rule_version": observed["rule_version"],
+                "contract_version": contract_version,
+            }
+        )
+        object_scope_fingerprint = self._association_fingerprint(
+            {
+                "object_id": linkable["id"],
+                "object_project_id": linkable["project_id"],
+                "object_status": linkable["status"],
+                "source_scope": signal["visibility_scope"],
+                "scope_revision": signal["scope_revision"],
+                "source_owner_project_id": signal["owner_project_id"],
+            }
+        )
+        return compatibility_fingerprint, object_scope_fingerprint
+
+    def _insert_catalog_association_add(
+        self,
+        *,
+        operation: dict[str, Any],
+        prevalidated: dict[str, Any],
+        actor_user: Mapping[str, Any],
+        request_id: str,
+        batch_id: str,
+        occurred_at: str,
+        supersedes_association_id: int | None = None,
+        event_type: str = "created",
+    ) -> dict[str, Any]:
+        observed = prevalidated["observed_state"]
+        existing = observed["active_association"]
+        if existing is not None:
+            return {
+                "client_operation_id": operation["client_operation_id"],
+                "action": "add",
+                "outcome": "unchanged",
+                "association_id": existing["id"],
+            }
+        signal = observed["signal"]
+        linkable = observed["object"]
+        rule_id = int(observed["compatibility_rule_id"])
+        role_id = int(observed["binding_role_id"])
+        association_table = self.link_layer_table_names()[
+            "time_series_catalog_associations"
+        ]
+        association_id = self._insert_canonical_row(
+            f"""
+            INSERT INTO {association_table} (
+                signal_id, time_series_set_id, linkable_object_id,
+                binding_role_id, compatibility_rule_id,
+                supersedes_association_id, lifecycle_revision, status, created_at, created_by,
+                metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, 1, 'active', ?, ?, ?)
+            """,
+            (
+                operation["signal_id"],
+                signal["time_series_set_id"],
+                operation["linkable_object_id"],
+                role_id,
+                rule_id,
+                supersedes_association_id,
+                occurred_at,
+                actor_user["email"],
+                json.dumps(
+                    {
+                        "client_operation_id": operation["client_operation_id"],
+                        "request_id": request_id,
+                    },
+                    sort_keys=True,
+                ),
+            ),
+        )
+        compatibility_fingerprint, object_scope_fingerprint = (
+            self._catalog_association_fingerprints(
+                observed=observed,
+                binding_role_key=operation["binding_role_key"],
+                contract_version=prevalidated["compatibility_decision"][
+                    "contract_version"
+                ],
+            )
+        )
+        validations = self.link_layer_table_names()["time_series_link_validations"]
+        self.connection.execute(
+            f"""
+            INSERT INTO {validations} (
+                catalog_association_id, subject_lifecycle_revision,
+                validation_mode, validated_set_revision_id,
+                observed_current_revision_id, compatibility_rule_id,
+                compatibility_fingerprint, object_scope_fingerprint,
+                validated_at, validated_by, reason_code, reason_text
+            ) VALUES (?, 1, 'association_current', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                association_id,
+                signal["current_revision_id"],
+                signal["current_revision_id"],
+                rule_id,
+                compatibility_fingerprint,
+                object_scope_fingerprint,
+                occurred_at,
+                actor_user["email"],
+                operation["reason_code"],
+                operation.get("reason_text"),
+            ),
+        )
+        event_table = self.link_layer_table_names()["time_series_link_events"]
+        after = {
+            "association_id": association_id,
+            "signal_id": operation["signal_id"],
+            "linkable_object_id": operation["linkable_object_id"],
+            "binding_role_key": operation["binding_role_key"],
+            "lifecycle_revision": 1,
+            "status": "active",
+            "supersedes_association_id": supersedes_association_id,
+        }
+        self.connection.execute(
+            f"""
+            INSERT INTO {event_table} (
+                batch_id, catalog_association_id, event_type,
+                actor_user_id, actor_identity_snapshot, actor_role_snapshot,
+                reason_code, reason_text, before_json, after_json,
+                request_id, occurred_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{{}}', ?, ?, ?)
+            """,
+            (
+                batch_id,
+                association_id,
+                event_type,
+                actor_user.get("id"),
+                actor_user["email"],
+                actor_user["role"],
+                operation["reason_code"],
+                operation.get("reason_text"),
+                json.dumps(after, sort_keys=True),
+                request_id,
+                occurred_at,
+            ),
+        )
+        return {
+            "client_operation_id": operation["client_operation_id"],
+            "action": operation["action"],
+            "outcome": "replaced" if event_type == "replaced" else "created",
+            "association_id": association_id,
+        }
+
+    def _replace_catalog_association(
+        self,
+        *,
+        operation: dict[str, Any],
+        prevalidated: dict[str, Any],
+        actor_user: Mapping[str, Any],
+        request_id: str,
+        batch_id: str,
+        occurred_at: str,
+    ) -> dict[str, Any]:
+        previous = prevalidated["observed_state"]["previous_association"]
+        association_table = self.link_layer_table_names()[
+            "time_series_catalog_associations"
+        ]
+        archived_revision = int(previous["lifecycle_revision"]) + 1
+        self.connection.execute(
+            f"""
+            UPDATE {association_table}
+            SET status = 'archived', lifecycle_revision = ?, archived_at = ?,
+                archived_by = ?, archived_reason_code = ?,
+                archived_reason_text = ?
+            WHERE id = ? AND status = 'active' AND lifecycle_revision = ?
+            """,
+            (
+                archived_revision,
+                occurred_at,
+                actor_user["email"],
+                operation["reason_code"],
+                operation.get("reason_text"),
+                previous["association_id"],
+                previous["lifecycle_revision"],
+            ),
+        )
+        event_table = self.link_layer_table_names()["time_series_link_events"]
+        before = {
+            "association_id": previous["association_id"],
+            "signal_id": previous["signal_id"],
+            "linkable_object_id": previous["linkable_object_id"],
+            "binding_role_key": previous["binding_role_key"],
+            "lifecycle_revision": previous["lifecycle_revision"],
+            "status": "active",
+        }
+        after = {
+            **before,
+            "lifecycle_revision": archived_revision,
+            "status": "archived",
+        }
+        self.connection.execute(
+            f"""
+            INSERT INTO {event_table} (
+                batch_id, catalog_association_id, event_type,
+                actor_user_id, actor_identity_snapshot, actor_role_snapshot,
+                reason_code, reason_text, before_json, after_json,
+                request_id, occurred_at
+            ) VALUES (?, ?, 'superseded', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                batch_id,
+                previous["association_id"],
+                actor_user.get("id"),
+                actor_user["email"],
+                actor_user["role"],
+                operation["reason_code"],
+                operation.get("reason_text"),
+                json.dumps(before, sort_keys=True),
+                json.dumps(after, sort_keys=True),
+                request_id,
+                occurred_at,
+            ),
+        )
+        return self._insert_catalog_association_add(
+            operation=operation,
+            prevalidated=prevalidated,
+            actor_user=actor_user,
+            request_id=request_id,
+            batch_id=batch_id,
+            occurred_at=occurred_at,
+            supersedes_association_id=previous["association_id"],
+            event_type="replaced",
+        )
+
+    def _archive_catalog_association(
+        self,
+        *,
+        operation: dict[str, Any],
+        prevalidated: dict[str, Any],
+        actor_user: Mapping[str, Any],
+        request_id: str,
+        batch_id: str,
+        occurred_at: str,
+    ) -> dict[str, Any]:
+        previous = prevalidated["observed_state"]["previous_association"]
+        association_table = self.link_layer_table_names()[
+            "time_series_catalog_associations"
+        ]
+        archived_revision = int(previous["lifecycle_revision"]) + 1
+        self.connection.execute(
+            f"""
+            UPDATE {association_table}
+            SET status = 'archived', lifecycle_revision = ?, archived_at = ?,
+                archived_by = ?, archived_reason_code = ?,
+                archived_reason_text = ?
+            WHERE id = ? AND status = 'active' AND lifecycle_revision = ?
+            """,
+            (
+                archived_revision,
+                occurred_at,
+                actor_user["email"],
+                operation["reason_code"],
+                operation.get("reason_text"),
+                previous["association_id"],
+                previous["lifecycle_revision"],
+            ),
+        )
+        before = {
+            "association_id": previous["association_id"],
+            "signal_id": previous["signal_id"],
+            "linkable_object_id": previous["linkable_object_id"],
+            "binding_role_key": previous["binding_role_key"],
+            "lifecycle_revision": previous["lifecycle_revision"],
+            "status": "active",
+        }
+        after = {
+            **before,
+            "lifecycle_revision": archived_revision,
+            "status": "archived",
+        }
+        event_table = self.link_layer_table_names()["time_series_link_events"]
+        self.connection.execute(
+            f"""
+            INSERT INTO {event_table} (
+                batch_id, catalog_association_id, event_type,
+                actor_user_id, actor_identity_snapshot, actor_role_snapshot,
+                reason_code, reason_text, before_json, after_json,
+                request_id, occurred_at
+            ) VALUES (?, ?, 'archived', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                batch_id,
+                previous["association_id"],
+                actor_user.get("id"),
+                actor_user["email"],
+                actor_user["role"],
+                operation["reason_code"],
+                operation.get("reason_text"),
+                json.dumps(before, sort_keys=True),
+                json.dumps(after, sort_keys=True),
+                request_id,
+                occurred_at,
+            ),
+        )
+        return {
+            "client_operation_id": operation["client_operation_id"],
+            "action": "archive",
+            "outcome": "archived",
+            "association_id": previous["association_id"],
+        }
+
+    def _revalidate_catalog_association(
+        self,
+        *,
+        operation: dict[str, Any],
+        prevalidated: dict[str, Any],
+        actor_user: Mapping[str, Any],
+        request_id: str,
+        batch_id: str,
+        occurred_at: str,
+    ) -> dict[str, Any]:
+        observed = prevalidated["observed_state"]
+        previous = observed["previous_association"]
+        signal = observed["signal"]
+        linkable = observed["object"]
+        compatibility_fingerprint, object_scope_fingerprint = (
+            self._catalog_association_fingerprints(
+                observed=observed,
+                binding_role_key=previous["binding_role_key"],
+                contract_version=prevalidated["compatibility_decision"][
+                    "contract_version"
+                ],
+            )
+        )
+        validations = self.link_layer_table_names()["time_series_link_validations"]
+        self.connection.execute(
+            f"""
+            INSERT INTO {validations} (
+                catalog_association_id, subject_lifecycle_revision,
+                validation_mode, validated_set_revision_id,
+                observed_current_revision_id, compatibility_rule_id,
+                compatibility_fingerprint, object_scope_fingerprint,
+                validated_at, validated_by, reason_code, reason_text
+            ) VALUES (?, ?, 'association_current', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                previous["association_id"],
+                previous["lifecycle_revision"],
+                signal["current_revision_id"],
+                signal["current_revision_id"],
+                observed["compatibility_rule_id"],
+                compatibility_fingerprint,
+                object_scope_fingerprint,
+                occurred_at,
+                actor_user["email"],
+                operation["reason_code"],
+                operation.get("reason_text"),
+            ),
+        )
+        event_table = self.link_layer_table_names()["time_series_link_events"]
+        state = {
+            "association_id": previous["association_id"],
+            "signal_id": previous["signal_id"],
+            "linkable_object_id": previous["linkable_object_id"],
+            "binding_role_key": previous["binding_role_key"],
+            "lifecycle_revision": previous["lifecycle_revision"],
+            "status": "active",
+        }
+        self.connection.execute(
+            f"""
+            INSERT INTO {event_table} (
+                batch_id, catalog_association_id, event_type,
+                actor_user_id, actor_identity_snapshot, actor_role_snapshot,
+                reason_code, reason_text, before_json, after_json,
+                request_id, occurred_at
+            ) VALUES (?, ?, 'revalidated_current', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                batch_id,
+                previous["association_id"],
+                actor_user.get("id"),
+                actor_user["email"],
+                actor_user["role"],
+                operation["reason_code"],
+                operation.get("reason_text"),
+                json.dumps(state, sort_keys=True),
+                json.dumps(
+                    {
+                        **state,
+                        "compatibility_fingerprint": compatibility_fingerprint,
+                    },
+                    sort_keys=True,
+                ),
+                request_id,
+                occurred_at,
+            ),
+        )
+        return {
+            "client_operation_id": operation["client_operation_id"],
+            "action": "revalidate",
+            "outcome": "revalidated",
+            "association_id": previous["association_id"],
+        }
+
+    def commit_catalog_association_batch(
+        self,
+        document: Mapping[str, Any],
+        *,
+        actor_user: Mapping[str, Any],
+        actor_class: str,
+        request_id: str,
+        prevalidation_token: str,
+        if_match: str,
+        idempotency_key: str,
+        confirmed: bool,
+    ) -> tuple[dict[str, Any], bool]:
+        """Reauthorize, re-evaluate and write one batch in one transaction."""
+
+        normalized = normalize_association_request(document)
+        request_hash = association_request_hash(normalized)
+        verify_prevalidation_token(
+            prevalidation_token,
+            request_hash=request_hash,
+            commit_etag=if_match,
+            actor_class=actor_class,
+            secret=self._catalog_cursor_secret,
+            check_expiry=False,
+        )
+        claim_hash = association_request_hash(
+            {"request": normalized, "confirmed": bool(confirmed)}
+        )
+        try:
+            with self._lock:
+                with self._database_transaction():
+                    claim = self._claim_idempotency(
+                        actor_id=actor_class,
+                        operation_kind="association_batch",
+                        scope_key=f"project:{normalized['target_project_id']}",
+                        idempotency_key=idempotency_key,
+                        request_hash=claim_hash,
+                    )
+                    if claim["state"] == "completed":
+                        return claim["response"], True
+                    verify_prevalidation_token(
+                        prevalidation_token,
+                        request_hash=request_hash,
+                        commit_etag=if_match,
+                        actor_class=actor_class,
+                        secret=self._catalog_cursor_secret,
+                    )
+                    self._lock_catalog_association_batch(normalized)
+                    current = self.prevalidate_catalog_association_batch(
+                        normalized, actor_class=actor_class
+                    )
+                    if current["commit_etag"] != if_match:
+                        scope_error = next(
+                            (
+                                error
+                                for row in current["operations"]
+                                for error in row["errors"]
+                                if error["code"] == "TS_COMPAT_SCOPE_NOT_ACCESSIBLE"
+                            ),
+                            None,
+                        )
+                        if scope_error is not None:
+                            raise AssociationMutationError(
+                                "TS_COMPAT_SCOPE_NOT_ACCESSIBLE",
+                                **scope_error["context"],
+                                details=current["operations"],
+                            )
+                        raise AssociationMutationError(
+                            "TS_LINK_PRECONDITION_CHANGED",
+                            expected_etag=if_match,
+                            actual_etag=current["commit_etag"],
+                        )
+                    if not current["can_commit"]:
+                        raise AssociationMutationError(
+                            "TS_LINK_BATCH_REJECTED",
+                            details=current["operations"],
+                            normalized_request=normalized,
+                        )
+                    if current["requires_confirmation"] and not confirmed:
+                        raise AssociationMutationError(
+                            "TS_LINK_CONFIRMATION_REQUIRED"
+                        )
+                    batch_id = f"asb_{uuid.uuid4().hex}"
+                    occurred_at = utc_now_iso()
+                    results = []
+                    for operation, prevalidated in zip(
+                        normalized["operations"], current["operations"]
+                    ):
+                        if operation["action"] == "replace":
+                            result = self._replace_catalog_association(
+                                operation=operation,
+                                prevalidated=prevalidated,
+                                actor_user=actor_user,
+                                request_id=request_id,
+                                batch_id=batch_id,
+                                occurred_at=occurred_at,
+                            )
+                        elif operation["action"] == "archive":
+                            result = self._archive_catalog_association(
+                                operation=operation,
+                                prevalidated=prevalidated,
+                                actor_user=actor_user,
+                                request_id=request_id,
+                                batch_id=batch_id,
+                                occurred_at=occurred_at,
+                            )
+                        elif operation["action"] == "revalidate":
+                            result = self._revalidate_catalog_association(
+                                operation=operation,
+                                prevalidated=prevalidated,
+                                actor_user=actor_user,
+                                request_id=request_id,
+                                batch_id=batch_id,
+                                occurred_at=occurred_at,
+                            )
+                        else:
+                            result = self._insert_catalog_association_add(
+                                operation=operation,
+                                prevalidated=prevalidated,
+                                actor_user=actor_user,
+                                request_id=request_id,
+                                batch_id=batch_id,
+                                occurred_at=occurred_at,
+                            )
+                        results.append(result)
+                    mutated = any(item["outcome"] != "unchanged" for item in results)
+                    catalog_changed = any(
+                        item["outcome"] in {"created", "replaced", "archived"}
+                        for item in results
+                    )
+                    if catalog_changed:
+                        affected_signals = sorted(
+                            {
+                                signal_id
+                                for operation, prevalidated in zip(
+                                    normalized["operations"], current["operations"]
+                                )
+                                for signal_id in (
+                                    operation.get("signal_id"),
+                                    (
+                                        prevalidated["observed_state"]
+                                        .get("previous_association", {})
+                                        .get("signal_id")
+                                    ),
+                                )
+                                if signal_id is not None
+                            }
+                        )
+                        association_table = self.link_layer_table_names()[
+                            "time_series_catalog_associations"
+                        ]
+                        entries = self._projection("time_series_catalog_entries")
+                        placeholders = ", ".join("?" for _ in affected_signals)
+                        self.connection.execute(
+                            f"""
+                            UPDATE {entries}
+                            SET association_count = (
+                                SELECT COUNT(*) FROM {association_table}
+                                WHERE signal_id = {entries}.signal_id
+                                  AND status = 'active'
+                            ), projection_revision = projection_revision + 1,
+                                updated_at = ?
+                            WHERE signal_id IN ({placeholders})
+                            """,
+                            (occurred_at, *affected_signals),
+                        )
+                        self._raise_catalog_generation(now=occurred_at)
+                    response = {
+                        "outcome": "created" if mutated else "unchanged",
+                        "batch_id": batch_id,
+                        "target_project_id": normalized["target_project_id"],
+                        "operations": results,
+                        "request_id": request_id,
+                    }
+                    self._complete_idempotency(
+                        claim_id=claim["id"],
+                        response=response,
+                        http_status=200 if response["outcome"] == "unchanged" else 201,
+                    )
+                    return response, False
+        except CanonicalRevisionError as error:
+            if error.code in {"TS_IDEMPOTENCY_KEY_CONFLICT", "TS_IDEMPOTENCY_IN_FLIGHT"}:
+                raise AssociationMutationError(
+                    "TS_IDEMPOTENCY_CONFLICT", reason=error.code
+                ) from error
+            raise
+        except Exception as error:
+            constraint_name = str(
+                getattr(getattr(error, "diag", None), "constraint_name", "") or ""
+            )
+            error_text = str(error).lower()
+            active_identity_conflict = (
+                constraint_name
+                == "time_series_catalog_associations_next_one_active_uk"
+                or (
+                    "unique constraint failed" in error_text
+                    and "time_series_catalog_associations" in error_text
+                    and "signal_id" in error_text
+                )
+            )
+            if active_identity_conflict:
+                raise AssociationMutationError(
+                    "TS_LINK_CONFLICT", reason="active_identity_race"
+                ) from error
+            raise
+
+    def _lock_catalog_association_batch(
+        self, normalized: Mapping[str, Any]
+    ) -> None:
+        """Serialize every resource a PostgreSQL association batch can mutate.
+
+        Sets are locked first, then objects, then existing associations, each in
+        ascending ID order. Revision publication and scope changes already write
+        the set row, while object archival writes the object row, so revalidation
+        below observes one stable world without broad table locks.
+        """
+
+        if self.database_backend != "postgresql":
+            return
+
+        association_ids = sorted(
+            {
+                int(operation["association_id"])
+                for operation in normalized["operations"]
+                if operation["action"] in {"replace", "archive", "revalidate"}
+            }
+        )
+        signal_ids = {
+            int(operation["signal_id"])
+            for operation in normalized["operations"]
+            if operation["action"] in {"add", "replace"}
+        }
+        object_ids = {
+            int(operation["linkable_object_id"])
+            for operation in normalized["operations"]
+            if operation["action"] in {"add", "replace"}
+        }
+        set_ids: set[int] = set()
+
+        association_table = self.link_layer_table_names()[
+            "time_series_catalog_associations"
+        ]
+        if association_ids:
+            placeholders = ", ".join("?" for _ in association_ids)
+            rows = self.connection.execute(
+                f"""
+                SELECT signal_id, time_series_set_id, linkable_object_id
+                FROM {association_table}
+                WHERE id IN ({placeholders})
+                ORDER BY id
+                """,
+                tuple(association_ids),
+            ).fetchall()
+            for row in rows:
+                signal_ids.add(int(row["signal_id"]))
+                set_ids.add(int(row["time_series_set_id"]))
+                object_ids.add(int(row["linkable_object_id"]))
+
+        if signal_ids:
+            ordered_signal_ids = sorted(signal_ids)
+            placeholders = ", ".join("?" for _ in ordered_signal_ids)
+            rows = self.connection.execute(
+                f"""
+                SELECT DISTINCT time_series_set_id
+                FROM {self._canonical('time_series_signals')}
+                WHERE id IN ({placeholders})
+                ORDER BY time_series_set_id
+                """,
+                tuple(ordered_signal_ids),
+            ).fetchall()
+            set_ids.update(int(row["time_series_set_id"]) for row in rows)
+
+        for table, ids in (
+            (self._canonical("time_series_sets"), sorted(set_ids)),
+            (self._linkable("linkable_objects"), sorted(object_ids)),
+            (association_table, association_ids),
+        ):
+            if not ids:
+                continue
+            placeholders = ", ".join("?" for _ in ids)
+            self.connection.execute(
+                f"""
+                SELECT id FROM {table}
+                WHERE id IN ({placeholders})
+                ORDER BY id
+                FOR UPDATE
+                """,
+                tuple(ids),
+            ).fetchall()
+
+    def _catalog_association_row(self, association_id: int):
+        table = self.link_layer_table_names()["time_series_catalog_associations"]
+        validations = self.link_layer_table_names()["time_series_link_validations"]
+        return self.connection.execute(
+            f"""
+            SELECT association.*, role.role_key, role.display_name AS role_display_name,
+                   entry.series_key, entry.display_name AS signal_display_name,
+                   entry.visibility_scope, entry.owner_project_id,
+                   entry.owner_project_name, entry.set_status, entry.signal_status,
+                   validation.compatibility_fingerprint,
+                   validation.object_scope_fingerprint,
+                   validation.validated_set_revision_id,
+                   validation.validated_at
+            FROM {table} AS association
+            JOIN time_series_binding_roles AS role
+              ON role.id = association.binding_role_id
+            JOIN {self._projection('time_series_catalog_entries')} AS entry
+              ON entry.signal_id = association.signal_id
+            LEFT JOIN {validations} AS validation
+              ON validation.id = (
+                  SELECT latest.id FROM {validations} AS latest
+                  WHERE latest.catalog_association_id = association.id
+                  ORDER BY latest.id DESC LIMIT 1
+              )
+            WHERE association.id = ?
+            """,
+            (int(association_id),),
+        ).fetchone()
+
+    def read_catalog_association(self, association_id: int) -> dict[str, Any]:
+        row = self._catalog_association_row(association_id)
+        if row is None:
+            raise KeyError(f"catalog association {association_id} not found")
+        item = dict(row)
+        linkable = self.get_linkable_object(int(item["linkable_object_id"]))
+        if item["status"] == "archived":
+            state = "archived"
+        else:
+            current_result, current_observation = (
+                self._prevalidate_catalog_association_add(
+                    {
+                        "client_operation_id": "effective-state",
+                        "action": "add",
+                        "signal_id": int(item["signal_id"]),
+                        "linkable_object_id": int(item["linkable_object_id"]),
+                        "binding_role_key": item["role_key"],
+                        "expected_absent": True,
+                        "reason_code": "effective_state_read",
+                    },
+                    target_project_id=int(linkable["project_id"]),
+                )
+            )
+            if not current_result["compatibility_decision"]["allowed"]:
+                state = "active_incompatible"
+            else:
+                current_compatibility, current_scope = (
+                    self._catalog_association_fingerprints(
+                        observed=current_observation,
+                        binding_role_key=item["role_key"],
+                        contract_version=current_result[
+                            "compatibility_decision"
+                        ]["contract_version"],
+                    )
+                )
+                state = (
+                    "active_valid"
+                    if current_compatibility == item["compatibility_fingerprint"]
+                    and current_scope == item["object_scope_fingerprint"]
+                    else "active_stale"
+                )
+        association_id = int(item["id"])
+        return {
+            "association_id": association_id,
+            "signal_id": int(item["signal_id"]),
+            "signal": {
+                "id": int(item["signal_id"]),
+                "series_key": item["series_key"],
+                "display_name": item["signal_display_name"],
+            },
+            "set": {
+                "id": int(item["time_series_set_id"]),
+                "visibility_scope": item["visibility_scope"],
+                "owner_project_id": int(item["owner_project_id"]),
+                "owner_project_name": item["owner_project_name"],
+            },
+            "object": {
+                "id": int(linkable["id"]),
+                "project_id": int(linkable["project_id"]),
+                "object_kind": linkable["object_kind"],
+                "object_type_key": linkable["object_type_key"],
+                "object_key": linkable["object_key"],
+                "display_name": linkable["display_name"],
+                "status": linkable["status"],
+            },
+            "binding_role": {
+                "id": int(item["binding_role_id"]),
+                "key": item["role_key"],
+                "display_name": item["role_display_name"],
+            },
+            "compatibility_rule_id": int(item["compatibility_rule_id"]),
+            "supersedes_association_id": (
+                int(item["supersedes_association_id"])
+                if item["supersedes_association_id"] is not None
+                else None
+            ),
+            "lifecycle_revision": int(item["lifecycle_revision"]),
+            "status": item["status"],
+            "state": state,
+            "created_at": item["created_at"],
+            "created_by": item["created_by"],
+            "archived_at": item["archived_at"],
+            "archived_by": item["archived_by"],
+            "archive_reason": (
+                {
+                    "code": item["archived_reason_code"],
+                    "text": item["archived_reason_text"],
+                }
+                if item["status"] == "archived"
+                else None
+            ),
+            "validation": {
+                "validated_revision_id": (
+                    int(item["validated_set_revision_id"])
+                    if item["validated_set_revision_id"] is not None
+                    else None
+                ),
+                "compatibility_fingerprint": item["compatibility_fingerprint"],
+                "object_scope_fingerprint": item["object_scope_fingerprint"],
+                "validated_at": item["validated_at"],
+            },
+            "capabilities": {
+                "replace": item["status"] == "active",
+                "archive": item["status"] == "active",
+                "revalidate": item["status"] == "active",
+            },
+            "links": {
+                "detail": f"/api/time-series/catalog/associations/{association_id}",
+                "events": f"/api/time-series/catalog/associations/{association_id}/events",
+            },
+        }
+
+    def read_catalog_associations(
+        self,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+        actor_class: str = "internal",
+    ) -> dict[str, Any]:
+        table = self.link_layer_table_names()["time_series_catalog_associations"]
+        events = self.link_layer_table_names()["time_series_link_events"]
+        resolved_limit = normalize_catalog_limit(limit)
+        summary = self.connection.execute(
+            f"""
+            SELECT COUNT(*) AS total_count, COALESCE(MAX(id), 0) AS max_id,
+                   COALESCE(SUM(lifecycle_revision), 0) AS lifecycle_sum
+            FROM {table}
+            """
+        ).fetchone()
+        latest_event = self.connection.execute(
+            f"SELECT COALESCE(MAX(id), 0) AS max_id FROM {events}"
+        ).fetchone()
+        generation = int(
+            hashlib.sha256(
+                (
+                    f"{summary['total_count']}:{summary['max_id']}:"
+                    f"{summary['lifecycle_sum']}:{latest_event['max_id']}"
+                ).encode("utf-8")
+            ).hexdigest()[:15],
+            16,
+        )
+        filters_hash = input_filters_hash({})
+        cursor_id = 0
+        if cursor is not None:
+            cursor_key = decode_catalog_cursor(
+                cursor,
+                self._catalog_cursor_secret,
+                section="associations",
+                order="id",
+                limit=resolved_limit,
+                generation=generation,
+                actor_class=actor_class,
+                filters_hash=filters_hash,
+            )
+            if len(cursor_key) != 1:
+                raise CatalogQueryError(
+                    "TS_QUERY_CURSOR_MISMATCH", reason="key_arity"
+                )
+            cursor_id = int(cursor_key[0])
+        ids = self.connection.execute(
+            f"SELECT id FROM {table} WHERE id > ? ORDER BY id LIMIT ?",
+            (cursor_id, resolved_limit + 1),
+        ).fetchall()
+        has_more = len(ids) > resolved_limit
+        visible = ids[:resolved_limit]
+        items = [
+            self.read_catalog_association(int(row["id"])) for row in visible
+        ]
+        next_cursor = None
+        if has_more and visible:
+            next_cursor = encode_catalog_cursor(
+                {
+                    "s": "associations",
+                    "o": "id",
+                    "l": resolved_limit,
+                    "g": generation,
+                    "k": [int(visible[-1]["id"])],
+                    "t": int(time.time()),
+                    "a": actor_class,
+                    "f": filters_hash,
+                },
+                self._catalog_cursor_secret,
+            )
+        return {
+            "items": items,
+            "page": {
+                "limit": resolved_limit,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+            },
+            "summary": {"total_count": int(summary["total_count"])},
+            "meta": {
+                "section": "associations",
+                "catalog_generation": generation,
+            },
+        }
+
+    def read_catalog_association_events(
+        self,
+        association_id: int,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+        actor_class: str = "internal",
+    ) -> dict[str, Any]:
+        self.read_catalog_association(association_id)
+        events = self.link_layer_table_names()["time_series_link_events"]
+        resolved_limit = normalize_catalog_limit(limit)
+        summary = self.connection.execute(
+            f"""
+            SELECT COUNT(*) AS total_count, COALESCE(MAX(id), 0) AS max_id
+            FROM {events} WHERE catalog_association_id = ?
+            """,
+            (int(association_id),),
+        ).fetchone()
+        generation = int(
+            hashlib.sha256(
+                f"{summary['total_count']}:{summary['max_id']}".encode("utf-8")
+            ).hexdigest()[:15],
+            16,
+        )
+        section = f"association:{int(association_id)}:events"
+        filters_hash = input_filters_hash({"association_id": int(association_id)})
+        cursor_id = 0
+        if cursor is not None:
+            cursor_key = decode_catalog_cursor(
+                cursor,
+                self._catalog_cursor_secret,
+                section=section,
+                order="id",
+                limit=resolved_limit,
+                generation=generation,
+                actor_class=actor_class,
+                filters_hash=filters_hash,
+            )
+            if len(cursor_key) != 1:
+                raise CatalogQueryError(
+                    "TS_QUERY_CURSOR_MISMATCH", reason="key_arity"
+                )
+            cursor_id = int(cursor_key[0])
+        rows = self.connection.execute(
+            f"""
+            SELECT * FROM {events}
+            WHERE catalog_association_id = ? AND id > ?
+            ORDER BY id LIMIT ?
+            """,
+            (int(association_id), cursor_id, resolved_limit + 1),
+        ).fetchall()
+        has_more = len(rows) > resolved_limit
+        visible = rows[:resolved_limit]
+        items = []
+        for row in visible:
+            event = dict(row)
+            items.append(
+                {
+                    "event_id": int(event["id"]),
+                    "batch_id": event["batch_id"],
+                    "association_id": int(event["catalog_association_id"]),
+                    "event_type": event["event_type"],
+                    "actor": {
+                        "user_id": (
+                            int(event["actor_user_id"])
+                            if event["actor_user_id"] is not None
+                            else None
+                        ),
+                        "identity": event["actor_identity_snapshot"],
+                        "role": event["actor_role_snapshot"],
+                    },
+                    "reason": {
+                        "code": event["reason_code"],
+                        "text": event["reason_text"],
+                    },
+                    "before": json.loads(event["before_json"]),
+                    "after": json.loads(event["after_json"]),
+                    "request_id": event["request_id"],
+                    "occurred_at": event["occurred_at"],
+                }
+            )
+        next_cursor = None
+        if has_more and visible:
+            next_cursor = encode_catalog_cursor(
+                {
+                    "s": section,
+                    "o": "id",
+                    "l": resolved_limit,
+                    "g": generation,
+                    "k": [int(visible[-1]["id"])],
+                    "t": int(time.time()),
+                    "a": actor_class,
+                    "f": filters_hash,
+                },
+                self._catalog_cursor_secret,
+            )
+        return {
+            "items": items,
+            "page": {
+                "limit": resolved_limit,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+            },
+            "meta": {
+                "association_id": int(association_id),
                 "catalog_generation": generation,
             },
         }
