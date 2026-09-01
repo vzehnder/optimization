@@ -76,12 +76,18 @@ def catalog_projection_schema_statements(backend: str) -> list[str]:
             time_series_set_id {reference} NOT NULL,
             series_kind TEXT NOT NULL DEFAULT 'catalog',
             owner_project_id {reference} NOT NULL REFERENCES projects(id),
+            owner_project_name TEXT NOT NULL,
             owner_project_name_sort TEXT NOT NULL,
+            set_name TEXT NOT NULL,
+            set_version_number INTEGER NOT NULL,
+            set_version_label TEXT NOT NULL,
+            set_description TEXT NOT NULL DEFAULT '',
             visibility_scope TEXT NOT NULL,
             set_status TEXT NOT NULL,
             signal_status TEXT NOT NULL,
             series_key TEXT NOT NULL,
             display_name TEXT NOT NULL,
+            signal_description TEXT NOT NULL DEFAULT '',
             display_name_sort TEXT NOT NULL,
             search_text_normalized TEXT NOT NULL,
             semantic_type_id {reference} NOT NULL
@@ -95,6 +101,8 @@ def catalog_projection_schema_statements(backend: str) -> list[str]:
             source_kind TEXT NOT NULL,
             current_revision_id {reference} NOT NULL,
             revision_number INTEGER NOT NULL,
+            revision_created_at TEXT NOT NULL,
+            source_timezone TEXT NOT NULL,
             coverage_start TEXT NOT NULL,
             coverage_end TEXT NOT NULL,
             period_count INTEGER NOT NULL,
@@ -389,12 +397,18 @@ CATALOG_ENTRY_COLUMNS = (
     "signal_id",
     "time_series_set_id",
     "owner_project_id",
+    "owner_project_name",
     "owner_project_name_sort",
+    "set_name",
+    "set_version_number",
+    "set_version_label",
+    "set_description",
     "visibility_scope",
     "set_status",
     "signal_status",
     "series_key",
     "display_name",
+    "signal_description",
     "display_name_sort",
     "search_text_normalized",
     "semantic_type_id",
@@ -406,6 +420,8 @@ CATALOG_ENTRY_COLUMNS = (
     "source_kind",
     "current_revision_id",
     "revision_number",
+    "revision_created_at",
+    "source_timezone",
     "coverage_start",
     "coverage_end",
     "period_count",
@@ -502,6 +518,8 @@ def catalog_page_sql(
     order_terms: list[tuple[str, bool]],
     cursor_key: list | None,
     limit: int,
+    filter_sql: str = "",
+    filter_parameters: tuple = (),
 ) -> tuple[str, tuple]:
     """Keyset page over the projection, as a ladder of comparisons.
 
@@ -513,8 +531,10 @@ def catalog_page_sql(
         f"{column} {'DESC' if descending else 'ASC'}"
         for column, descending in order_terms
     )
-    parameters: list = []
-    where = ""
+    parameters: list = list(filter_parameters)
+    conditions: list[str] = []
+    if filter_sql:
+        conditions.append(f"({filter_sql})")
     if cursor_key is not None:
         if len(cursor_key) != len(order_terms):
             raise CatalogQueryError("TS_QUERY_CURSOR_MISMATCH", reason="key_arity")
@@ -537,11 +557,13 @@ def catalog_page_sql(
             rungs.append(f"({rung})")
             parameters.extend(cursor_key[:index])
             parameters.append(cursor_key[index])
-        where = f"WHERE {bound} AND ({' OR '.join(rungs)})"
+        conditions.append(f"{bound} AND ({' OR '.join(rungs)})")
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     # One extra row answers ``has_more`` without a second count.
     parameters.append(limit + 1)
     return (
-        f"SELECT * FROM {entries_table} {where} ORDER BY {order_sql} LIMIT ?",
+        f"SELECT entry.* FROM {entries_table} AS entry {where} "
+        f"ORDER BY {order_sql} LIMIT ?",
         tuple(parameters),
     )
 
@@ -675,6 +697,8 @@ def decode_catalog_cursor(
     order: str,
     limit: int,
     generation: int,
+    actor_class: str | None = None,
+    filters_hash: str | None = None,
     now: float | None = None,
 ) -> list:
     """Return the keyset position, or refuse with a stable navigation code."""
@@ -698,6 +722,8 @@ def decode_catalog_cursor(
         payload.get("s") != section
         or payload.get("o") != order
         or int(payload.get("l", -1)) != limit
+        or (actor_class is not None and payload.get("a") != actor_class)
+        or (filters_hash is not None and payload.get("f") != filters_hash)
     ):
         raise CatalogQueryError("TS_QUERY_CURSOR_MISMATCH", reason="query_changed")
     if int(payload.get("g", -1)) != generation:

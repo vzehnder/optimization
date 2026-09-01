@@ -528,6 +528,62 @@
         "title": "CurrentUserResponse",
         "type": "object"
       },
+      "CustomSemanticTypeCreateRequest": {
+        "properties": {
+          "canonical_unit_key": {
+            "minLength": 1,
+            "title": "Canonical Unit Key",
+            "type": "string"
+          },
+          "default_aggregation": {
+            "minLength": 1,
+            "title": "Default Aggregation",
+            "type": "string"
+          },
+          "description": {
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "dimension_key": {
+            "minLength": 1,
+            "title": "Dimension Key",
+            "type": "string"
+          },
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "semantic_key": {
+            "minLength": 1,
+            "title": "Semantic Key",
+            "type": "string"
+          },
+          "validation_rules": {
+            "additionalProperties": true,
+            "title": "Validation Rules",
+            "type": "object"
+          },
+          "value_kind": {
+            "minLength": 1,
+            "title": "Value Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "semantic_key",
+          "display_name",
+          "description",
+          "dimension_key",
+          "canonical_unit_key",
+          "value_kind",
+          "default_aggregation",
+          "validation_rules"
+        ],
+        "title": "CustomSemanticTypeCreateRequest",
+        "type": "object"
+      },
       "DashboardTemplateWriteRequest": {
         "properties": {
           "name": {
@@ -2672,6 +2728,42 @@
           }
         },
         "summary": "Admin Run Due Schedules"
+      }
+    },
+    "/api/admin/time-series/semantic-types": {
+      "post": {
+        "operationId": "admin_create_custom_time_series_semantic_type_api_admin_time_series_semantic_types_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomSemanticTypeCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Create Custom Time Series Semantic Type"
       }
     },
     "/api/admin/users": {
@@ -7467,9 +7559,656 @@
         "summary": "Validate System Case"
       }
     },
+    "/api/time-series/catalog/descriptors": {
+      "get": {
+        "operationId": "get_global_time_series_catalog_descriptors_api_time_series_catalog_descriptors_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Q",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Global Time Series Catalog Descriptors"
+      }
+    },
+    "/api/time-series/catalog/inputs": {
+      "get": {
+        "description": "List canonical input signals; never sets, results or legacy rows.",
+        "operationId": "get_global_time_series_catalog_inputs_api_time_series_catalog_inputs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Global Time Series Catalog Inputs"
+      }
+    },
+    "/api/time-series/catalog/inputs/{signal_id}": {
+      "get": {
+        "operationId": "get_global_time_series_catalog_input_api_time_series_catalog_inputs__signal_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "signal_id",
+            "required": true,
+            "schema": {
+              "title": "Signal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Global Time Series Catalog Input"
+      }
+    },
+    "/api/time-series/catalog/inputs/{signal_id}/object-candidates": {
+      "get": {
+        "operationId": "get_global_time_series_catalog_object_candidates_api_time_series_catalog_inputs__signal_id__object_candidates_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "signal_id",
+            "required": true,
+            "schema": {
+              "title": "Signal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target_project_id",
+            "required": true,
+            "schema": {
+              "title": "Target Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "binding_role_key",
+            "required": true,
+            "schema": {
+              "title": "Binding Role Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "usage",
+            "required": true,
+            "schema": {
+              "title": "Usage",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_denied",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Denied",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Global Time Series Catalog Object Candidates"
+      }
+    },
+    "/api/time-series/catalog/inputs/{signal_id}/preview": {
+      "get": {
+        "operationId": "get_global_time_series_catalog_input_preview_api_time_series_catalog_inputs__signal_id__preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "signal_id",
+            "required": true,
+            "schema": {
+              "title": "Signal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Global Time Series Catalog Input Preview"
+      }
+    },
+    "/api/time-series/catalog/inputs/{signal_id}/revisions": {
+      "get": {
+        "operationId": "get_global_time_series_catalog_input_revisions_api_time_series_catalog_inputs__signal_id__revisions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "signal_id",
+            "required": true,
+            "schema": {
+              "title": "Signal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Global Time Series Catalog Input Revisions"
+      }
+    },
+    "/api/time-series/catalog/legacy": {
+      "get": {
+        "operationId": "get_global_time_series_catalog_legacy_api_time_series_catalog_legacy_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Global Time Series Catalog Legacy"
+      }
+    },
+    "/api/time-series/catalog/legacy/{legacy_entry_ref}": {
+      "get": {
+        "operationId": "get_global_time_series_catalog_legacy_detail_api_time_series_catalog_legacy__legacy_entry_ref__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "legacy_entry_ref",
+            "required": true,
+            "schema": {
+              "title": "Legacy Entry Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Global Time Series Catalog Legacy Detail"
+      }
+    },
+    "/api/time-series/catalog/legacy/{legacy_entry_ref}/preview": {
+      "get": {
+        "operationId": "get_global_time_series_catalog_legacy_preview_api_time_series_catalog_legacy__legacy_entry_ref__preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "legacy_entry_ref",
+            "required": true,
+            "schema": {
+              "title": "Legacy Entry Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Global Time Series Catalog Legacy Preview"
+      }
+    },
+    "/api/time-series/catalog/results": {
+      "get": {
+        "operationId": "get_global_time_series_catalog_results_api_time_series_catalog_results_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Global Time Series Catalog Results"
+      }
+    },
+    "/api/time-series/catalog/results/{result_series_id}": {
+      "get": {
+        "operationId": "get_global_time_series_catalog_result_detail_api_time_series_catalog_results__result_series_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "result_series_id",
+            "required": true,
+            "schema": {
+              "title": "Result Series Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Global Time Series Catalog Result Detail"
+      }
+    },
+    "/api/time-series/catalog/results/{result_series_id}/preview": {
+      "get": {
+        "operationId": "get_global_time_series_catalog_result_preview_api_time_series_catalog_results__result_series_id__preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "result_series_id",
+            "required": true,
+            "schema": {
+              "title": "Result Series Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Global Time Series Catalog Result Preview"
+      }
+    },
     "/api/time-series/signal-catalog": {
       "get": {
-        "description": "Expose the canonical signal registry to internal surfaces only.",
+        "description": "Expose the DB-backed legacy signal adapter to internal surfaces.",
         "operationId": "get_signal_catalog_api_time_series_signal_catalog_get",
         "responses": {
           "200": {

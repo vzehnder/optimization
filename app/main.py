@@ -93,6 +93,17 @@ from app.time_series_catalog import (
     TimeSeriesCatalogError,
     prepare_time_series_catalog_import,
 )
+from app.time_series_catalog_projection import CatalogQueryError
+from app.time_series_catalog_read import (
+    catalog_detail_etag,
+    catalog_error_payload,
+    catalog_preview_etag,
+    input_list_item,
+    parse_input_filters,
+    parse_legacy_preview_query,
+    parse_preview_query,
+    parse_result_filters,
+)
 from app.transformations import TransformationError
 from app.runner import JuliaRunExecutor, LocalRunQueue
 from app.time_series_ingestion import (
@@ -831,6 +842,13 @@ def create_app(
         if user is None:
             return auth_required_response(request)
 
+        if user["role"] == "external" and path.startswith(
+            "/api/time-series/catalog"
+        ):
+            # TS7's whole internal catalog is refused at the namespace boundary,
+            # before FastAPI resolves a signal/revision id or invokes a query.
+            return forbidden_response(request)
+
         if user["role"] == "external" and not external_may_reach_path(path):
             # A root an external identity may not enter reveals nothing about
             # itself, not even that the route exists.
@@ -1446,6 +1464,421 @@ def create_app(
         """Expose the DB-backed legacy signal adapter to internal surfaces."""
 
         return {"signals": analyst_store.signal_catalog_entries()}
+
+    @app.get("/api/time-series/catalog/inputs")
+    async def get_global_time_series_catalog_inputs(
+        request: Request,
+        limit: int = 50,
+        order: str | None = None,
+        cursor: str | None = None,
+    ):
+        """List canonical input signals; never sets, results or legacy rows."""
+
+        user = request.state.current_user or {}
+        role = user.get("role", "analyst")
+        actor_class = f"{role}:{user.get('id', 'auth-disabled')}"
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            filters = parse_input_filters(request.query_params)
+            page = analyst_store.read_catalog_page(
+                limit=limit,
+                order=order,
+                cursor=cursor,
+                include_total=True,
+                filters=filters,
+                actor_class=actor_class,
+            )
+        except CatalogQueryError as error:
+            status_code = 410 if error.code == "TS_QUERY_CURSOR_EXPIRED" else 400
+            if error.code == "TS_QUERY_SNAPSHOT_CHANGED":
+                status_code = 409
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=status_code,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        page["items"] = [
+            input_list_item(item, actor_role=role) for item in page["items"]
+        ]
+        if "context_linkable_object_id" in filters:
+            for item in page["items"]:
+                item["compatibility_decision"] = (
+                    analyst_store.evaluate_catalog_signal_for_object(
+                        signal_id=item["signal_id"],
+                        linkable_object_id=filters["context_linkable_object_id"],
+                        binding_role_key=filters["context_binding_role_key"],
+                        usage=filters["context_usage"],
+                    )
+                )
+        page["meta"]["request_id"] = request_id
+        return JSONResponse(
+            page,
+            headers={"Cache-Control": "private, must-revalidate"},
+        )
+
+    @app.get("/api/time-series/catalog/inputs/{signal_id}")
+    async def get_global_time_series_catalog_input(signal_id: int, request: Request):
+        user = request.state.current_user or {}
+        actor_class = f"{user.get('role', 'analyst')}:{user.get('id', 'auth-disabled')}"
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            detail = analyst_store.read_catalog_input_detail(signal_id)
+        except KeyError:
+            error = CatalogQueryError("TS_CATALOG_SIGNAL_NOT_FOUND")
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=404,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        active = (
+            detail["identity"]["status"] != "archived"
+            and detail["set"]["status"] != "archived"
+        )
+        may_edit = active and (
+            detail["set"]["visibility_scope"] == "project"
+            or user.get("role") == "admin"
+        )
+        detail["capabilities"] = {
+            "view_detail": True,
+            "preview": True,
+            "associate": active,
+            "bind": active,
+            "edit_set": may_edit,
+            "publish_revision": may_edit,
+        }
+        detail["links"] = {
+            "revisions": f"/api/time-series/catalog/inputs/{signal_id}/revisions",
+            "preview": f"/api/time-series/catalog/inputs/{signal_id}/preview",
+            "object_candidates": (
+                f"/api/time-series/catalog/inputs/{signal_id}/object-candidates"
+            ),
+        }
+        etag = catalog_detail_etag(detail, actor_class=actor_class)
+        if request.headers.get("if-none-match") == etag:
+            return Response(
+                status_code=304,
+                headers={"ETag": etag, "Cache-Control": "private, must-revalidate"},
+            )
+        detail["request_id"] = request_id
+        return JSONResponse(
+            detail,
+            headers={"ETag": etag, "Cache-Control": "private, must-revalidate"},
+        )
+
+    @app.get("/api/time-series/catalog/inputs/{signal_id}/revisions")
+    async def get_global_time_series_catalog_input_revisions(
+        signal_id: int,
+        request: Request,
+        limit: int = 50,
+        cursor: str | None = None,
+    ):
+        user = request.state.current_user or {}
+        actor_class = f"{user.get('role', 'analyst')}:{user.get('id', 'auth-disabled')}"
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            page = analyst_store.read_catalog_input_revisions(
+                signal_id,
+                limit=limit,
+                cursor=cursor,
+                actor_class=actor_class,
+            )
+        except KeyError:
+            error = CatalogQueryError("TS_CATALOG_SIGNAL_NOT_FOUND")
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=404,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        except CatalogQueryError as error:
+            status_code = 410 if error.code == "TS_QUERY_CURSOR_EXPIRED" else 400
+            if error.code == "TS_QUERY_SNAPSHOT_CHANGED":
+                status_code = 409
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=status_code,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        page["meta"]["request_id"] = request_id
+        return JSONResponse(
+            page,
+            headers={"Cache-Control": "private, must-revalidate"},
+        )
+
+    @app.get("/api/time-series/catalog/inputs/{signal_id}/preview")
+    async def get_global_time_series_catalog_input_preview(
+        signal_id: int, request: Request
+    ):
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            query = parse_preview_query(request.query_params)
+            preview = analyst_store.read_catalog_input_preview(signal_id, **query)
+        except KeyError:
+            error = CatalogQueryError("TS_CATALOG_SIGNAL_NOT_FOUND")
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=404,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        except CatalogQueryError as error:
+            status_code = 422 if error.code == "TS_PREVIEW_TOO_LARGE" else 400
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=status_code,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        etag = catalog_preview_etag(preview)
+        preview["request_id"] = request_id
+        return JSONResponse(
+            preview,
+            headers={"ETag": etag, "Cache-Control": "private, no-store"},
+        )
+
+    @app.get("/api/time-series/catalog/descriptors")
+    async def get_global_time_series_catalog_descriptors(
+        request: Request,
+        kind: str,
+        limit: int = 50,
+        cursor: str | None = None,
+        q: str = "",
+    ):
+        user = request.state.current_user or {}
+        actor_class = f"{user.get('role', 'analyst')}:{user.get('id', 'auth-disabled')}"
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            page = analyst_store.read_catalog_descriptors(
+                kind=kind,
+                limit=limit,
+                cursor=cursor,
+                q=q,
+                statuses=request.query_params.getlist("status") or None,
+                actor_class=actor_class,
+            )
+        except CatalogQueryError as error:
+            status_code = 410 if error.code == "TS_QUERY_CURSOR_EXPIRED" else 400
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=status_code,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        page["meta"]["request_id"] = request_id
+        return JSONResponse(
+            page,
+            headers={"Cache-Control": "private, must-revalidate"},
+        )
+
+    @app.get("/api/time-series/catalog/inputs/{signal_id}/object-candidates")
+    async def get_global_time_series_catalog_object_candidates(
+        signal_id: int,
+        request: Request,
+        target_project_id: int,
+        binding_role_key: str,
+        usage: str,
+        include_denied: bool = False,
+        q: str = "",
+        limit: int = 50,
+        cursor: str | None = None,
+    ):
+        user = request.state.current_user or {}
+        actor_class = f"{user.get('role', 'analyst')}:{user.get('id', 'auth-disabled')}"
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            context_scenario_id = None
+            context_variant_id = None
+            if usage == "execution":
+                raw_scenario_id = request.query_params.get("context_scenario_id")
+                raw_variant_id = request.query_params.get("context_variant_id")
+                if raw_scenario_id is None or raw_variant_id is None:
+                    raise CatalogQueryError(
+                        "TS_QUERY_INVALID",
+                        field="context_scenario_id",
+                        reason="execution_context_required",
+                    )
+                try:
+                    context_scenario_id = int(raw_scenario_id)
+                    context_variant_id = int(raw_variant_id)
+                except ValueError as error:
+                    raise CatalogQueryError(
+                        "TS_QUERY_INVALID", field="context_scenario_id"
+                    ) from error
+            page = analyst_store.read_catalog_object_candidates(
+                signal_id,
+                target_project_id=target_project_id,
+                binding_role_key=binding_role_key,
+                usage=usage,
+                context_scenario_id=context_scenario_id,
+                context_variant_id=context_variant_id,
+                include_denied=include_denied,
+                object_type_keys=request.query_params.getlist("object_type_key"),
+                q=q,
+                limit=limit,
+                cursor=cursor,
+                actor_class=actor_class,
+            )
+        except KeyError:
+            error = CatalogQueryError("TS_CATALOG_SIGNAL_NOT_FOUND")
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=404,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        except CatalogQueryError as error:
+            status_code = 410 if error.code == "TS_QUERY_CURSOR_EXPIRED" else 400
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=status_code,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        page["meta"]["request_id"] = request_id
+        return JSONResponse(
+            page,
+            headers={"Cache-Control": "private, must-revalidate"},
+        )
+
+    @app.get("/api/time-series/catalog/results")
+    async def get_global_time_series_catalog_results(
+        request: Request, limit: int = 50, cursor: str | None = None
+    ):
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        user = request.state.current_user or {}
+        actor_class = f"{user.get('role', 'analyst')}:{user.get('id', 'auth-disabled')}"
+        try:
+            filters = parse_result_filters(request.query_params)
+            page = analyst_store.list_catalog_results(
+                limit=limit,
+                cursor=cursor,
+                actor_class=actor_class,
+                filters=filters,
+            )
+        except CatalogQueryError as error:
+            status_code = 410 if error.code == "TS_QUERY_CURSOR_EXPIRED" else 400
+            if error.code == "TS_QUERY_SNAPSHOT_CHANGED":
+                status_code = 409
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=status_code,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        page["meta"]["request_id"] = request_id
+        return JSONResponse(
+            page, headers={"Cache-Control": "private, must-revalidate"}
+        )
+
+    @app.get("/api/time-series/catalog/results/{result_series_id}")
+    async def get_global_time_series_catalog_result_detail(
+        result_series_id: str, request: Request
+    ):
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            detail = analyst_store.read_catalog_result_detail(result_series_id)
+        except KeyError:
+            error = CatalogQueryError("TS_CATALOG_RESULT_NOT_FOUND")
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=404,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        detail["request_id"] = request_id
+        return JSONResponse(
+            detail, headers={"Cache-Control": "private, must-revalidate"}
+        )
+
+    @app.get("/api/time-series/catalog/results/{result_series_id}/preview")
+    async def get_global_time_series_catalog_result_preview(
+        result_series_id: str, request: Request
+    ):
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            query = parse_legacy_preview_query(request.query_params)
+            preview = analyst_store.read_catalog_result_preview(result_series_id, **query)
+        except KeyError:
+            error = CatalogQueryError("TS_CATALOG_RESULT_NOT_FOUND")
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=404,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        except CatalogQueryError as error:
+            status_code = 422 if error.code == "TS_PREVIEW_TOO_LARGE" else 400
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=status_code,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        preview["request_id"] = request_id
+        return JSONResponse(
+            preview, headers={"Cache-Control": "private, no-store"}
+        )
+
+    @app.get("/api/time-series/catalog/legacy")
+    async def get_global_time_series_catalog_legacy(
+        request: Request, limit: int = 50, cursor: str | None = None
+    ):
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        user = request.state.current_user or {}
+        actor_class = f"{user.get('role', 'analyst')}:{user.get('id', 'auth-disabled')}"
+        try:
+            page = analyst_store.list_catalog_legacy(
+                limit=limit, cursor=cursor, actor_class=actor_class
+            )
+        except CatalogQueryError as error:
+            status_code = 410 if error.code == "TS_QUERY_CURSOR_EXPIRED" else 400
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=status_code,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        page["meta"]["request_id"] = request_id
+        return JSONResponse(
+            page, headers={"Cache-Control": "private, must-revalidate"}
+        )
+
+    @app.get("/api/time-series/catalog/legacy/{legacy_entry_ref}")
+    async def get_global_time_series_catalog_legacy_detail(
+        legacy_entry_ref: str, request: Request
+    ):
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            detail = analyst_store.read_catalog_legacy_detail(legacy_entry_ref)
+        except KeyError:
+            error = CatalogQueryError("TS_CATALOG_LEGACY_NOT_FOUND")
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=404,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        detail["request_id"] = request_id
+        return JSONResponse(
+            detail, headers={"Cache-Control": "private, must-revalidate"}
+        )
+
+    @app.get("/api/time-series/catalog/legacy/{legacy_entry_ref}/preview")
+    async def get_global_time_series_catalog_legacy_preview(
+        legacy_entry_ref: str, request: Request
+    ):
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            query = parse_legacy_preview_query(request.query_params)
+            preview = analyst_store.read_catalog_legacy_preview(
+                legacy_entry_ref, **query
+            )
+        except KeyError:
+            error = CatalogQueryError("TS_CATALOG_LEGACY_NOT_FOUND")
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=404,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        except CatalogQueryError as error:
+            status_code = 422 if error.code == "TS_PREVIEW_TOO_LARGE" else 400
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=status_code,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        preview["request_id"] = request_id
+        return JSONResponse(
+            preview, headers={"Cache-Control": "private, no-store"}
+        )
 
     @app.post("/api/admin/time-series/semantic-types", status_code=201)
     async def admin_create_custom_time_series_semantic_type(

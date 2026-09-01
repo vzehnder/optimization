@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import hmac
 import json
 import math
 import os
@@ -108,6 +109,11 @@ from app.time_series_catalog_projection import (
     publish_request_payload,
     publish_scope_key,
     summarize_coverage,
+)
+from app.time_series_catalog_read import (
+    input_filters_hash,
+    input_filters_sql,
+    sample_preview_rows,
 )
 from app.time_series_links import (
     link_history_guard_script,
@@ -1682,6 +1688,54 @@ class AnalystStore:
     def _ensure_catalog_projection(self) -> None:
         for statement in catalog_projection_schema_statements(self.database_backend):
             self.connection.execute(statement)
+        self._ensure_catalog_projection_read_columns()
+
+    def _ensure_catalog_projection_read_columns(self) -> None:
+        """Expand an already-landed TS7-005 projection for TS7-006 rows."""
+
+        table = self._projection("time_series_catalog_entries")
+        definitions = {
+            "owner_project_name": "TEXT NOT NULL DEFAULT ''",
+            "set_name": "TEXT NOT NULL DEFAULT ''",
+            "set_version_number": "INTEGER NOT NULL DEFAULT 1",
+            "set_version_label": "TEXT NOT NULL DEFAULT ''",
+            "set_description": "TEXT NOT NULL DEFAULT ''",
+            "signal_description": "TEXT NOT NULL DEFAULT ''",
+            "revision_created_at": "TEXT NOT NULL DEFAULT ''",
+            "source_timezone": "TEXT NOT NULL DEFAULT 'UTC'",
+        }
+        if self.database_backend == "postgresql":
+            schema_name, table_name = table.split(".", 1)
+            existing = {
+                row["column_name"]
+                for row in self.connection.execute(
+                    """
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_schema = ? AND table_name = ?
+                    """,
+                    (schema_name, table_name),
+                ).fetchall()
+            }
+        else:
+            existing = {
+                row["name"]
+                for row in self.connection.execute(
+                    f"PRAGMA table_info({table})"
+                ).fetchall()
+            }
+        missing = [column for column in definitions if column not in existing]
+        for column in missing:
+            self.connection.execute(
+                f"ALTER TABLE {table} ADD COLUMN {column} {definitions[column]}"
+            )
+        if not missing:
+            return
+        now = utc_now_iso()
+        projected_sets = self._projected_catalog_set_ids()
+        for set_id in projected_sets:
+            self._project_catalog_entries(set_id=set_id, now=now)
+        if projected_sets:
+            self._raise_catalog_generation(now=now)
 
     def catalog_projection_table_names(self) -> dict[str, str]:
         """Physical name of every TS7-005 table on the configured engine."""
@@ -2961,6 +3015,41 @@ class AnalystStore:
 
     # -- Catalog read model (TS7-005, chapters 9.3 to 9.5) ------------------
 
+    def _validate_catalog_execution_context(
+        self,
+        *,
+        scenario_id: int,
+        variant_id: int,
+        target_project_id: int,
+    ) -> None:
+        """Derive the variant project instead of trusting duplicated context."""
+
+        row = self.connection.execute(
+            """
+            SELECT scenario.project_id
+            FROM case_input_variants AS variant
+            JOIN optimization_cases AS optimization_case
+              ON optimization_case.id = variant.case_id
+            JOIN scenarios AS scenario
+              ON scenario.id = optimization_case.scenario_id
+            WHERE variant.id = ? AND scenario.id = ?
+            """,
+            (int(variant_id), int(scenario_id)),
+        ).fetchone()
+        if row is None:
+            raise CatalogQueryError(
+                "TS_QUERY_INVALID",
+                field="context_variant_id",
+                reason="execution_context_not_found",
+            )
+        if int(row["project_id"]) != int(target_project_id):
+            raise CatalogQueryError(
+                "TS_COMPAT_PROJECT_CONTEXT_MISMATCH",
+                scenario_id=int(scenario_id),
+                variant_id=int(variant_id),
+                target_project_id=int(target_project_id),
+            )
+
     def read_catalog_page(
         self,
         *,
@@ -2969,6 +3058,8 @@ class AnalystStore:
         cursor: str | None = None,
         include_total: bool = False,
         section: str = CATALOG_SECTION_INPUTS,
+        filters: dict[str, Any] | None = None,
+        actor_class: str = "internal",
     ) -> dict[str, Any]:
         """One keyset page of the catalog, read only from the projection.
 
@@ -2980,6 +3071,32 @@ class AnalystStore:
         canonical_order = normalize_catalog_order(order)
         order_terms = parse_catalog_order(order)
         entries_table = self._projection("time_series_catalog_entries")
+        normalized_filters = dict(filters or {})
+        if "context_linkable_object_id" in normalized_filters:
+            context_object = self.get_linkable_object(
+                normalized_filters["context_linkable_object_id"]
+            )
+            normalized_filters.update(
+                {
+                    "_context_object_status": context_object["status"],
+                    "_context_project_id": int(context_object["project_id"]),
+                    "_context_object_type_id": int(context_object["object_type_id"]),
+                }
+            )
+            if normalized_filters["context_usage"] == "execution":
+                self._validate_catalog_execution_context(
+                    scenario_id=normalized_filters["context_scenario_id"],
+                    variant_id=normalized_filters["context_variant_id"],
+                    target_project_id=int(context_object["project_id"]),
+                )
+        filter_sql, filter_parameters = input_filters_sql(
+            normalized_filters,
+            associations_table=self.link_layer_table_names()[
+                "time_series_catalog_associations"
+            ],
+            bindings_table=self.link_layer_table_names()["case_time_series_bindings"],
+        )
+        filters_digest = input_filters_hash(normalized_filters)
 
         with self._read_only_transaction():
             generation = self.catalog_generation(section)
@@ -2992,12 +3109,16 @@ class AnalystStore:
                     order=canonical_order,
                     limit=resolved_limit,
                     generation=generation,
+                    actor_class=actor_class,
+                    filters_hash=filters_digest,
                 )
             sql, parameters = catalog_page_sql(
                 entries_table=entries_table,
                 order_terms=order_terms,
                 cursor_key=cursor_key,
                 limit=resolved_limit,
+                filter_sql=filter_sql,
+                filter_parameters=filter_parameters,
             )
             rows = [
                 dict(row)
@@ -3007,7 +3128,9 @@ class AnalystStore:
             if include_total:
                 total_count = int(
                     self.connection.execute(
-                        f"SELECT COUNT(*) AS total FROM {entries_table}"
+                        f"SELECT COUNT(*) AS total FROM {entries_table} AS entry "
+                        + (f"WHERE {filter_sql}" if filter_sql else ""),
+                        filter_parameters,
                     ).fetchone()["total"]
                 )
 
@@ -3023,6 +3146,8 @@ class AnalystStore:
                     "g": generation,
                     "k": [items[-1][column] for column, _ in order_terms],
                     "t": int(time.time()),
+                    "a": actor_class,
+                    "f": filters_digest,
                 },
                 self._catalog_cursor_secret,
             )
@@ -3037,6 +3162,84 @@ class AnalystStore:
             "facets": None,
             "meta": {"section": section, "catalog_generation": generation},
         }
+
+    def evaluate_catalog_signal_for_object(
+        self,
+        *,
+        signal_id: int,
+        linkable_object_id: int,
+        binding_role_key: str,
+        usage: str,
+    ) -> dict[str, Any]:
+        """Contextual decision used by the inverse catalog selector."""
+
+        entry = self.connection.execute(
+            f"SELECT * FROM {self._projection('time_series_catalog_entries')} "
+            "WHERE signal_id = ?",
+            (int(signal_id),),
+        ).fetchone()
+        if entry is None:
+            raise KeyError(f"catalog signal {signal_id} not found")
+        entry = dict(entry)
+        linkable = self.get_linkable_object(int(linkable_object_id))
+        decision = self.evaluate_time_series_compatibility(
+            semantic_type_key=entry["semantic_type_key"],
+            binding_role_key=binding_role_key,
+            object_type_key=linkable["object_type_key"],
+            unit_key=entry["unit_key"],
+            usage=usage,
+        )
+        extra_errors = []
+        if entry["set_status"] == "archived" or entry["signal_status"] == "archived":
+            extra_errors.append(
+                compatibility_error(
+                    "TS_COMPAT_SIGNAL_UNAVAILABLE", {"signal_id": int(signal_id)}
+                )
+            )
+        if linkable["status"] != "active":
+            extra_errors.append(
+                compatibility_error(
+                    "TS_COMPAT_OBJECT_UNAVAILABLE",
+                    {"linkable_object_id": int(linkable_object_id)},
+                )
+            )
+        if (
+            entry["visibility_scope"] == "project"
+            and int(entry["owner_project_id"]) != int(linkable["project_id"])
+        ):
+            extra_errors.append(
+                compatibility_error(
+                    "TS_COMPAT_SCOPE_NOT_ACCESSIBLE",
+                    {
+                        "signal_id": int(signal_id),
+                        "owner_project_id": int(entry["owner_project_id"]),
+                        "target_project_id": int(linkable["project_id"]),
+                    },
+                )
+            )
+        errors = extra_errors + list(decision["errors"])
+        evaluated = {
+            **decision,
+            "allowed": bool(decision["allowed"] and not extra_errors),
+            "errors": errors,
+            "primary_error": errors[0] if errors else None,
+        }
+        fingerprint_source = json.dumps(
+            {
+                "signal_id": int(signal_id),
+                "revision_id": entry["current_revision_id"],
+                "object_id": int(linkable_object_id),
+                "role": binding_role_key,
+                "usage": usage,
+                "decision": evaluated,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        evaluated["compatibility_fingerprint"] = hashlib.sha256(
+            fingerprint_source.encode()
+        ).hexdigest()
+        return evaluated
 
     def explain_catalog_page(
         self,
@@ -3061,6 +3264,1385 @@ class AnalystStore:
             limit=resolved_limit,
         )
         return self._explain(sql, parameters, analyze=analyze)
+
+    def read_catalog_input_detail(self, signal_id: int) -> dict[str, Any]:
+        """Complete metadata for one signal admitted by the list projection."""
+
+        row = self.connection.execute(
+            f"""
+            SELECT entry.*,
+                   signal.description AS signal_description,
+                   the_set.name AS set_name,
+                   the_set.version_number AS set_version_number,
+                   the_set.version_label AS set_version_label,
+                   the_set.description AS set_description,
+                   the_set.scope_revision AS scope_revision,
+                   revision.state AS revision_state,
+                   revision.content_hash AS revision_content_hash,
+                   revision.timezone AS revision_timezone,
+                   revision.timestamp_convention AS timestamp_convention,
+                   revision.created_at AS revision_created_at,
+                   revision.created_by AS revision_created_by,
+                   revision.validation_payload_json AS validation_payload_json,
+                   revision_signal.signal_role AS signal_role,
+                   revision_signal.aggregation AS aggregation,
+                   semantic_type.display_name AS semantic_type_name,
+                   semantic_type.description AS semantic_type_description,
+                   semantic_type.status AS semantic_type_status,
+                   semantic_type.value_kind AS value_kind,
+                   semantic_type.default_aggregation AS default_aggregation,
+                   semantic_type.validation_rules_json AS semantic_validation_rules_json,
+                   dimension.dimension_key AS dimension_key,
+                   unit.symbol AS unit_symbol,
+                   unit.status AS unit_status,
+                   data_class.display_name AS data_class_name,
+                   data_class.status AS data_class_status,
+                   source.kind AS provenance_kind,
+                   source.source_key AS provenance_source_key,
+                   source.original_filename AS provenance_filename,
+                   source.media_type AS provenance_media_type,
+                   source.checksum AS provenance_checksum
+            FROM {self._projection('time_series_catalog_entries')} AS entry
+            JOIN {self._canonical('time_series_signals')} AS signal
+              ON signal.id = entry.signal_id
+            JOIN {self._canonical('time_series_sets')} AS the_set
+              ON the_set.id = entry.time_series_set_id
+            JOIN {self._canonical('time_series_set_revisions')} AS revision
+              ON revision.id = entry.current_revision_id
+            JOIN {self._canonical('time_series_revision_signals')} AS revision_signal
+              ON revision_signal.set_revision_id = revision.id
+             AND revision_signal.signal_id = entry.signal_id
+            JOIN time_series_semantic_types AS semantic_type
+              ON semantic_type.id = revision_signal.semantic_type_id
+            JOIN measurement_dimensions AS dimension
+              ON dimension.id = semantic_type.dimension_id
+            JOIN measurement_units AS unit
+              ON unit.id = revision_signal.unit_id
+            JOIN time_series_data_classes AS data_class
+              ON data_class.id = revision_signal.data_class_id
+            LEFT JOIN {self._canonical('time_series_sources')} AS source
+              ON source.id = revision.time_series_source_id
+            WHERE entry.signal_id = ?
+            """,
+            (int(signal_id),),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"catalog signal {signal_id} not found")
+        item = dict(row)
+        try:
+            validation = json.loads(item["validation_payload_json"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            validation = {}
+        try:
+            semantic_validation_rules = json.loads(
+                item["semantic_validation_rules_json"] or "{}"
+            )
+        except (TypeError, json.JSONDecodeError):
+            semantic_validation_rules = {}
+        lineage_table = self._canonical("time_series_revision_lineage")
+        lineage_rows = self.connection.execute(
+            f"""
+            SELECT lineage_kind, COUNT(*) AS occurrence_count
+            FROM {lineage_table}
+            WHERE (derived_set_revision_id = ? AND derived_signal_id = ?)
+               OR (source_set_revision_id = ? AND source_signal_id = ?)
+            GROUP BY lineage_kind
+            ORDER BY lineage_kind
+            """,
+            (
+                item["current_revision_id"],
+                item["signal_id"],
+                item["current_revision_id"],
+                item["signal_id"],
+            ),
+        ).fetchall()
+        return {
+            "entry_kind": "input",
+            "signal_id": int(item["signal_id"]),
+            "identity": {
+                "series_key": item["series_key"],
+                "display_name": item["display_name"],
+                "description": item["signal_description"],
+                "status": item["signal_status"],
+            },
+            "owner": {
+                "project_id": int(item["owner_project_id"]),
+                "project_name": item["owner_project_name"],
+            },
+            "set": {
+                "id": int(item["time_series_set_id"]),
+                "name": item["set_name"],
+                "version_number": int(item["set_version_number"]),
+                "version_label": item["set_version_label"],
+                "description": item["set_description"],
+                "status": item["set_status"],
+                "visibility_scope": item["visibility_scope"],
+                "scope_revision": int(item["scope_revision"]),
+            },
+            "contract": {
+                "semantic_type": {
+                    "key": item["semantic_type_key"],
+                    "display_name": item["semantic_type_name"],
+                    "description": item["semantic_type_description"],
+                    "status": item["semantic_type_status"],
+                    "dimension_key": item["dimension_key"],
+                    "value_kind": item["value_kind"],
+                    "default_aggregation": item["default_aggregation"],
+                    "validation_rules": semantic_validation_rules,
+                },
+                "data_class": {
+                    "key": item["data_class_key"],
+                    "display_name": item["data_class_name"],
+                    "status": item["data_class_status"],
+                },
+                "unit": {
+                    "key": item["unit_key"],
+                    "symbol": item["unit_symbol"],
+                    "dimension_key": item["dimension_key"],
+                    "status": item["unit_status"],
+                },
+                "signal_role": item["signal_role"],
+                "aggregation": item["aggregation"],
+            },
+            "current_revision": {
+                "id": int(item["current_revision_id"]),
+                "number": int(item["revision_number"]),
+                "state": item["revision_state"],
+                "content_hash": item["revision_content_hash"],
+                "timezone": item["revision_timezone"],
+                "timestamp_convention": item["timestamp_convention"],
+                "created_at": item["revision_created_at"],
+                "created_by": item["revision_created_by"],
+            },
+            "provenance": {
+                "kind": item["provenance_kind"] or item["source_kind"],
+                "source_key": item["provenance_source_key"],
+                "filename": item["provenance_filename"],
+                "media_type": item["provenance_media_type"],
+                "checksum": item["provenance_checksum"],
+            },
+            "validation_summary": {
+                "status": validation.get("status"),
+                "error_count": len(validation.get("errors", []))
+                if isinstance(validation.get("errors"), list)
+                else 0,
+            },
+            "lineage_summary": [
+                {
+                    "kind": lineage["lineage_kind"],
+                    "occurrence_count": int(lineage["occurrence_count"]),
+                }
+                for lineage in lineage_rows
+            ],
+        }
+
+    def read_catalog_input_revisions(
+        self,
+        signal_id: int,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+        actor_class: str = "internal",
+    ) -> dict[str, Any]:
+        """Immutable revision metadata for one projected catalog signal."""
+
+        resolved_limit = normalize_catalog_limit(limit)
+        signal_id = int(signal_id)
+        section = f"input:{signal_id}:revisions"
+        cursor_filter_hash = input_filters_hash({"signal_id": signal_id})
+        entry = self.connection.execute(
+            f"SELECT time_series_set_id FROM {self._projection('time_series_catalog_entries')} "
+            "WHERE signal_id = ?",
+            (signal_id,),
+        ).fetchone()
+        if entry is None:
+            raise KeyError(f"catalog signal {signal_id} not found")
+
+        with self._read_only_transaction():
+            generation = self.catalog_generation()
+            cursor_key = None
+            if cursor is not None:
+                cursor_key = decode_catalog_cursor(
+                    cursor,
+                    self._catalog_cursor_secret,
+                    section=section,
+                    order="-revision_number",
+                    limit=resolved_limit,
+                    generation=generation,
+                    actor_class=actor_class,
+                    filters_hash=cursor_filter_hash,
+                )
+            keyset = ""
+            parameters: list[Any] = [signal_id]
+            if cursor_key is not None:
+                if len(cursor_key) != 2:
+                    raise CatalogQueryError(
+                        "TS_QUERY_CURSOR_MISMATCH", reason="key_arity"
+                    )
+                keyset = (
+                    "AND (revision.revision_number < ? OR "
+                    "(revision.revision_number = ? AND revision.id > ?))"
+                )
+                parameters.extend((cursor_key[0], cursor_key[0], cursor_key[1]))
+            parameters.append(resolved_limit + 1)
+            rows = self.connection.execute(
+                f"""
+                SELECT revision.id, revision.revision_number, revision.state,
+                       revision.content_hash, revision.created_at,
+                       revision.created_by, revision.change_summary,
+                       revision.validation_payload_json,
+                       source.kind AS source_kind
+                FROM {self._canonical('time_series_revision_signals')} AS revision_signal
+                JOIN {self._canonical('time_series_set_revisions')} AS revision
+                  ON revision.id = revision_signal.set_revision_id
+                LEFT JOIN {self._canonical('time_series_sources')} AS source
+                  ON source.id = revision.time_series_source_id
+                WHERE revision_signal.signal_id = ?
+                  {keyset}
+                ORDER BY revision.revision_number DESC, revision.id ASC
+                LIMIT ?
+                """,
+                tuple(parameters),
+            ).fetchall()
+            total_count = int(
+                self.connection.execute(
+                    f"SELECT COUNT(*) AS total FROM "
+                    f"{self._canonical('time_series_revision_signals')} "
+                    "WHERE signal_id = ?",
+                    (signal_id,),
+                ).fetchone()["total"]
+            )
+
+        has_more = len(rows) > resolved_limit
+        visible = rows[:resolved_limit]
+        items = []
+        for row in visible:
+            try:
+                validation = json.loads(row["validation_payload_json"] or "{}")
+            except (TypeError, json.JSONDecodeError):
+                validation = {}
+            items.append(
+                {
+                    "id": int(row["id"]),
+                    "number": int(row["revision_number"]),
+                    "state": row["state"],
+                    "content_hash": row["content_hash"],
+                    "created_at": row["created_at"],
+                    "created_by": row["created_by"],
+                    "change_summary": row["change_summary"],
+                    "source_kind": row["source_kind"] or "api",
+                    "validation_summary": {
+                        "status": validation.get("status"),
+                        "error_count": len(validation.get("errors", []))
+                        if isinstance(validation.get("errors"), list)
+                        else 0,
+                    },
+                }
+            )
+        next_cursor = None
+        if has_more and visible:
+            next_cursor = encode_catalog_cursor(
+                {
+                    "s": section,
+                    "o": "-revision_number",
+                    "l": resolved_limit,
+                    "g": generation,
+                    "k": [visible[-1]["revision_number"], visible[-1]["id"]],
+                    "t": int(time.time()),
+                    "a": actor_class,
+                    "f": cursor_filter_hash,
+                },
+                self._catalog_cursor_secret,
+            )
+        return {
+            "items": items,
+            "page": {
+                "limit": resolved_limit,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+            },
+            "summary": {"total_count": total_count},
+            "facets": None,
+            "meta": {
+                "section": "input_revisions",
+                "signal_id": signal_id,
+                "catalog_generation": generation,
+            },
+        }
+
+    def read_catalog_input_preview(
+        self,
+        signal_id: int,
+        *,
+        revision_id: int,
+        range_from: str,
+        range_to: str,
+        sampling: str,
+        max_points: int,
+    ) -> dict[str, Any]:
+        """Bounded values from one explicitly named sealed revision."""
+
+        signal_id = int(signal_id)
+        revision_id = int(revision_id)
+        metadata = self.connection.execute(
+            f"""
+            SELECT revision.id AS revision_id,
+                   revision.content_hash,
+                   revision.state,
+                   unit.unit_key,
+                   unit.symbol AS unit_symbol
+            FROM {self._projection('time_series_catalog_entries')} AS entry
+            JOIN {self._canonical('time_series_set_revisions')} AS revision
+              ON revision.time_series_set_id = entry.time_series_set_id
+            JOIN {self._canonical('time_series_revision_signals')} AS revision_signal
+              ON revision_signal.set_revision_id = revision.id
+             AND revision_signal.signal_id = entry.signal_id
+            JOIN measurement_units AS unit ON unit.id = revision_signal.unit_id
+            WHERE entry.signal_id = ? AND revision.id = ?
+            """,
+            (signal_id, revision_id),
+        ).fetchone()
+        if metadata is None:
+            raise KeyError("catalog signal or exact revision not found")
+        if metadata["state"] != "sealed" or not metadata["content_hash"]:
+            raise CatalogQueryError(
+                "TS_PREVIEW_REVISION_UNAVAILABLE", revision_id=revision_id
+            )
+
+        range_summary = self.connection.execute(
+            f"""
+                SELECT COUNT(*) AS total,
+                       MIN(period.timestamp_start) AS effective_start,
+                       MAX(period.timestamp_end) AS effective_end
+                FROM {self._canonical('time_series_values')} AS value
+                JOIN {self._canonical('time_series_periods')} AS period
+                  ON period.id = value.time_series_period_id
+                 AND period.set_revision_id = value.set_revision_id
+                WHERE value.set_revision_id = ? AND value.signal_id = ?
+                  AND period.timestamp_start >= ? AND period.timestamp_end <= ?
+            """,
+            (revision_id, signal_id, range_from, range_to),
+        ).fetchone()
+        count = int(range_summary["total"])
+        if sampling == "none" and count > max_points:
+            raise CatalogQueryError(
+                "TS_PREVIEW_TOO_LARGE",
+                source_point_count=count,
+                max_points=max_points,
+            )
+        base_query = f"""
+                SELECT period.timestamp_start, period.timestamp_end,
+                       value.value_numeric, value.quality_flag,
+                       period.id AS period_id
+                FROM {self._canonical('time_series_values')} AS value
+                JOIN {self._canonical('time_series_periods')} AS period
+                  ON period.id = value.time_series_period_id
+                 AND period.set_revision_id = value.set_revision_id
+                WHERE value.set_revision_id = ? AND value.signal_id = ?
+                  AND period.timestamp_start >= ? AND period.timestamp_end <= ?
+        """
+        source_parameters: list[Any] = [
+            revision_id,
+            signal_id,
+            range_from,
+            range_to,
+        ]
+        if count <= max_points or sampling == "none":
+            sample_sql = base_query + " ORDER BY period.timestamp_start, period.id"
+            sample_parameters = tuple(source_parameters)
+        elif sampling == "uniform":
+            sample_sql = f"""
+                WITH source AS (
+                    SELECT sampled_source.*,
+                           ROW_NUMBER() OVER (
+                               ORDER BY timestamp_start, period_id
+                           ) - 1 AS row_number
+                    FROM ({base_query}) AS sampled_source
+                ), bucketed AS (
+                    SELECT source.*,
+                           CAST((row_number * ?) / ? AS INTEGER) AS bucket
+                    FROM source
+                ), ranked AS (
+                    SELECT bucketed.*,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY bucket ORDER BY row_number
+                           ) AS bucket_rank
+                    FROM bucketed
+                )
+                SELECT timestamp_start, timestamp_end, value_numeric, quality_flag
+                FROM ranked WHERE bucket_rank = 1
+                ORDER BY row_number LIMIT ?
+            """
+            sample_parameters = tuple(
+                [*source_parameters, max_points, count, max_points]
+            )
+        else:
+            bucket_count = max(1, (max_points + 1) // 2)
+            sample_sql = f"""
+                WITH source AS (
+                    SELECT sampled_source.*,
+                           ROW_NUMBER() OVER (
+                               ORDER BY timestamp_start, period_id
+                           ) - 1 AS row_number
+                    FROM ({base_query}) AS sampled_source
+                ), bucketed AS (
+                    SELECT source.*,
+                           CAST((row_number * ?) / ? AS INTEGER) AS bucket
+                    FROM source
+                ), ranked AS (
+                    SELECT bucketed.*,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY bucket
+                               ORDER BY value_numeric, row_number
+                           ) AS low_rank,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY bucket
+                               ORDER BY value_numeric DESC, row_number
+                           ) AS high_rank
+                    FROM bucketed
+                )
+                SELECT timestamp_start, timestamp_end, value_numeric, quality_flag
+                FROM ranked WHERE low_rank = 1 OR high_rank = 1
+                ORDER BY row_number LIMIT ?
+            """
+            sample_parameters = tuple(
+                [*source_parameters, bucket_count, count, max_points]
+            )
+        sampled = [
+            dict(row)
+            for row in self.connection.execute(
+                sample_sql, sample_parameters
+            ).fetchall()
+        ]
+        effective_range = (
+            {
+                "from": range_summary["effective_start"],
+                "to": range_summary["effective_end"],
+            }
+            if count
+            else None
+        )
+        return {
+            "signal_id": signal_id,
+            "revision": {
+                "id": revision_id,
+                "content_hash": metadata["content_hash"],
+            },
+            "requested_range": {"from": range_from, "to": range_to},
+            "effective_range": effective_range,
+            "sampling": sampling,
+            "max_points": max_points,
+            "source_point_count": count,
+            "returned_point_count": len(sampled),
+            "unit": {
+                "key": metadata["unit_key"],
+                "symbol": metadata["unit_symbol"],
+            },
+            "points": [
+                {
+                    "timestamp_start": row["timestamp_start"],
+                    "timestamp_end": row["timestamp_end"],
+                    "value": float(row["value_numeric"]),
+                    "quality_flag": row["quality_flag"],
+                }
+                for row in sampled
+            ],
+        }
+
+    def read_catalog_descriptors(
+        self,
+        *,
+        kind: str,
+        limit: int | None = None,
+        cursor: str | None = None,
+        q: str = "",
+        statuses: list[str] | None = None,
+        actor_class: str = "internal",
+    ) -> dict[str, Any]:
+        """One independently paged persistent selector catalog."""
+
+        queries = {
+            "semantic_type": """
+                SELECT semantic.id, semantic.semantic_key AS key,
+                       semantic.display_name, semantic.status,
+                       dimension.dimension_key,
+                       unit.unit_key AS canonical_unit_key,
+                       semantic.value_kind, semantic.default_aggregation,
+                       semantic.is_system
+                FROM time_series_semantic_types AS semantic
+                JOIN measurement_dimensions AS dimension
+                  ON dimension.id = semantic.dimension_id
+                JOIN measurement_units AS unit
+                  ON unit.id = semantic.canonical_unit_id
+            """,
+            "data_class": """
+                SELECT id, data_class_key AS key, display_name, status
+                FROM time_series_data_classes
+            """,
+            "unit": """
+                SELECT unit.id, unit.unit_key AS key, unit.symbol AS display_name,
+                       unit.status, dimension.dimension_key
+                FROM measurement_units AS unit
+                JOIN measurement_dimensions AS dimension
+                  ON dimension.id = unit.dimension_id
+            """,
+            "binding_role": """
+                SELECT role.id, role.role_key AS key, role.display_name,
+                       role.status, dimension.dimension_key,
+                       unit.unit_key AS canonical_unit_key,
+                       role.association_allowed, role.execution_allowed,
+                       role.is_system
+                FROM time_series_binding_roles AS role
+                JOIN measurement_dimensions AS dimension
+                  ON dimension.id = role.dimension_id
+                JOIN measurement_units AS unit
+                  ON unit.id = role.canonical_unit_id
+            """,
+            "object_type": """
+                SELECT id, object_type_key AS key, display_name, status,
+                       object_kind, is_system
+                FROM linkable_object_types
+            """,
+            "source_kind": f"""
+                SELECT MIN(id) AS id, kind AS key, kind AS display_name,
+                       'active' AS status
+                FROM {self._canonical('time_series_sources')}
+                GROUP BY kind
+            """,
+        }
+        if kind not in queries:
+            raise CatalogQueryError("TS_QUERY_INVALID", field="kind")
+        resolved_limit = normalize_catalog_limit(limit)
+        normalized_q = normalize_search_text(q)
+        selected_statuses = sorted(set(statuses or ["active"]))
+        rows = [dict(row) for row in self.connection.execute(queries[kind]).fetchall()]
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            if row["status"] not in selected_statuses:
+                continue
+            search = normalize_search_text(row["key"], row["display_name"])
+            if any(token not in search for token in normalized_q.split()):
+                continue
+            item = dict(row)
+            for flag in (
+                "is_system",
+                "association_allowed",
+                "execution_allowed",
+            ):
+                if flag in item:
+                    item[flag] = bool(item[flag])
+            item["capabilities"] = {
+                "edit": actor_class.startswith("admin:")
+                and not bool(item.get("is_system", False)),
+                "archive": actor_class.startswith("admin:")
+                and not bool(item.get("is_system", False)),
+            }
+            item["_sort_key"] = normalize_sort_text(item["display_name"])
+            items.append(item)
+        items.sort(key=lambda item: (item["_sort_key"], int(item["id"])))
+        generation_source = json.dumps(
+            [
+                [item["id"], item["key"], item["status"], item["_sort_key"]]
+                for item in items
+            ],
+            separators=(",", ":"),
+        )
+        generation = int(hashlib.sha256(generation_source.encode()).hexdigest()[:15], 16)
+        filters_digest = input_filters_hash(
+            {"kind": kind, "q": normalized_q, "statuses": selected_statuses}
+        )
+        cursor_key = None
+        if cursor is not None:
+            cursor_key = decode_catalog_cursor(
+                cursor,
+                self._catalog_cursor_secret,
+                section=f"descriptors:{kind}",
+                order="display_name",
+                limit=resolved_limit,
+                generation=generation,
+                actor_class=actor_class,
+                filters_hash=filters_digest,
+            )
+        if cursor_key is not None:
+            if len(cursor_key) != 2:
+                raise CatalogQueryError("TS_QUERY_CURSOR_MISMATCH", reason="key_arity")
+            items = [
+                item
+                for item in items
+                if (item["_sort_key"], int(item["id"]))
+                > (str(cursor_key[0]), int(cursor_key[1]))
+            ]
+        total_count = len(
+            [
+                row
+                for row in rows
+                if row["status"] in selected_statuses
+                and all(
+                    token
+                    in normalize_search_text(row["key"], row["display_name"])
+                    for token in normalized_q.split()
+                )
+            ]
+        )
+        has_more = len(items) > resolved_limit
+        visible = items[:resolved_limit]
+        next_cursor = None
+        if has_more and visible:
+            next_cursor = encode_catalog_cursor(
+                {
+                    "s": f"descriptors:{kind}",
+                    "o": "display_name",
+                    "l": resolved_limit,
+                    "g": generation,
+                    "k": [visible[-1]["_sort_key"], visible[-1]["id"]],
+                    "t": int(time.time()),
+                    "a": actor_class,
+                    "f": filters_digest,
+                },
+                self._catalog_cursor_secret,
+            )
+        for item in visible:
+            item.pop("_sort_key", None)
+        return {
+            "items": visible,
+            "page": {
+                "limit": resolved_limit,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+            },
+            "summary": {"total_count": total_count},
+            "facets": None,
+            "meta": {"section": "descriptors", "kind": kind, "catalog_generation": generation},
+        }
+
+    def read_catalog_object_candidates(
+        self,
+        signal_id: int,
+        *,
+        target_project_id: int,
+        binding_role_key: str,
+        usage: str,
+        context_scenario_id: int | None = None,
+        context_variant_id: int | None = None,
+        include_denied: bool = False,
+        object_type_keys: list[str] | None = None,
+        q: str = "",
+        limit: int | None = None,
+        cursor: str | None = None,
+        actor_class: str = "internal",
+    ) -> dict[str, Any]:
+        """Real project objects evaluated by the one compatibility policy."""
+
+        if usage not in {"association", "execution"}:
+            raise CatalogQueryError("TS_QUERY_INVALID", field="usage")
+        resolved_limit = normalize_catalog_limit(limit)
+        signal_id = int(signal_id)
+        target_project_id = int(target_project_id)
+        if usage == "execution":
+            if context_scenario_id is None or context_variant_id is None:
+                raise CatalogQueryError(
+                    "TS_QUERY_INVALID",
+                    field="context_scenario_id",
+                    reason="execution_context_required",
+                )
+            self._validate_catalog_execution_context(
+                scenario_id=int(context_scenario_id),
+                variant_id=int(context_variant_id),
+                target_project_id=target_project_id,
+            )
+        entry = self.connection.execute(
+            f"SELECT * FROM {self._projection('time_series_catalog_entries')} "
+            "WHERE signal_id = ?",
+            (signal_id,),
+        ).fetchone()
+        if entry is None:
+            raise KeyError(f"catalog signal {signal_id} not found")
+        self.get_project(target_project_id)
+        entry = dict(entry)
+        normalized_q = normalize_search_text(q)
+        selected_types = sorted(set(object_type_keys or []))
+        candidates = []
+        for linkable in self.list_linkable_objects(
+            project_id=target_project_id, include_archived=True
+        ):
+            if selected_types and linkable["object_type_key"] not in selected_types:
+                continue
+            search = normalize_search_text(
+                linkable["object_key"],
+                linkable["display_name"],
+                linkable["object_type_key"],
+            )
+            if any(token not in search for token in normalized_q.split()):
+                continue
+            decision = self.evaluate_time_series_compatibility(
+                semantic_type_key=entry["semantic_type_key"],
+                binding_role_key=binding_role_key,
+                object_type_key=linkable["object_type_key"],
+                unit_key=entry["unit_key"],
+                usage=usage,
+            )
+            extra_errors = []
+            if (
+                entry["set_status"] == "archived"
+                or entry["signal_status"] == "archived"
+            ):
+                extra_errors.append(
+                    compatibility_error(
+                        "TS_COMPAT_SIGNAL_UNAVAILABLE",
+                        {"signal_id": signal_id, "usage": usage},
+                    )
+                )
+            if linkable["status"] != "active":
+                extra_errors.append(
+                    compatibility_error(
+                        "TS_COMPAT_OBJECT_UNAVAILABLE",
+                        {
+                            "linkable_object_id": int(linkable["id"]),
+                            "usage": usage,
+                        },
+                    )
+                )
+            if (
+                entry["visibility_scope"] == "project"
+                and int(entry["owner_project_id"]) != target_project_id
+            ):
+                extra_errors.append(
+                    compatibility_error(
+                        "TS_COMPAT_SCOPE_NOT_ACCESSIBLE",
+                        {
+                            "signal_id": signal_id,
+                            "owner_project_id": int(entry["owner_project_id"]),
+                            "target_project_id": target_project_id,
+                        },
+                    )
+                )
+            errors = extra_errors + list(decision["errors"])
+            decision = {
+                **decision,
+                "allowed": bool(decision["allowed"] and not extra_errors),
+                "errors": errors,
+                "primary_error": errors[0] if errors else None,
+            }
+            fingerprint_source = json.dumps(
+                {
+                    "signal_id": signal_id,
+                    "revision_id": entry["current_revision_id"],
+                    "object_id": linkable["id"],
+                    "role": binding_role_key,
+                    "usage": usage,
+                    "decision": decision,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            decision["compatibility_fingerprint"] = hashlib.sha256(
+                fingerprint_source.encode()
+            ).hexdigest()
+            if not include_denied and not decision["allowed"]:
+                continue
+            candidates.append(
+                {
+                    "object": {
+                        "id": int(linkable["id"]),
+                        "project_id": int(linkable["project_id"]),
+                        "object_kind": linkable["object_kind"],
+                        "object_type_key": linkable["object_type_key"],
+                        "object_key": linkable["object_key"],
+                        "display_name": linkable["display_name"],
+                        "status": linkable["status"],
+                    },
+                    "compatibility_decision": decision,
+                    "selectable": bool(decision["allowed"]),
+                    "_sort_key": normalize_sort_text(linkable["display_name"]),
+                }
+            )
+        candidates.sort(
+            key=lambda item: (item["_sort_key"], item["object"]["id"])
+        )
+        generation_source = json.dumps(candidates, sort_keys=True, default=str)
+        generation = int(hashlib.sha256(generation_source.encode()).hexdigest()[:15], 16)
+        filters_digest = input_filters_hash(
+            {
+                "signal_id": signal_id,
+                "target_project_id": target_project_id,
+                "binding_role_key": binding_role_key,
+                "usage": usage,
+                "include_denied": bool(include_denied),
+                "object_type_keys": selected_types,
+                "q": normalized_q,
+                "context_scenario_id": context_scenario_id,
+                "context_variant_id": context_variant_id,
+            }
+        )
+        total_count = len(candidates)
+        cursor_key = None
+        if cursor is not None:
+            cursor_key = decode_catalog_cursor(
+                cursor,
+                self._catalog_cursor_secret,
+                section=f"input:{signal_id}:object-candidates",
+                order="display_name",
+                limit=resolved_limit,
+                generation=generation,
+                actor_class=actor_class,
+                filters_hash=filters_digest,
+            )
+        if cursor_key is not None:
+            if len(cursor_key) != 2:
+                raise CatalogQueryError("TS_QUERY_CURSOR_MISMATCH", reason="key_arity")
+            candidates = [
+                item
+                for item in candidates
+                if (item["_sort_key"], item["object"]["id"])
+                > (str(cursor_key[0]), int(cursor_key[1]))
+            ]
+        has_more = len(candidates) > resolved_limit
+        visible = candidates[:resolved_limit]
+        next_cursor = None
+        if has_more and visible:
+            next_cursor = encode_catalog_cursor(
+                {
+                    "s": f"input:{signal_id}:object-candidates",
+                    "o": "display_name",
+                    "l": resolved_limit,
+                    "g": generation,
+                    "k": [visible[-1]["_sort_key"], visible[-1]["object"]["id"]],
+                    "t": int(time.time()),
+                    "a": actor_class,
+                    "f": filters_digest,
+                },
+                self._catalog_cursor_secret,
+            )
+        for item in visible:
+            item.pop("_sort_key", None)
+        return {
+            "items": visible,
+            "page": {
+                "limit": resolved_limit,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+            },
+            "summary": {"total_count": total_count},
+            "facets": None,
+            "meta": {
+                "section": "object_candidates",
+                "signal_id": signal_id,
+                "target_project_id": target_project_id,
+                "catalog_generation": generation,
+            },
+        }
+
+    def list_catalog_results(
+        self,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+        actor_class: str = "internal",
+        filters: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Read-only result identities; never canonical signal identities."""
+
+        resolved_limit = normalize_catalog_limit(limit)
+        rows = self.connection.execute(
+            """
+            SELECT result_index.run_id, result_index.dispatch_columns_json,
+                   result_index.signal_keys_json, result_index.created_at,
+                   run.status AS run_status, scenario.id AS scenario_id,
+                   scenario.name AS scenario_name, project.id AS project_id,
+                   project.name AS project_name
+            FROM run_dispatch_result_indexes AS result_index
+            JOIN runs AS run ON run.id = result_index.run_id
+            JOIN scenario_versions AS version
+              ON version.id = result_index.scenario_version_id
+            JOIN scenarios AS scenario ON scenario.id = version.scenario_id
+            JOIN projects AS project ON project.id = scenario.project_id
+            ORDER BY result_index.created_at DESC, result_index.run_id DESC
+            """
+        ).fetchall()
+        items = []
+        excluded = {"timestamp", "duration_hours", "period_index"}
+        for row in rows:
+            columns = json.loads(row["dispatch_columns_json"] or "[]")
+            signal_keys = json.loads(row["signal_keys_json"] or "{}")
+            coverage = self.connection.execute(
+                """
+                SELECT MIN(timestamp) AS coverage_start,
+                       MAX(timestamp) AS coverage_end,
+                       COUNT(*) AS period_count
+                FROM run_dispatch_result_rows WHERE run_id = ?
+                """,
+                (row["run_id"],),
+            ).fetchone()
+            for column in columns:
+                if column in excluded:
+                    continue
+                items.append(
+                    {
+                        "entry_kind": "result",
+                        "result_series_id": f"run:{int(row['run_id'])}:dispatch:{column}",
+                        "result_type": column,
+                        "display_name": str(column).replace("_", " ").title(),
+                        "signal_key": signal_keys.get(column),
+                        "owner": {
+                            "project_id": int(row["project_id"]),
+                            "project_name": row["project_name"],
+                        },
+                        "scenario": {
+                            "id": int(row["scenario_id"]),
+                            "name": row["scenario_name"],
+                        },
+                        "run": {
+                            "id": int(row["run_id"]),
+                            "status": row["run_status"],
+                        },
+                        "coverage_summary": {
+                            "start": coverage["coverage_start"],
+                            "end": coverage["coverage_end"],
+                            "period_count": int(coverage["period_count"]),
+                        },
+                        "produced_at": row["created_at"],
+                        "capabilities": {"view_detail": True, "preview": True},
+                    }
+                )
+        generation_source = json.dumps(items, sort_keys=True, default=str)
+        generation = int(hashlib.sha256(generation_source.encode()).hexdigest()[:15], 16)
+        normalized_filters = dict(filters or {})
+
+        def produced_at_utc(value: str) -> str:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if parsed.tzinfo is not None:
+                parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+            return parsed.isoformat()
+
+        def selected(item: dict[str, Any]) -> bool:
+            checks = (
+                ("owner_project_id", item["owner"]["project_id"]),
+                ("scenario_id", item["scenario"]["id"]),
+                ("run_id", item["run"]["id"]),
+                ("run_status", item["run"]["status"]),
+                ("result_type", item["result_type"]),
+            )
+            if any(
+                name in normalized_filters
+                and value not in normalized_filters[name]
+                for name, value in checks
+            ):
+                return False
+            produced_at = produced_at_utc(item["produced_at"])
+            if produced_at < normalized_filters.get("produced_from", produced_at):
+                return False
+            if produced_at > normalized_filters.get("produced_to", produced_at):
+                return False
+            return True
+
+        items = [item for item in items if selected(item)]
+        total_count = len(items)
+        filters_digest = input_filters_hash(
+            {"section": "results", **normalized_filters}
+        )
+        if cursor is not None:
+            cursor_key = decode_catalog_cursor(
+                cursor,
+                self._catalog_cursor_secret,
+                section="results",
+                order="-produced_at",
+                limit=resolved_limit,
+                generation=generation,
+                actor_class=actor_class,
+                filters_hash=filters_digest,
+            )
+            if len(cursor_key) != 1:
+                raise CatalogQueryError("TS_QUERY_CURSOR_MISMATCH", reason="key_arity")
+            positions = {
+                item["result_series_id"]: index for index, item in enumerate(items)
+            }
+            if cursor_key[0] not in positions:
+                raise CatalogQueryError("TS_QUERY_CURSOR_MISMATCH", reason="key_missing")
+            items = items[positions[cursor_key[0]] + 1 :]
+        visible = items[:resolved_limit]
+        has_more = len(items) > resolved_limit
+        next_cursor = None
+        if has_more and visible:
+            next_cursor = encode_catalog_cursor(
+                {
+                    "s": "results",
+                    "o": "-produced_at",
+                    "l": resolved_limit,
+                    "g": generation,
+                    "k": [visible[-1]["result_series_id"]],
+                    "t": int(time.time()),
+                    "a": actor_class,
+                    "f": filters_digest,
+                },
+                self._catalog_cursor_secret,
+            )
+        return {
+            "items": visible,
+            "page": {
+                "limit": resolved_limit,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+            },
+            "summary": {"total_count": total_count},
+            "facets": None,
+            "meta": {"section": "results", "catalog_generation": generation},
+        }
+
+    @staticmethod
+    def _parse_result_series_id(result_series_id: str) -> tuple[int, str]:
+        parts = str(result_series_id).split(":", 3)
+        if len(parts) != 4 or parts[0] != "run" or parts[2] != "dispatch":
+            raise KeyError("result series not found")
+        try:
+            run_id = int(parts[1])
+        except ValueError as error:
+            raise KeyError("result series not found") from error
+        if run_id < 1 or not parts[3]:
+            raise KeyError("result series not found")
+        return run_id, parts[3]
+
+    def read_catalog_result_detail(self, result_series_id: str) -> dict[str, Any]:
+        run_id, column = self._parse_result_series_id(result_series_id)
+        row = self.connection.execute(
+            """
+            SELECT result_index.dispatch_columns_json,
+                   result_index.signal_keys_json, result_index.created_at,
+                   run.status AS run_status, scenario.id AS scenario_id,
+                   scenario.name AS scenario_name, project.id AS project_id,
+                   project.name AS project_name
+            FROM run_dispatch_result_indexes AS result_index
+            JOIN runs AS run ON run.id = result_index.run_id
+            JOIN scenario_versions AS version
+              ON version.id = result_index.scenario_version_id
+            JOIN scenarios AS scenario ON scenario.id = version.scenario_id
+            JOIN projects AS project ON project.id = scenario.project_id
+            WHERE result_index.run_id = ?
+            """,
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError("result series not found")
+        columns = json.loads(row["dispatch_columns_json"] or "[]")
+        if column not in columns or column in {"timestamp", "duration_hours", "period_index"}:
+            raise KeyError("result series not found")
+        signal_keys = json.loads(row["signal_keys_json"] or "{}")
+        coverage = self.connection.execute(
+            """
+            SELECT MIN(timestamp) AS coverage_start,
+                   MAX(timestamp) AS coverage_end,
+                   COUNT(*) AS period_count
+            FROM run_dispatch_result_rows WHERE run_id = ?
+            """,
+            (run_id,),
+        ).fetchone()
+        return {
+            "entry_kind": "result",
+            "result_series_id": result_series_id,
+            "result_type": column,
+            "display_name": column.replace("_", " ").title(),
+            "signal_key": signal_keys.get(column),
+            "owner": {
+                "project_id": int(row["project_id"]),
+                "project_name": row["project_name"],
+            },
+            "scenario": {
+                "id": int(row["scenario_id"]),
+                "name": row["scenario_name"],
+            },
+            "run": {"id": run_id, "status": row["run_status"]},
+            "coverage_summary": {
+                "start": coverage["coverage_start"],
+                "end": coverage["coverage_end"],
+                "period_count": int(coverage["period_count"]),
+            },
+            "produced_at": row["created_at"],
+            "capabilities": {"view_detail": True, "preview": True},
+        }
+
+    def read_catalog_result_preview(
+        self,
+        result_series_id: str,
+        *,
+        range_from: str,
+        range_to: str,
+        sampling: str,
+        max_points: int,
+    ) -> dict[str, Any]:
+        detail = self.read_catalog_result_detail(result_series_id)
+        run_id, column = self._parse_result_series_id(result_series_id)
+        rows = []
+        for stored in self.connection.execute(
+            """
+            SELECT row_json, timestamp, duration_hours
+            FROM run_dispatch_result_rows
+            WHERE run_id = ? ORDER BY period_index
+            """,
+            (run_id,),
+        ).fetchall():
+            payload = json.loads(stored["row_json"] or "{}")
+            timestamp_start = str(stored["timestamp"])
+            duration_hours = float(stored["duration_hours"] or 0)
+            timestamp_end = (
+                datetime.fromisoformat(timestamp_start) + timedelta(hours=duration_hours)
+            ).isoformat()
+            if timestamp_start < range_from or timestamp_end > range_to:
+                continue
+            value = payload.get(column)
+            if value is None:
+                continue
+            rows.append(
+                {
+                    "timestamp_start": timestamp_start,
+                    "timestamp_end": timestamp_end,
+                    "value_numeric": float(value),
+                    "quality_flag": None,
+                }
+            )
+        if sampling == "none" and len(rows) > max_points:
+            raise CatalogQueryError(
+                "TS_PREVIEW_TOO_LARGE",
+                source_point_count=len(rows),
+                max_points=max_points,
+            )
+        sampled = sample_preview_rows(rows, strategy=sampling, limit=max_points)
+        return {
+            "entry_kind": "result",
+            "result_series_id": result_series_id,
+            "result_type": detail["result_type"],
+            "requested_range": {"from": range_from, "to": range_to},
+            "effective_range": (
+                {"from": rows[0]["timestamp_start"], "to": rows[-1]["timestamp_end"]}
+                if rows
+                else None
+            ),
+            "sampling": sampling,
+            "max_points": max_points,
+            "source_point_count": len(rows),
+            "returned_point_count": len(sampled),
+            "points": [
+                {
+                    "timestamp_start": row["timestamp_start"],
+                    "timestamp_end": row["timestamp_end"],
+                    "value": row["value_numeric"],
+                    "quality_flag": row["quality_flag"],
+                }
+                for row in sampled
+            ],
+        }
+
+    def _legacy_entry_ref(self, legacy_id: int) -> str:
+        digest = hmac.new(
+            self._catalog_cursor_secret,
+            f"hydraulic:{int(legacy_id)}".encode(),
+            hashlib.sha256,
+        ).hexdigest()[:32]
+        return f"legacy_{digest}"
+
+    def list_catalog_legacy(
+        self,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+        actor_class: str = "internal",
+    ) -> dict[str, Any]:
+        """Global internal view of the existing hydraulic legacy adapter."""
+
+        resolved_limit = normalize_catalog_limit(limit)
+        rows = self.connection.execute(
+            "SELECT " + self._HYDRAULIC_TIME_SERIES_CATALOG_COLUMNS
+            + self._HYDRAULIC_TIME_SERIES_CATALOG_JOINS
+            + " ORDER BY hydraulic_time_series_sets.id"
+        ).fetchall()
+        project_names = {
+            int(row["id"]): row["name"]
+            for row in self.connection.execute("SELECT id, name FROM projects").fetchall()
+        }
+        items = []
+        for raw in rows:
+            summary = build_hydraulic_catalog_summary(row_to_dict(raw))
+            migrated = summary["migration"] is not None
+            items.append(
+                {
+                    "entry_kind": "legacy",
+                    "legacy_entry_ref": self._legacy_entry_ref(summary["id"]),
+                    "identity": {
+                        "signal_key": summary["signal_key"],
+                        "entity_type": summary["entity_type"],
+                        "entity_key": summary["entity_key"],
+                        "display_name": summary["name"],
+                        "status": summary["status"],
+                    },
+                    "owner": {
+                        "project_id": summary["project_id"],
+                        "project_name": project_names.get(summary["project_id"], ""),
+                    },
+                    "version": {
+                        "number": summary["version_number"],
+                        "label": summary["version_label"],
+                        "content_hash": summary["content_hash"],
+                    },
+                    "migration_state": "migrated" if migrated else "unmigrated",
+                    "canonical_signal": summary["migration"],
+                    "coverage_summary": {"period_count": summary["period_count"]},
+                    "capabilities": {
+                        "view_detail": True,
+                        "preview": True,
+                        "migrate": not migrated,
+                    },
+                }
+            )
+        generation_source = json.dumps(items, sort_keys=True, default=str)
+        generation = int(hashlib.sha256(generation_source.encode()).hexdigest()[:15], 16)
+        total_count = len(items)
+        filters_digest = input_filters_hash({"section": "legacy"})
+        if cursor is not None:
+            cursor_key = decode_catalog_cursor(
+                cursor,
+                self._catalog_cursor_secret,
+                section="legacy",
+                order="legacy_id",
+                limit=resolved_limit,
+                generation=generation,
+                actor_class=actor_class,
+                filters_hash=filters_digest,
+            )
+            if len(cursor_key) != 1:
+                raise CatalogQueryError("TS_QUERY_CURSOR_MISMATCH", reason="key_arity")
+            positions = {
+                item["legacy_entry_ref"]: index for index, item in enumerate(items)
+            }
+            if cursor_key[0] not in positions:
+                raise CatalogQueryError("TS_QUERY_CURSOR_MISMATCH", reason="key_missing")
+            items = items[positions[cursor_key[0]] + 1 :]
+        visible = items[:resolved_limit]
+        has_more = len(items) > resolved_limit
+        next_cursor = None
+        if has_more and visible:
+            next_cursor = encode_catalog_cursor(
+                {
+                    "s": "legacy",
+                    "o": "legacy_id",
+                    "l": resolved_limit,
+                    "g": generation,
+                    "k": [visible[-1]["legacy_entry_ref"]],
+                    "t": int(time.time()),
+                    "a": actor_class,
+                    "f": filters_digest,
+                },
+                self._catalog_cursor_secret,
+            )
+        return {
+            "items": visible,
+            "page": {
+                "limit": resolved_limit,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+            },
+            "summary": {"total_count": total_count},
+            "facets": None,
+            "meta": {"section": "legacy", "catalog_generation": generation},
+        }
+
+    def _resolve_legacy_entry_ref(self, legacy_entry_ref: str) -> tuple[int, int]:
+        rows = self.connection.execute(
+            "SELECT id, project_id FROM hydraulic_time_series_sets ORDER BY id"
+        ).fetchall()
+        for row in rows:
+            candidate = self._legacy_entry_ref(int(row["id"]))
+            if hmac.compare_digest(candidate, str(legacy_entry_ref)):
+                return int(row["project_id"]), int(row["id"])
+        raise KeyError("legacy entry not found")
+
+    def read_catalog_legacy_detail(self, legacy_entry_ref: str) -> dict[str, Any]:
+        project_id, legacy_id = self._resolve_legacy_entry_ref(legacy_entry_ref)
+        raw = self.get_hydraulic_time_series_set(project_id, legacy_id)
+        return {
+            "entry_kind": "legacy",
+            "legacy_entry_ref": legacy_entry_ref,
+            "identity": {
+                "signal_key": raw["signal_key"],
+                "entity_type": raw["entity_type"],
+                "entity_key": raw["entity_key"],
+                "display_name": raw["name"],
+                "status": raw["status"],
+            },
+            "owner": {
+                "project_id": project_id,
+                "project_name": self.get_project(project_id)["name"],
+            },
+            "version": {
+                "number": raw["version_number"],
+                "label": raw["version_label"],
+                "content_hash": raw["content_hash"],
+            },
+            "migration_state": "migrated" if raw["migration"] else "unmigrated",
+            "canonical_signal": raw["migration"],
+            "coverage_summary": raw["horizon"],
+            "origin": raw["origin"],
+            "capabilities": {
+                "view_detail": True,
+                "preview": True,
+                "migrate": raw["migration"] is None,
+            },
+        }
+
+    def read_catalog_legacy_preview(
+        self,
+        legacy_entry_ref: str,
+        *,
+        range_from: str,
+        range_to: str,
+        sampling: str,
+        max_points: int,
+    ) -> dict[str, Any]:
+        project_id, legacy_id = self._resolve_legacy_entry_ref(legacy_entry_ref)
+        raw = self.get_hydraulic_time_series_set(project_id, legacy_id)
+        rows = []
+        for period, value in zip(raw["periods"], raw["values"]):
+            if (
+                period["timestamp_start"] >= range_from
+                and period["timestamp_end"] <= range_to
+            ):
+                rows.append(
+                    {
+                        "timestamp_start": period["timestamp_start"],
+                        "timestamp_end": period["timestamp_end"],
+                        "value_numeric": float(value["value_numeric"]),
+                        "quality_flag": None,
+                    }
+                )
+        if sampling == "none" and len(rows) > max_points:
+            raise CatalogQueryError(
+                "TS_PREVIEW_TOO_LARGE",
+                source_point_count=len(rows),
+                max_points=max_points,
+            )
+        sampled = sample_preview_rows(rows, strategy=sampling, limit=max_points)
+        return {
+            "entry_kind": "legacy",
+            "legacy_entry_ref": legacy_entry_ref,
+            "content_hash": raw["content_hash"],
+            "requested_range": {"from": range_from, "to": range_to},
+            "effective_range": (
+                {"from": rows[0]["timestamp_start"], "to": rows[-1]["timestamp_end"]}
+                if rows
+                else None
+            ),
+            "sampling": sampling,
+            "max_points": max_points,
+            "source_point_count": len(rows),
+            "returned_point_count": len(sampled),
+            "unit": raw["unit"],
+            "points": [
+                {
+                    "timestamp_start": row["timestamp_start"],
+                    "timestamp_end": row["timestamp_end"],
+                    "value": row["value_numeric"],
+                    "quality_flag": row["quality_flag"],
+                }
+                for row in sampled
+            ],
+        }
 
     def explain_object_context_page(
         self,
@@ -3390,7 +4972,7 @@ class AnalystStore:
         coverage = self._catalog_revision_coverage(revision_id)
         revision = self.connection.execute(
             f"""
-            SELECT revision_number
+            SELECT revision_number, created_at, timezone
             FROM {self._canonical('time_series_set_revisions')}
             WHERE id = ?
             """,
@@ -3403,6 +4985,7 @@ class AnalystStore:
             f"""
             SELECT signal.id AS signal_id, signal.series_key AS series_key,
                    signal.display_name AS display_name,
+                   signal.description AS signal_description,
                    signal.status AS signal_status,
                    revision_signal.semantic_type_id AS semantic_type_id,
                    semantic_type.semantic_key AS semantic_type_key,
@@ -3438,12 +5021,18 @@ class AnalystStore:
                     "signal_id": int(signal["signal_id"]),
                     "time_series_set_id": set_id,
                     "owner_project_id": int(set_row["owner_project_id"]),
+                    "owner_project_name": set_row["owner_project_name"],
                     "owner_project_name_sort": project_name_sort,
+                    "set_name": set_row["name"],
+                    "set_version_number": int(set_row["version_number"]),
+                    "set_version_label": set_row["version_label"],
+                    "set_description": set_row["description"],
                     "visibility_scope": set_row["visibility_scope"],
                     "set_status": set_row["status"],
                     "signal_status": signal["signal_status"],
                     "series_key": signal["series_key"],
                     "display_name": signal["display_name"],
+                    "signal_description": signal["signal_description"],
                     "display_name_sort": normalize_sort_text(signal["display_name"]),
                     "search_text_normalized": normalize_search_text(
                         signal["display_name"],
@@ -3462,6 +5051,8 @@ class AnalystStore:
                     "source_kind": source_kind,
                     "current_revision_id": revision_id,
                     "revision_number": int(revision["revision_number"]),
+                    "revision_created_at": revision["created_at"],
+                    "source_timezone": revision["timezone"],
                     "coverage_start": coverage["coverage_start"],
                     "coverage_end": coverage["coverage_end"],
                     "period_count": coverage["period_count"],
@@ -4089,6 +5680,7 @@ class AnalystStore:
                         "series_key": series_key,
                         "status": "archived",
                     }
+                now = utc_now_iso()
                 self.connection.execute(
                     f"""
                     UPDATE {signals_table}
@@ -4096,8 +5688,12 @@ class AnalystStore:
                         description = ?
                     WHERE id = ?
                     """,
-                    (utc_now_iso(), actor, reason_text, int(row["id"])),
+                    (now, actor, reason_text, int(row["id"])),
                 )
+                # Archival changes list membership and capabilities, so the
+                # read projection and its snapshot generation move atomically.
+                self._project_catalog_entries(set_id=set_id, now=now)
+                self._raise_catalog_generation(now=now)
                 return {
                     "signal_id": int(row["id"]),
                     "series_key": series_key,
