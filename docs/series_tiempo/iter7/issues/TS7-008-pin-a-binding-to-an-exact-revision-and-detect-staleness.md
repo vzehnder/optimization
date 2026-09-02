@@ -1,6 +1,6 @@
 # TS7-008: Pin A Binding To An Exact Revision And Detect Staleness
 
-Status: Todo
+Status: In Review
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter7/spec_ts7_catalogo_global_y_series_especificas.md` (4.3, 4.4, 4.5, 4.7, 6.1)
@@ -28,15 +28,15 @@ deleted, and past bindings keep resolving.
 
 ## Acceptance criteria
 
-- [ ] Only one active binding exists per `case_input_variant_id + linkable_object_id + binding_role_id` (AC-BIN-01).
-- [ ] A binding pins exact revision and hash and does not follow `current_revision_id` after a new publication (AC-BIN-02).
-- [ ] Publishing a revision leaves consumers stale and blocks their execution; no variant advances by itself (AC-BIN-03).
-- [ ] `stale` and `invalid` are derived: a client that submits them does not avoid validation (AC-BIN-04).
-- [ ] Replacing requires comparison and a reason, and the previous binding stays in consultable history (AC-BIN-05 backend half).
-- [ ] An object and variant from different projects return `TS_COMPAT_PROJECT_CONTEXT_MISMATCH` (AC-BIN-06).
-- [ ] The batch is all-or-nothing per variant and shares the prevalidation contract with associations.
-- [ ] Archiving a signal or type in use preserves history and past bindings; nothing is physically deleted.
-- [ ] Binding events are append-only and paginated.
+- [x] Only one active binding exists per `case_input_variant_id + linkable_object_id + binding_role_id` (AC-BIN-01).
+- [x] A binding pins exact revision and hash and does not follow `current_revision_id` after a new publication (AC-BIN-02).
+- [x] Publishing a revision leaves consumers stale and blocks their execution; no variant advances by itself (AC-BIN-03).
+- [x] `stale` and `invalid` are derived: a client that submits them does not avoid validation (AC-BIN-04).
+- [x] Replacing requires comparison and a reason, and the previous binding stays in consultable history (AC-BIN-05 backend half).
+- [x] An object and variant from different projects return `TS_COMPAT_PROJECT_CONTEXT_MISMATCH` (AC-BIN-06).
+- [x] The batch is all-or-nothing per variant and shares the prevalidation contract with associations.
+- [x] Archiving a signal or type in use preserves history and past bindings; nothing is physically deleted.
+- [x] Binding events are append-only and paginated.
 
 ## Blocked by
 

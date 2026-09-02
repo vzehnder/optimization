@@ -123,6 +123,14 @@ from app.time_series_associations import (
     normalize_association_request,
     verify_prevalidation_token,
 )
+from app.time_series_bindings import (
+    BindingMutationError,
+    binding_commit_etag,
+    binding_request_hash,
+    issue_binding_prevalidation_token,
+    normalize_binding_request,
+    verify_binding_prevalidation_token,
+)
 from app.time_series_links import (
     link_history_guard_script,
     link_layer_constraint_upgrade_script,
@@ -4741,6 +4749,48 @@ class AnalystStore:
         )
         return compatibility_fingerprint, object_scope_fingerprint
 
+    def _case_binding_fingerprints(
+        self,
+        *,
+        observed: Mapping[str, Any],
+        binding_role_key: str,
+        contract_version: int,
+    ) -> tuple[str, str]:
+        compatibility, object_scope = self._catalog_association_fingerprints(
+            observed=observed,
+            binding_role_key=binding_role_key,
+            contract_version=contract_version,
+        )
+        return (
+            self._association_fingerprint(
+                {
+                    "compatibility_fingerprint": compatibility,
+                    "catalog_association": observed.get("catalog_association"),
+                }
+            ),
+            object_scope,
+        )
+
+    def _case_binding_variant_dependency_fingerprint(
+        self, *, scenario_id: int, variant_id: int, project_id: int
+    ) -> str:
+        dependencies = [
+            dependency
+            for dependency in self._current_case_input_variant_dependencies(
+                scenario_id=scenario_id,
+                case_input_variant_id=variant_id,
+            )
+            if dependency["dependency_type"] in {"topology", "parameters"}
+        ]
+        return self._association_fingerprint(
+            {
+                "scenario_id": int(scenario_id),
+                "variant_id": int(variant_id),
+                "project_id": int(project_id),
+                "dependencies": dependencies,
+            }
+        )
+
     def _insert_catalog_association_add(
         self,
         *,
@@ -5743,6 +5793,2056 @@ class AnalystStore:
                 "catalog_generation": generation,
             },
         }
+
+    # -- Exact case bindings (TS7-008) ------------------------------------
+
+    def _canonical_binding_context(
+        self, *, scenario_id: int, variant_id: int
+    ) -> dict[str, Any]:
+        row = self.connection.execute(
+            """
+            SELECT variant.id AS variant_id, variant.bindings_revision,
+                   scenario.id AS scenario_id, scenario.project_id
+            FROM case_input_variants AS variant
+            JOIN optimization_cases AS optimization_case
+              ON optimization_case.id = variant.case_id
+            JOIN scenarios AS scenario
+              ON scenario.id = optimization_case.scenario_id
+            WHERE variant.id = ? AND scenario.id = ?
+            """,
+            (int(variant_id), int(scenario_id)),
+        ).fetchone()
+        if row is None:
+            raise KeyError(
+                f"case input variant {variant_id} not found for scenario {scenario_id}"
+            )
+        return {
+            "scenario_id": int(row["scenario_id"]),
+            "variant_id": int(row["variant_id"]),
+            "project_id": int(row["project_id"]),
+            "bindings_revision": int(row["bindings_revision"]),
+        }
+
+    @staticmethod
+    def _binding_operation_error(
+        code: str, *, field: str | None = None, **context: Any
+    ) -> dict[str, Any]:
+        error = BindingMutationError(code, **context)
+        return {
+            "code": error.code,
+            "message_key": error.message_key,
+            "message": error.message,
+            "field": field if field is not None else error.field,
+            "context": context,
+        }
+
+    def _prevalidate_case_binding_create(
+        self,
+        operation: dict[str, Any],
+        *,
+        context: Mapping[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        variant_dependency_fingerprint = context.get(
+            "variant_dependency_fingerprint"
+        ) or self._case_binding_variant_dependency_fingerprint(
+            scenario_id=int(context["scenario_id"]),
+            variant_id=int(context["variant_id"]),
+            project_id=int(context["project_id"]),
+        )
+        revision_request = operation["revision"]
+        entry = self.connection.execute(
+            f"""
+            SELECT entry.*, canonical_set.scope_revision,
+                   canonical_set.series_kind,
+                   current_revision.content_hash AS current_content_hash,
+                   selected_revision.state AS selected_revision_state,
+                   selected_revision.content_hash AS selected_content_hash,
+                   revision_signal.signal_role
+            FROM {self._projection('time_series_catalog_entries')} AS entry
+            JOIN {self._canonical('time_series_sets')} AS canonical_set
+              ON canonical_set.id = entry.time_series_set_id
+            JOIN {self._canonical('time_series_set_revisions')} AS current_revision
+              ON current_revision.id = entry.current_revision_id
+            JOIN {self._canonical('time_series_set_revisions')} AS selected_revision
+              ON selected_revision.id = ?
+             AND selected_revision.time_series_set_id = entry.time_series_set_id
+            JOIN {self._canonical('time_series_revision_signals')} AS revision_signal
+              ON revision_signal.set_revision_id = selected_revision.id
+             AND revision_signal.signal_id = entry.signal_id
+            WHERE entry.signal_id = ?
+            """,
+            (revision_request["revision_id"], operation["signal_id"]),
+        ).fetchone()
+        try:
+            linkable = self.get_linkable_object(operation["linkable_object_id"])
+        except LinkableObjectError:
+            linkable = None
+
+        errors: list[dict[str, Any]] = []
+        decision: dict[str, Any]
+        role = None
+        if entry is None:
+            errors.append(
+                compatibility_error(
+                    "TS_COMPAT_SIGNAL_UNAVAILABLE",
+                    {
+                        "signal_id": operation["signal_id"],
+                        "revision_id": revision_request["revision_id"],
+                        "usage": "execution",
+                    },
+                )
+            )
+            decision = {
+                "allowed": False,
+                "compatibility_rule_id": None,
+                "rule_version": None,
+                "contract_version": CLASSIFICATION_CONTRACT_VERSION,
+                "errors": list(errors),
+                "primary_error": errors[0],
+            }
+        elif linkable is None:
+            errors.append(
+                compatibility_error(
+                    "TS_COMPAT_OBJECT_UNAVAILABLE",
+                    {
+                        "linkable_object_id": operation["linkable_object_id"],
+                        "usage": "execution",
+                    },
+                )
+            )
+            decision = {
+                "allowed": False,
+                "compatibility_rule_id": None,
+                "rule_version": None,
+                "contract_version": CLASSIFICATION_CONTRACT_VERSION,
+                "errors": list(errors),
+                "primary_error": errors[0],
+            }
+        else:
+            entry = dict(entry)
+            decision = self.evaluate_time_series_compatibility(
+                semantic_type_key=entry["semantic_type_key"],
+                binding_role_key=operation["binding_role_key"],
+                object_type_key=linkable["object_type_key"],
+                unit_key=entry["unit_key"],
+                usage="execution",
+            )
+            if int(linkable["project_id"]) != int(context["project_id"]):
+                errors.append(
+                    compatibility_error(
+                        "TS_COMPAT_PROJECT_CONTEXT_MISMATCH",
+                        {
+                            "scenario_id": context["scenario_id"],
+                            "variant_id": context["variant_id"],
+                            "variant_project_id": context["project_id"],
+                            "linkable_object_id": operation["linkable_object_id"],
+                            "object_project_id": int(linkable["project_id"]),
+                        },
+                    )
+                )
+            if (
+                entry["visibility_scope"] == "project"
+                and int(entry["owner_project_id"]) != int(context["project_id"])
+            ):
+                errors.append(
+                    compatibility_error(
+                        "TS_COMPAT_SCOPE_NOT_ACCESSIBLE",
+                        {
+                            "signal_id": operation["signal_id"],
+                            "owner_project_id": int(entry["owner_project_id"]),
+                            "target_project_id": context["project_id"],
+                        },
+                    )
+                )
+            if (
+                entry["set_status"] == "archived"
+                or entry["signal_status"] == "archived"
+                or entry["selected_revision_state"] != "sealed"
+                or entry["selected_content_hash"] != revision_request["content_hash"]
+            ):
+                errors.append(
+                    compatibility_error(
+                        "TS_COMPAT_SIGNAL_UNAVAILABLE",
+                        {
+                            "signal_id": operation["signal_id"],
+                            "revision_id": revision_request["revision_id"],
+                            "usage": "execution",
+                            "reason": "revision_not_sealed_or_hash_mismatch",
+                        },
+                    )
+                )
+            if linkable["status"] != "active":
+                errors.append(
+                    compatibility_error(
+                        "TS_COMPAT_OBJECT_UNAVAILABLE",
+                        {
+                            "linkable_object_id": operation["linkable_object_id"],
+                            "usage": "execution",
+                        },
+                    )
+                )
+            current_revision_id = int(entry["current_revision_id"])
+            selected_revision_id = int(revision_request["revision_id"])
+            if revision_request["mode"] == "current" and (
+                selected_revision_id != current_revision_id
+                or revision_request["content_hash"] != entry["current_content_hash"]
+            ):
+                errors.append(
+                    compatibility_error(
+                        "TS_COMPAT_CONTRACT_CHANGED",
+                        {
+                            "signal_id": operation["signal_id"],
+                            "expected_current_revision_id": selected_revision_id,
+                            "actual_current_revision_id": current_revision_id,
+                        },
+                    )
+                )
+            if revision_request["mode"] == "pinned" and (
+                selected_revision_id == current_revision_id
+            ):
+                errors.append(
+                    compatibility_error(
+                        "TS_COMPAT_CONTRACT_CHANGED",
+                        {
+                            "signal_id": operation["signal_id"],
+                            "reason": "pinned_revision_must_be_historical",
+                        },
+                    )
+                )
+            if errors:
+                decision = {
+                    **decision,
+                    "allowed": False,
+                    "errors": [*errors, *decision["errors"]],
+                    "primary_error": errors[0],
+                }
+            role = self.connection.execute(
+                """
+                SELECT id, status FROM time_series_binding_roles
+                WHERE role_key = ?
+                """,
+                (operation["binding_role_key"],),
+            ).fetchone()
+
+        catalog_association = None
+        association_id = operation.get("catalog_association_id")
+        if association_id is not None:
+            association_row = self.connection.execute(
+                f"""
+                SELECT id, signal_id, linkable_object_id, binding_role_id,
+                       lifecycle_revision, status
+                FROM {self.link_layer_table_names()['time_series_catalog_associations']}
+                WHERE id = ?
+                """,
+                (int(association_id),),
+            ).fetchone()
+            association_matches = (
+                association_row is not None
+                and role is not None
+                and association_row["status"] == "active"
+                and int(association_row["signal_id"]) == int(operation["signal_id"])
+                and int(association_row["linkable_object_id"])
+                == int(operation["linkable_object_id"])
+                and int(association_row["binding_role_id"]) == int(role["id"])
+            )
+            association_state = None
+            if association_row is not None:
+                association_detail = self.read_catalog_association(
+                    int(association_id)
+                )
+                association_state = association_detail["state"]
+                association_matches = (
+                    association_matches and association_state == "active_valid"
+                )
+            if not association_matches:
+                association_error = compatibility_error(
+                    "TS_COMPAT_ASSOCIATION_MISMATCH",
+                    {
+                        "catalog_association_id": int(association_id),
+                        "signal_id": operation["signal_id"],
+                        "linkable_object_id": operation["linkable_object_id"],
+                        "binding_role_key": operation["binding_role_key"],
+                        "association_state": association_state,
+                    },
+                )
+                decision = {
+                    **decision,
+                    "allowed": False,
+                    "errors": [association_error, *decision["errors"]],
+                    "primary_error": association_error,
+                }
+            elif association_row is not None:
+                catalog_association = {
+                    "id": int(association_row["id"]),
+                    "lifecycle_revision": int(
+                        association_row["lifecycle_revision"]
+                    ),
+                    "status": association_row["status"],
+                    "state": association_state,
+                    "compatibility_fingerprint": association_detail[
+                        "validation"
+                    ]["compatibility_fingerprint"],
+                    "object_scope_fingerprint": association_detail["validation"][
+                        "object_scope_fingerprint"
+                    ],
+                }
+
+        active_binding = None
+        if role is not None:
+            active_binding = self.connection.execute(
+                f"""
+                SELECT id, lifecycle_revision, status, signal_id,
+                       set_revision_id, bound_content_hash
+                FROM {self.link_layer_table_names()['case_time_series_bindings']}
+                WHERE case_input_variant_id = ? AND linkable_object_id = ?
+                  AND binding_role_id = ? AND status = 'active'
+                """,
+                (
+                    context["variant_id"],
+                    operation["linkable_object_id"],
+                    int(role["id"]),
+                ),
+            ).fetchone()
+        if active_binding is not None:
+            conflict = self._binding_operation_error(
+                "TS_LINK_CONFLICT",
+                field="linkable_object_id",
+                binding_id=int(active_binding["id"]),
+                reason="active_identity_exists",
+            )
+            decision = {
+                **decision,
+                "allowed": False,
+                "errors": [conflict, *decision["errors"]],
+                "primary_error": conflict,
+            }
+
+        observation = {
+            "variant": {
+                **dict(context),
+                "variant_dependency_fingerprint": variant_dependency_fingerprint,
+            },
+            "signal": (
+                {
+                    "signal_id": int(entry["signal_id"]),
+                    "time_series_set_id": int(entry["time_series_set_id"]),
+                    "current_revision_id": int(entry["current_revision_id"]),
+                    "selected_revision_id": int(revision_request["revision_id"]),
+                    "selected_content_hash": entry["selected_content_hash"],
+                    "content_hash": entry["current_content_hash"],
+                    "visibility_scope": entry["visibility_scope"],
+                    "owner_project_id": int(entry["owner_project_id"]),
+                    "semantic_type_key": entry["semantic_type_key"],
+                    "data_class_key": entry["data_class_key"],
+                    "unit_key": entry["unit_key"],
+                    "signal_role": entry["signal_role"],
+                    "scope_revision": int(entry["scope_revision"]),
+                    "set_status": entry["set_status"],
+                    "signal_status": entry["signal_status"],
+                    "series_kind": entry["series_kind"],
+                    "coverage_start": entry["coverage_start"],
+                    "coverage_end": entry["coverage_end"],
+                    "period_count": int(entry["period_count"]),
+                    "nominal_resolution_seconds": float(
+                        entry["nominal_resolution_seconds"]
+                    ),
+                }
+                if entry is not None
+                else None
+            ),
+            "object": (
+                {
+                    "id": int(linkable["id"]),
+                    "project_id": int(linkable["project_id"]),
+                    "object_type_key": linkable["object_type_key"],
+                    "status": linkable["status"],
+                }
+                if linkable is not None
+                else None
+            ),
+            "compatibility_rule_id": decision["compatibility_rule_id"],
+            "binding_role_id": int(role["id"]) if role is not None else None,
+            "rule_version": decision["rule_version"],
+            "catalog_association": catalog_association,
+            "active_binding": dict(active_binding) if active_binding is not None else None,
+        }
+        verdict = (
+            "rejected"
+            if not decision["allowed"]
+            else "confirmation_required"
+            if revision_request["mode"] == "pinned"
+            else "accepted"
+        )
+        after_state = (
+            "valid_pinned"
+            if revision_request["mode"] == "pinned"
+            else "valid_current"
+        )
+        result = {
+            "client_operation_id": operation["client_operation_id"],
+            "action": operation["action"],
+            "normalized_operation": operation,
+            "verdict": verdict,
+            "compatibility_decision": decision,
+            "errors": decision["errors"],
+            "before": observation["active_binding"],
+            "after": {
+                "state": after_state,
+                "set_revision_id": revision_request["revision_id"],
+                "bound_content_hash": revision_request["content_hash"],
+                "coverage": (
+                    {
+                        "start": observation["signal"]["coverage_start"],
+                        "end": observation["signal"]["coverage_end"],
+                        "period_count": observation["signal"]["period_count"],
+                        "nominal_resolution_seconds": observation["signal"][
+                            "nominal_resolution_seconds"
+                        ],
+                    }
+                    if observation["signal"] is not None
+                    else None
+                ),
+            },
+            "observed_state": observation,
+        }
+        return result, observation
+
+    def _prevalidate_case_binding_replace(
+        self,
+        operation: dict[str, Any],
+        *,
+        context: Mapping[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        result, observation = self._prevalidate_case_binding_create(
+            operation, context=context
+        )
+        try:
+            previous = self.read_case_binding(
+                scenario_id=int(context["scenario_id"]),
+                variant_id=int(context["variant_id"]),
+                binding_id=operation["binding_id"],
+            )
+        except KeyError:
+            previous = None
+        errors = list(result["errors"])
+        if previous is None:
+            errors.insert(
+                0,
+                self._binding_operation_error(
+                    "TS_LINK_PRECONDITION_CHANGED",
+                    field="binding_id",
+                    binding_id=operation["binding_id"],
+                    reason="binding_not_found",
+                ),
+            )
+        else:
+            errors = [
+                error
+                for error in errors
+                if not (
+                    error["code"] == "TS_LINK_CONFLICT"
+                    and error["context"].get("binding_id")
+                    == operation["binding_id"]
+                )
+            ]
+            if previous["status"] != "active" or previous[
+                "lifecycle_revision"
+            ] != operation["expected_lifecycle_revision"]:
+                errors.insert(
+                    0,
+                    self._binding_operation_error(
+                        "TS_LINK_PRECONDITION_CHANGED",
+                        field="expected_lifecycle_revision",
+                        binding_id=operation["binding_id"],
+                        expected_lifecycle_revision=operation[
+                            "expected_lifecycle_revision"
+                        ],
+                        actual_lifecycle_revision=previous[
+                            "lifecycle_revision"
+                        ],
+                        actual_status=previous["status"],
+                    ),
+                )
+        allowed = not errors
+        result["verdict"] = "confirmation_required" if allowed else "rejected"
+        result["errors"] = errors
+        result["compatibility_decision"] = {
+            **result["compatibility_decision"],
+            "allowed": allowed,
+            "errors": errors,
+            "primary_error": errors[0] if errors else None,
+        }
+        result["before"] = previous
+        result["comparison"] = {
+            "before": previous,
+            "after": result["after"],
+        }
+        observation["previous_binding"] = previous
+        return result, observation
+
+    def _prevalidate_case_binding_revalidate(
+        self,
+        operation: dict[str, Any],
+        *,
+        context: Mapping[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        try:
+            previous = self.read_case_binding(
+                scenario_id=int(context["scenario_id"]),
+                variant_id=int(context["variant_id"]),
+                binding_id=operation["binding_id"],
+            )
+        except KeyError:
+            previous = None
+        if previous is None:
+            error = self._binding_operation_error(
+                "TS_LINK_PRECONDITION_CHANGED",
+                field="binding_id",
+                binding_id=operation["binding_id"],
+                reason="binding_not_found",
+            )
+            return (
+                {
+                    "client_operation_id": operation["client_operation_id"],
+                    "action": operation["action"],
+                    "normalized_operation": operation,
+                    "verdict": "rejected",
+                    "compatibility_decision": {
+                        "allowed": False,
+                        "compatibility_rule_id": None,
+                        "rule_version": None,
+                        "contract_version": CLASSIFICATION_CONTRACT_VERSION,
+                        "errors": [error],
+                        "primary_error": error,
+                    },
+                    "errors": [error],
+                    "before": None,
+                    "after": None,
+                    "comparison": {"before": None, "after": None},
+                },
+                {"variant": dict(context), "previous_binding": None},
+            )
+        mode = (
+            "pinned"
+            if operation["action"] == "revalidate_pinned"
+            else "current"
+        )
+        target = {
+            "client_operation_id": operation["client_operation_id"],
+            "action": "create",
+            "linkable_object_id": previous["object"]["id"],
+            "binding_role_key": previous["binding_role"]["key"],
+            "signal_id": previous["signal_id"],
+            "revision": {
+                "mode": mode,
+                "revision_id": previous["set_revision_id"],
+                "content_hash": previous["bound_content_hash"],
+            },
+            "catalog_association_id": previous["catalog_association_id"],
+            "reason_code": operation["reason_code"],
+            **(
+                {"reason_text": operation["reason_text"]}
+                if operation.get("reason_text")
+                else {}
+            ),
+        }
+        result, observation = self._prevalidate_case_binding_create(
+            target, context=context
+        )
+        errors = [
+            error
+            for error in result["errors"]
+            if not (
+                error["code"] == "TS_LINK_CONFLICT"
+                and error["context"].get("binding_id") == operation["binding_id"]
+            )
+        ]
+        if previous["status"] != "active" or previous[
+            "lifecycle_revision"
+        ] != operation["expected_lifecycle_revision"]:
+            errors.insert(
+                0,
+                self._binding_operation_error(
+                    "TS_LINK_PRECONDITION_CHANGED",
+                    field="expected_lifecycle_revision",
+                    binding_id=operation["binding_id"],
+                    expected_lifecycle_revision=operation[
+                        "expected_lifecycle_revision"
+                    ],
+                    actual_lifecycle_revision=previous["lifecycle_revision"],
+                    actual_status=previous["status"],
+                ),
+            )
+        allowed = not errors
+        after = {
+            "binding_id": operation["binding_id"],
+            "state": "valid_pinned" if mode == "pinned" else "valid_current",
+            "set_revision_id": previous["set_revision_id"],
+            "bound_content_hash": previous["bound_content_hash"],
+        }
+        result.update(
+            {
+                "action": operation["action"],
+                "normalized_operation": operation,
+                "verdict": (
+                    "rejected"
+                    if not allowed
+                    else "confirmation_required"
+                    if mode == "pinned"
+                    else "accepted"
+                ),
+                "errors": errors,
+                "before": previous,
+                "after": after,
+                "comparison": {"before": previous, "after": after},
+                "compatibility_decision": {
+                    **result["compatibility_decision"],
+                    "allowed": allowed,
+                    "errors": errors,
+                    "primary_error": errors[0] if errors else None,
+                },
+            }
+        )
+        observation["previous_binding"] = previous
+        observation["revalidation_mode"] = mode
+        return result, observation
+
+    def _prevalidate_case_binding_lifecycle(
+        self,
+        operation: dict[str, Any],
+        *,
+        context: Mapping[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        try:
+            previous = self.read_case_binding(
+                scenario_id=int(context["scenario_id"]),
+                variant_id=int(context["variant_id"]),
+                binding_id=operation["binding_id"],
+            )
+        except KeyError:
+            previous = None
+        errors: list[dict[str, Any]] = []
+        observation: dict[str, Any] = {
+            "variant": dict(context),
+            "previous_binding": previous,
+        }
+        compatibility_decision: dict[str, Any] = {
+            "allowed": True,
+            "compatibility_rule_id": (
+                previous["compatibility_rule_id"] if previous else None
+            ),
+            "rule_version": None,
+            "contract_version": CLASSIFICATION_CONTRACT_VERSION,
+            "errors": [],
+            "primary_error": None,
+        }
+        expected_status = "active" if operation["action"] == "remove" else "removed"
+        if previous is None:
+            errors.append(
+                self._binding_operation_error(
+                    "TS_LINK_PRECONDITION_CHANGED",
+                    field="binding_id",
+                    binding_id=operation["binding_id"],
+                    reason="binding_not_found",
+                )
+            )
+        elif previous["status"] != expected_status or previous[
+            "lifecycle_revision"
+        ] != operation["expected_lifecycle_revision"]:
+            errors.append(
+                self._binding_operation_error(
+                    "TS_LINK_PRECONDITION_CHANGED",
+                    field="expected_lifecycle_revision",
+                    binding_id=operation["binding_id"],
+                    expected_status=expected_status,
+                    actual_status=previous["status"],
+                    expected_lifecycle_revision=operation[
+                        "expected_lifecycle_revision"
+                    ],
+                    actual_lifecycle_revision=previous["lifecycle_revision"],
+                )
+            )
+        restore_target = None
+        after = {
+            "binding_id": operation["binding_id"],
+            "state": "inactive",
+            "status": "removed",
+        }
+        if operation["action"] == "restore" and previous is not None and not errors:
+            mode = previous["revision"]["mode"] or "current"
+            restore_target = {
+                "client_operation_id": operation["client_operation_id"],
+                "action": "create",
+                "linkable_object_id": previous["object"]["id"],
+                "binding_role_key": previous["binding_role"]["key"],
+                "signal_id": previous["signal_id"],
+                "revision": {
+                    "mode": mode,
+                    "revision_id": previous["set_revision_id"],
+                    "content_hash": previous["bound_content_hash"],
+                },
+                "catalog_association_id": previous["catalog_association_id"],
+                "reason_code": operation["reason_code"],
+                "reason_text": operation["reason_text"],
+            }
+            target_result, target_observation = self._prevalidate_case_binding_create(
+                restore_target, context=context
+            )
+            errors.extend(target_result["errors"])
+            compatibility_decision = target_result["compatibility_decision"]
+            observation.update(target_observation)
+            observation["previous_binding"] = previous
+            after = {
+                **target_result["after"],
+                "status": "active",
+            }
+        observation["restore_target"] = restore_target
+        allowed = not errors
+        compatibility_decision = {
+            **compatibility_decision,
+            "allowed": allowed,
+            "errors": errors,
+            "primary_error": errors[0] if errors else None,
+        }
+        return (
+            {
+                "client_operation_id": operation["client_operation_id"],
+                "action": operation["action"],
+                "normalized_operation": operation,
+                "verdict": "confirmation_required" if allowed else "rejected",
+                "compatibility_decision": compatibility_decision,
+                "errors": errors,
+                "before": previous,
+                "after": after,
+                "comparison": {"before": previous, "after": after},
+                "observed_state": observation,
+            },
+            observation,
+        )
+
+    def prevalidate_case_binding_batch(
+        self,
+        *,
+        scenario_id: int,
+        variant_id: int,
+        document: Mapping[str, Any],
+        actor_class: str,
+    ) -> dict[str, Any]:
+        normalized = normalize_binding_request(document)
+        context = self._canonical_binding_context(
+            scenario_id=scenario_id, variant_id=variant_id
+        )
+        context["variant_dependency_fingerprint"] = (
+            self._case_binding_variant_dependency_fingerprint(
+                scenario_id=scenario_id,
+                variant_id=variant_id,
+                project_id=context["project_id"],
+            )
+        )
+        results = []
+        observations = []
+        claimed_targets: dict[tuple[int, str], str] = {}
+        claimed_bindings: dict[int, str] = {}
+        for operation in normalized["operations"]:
+            if operation["action"] == "replace":
+                result, observation = self._prevalidate_case_binding_replace(
+                    operation, context=context
+                )
+            elif operation["action"] in {
+                "revalidate_current",
+                "revalidate_pinned",
+            }:
+                result, observation = self._prevalidate_case_binding_revalidate(
+                    operation, context=context
+                )
+            elif operation["action"] in {"remove", "restore"}:
+                result, observation = self._prevalidate_case_binding_lifecycle(
+                    operation, context=context
+                )
+            else:
+                result, observation = self._prevalidate_case_binding_create(
+                    operation, context=context
+                )
+            conflicting_with = None
+            if operation["action"] in {"create", "replace"}:
+                target = (
+                    operation["linkable_object_id"],
+                    operation["binding_role_key"],
+                )
+                conflicting_with = claimed_targets.get(target)
+                claimed_targets.setdefault(
+                    target, operation["client_operation_id"]
+                )
+            if operation["action"] in {
+                "replace",
+                "revalidate_current",
+                "revalidate_pinned",
+                "remove",
+                "restore",
+            }:
+                conflicting_with = (
+                    conflicting_with
+                    or claimed_bindings.get(operation["binding_id"])
+                )
+                claimed_bindings.setdefault(
+                    operation["binding_id"], operation["client_operation_id"]
+                )
+            if conflicting_with is not None:
+                conflict = self._binding_operation_error(
+                    "TS_LINK_CONFLICT",
+                    field="client_operation_id",
+                    conflicts_with=conflicting_with,
+                )
+                result["verdict"] = "rejected"
+                result["errors"] = [conflict, *result["errors"]]
+                result["compatibility_decision"] = {
+                    **result["compatibility_decision"],
+                    "allowed": False,
+                    "errors": result["errors"],
+                    "primary_error": conflict,
+                }
+                observation["batch_conflict"] = {
+                    "conflicts_with": conflicting_with
+                }
+            if normalized["expected_bindings_revision"] != context["bindings_revision"]:
+                changed = self._binding_operation_error(
+                    "TS_LINK_PRECONDITION_CHANGED",
+                    field="expected_bindings_revision",
+                    expected_bindings_revision=normalized["expected_bindings_revision"],
+                    actual_bindings_revision=context["bindings_revision"],
+                )
+                result["verdict"] = "rejected"
+                result["errors"] = [changed, *result["errors"]]
+                result["compatibility_decision"] = {
+                    **result["compatibility_decision"],
+                    "allowed": False,
+                    "errors": result["errors"],
+                    "primary_error": changed,
+                }
+            results.append(result)
+            observations.append(observation)
+        request_hash = binding_request_hash(normalized)
+        commit_etag = binding_commit_etag(
+            normalized,
+            observations,
+            scenario_id=scenario_id,
+            variant_id=variant_id,
+            actor_class=actor_class,
+        )
+        token, expires_at = issue_binding_prevalidation_token(
+            request_hash=request_hash,
+            commit_etag=commit_etag,
+            actor_class=actor_class,
+            secret=self._catalog_cursor_secret,
+        )
+        return {
+            "normalized_request": normalized,
+            "request_hash": request_hash,
+            "observed_bindings_revision": context["bindings_revision"],
+            "operations": results,
+            "can_commit": all(row["verdict"] != "rejected" for row in results),
+            "requires_confirmation": any(
+                row["verdict"] == "confirmation_required" for row in results
+            ),
+            "expires_at": expires_at,
+            "prevalidation_token": token,
+            "commit_etag": commit_etag,
+        }
+
+    def _insert_case_binding_create(
+        self,
+        *,
+        operation: dict[str, Any],
+        prevalidated: dict[str, Any],
+        actor_user: Mapping[str, Any],
+        request_id: str,
+        batch_id: str,
+        occurred_at: str,
+        supersedes_binding_id: int | None = None,
+        event_type: str = "created",
+        before: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        observed = prevalidated["observed_state"]
+        signal = observed["signal"]
+        linkable = observed["object"]
+        revision = operation["revision"]
+        binding_id = self._insert_canonical_row(
+            f"""
+            INSERT INTO {self.link_layer_table_names()['case_time_series_bindings']} (
+                case_input_variant_id, linkable_object_id, binding_role_id,
+                signal_id, time_series_set_id, set_revision_id,
+                bound_content_hash, source_kind, source_owner_linkable_object_id,
+                catalog_association_id, compatibility_rule_id, required, status,
+                supersedes_binding_id, lifecycle_revision, change_reason_code,
+                change_reason_text, validated_at, created_at, updated_at,
+                created_by, updated_by, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 1, 'active',
+                      ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                observed["variant"]["variant_id"],
+                linkable["id"],
+                observed["binding_role_id"],
+                signal["signal_id"],
+                signal["time_series_set_id"],
+                revision["revision_id"],
+                revision["content_hash"],
+                signal["series_kind"],
+                operation.get("catalog_association_id"),
+                observed["compatibility_rule_id"],
+                supersedes_binding_id,
+                operation["reason_code"],
+                operation.get("reason_text"),
+                occurred_at,
+                occurred_at,
+                occurred_at,
+                actor_user["email"],
+                actor_user["email"],
+                json.dumps(
+                    {
+                        "client_operation_id": operation["client_operation_id"],
+                        "request_id": request_id,
+                    },
+                    sort_keys=True,
+                ),
+            ),
+        )
+        compatibility_fingerprint, object_scope_fingerprint = (
+            self._case_binding_fingerprints(
+                observed=observed,
+                binding_role_key=operation["binding_role_key"],
+                contract_version=prevalidated["compatibility_decision"][
+                    "contract_version"
+                ],
+            )
+        )
+        variant_dependency_fingerprint = observed["variant"][
+            "variant_dependency_fingerprint"
+        ]
+        validation_mode = f"binding_{revision['mode']}"
+        self.connection.execute(
+            f"""
+            INSERT INTO {self.link_layer_table_names()['time_series_link_validations']} (
+                binding_id, subject_lifecycle_revision, validation_mode,
+                validated_set_revision_id, observed_current_revision_id,
+                compatibility_rule_id, compatibility_fingerprint,
+                object_scope_fingerprint, variant_dependency_fingerprint,
+                validated_at, validated_by, reason_code, reason_text
+            ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                binding_id,
+                validation_mode,
+                revision["revision_id"],
+                signal["current_revision_id"],
+                observed["compatibility_rule_id"],
+                compatibility_fingerprint,
+                object_scope_fingerprint,
+                variant_dependency_fingerprint,
+                occurred_at,
+                actor_user["email"],
+                operation["reason_code"],
+                operation.get("reason_text"),
+            ),
+        )
+        after = {
+            "binding_id": binding_id,
+            "case_input_variant_id": observed["variant"]["variant_id"],
+            "linkable_object_id": linkable["id"],
+            "binding_role_key": operation["binding_role_key"],
+            "signal_id": signal["signal_id"],
+            "set_revision_id": revision["revision_id"],
+            "bound_content_hash": revision["content_hash"],
+            "revision_mode": revision["mode"],
+            "status": "active",
+        }
+        self.connection.execute(
+            f"""
+            INSERT INTO {self.link_layer_table_names()['time_series_link_events']} (
+                batch_id, binding_id, event_type, actor_user_id,
+                actor_identity_snapshot, actor_role_snapshot, reason_code,
+                reason_text, before_json, after_json, request_id, occurred_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                batch_id,
+                binding_id,
+                event_type,
+                actor_user.get("id"),
+                actor_user["email"],
+                actor_user["role"],
+                operation["reason_code"],
+                operation.get("reason_text"),
+                json.dumps(dict(before or {}), sort_keys=True),
+                json.dumps(after, sort_keys=True),
+                request_id,
+                occurred_at,
+            ),
+        )
+        return {
+            "client_operation_id": operation["client_operation_id"],
+            "action": operation["action"],
+            "outcome": "replaced" if event_type == "replaced" else "created",
+            "binding_id": binding_id,
+            "supersedes_binding_id": supersedes_binding_id,
+        }
+
+    def _replace_case_binding(
+        self,
+        *,
+        operation: dict[str, Any],
+        prevalidated: dict[str, Any],
+        actor_user: Mapping[str, Any],
+        request_id: str,
+        batch_id: str,
+        occurred_at: str,
+    ) -> dict[str, Any]:
+        previous = prevalidated["observed_state"]["previous_binding"]
+        previous_id = int(previous["binding_id"])
+        self.connection.execute(
+            f"""
+            UPDATE {self.link_layer_table_names()['case_time_series_bindings']}
+            SET status = 'superseded', lifecycle_revision = lifecycle_revision + 1,
+                superseded_at = ?, superseded_by = ?, updated_at = ?, updated_by = ?
+            WHERE id = ? AND status = 'active' AND lifecycle_revision = ?
+            """,
+            (
+                occurred_at,
+                actor_user["email"],
+                occurred_at,
+                actor_user["email"],
+                previous_id,
+                operation["expected_lifecycle_revision"],
+            ),
+        )
+        before_event = {
+            "binding_id": previous_id,
+            "status": "active",
+            "lifecycle_revision": operation["expected_lifecycle_revision"],
+            "set_revision_id": previous["set_revision_id"],
+            "bound_content_hash": previous["bound_content_hash"],
+        }
+        after_event = {
+            **before_event,
+            "status": "superseded",
+            "lifecycle_revision": operation["expected_lifecycle_revision"] + 1,
+        }
+        self.connection.execute(
+            f"""
+            INSERT INTO {self.link_layer_table_names()['time_series_link_events']} (
+                batch_id, binding_id, event_type, actor_user_id,
+                actor_identity_snapshot, actor_role_snapshot, reason_code,
+                reason_text, before_json, after_json, request_id, occurred_at
+            ) VALUES (?, ?, 'superseded', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                batch_id,
+                previous_id,
+                actor_user.get("id"),
+                actor_user["email"],
+                actor_user["role"],
+                operation["reason_code"],
+                operation.get("reason_text"),
+                json.dumps(before_event, sort_keys=True),
+                json.dumps(after_event, sort_keys=True),
+                request_id,
+                occurred_at,
+            ),
+        )
+        return self._insert_case_binding_create(
+            operation=operation,
+            prevalidated=prevalidated,
+            actor_user=actor_user,
+            request_id=request_id,
+            batch_id=batch_id,
+            occurred_at=occurred_at,
+            supersedes_binding_id=previous_id,
+            event_type="replaced",
+            before=before_event,
+        )
+
+    def _revalidate_case_binding(
+        self,
+        *,
+        operation: dict[str, Any],
+        prevalidated: dict[str, Any],
+        actor_user: Mapping[str, Any],
+        request_id: str,
+        batch_id: str,
+        occurred_at: str,
+    ) -> dict[str, Any]:
+        observed = prevalidated["observed_state"]
+        previous = observed["previous_binding"]
+        signal = observed["signal"]
+        mode = observed["revalidation_mode"]
+        compatibility_fingerprint, object_scope_fingerprint = (
+            self._case_binding_fingerprints(
+                observed=observed,
+                binding_role_key=previous["binding_role"]["key"],
+                contract_version=prevalidated["compatibility_decision"][
+                    "contract_version"
+                ],
+            )
+        )
+        variant_dependency_fingerprint = observed["variant"][
+            "variant_dependency_fingerprint"
+        ]
+        binding_id = int(operation["binding_id"])
+        self.connection.execute(
+            f"""
+            INSERT INTO {self.link_layer_table_names()['time_series_link_validations']} (
+                binding_id, subject_lifecycle_revision, validation_mode,
+                validated_set_revision_id, observed_current_revision_id,
+                compatibility_rule_id, compatibility_fingerprint,
+                object_scope_fingerprint, variant_dependency_fingerprint,
+                validated_at, validated_by, reason_code, reason_text
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                binding_id,
+                operation["expected_lifecycle_revision"],
+                f"binding_{mode}",
+                previous["set_revision_id"],
+                signal["current_revision_id"],
+                observed["compatibility_rule_id"],
+                compatibility_fingerprint,
+                object_scope_fingerprint,
+                variant_dependency_fingerprint,
+                occurred_at,
+                actor_user["email"],
+                operation["reason_code"],
+                operation.get("reason_text"),
+            ),
+        )
+        self.connection.execute(
+            f"""
+            UPDATE {self.link_layer_table_names()['case_time_series_bindings']}
+            SET validated_at = ?, updated_at = ?, updated_by = ?
+            WHERE id = ? AND status = 'active' AND lifecycle_revision = ?
+            """,
+            (
+                occurred_at,
+                occurred_at,
+                actor_user["email"],
+                binding_id,
+                operation["expected_lifecycle_revision"],
+            ),
+        )
+        before = {
+            "binding_id": binding_id,
+            "state": previous["state"],
+            "set_revision_id": previous["set_revision_id"],
+            "bound_content_hash": previous["bound_content_hash"],
+        }
+        after = {
+            **before,
+            "state": "valid_pinned" if mode == "pinned" else "valid_current",
+            "observed_current_revision_id": signal["current_revision_id"],
+        }
+        event_type = f"revalidated_{mode}"
+        self.connection.execute(
+            f"""
+            INSERT INTO {self.link_layer_table_names()['time_series_link_events']} (
+                batch_id, binding_id, event_type, actor_user_id,
+                actor_identity_snapshot, actor_role_snapshot, reason_code,
+                reason_text, before_json, after_json, request_id, occurred_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                batch_id,
+                binding_id,
+                event_type,
+                actor_user.get("id"),
+                actor_user["email"],
+                actor_user["role"],
+                operation["reason_code"],
+                operation.get("reason_text"),
+                json.dumps(before, sort_keys=True),
+                json.dumps(after, sort_keys=True),
+                request_id,
+                occurred_at,
+            ),
+        )
+        return {
+            "client_operation_id": operation["client_operation_id"],
+            "action": operation["action"],
+            "outcome": event_type,
+            "binding_id": binding_id,
+        }
+
+    def _remove_case_binding(
+        self,
+        *,
+        operation: dict[str, Any],
+        prevalidated: dict[str, Any],
+        actor_user: Mapping[str, Any],
+        request_id: str,
+        batch_id: str,
+        occurred_at: str,
+    ) -> dict[str, Any]:
+        previous = prevalidated["observed_state"]["previous_binding"]
+        binding_id = int(operation["binding_id"])
+        self.connection.execute(
+            f"""
+            UPDATE {self.link_layer_table_names()['case_time_series_bindings']}
+            SET status = 'removed', lifecycle_revision = lifecycle_revision + 1,
+                removed_at = ?, removed_by = ?, updated_at = ?, updated_by = ?
+            WHERE id = ? AND status = 'active' AND lifecycle_revision = ?
+            """,
+            (
+                occurred_at,
+                actor_user["email"],
+                occurred_at,
+                actor_user["email"],
+                binding_id,
+                operation["expected_lifecycle_revision"],
+            ),
+        )
+        before = {
+            "binding_id": binding_id,
+            "status": "active",
+            "state": previous["state"],
+            "lifecycle_revision": operation["expected_lifecycle_revision"],
+        }
+        after = {
+            **before,
+            "status": "removed",
+            "state": "inactive",
+            "lifecycle_revision": operation["expected_lifecycle_revision"] + 1,
+        }
+        self.connection.execute(
+            f"""
+            INSERT INTO {self.link_layer_table_names()['time_series_link_events']} (
+                batch_id, binding_id, event_type, actor_user_id,
+                actor_identity_snapshot, actor_role_snapshot, reason_code,
+                reason_text, before_json, after_json, request_id, occurred_at
+            ) VALUES (?, ?, 'removed', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                batch_id,
+                binding_id,
+                actor_user.get("id"),
+                actor_user["email"],
+                actor_user["role"],
+                operation["reason_code"],
+                operation["reason_text"],
+                json.dumps(before, sort_keys=True),
+                json.dumps(after, sort_keys=True),
+                request_id,
+                occurred_at,
+            ),
+        )
+        return {
+            "client_operation_id": operation["client_operation_id"],
+            "action": "remove",
+            "outcome": "removed",
+            "binding_id": binding_id,
+        }
+
+    def _restore_case_binding(
+        self,
+        *,
+        operation: dict[str, Any],
+        prevalidated: dict[str, Any],
+        actor_user: Mapping[str, Any],
+        request_id: str,
+        batch_id: str,
+        occurred_at: str,
+    ) -> dict[str, Any]:
+        observed = prevalidated["observed_state"]
+        target = observed["restore_target"]
+        previous_id = int(operation["binding_id"])
+        restored = self._insert_case_binding_create(
+            operation=target,
+            prevalidated=prevalidated,
+            actor_user=actor_user,
+            request_id=request_id,
+            batch_id=batch_id,
+            occurred_at=occurred_at,
+            supersedes_binding_id=previous_id,
+            event_type="recreated",
+            before={
+                "binding_id": previous_id,
+                "status": "removed",
+                "lifecycle_revision": operation["expected_lifecycle_revision"],
+            },
+        )
+        restored.update(
+            {
+                "client_operation_id": operation["client_operation_id"],
+                "action": "restore",
+                "outcome": "restored",
+            }
+        )
+        return restored
+
+    def commit_case_binding_batch(
+        self,
+        *,
+        scenario_id: int,
+        variant_id: int,
+        document: Mapping[str, Any],
+        actor_user: Mapping[str, Any],
+        actor_class: str,
+        request_id: str,
+        prevalidation_token: str,
+        if_match: str,
+        idempotency_key: str,
+        confirmed: bool,
+    ) -> tuple[dict[str, Any], bool]:
+        normalized = normalize_binding_request(document)
+        request_hash = binding_request_hash(normalized)
+        verify_binding_prevalidation_token(
+            prevalidation_token,
+            request_hash=request_hash,
+            commit_etag=if_match,
+            actor_class=actor_class,
+            secret=self._catalog_cursor_secret,
+            check_expiry=False,
+        )
+        claim_hash = binding_request_hash(
+            {
+                "scenario_id": int(scenario_id),
+                "variant_id": int(variant_id),
+                "request": normalized,
+                "confirmed": bool(confirmed),
+            }
+        )
+        try:
+            with self._lock:
+                with self._database_transaction():
+                    context = self._canonical_binding_context(
+                        scenario_id=scenario_id, variant_id=variant_id
+                    )
+                    claim = self._claim_idempotency(
+                        actor_id=actor_class,
+                        operation_kind="binding_batch",
+                        scope_key=(
+                            f"scenario:{scenario_id}:variant:{variant_id}:"
+                            f"project:{context['project_id']}"
+                        ),
+                        idempotency_key=idempotency_key,
+                        request_hash=claim_hash,
+                    )
+                    if claim["state"] == "completed":
+                        return claim["response"], True
+                    verify_binding_prevalidation_token(
+                        prevalidation_token,
+                        request_hash=request_hash,
+                        commit_etag=if_match,
+                        actor_class=actor_class,
+                        secret=self._catalog_cursor_secret,
+                    )
+                    self._lock_case_binding_batch(
+                        normalized=normalized, variant_id=variant_id
+                    )
+                    current = self.prevalidate_case_binding_batch(
+                        scenario_id=scenario_id,
+                        variant_id=variant_id,
+                        document=normalized,
+                        actor_class=actor_class,
+                    )
+                    if current["commit_etag"] != if_match:
+                        raise BindingMutationError(
+                            "TS_LINK_PRECONDITION_CHANGED",
+                            expected_etag=if_match,
+                            actual_etag=current["commit_etag"],
+                        )
+                    if not current["can_commit"]:
+                        raise BindingMutationError(
+                            "TS_LINK_BATCH_REJECTED",
+                            details=current["operations"],
+                            normalized_request=normalized,
+                        )
+                    if current["requires_confirmation"] and not confirmed:
+                        raise BindingMutationError("TS_LINK_CONFIRMATION_REQUIRED")
+                    batch_id = f"bnb_{uuid.uuid4().hex}"
+                    occurred_at = utc_now_iso()
+                    results = []
+                    for operation, prevalidated in zip(
+                        normalized["operations"], current["operations"]
+                    ):
+                        if operation["action"] == "replace":
+                            result = self._replace_case_binding(
+                                operation=operation,
+                                prevalidated=prevalidated,
+                                actor_user=actor_user,
+                                request_id=request_id,
+                                batch_id=batch_id,
+                                occurred_at=occurred_at,
+                            )
+                        elif operation["action"] in {
+                            "revalidate_current",
+                            "revalidate_pinned",
+                        }:
+                            result = self._revalidate_case_binding(
+                                operation=operation,
+                                prevalidated=prevalidated,
+                                actor_user=actor_user,
+                                request_id=request_id,
+                                batch_id=batch_id,
+                                occurred_at=occurred_at,
+                            )
+                        elif operation["action"] == "remove":
+                            result = self._remove_case_binding(
+                                operation=operation,
+                                prevalidated=prevalidated,
+                                actor_user=actor_user,
+                                request_id=request_id,
+                                batch_id=batch_id,
+                                occurred_at=occurred_at,
+                            )
+                        elif operation["action"] == "restore":
+                            result = self._restore_case_binding(
+                                operation=operation,
+                                prevalidated=prevalidated,
+                                actor_user=actor_user,
+                                request_id=request_id,
+                                batch_id=batch_id,
+                                occurred_at=occurred_at,
+                            )
+                        else:
+                            result = self._insert_case_binding_create(
+                                operation=operation,
+                                prevalidated=prevalidated,
+                                actor_user=actor_user,
+                                request_id=request_id,
+                                batch_id=batch_id,
+                                occurred_at=occurred_at,
+                            )
+                        results.append(result)
+                    structural_mutation = any(
+                        operation["action"] in {
+                            "create",
+                            "replace",
+                            "remove",
+                            "restore",
+                        }
+                        for operation in normalized["operations"]
+                    )
+                    if structural_mutation:
+                        self.connection.execute(
+                            """
+                            UPDATE case_input_variants
+                            SET bindings_revision = bindings_revision + 1,
+                                updated_at = ?, updated_by = ?
+                            WHERE id = ?
+                            """,
+                            (occurred_at, actor_user["email"], int(variant_id)),
+                        )
+                        affected_signal_ids = sorted(
+                            {
+                                int(signal_id)
+                                for operation, prevalidated in zip(
+                                    normalized["operations"], current["operations"]
+                                )
+                                for signal_id in (
+                                    operation.get("signal_id"),
+                                    (
+                                        prevalidated["observed_state"]
+                                        .get("previous_binding", {})
+                                        .get("signal_id")
+                                        if prevalidated["observed_state"].get(
+                                            "previous_binding"
+                                        )
+                                        else None
+                                    ),
+                                )
+                                if signal_id is not None
+                            }
+                        )
+                        if affected_signal_ids:
+                            placeholders = ", ".join(
+                                "?" for _ in affected_signal_ids
+                            )
+                            binding_table = self.link_layer_table_names()[
+                                "case_time_series_bindings"
+                            ]
+                            entries = self._projection(
+                                "time_series_catalog_entries"
+                            )
+                            self.connection.execute(
+                                f"""
+                                UPDATE {entries}
+                                SET binding_count = (
+                                    SELECT COUNT(*) FROM {binding_table}
+                                    WHERE signal_id = {entries}.signal_id
+                                      AND status = 'active'
+                                ), projection_revision = projection_revision + 1,
+                                   updated_at = ?
+                                WHERE signal_id IN ({placeholders})
+                                """,
+                                (occurred_at, *affected_signal_ids),
+                            )
+                            self._raise_catalog_generation(now=occurred_at)
+                    new_revision = current["observed_bindings_revision"] + int(
+                        structural_mutation
+                    )
+                    response = {
+                        "outcome": "created",
+                        "batch_id": batch_id,
+                        "scenario_id": int(scenario_id),
+                        "variant_id": int(variant_id),
+                        "bindings_revision": new_revision,
+                        "operations": results,
+                        "request_id": request_id,
+                    }
+                    self._complete_idempotency(
+                        claim_id=claim["id"], response=response, http_status=201
+                    )
+                    return response, False
+        except CanonicalRevisionError as error:
+            if error.code in {
+                "TS_IDEMPOTENCY_KEY_CONFLICT",
+                "TS_IDEMPOTENCY_IN_FLIGHT",
+            }:
+                raise BindingMutationError(
+                    "TS_IDEMPOTENCY_CONFLICT", reason=error.code
+                ) from error
+            raise
+        except Exception as error:
+            constraint_name = str(
+                getattr(getattr(error, "diag", None), "constraint_name", "") or ""
+            )
+            error_text = str(error).lower()
+            if constraint_name == "case_time_series_bindings_next_one_active_uk" or (
+                "unique constraint failed" in error_text
+                and "case_time_series_bindings" in error_text
+                and "linkable_object_id" in error_text
+            ):
+                raise BindingMutationError(
+                    "TS_LINK_CONFLICT", reason="active_identity_race"
+                ) from error
+            raise
+
+    def _lock_case_binding_batch(
+        self, *, normalized: Mapping[str, Any], variant_id: int
+    ) -> None:
+        """Lock variant, sets and link subjects in deterministic PostgreSQL order."""
+
+        if self.database_backend != "postgresql":
+            return
+        self.connection.execute(
+            "SELECT id FROM case_input_variants WHERE id = ? FOR UPDATE",
+            (int(variant_id),),
+        ).fetchone()
+        operations = normalized["operations"]
+        signal_ids = sorted(
+            {int(row["signal_id"]) for row in operations if row.get("signal_id")}
+        )
+        binding_ids = sorted(
+            {int(row["binding_id"]) for row in operations if row.get("binding_id")}
+        )
+        set_ids: set[int] = set()
+        object_ids = {
+            int(row["linkable_object_id"])
+            for row in operations
+            if row.get("linkable_object_id")
+        }
+        association_ids = {
+            int(row["catalog_association_id"])
+            for row in operations
+            if row.get("catalog_association_id")
+        }
+        if signal_ids:
+            placeholders = ", ".join("?" for _ in signal_ids)
+            set_ids.update(
+                int(row["time_series_set_id"])
+                for row in self.connection.execute(
+                    f"""
+                    SELECT DISTINCT time_series_set_id
+                    FROM {self._canonical('time_series_signals')}
+                    WHERE id IN ({placeholders})
+                    """,
+                    tuple(signal_ids),
+                ).fetchall()
+            )
+        if binding_ids:
+            placeholders = ", ".join("?" for _ in binding_ids)
+            rows = self.connection.execute(
+                f"""
+                SELECT id, time_series_set_id, linkable_object_id,
+                       catalog_association_id
+                FROM {self.link_layer_table_names()['case_time_series_bindings']}
+                WHERE id IN ({placeholders})
+                """,
+                tuple(binding_ids),
+            ).fetchall()
+            set_ids.update(int(row["time_series_set_id"]) for row in rows)
+            object_ids.update(int(row["linkable_object_id"]) for row in rows)
+            association_ids.update(
+                int(row["catalog_association_id"])
+                for row in rows
+                if row["catalog_association_id"] is not None
+            )
+        for table, ids in (
+            (self._canonical("time_series_sets"), sorted(set_ids)),
+            (self._linkable("linkable_objects"), sorted(object_ids)),
+            (
+                self.link_layer_table_names()[
+                    "time_series_catalog_associations"
+                ],
+                sorted(association_ids),
+            ),
+            (
+                self.link_layer_table_names()["case_time_series_bindings"],
+                binding_ids,
+            ),
+        ):
+            if not ids:
+                continue
+            placeholders = ", ".join("?" for _ in ids)
+            self.connection.execute(
+                f"SELECT id FROM {table} WHERE id IN ({placeholders}) "
+                "ORDER BY id FOR UPDATE",
+                tuple(ids),
+            ).fetchall()
+
+    def _canonical_binding_row(self, binding_id: int):
+        bindings = self.link_layer_table_names()["case_time_series_bindings"]
+        validations = self.link_layer_table_names()["time_series_link_validations"]
+        return self.connection.execute(
+            f"""
+            SELECT binding.*, role.role_key,
+                   role.display_name AS role_display_name,
+                   role.status AS role_status,
+                   entry.series_key, entry.display_name AS signal_display_name,
+                   entry.visibility_scope, entry.owner_project_id,
+                   entry.current_revision_id,
+                   current_revision.content_hash AS current_content_hash,
+                   entry.set_status, entry.signal_status,
+                   validation.validation_mode,
+                   validation.validated_set_revision_id,
+                   validation.observed_current_revision_id,
+                   validation.compatibility_fingerprint,
+                   validation.object_scope_fingerprint,
+                   validation.variant_dependency_fingerprint,
+                   validation.validated_at, validation.validated_by,
+                   validation.reason_code AS validation_reason_code,
+                   validation.reason_text AS validation_reason_text,
+                   revision.state AS revision_state,
+                   revision.content_hash AS revision_content_hash
+            FROM {bindings} AS binding
+            JOIN time_series_binding_roles AS role
+              ON role.id = binding.binding_role_id
+            JOIN {self._projection('time_series_catalog_entries')} AS entry
+              ON entry.signal_id = binding.signal_id
+            JOIN {self._canonical('time_series_set_revisions')} AS current_revision
+              ON current_revision.id = entry.current_revision_id
+            JOIN {self._canonical('time_series_set_revisions')} AS revision
+              ON revision.id = binding.set_revision_id
+            LEFT JOIN {validations} AS validation
+              ON validation.id = (
+                  SELECT latest.id FROM {validations} AS latest
+                  WHERE latest.binding_id = binding.id
+                  ORDER BY latest.id DESC LIMIT 1
+              )
+            WHERE binding.id = ?
+            """,
+            (int(binding_id),),
+        ).fetchone()
+
+    def read_case_binding(
+        self, *, scenario_id: int, variant_id: int, binding_id: int
+    ) -> dict[str, Any]:
+        context = self._canonical_binding_context(
+            scenario_id=scenario_id, variant_id=variant_id
+        )
+        row = self._canonical_binding_row(binding_id)
+        if row is None or int(row["case_input_variant_id"]) != int(variant_id):
+            raise KeyError(f"binding {binding_id} not found")
+        item = dict(row)
+        linkable = self.get_linkable_object(int(item["linkable_object_id"]))
+        if item["status"] != "active":
+            state = "inactive"
+        elif (
+            item["validation_mode"] is None
+            or item["revision_state"] != "sealed"
+            or item["revision_content_hash"] != item["bound_content_hash"]
+            or item["set_status"] == "archived"
+            or item["signal_status"] == "archived"
+            or item["role_status"] != "active"
+            or linkable["status"] != "active"
+        ):
+            state = "invalid"
+        else:
+            operation = {
+                "client_operation_id": "effective-state",
+                "action": "create",
+                "linkable_object_id": int(item["linkable_object_id"]),
+                "binding_role_key": item["role_key"],
+                "signal_id": int(item["signal_id"]),
+                "revision": {
+                    "mode": str(item["validation_mode"]).removeprefix("binding_"),
+                    "revision_id": int(item["set_revision_id"]),
+                    "content_hash": item["bound_content_hash"],
+                },
+                "catalog_association_id": item["catalog_association_id"],
+                "reason_code": "effective_state_read",
+                **(
+                    {"reason_text": "Previously accepted exact revision."}
+                    if item["validation_mode"] == "binding_pinned"
+                    else {}
+                ),
+            }
+            current_result, current_observation = self._prevalidate_case_binding_create(
+                operation,
+                context={
+                    **context,
+                    "bindings_revision": context["bindings_revision"],
+                },
+            )
+            provenance_stale = any(
+                error["code"] == "TS_COMPAT_ASSOCIATION_MISMATCH"
+                and error["context"].get("catalog_association_id")
+                == item["catalog_association_id"]
+                and error["context"].get("association_state") is not None
+                for error in current_result["errors"]
+            )
+            current_errors = [
+                error
+                for error in current_result["errors"]
+                if not (
+                    error["code"] == "TS_LINK_CONFLICT"
+                    and error["context"].get("binding_id") == int(binding_id)
+                )
+                and not (
+                    error["code"] == "TS_COMPAT_CONTRACT_CHANGED"
+                    and "actual_current_revision_id" in error["context"]
+                    and int(item["observed_current_revision_id"])
+                    != int(item["current_revision_id"])
+                )
+                and not (
+                    error["code"] == "TS_COMPAT_ASSOCIATION_MISMATCH"
+                    and provenance_stale
+                )
+            ]
+            if current_errors:
+                state = "invalid"
+            else:
+                current_variant_dependency = (
+                    self._case_binding_variant_dependency_fingerprint(
+                        scenario_id=int(scenario_id),
+                        variant_id=int(variant_id),
+                        project_id=context["project_id"],
+                    )
+                )
+                current_compatibility, current_scope = (
+                    self._case_binding_fingerprints(
+                        observed=current_observation,
+                        binding_role_key=item["role_key"],
+                        contract_version=current_result["compatibility_decision"][
+                            "contract_version"
+                        ],
+                    )
+                )
+                stale = (
+                    provenance_stale
+                    or
+                    current_compatibility != item["compatibility_fingerprint"]
+                    or current_scope != item["object_scope_fingerprint"]
+                    or current_variant_dependency
+                    != item["variant_dependency_fingerprint"]
+                    or int(item["observed_current_revision_id"])
+                    != int(item["current_revision_id"])
+                )
+                state = (
+                    "stale"
+                    if stale
+                    else "valid_pinned"
+                    if item["validation_mode"] == "binding_pinned"
+                    else "valid_current"
+                )
+        binding_id = int(item["id"])
+        return {
+            "binding_id": binding_id,
+            "scenario_id": int(scenario_id),
+            "case_input_variant_id": int(item["case_input_variant_id"]),
+            "signal_id": int(item["signal_id"]),
+            "signal": {
+                "id": int(item["signal_id"]),
+                "series_key": item["series_key"],
+                "display_name": item["signal_display_name"],
+            },
+            "time_series_set_id": int(item["time_series_set_id"]),
+            "set_revision_id": int(item["set_revision_id"]),
+            "bound_content_hash": item["bound_content_hash"],
+            "revision": {
+                "mode": (
+                    str(item["validation_mode"]).removeprefix("binding_")
+                    if item["validation_mode"]
+                    else None
+                ),
+                "id": int(item["set_revision_id"]),
+                "content_hash": item["bound_content_hash"],
+                "observed_current_revision_id": (
+                    int(item["observed_current_revision_id"])
+                    if item["observed_current_revision_id"] is not None
+                    else None
+                ),
+                "current_revision_id": int(item["current_revision_id"]),
+            },
+            "object": {
+                "id": int(linkable["id"]),
+                "project_id": int(linkable["project_id"]),
+                "object_kind": linkable["object_kind"],
+                "object_type_key": linkable["object_type_key"],
+                "object_key": linkable["object_key"],
+                "display_name": linkable["display_name"],
+                "status": linkable["status"],
+            },
+            "binding_role": {
+                "id": int(item["binding_role_id"]),
+                "key": item["role_key"],
+                "display_name": item["role_display_name"],
+            },
+            "catalog_association_id": (
+                int(item["catalog_association_id"])
+                if item["catalog_association_id"] is not None
+                else None
+            ),
+            "compatibility_rule_id": int(item["compatibility_rule_id"]),
+            "status": item["status"],
+            "state": state,
+            "lifecycle_revision": int(item["lifecycle_revision"]),
+            "supersedes_binding_id": (
+                int(item["supersedes_binding_id"])
+                if item["supersedes_binding_id"] is not None
+                else None
+            ),
+            "created_at": item["created_at"],
+            "created_by": item["created_by"],
+            "updated_at": item["updated_at"],
+            "updated_by": item["updated_by"],
+            "superseded_at": item["superseded_at"],
+            "superseded_by": item["superseded_by"],
+            "removed_at": item["removed_at"],
+            "removed_by": item["removed_by"],
+            "change_reason": {
+                "code": item["change_reason_code"],
+                "text": item["change_reason_text"],
+            },
+            "validation": {
+                "mode": item["validation_mode"],
+                "validated_revision_id": (
+                    int(item["validated_set_revision_id"])
+                    if item["validated_set_revision_id"] is not None
+                    else None
+                ),
+                "compatibility_fingerprint": item["compatibility_fingerprint"],
+                "object_scope_fingerprint": item["object_scope_fingerprint"],
+                "variant_dependency_fingerprint": item[
+                    "variant_dependency_fingerprint"
+                ],
+                "validated_at": item["validated_at"],
+                "validated_by": item["validated_by"],
+            },
+            "capabilities": {
+                "replace": item["status"] == "active",
+                "remove": item["status"] == "active",
+                "restore": item["status"] == "removed",
+                "revalidate_current": (
+                    item["status"] == "active"
+                    and int(item["set_revision_id"])
+                    == int(item["current_revision_id"])
+                ),
+                "revalidate_pinned": (
+                    item["status"] == "active"
+                    and int(item["set_revision_id"])
+                    != int(item["current_revision_id"])
+                ),
+            },
+            "links": {
+                "detail": (
+                    f"/api/scenarios/{int(scenario_id)}/case-variants/"
+                    f"{int(variant_id)}/time-series-bindings/{binding_id}"
+                ),
+                "events": (
+                    f"/api/scenarios/{int(scenario_id)}/case-variants/"
+                    f"{int(variant_id)}/time-series-bindings/{binding_id}/events"
+                ),
+            },
+        }
+
+    def read_case_bindings(
+        self, *, scenario_id: int, variant_id: int
+    ) -> dict[str, Any]:
+        self._canonical_binding_context(
+            scenario_id=scenario_id, variant_id=variant_id
+        )
+        rows = self.connection.execute(
+            f"""
+            SELECT id FROM {self.link_layer_table_names()['case_time_series_bindings']}
+            WHERE case_input_variant_id = ?
+            ORDER BY id
+            """,
+            (int(variant_id),),
+        ).fetchall()
+        items = [
+            self.read_case_binding(
+                scenario_id=scenario_id,
+                variant_id=variant_id,
+                binding_id=int(row["id"]),
+            )
+            for row in rows
+        ]
+        return {
+            "items": items,
+            "page": {"limit": len(items), "has_more": False, "next_cursor": None},
+            "summary": {"total_count": len(items)},
+            "meta": {
+                "scenario_id": int(scenario_id),
+                "variant_id": int(variant_id),
+            },
+        }
+
+    def read_case_binding_events(
+        self,
+        *,
+        scenario_id: int,
+        variant_id: int,
+        binding_id: int,
+        limit: int | None = None,
+        cursor: str | None = None,
+        actor_class: str = "internal",
+    ) -> dict[str, Any]:
+        self.read_case_binding(
+            scenario_id=scenario_id,
+            variant_id=variant_id,
+            binding_id=binding_id,
+        )
+        events = self.link_layer_table_names()["time_series_link_events"]
+        resolved_limit = normalize_catalog_limit(limit)
+        summary = self.connection.execute(
+            f"""
+            SELECT COUNT(*) AS total_count, COALESCE(MAX(id), 0) AS max_id
+            FROM {events} WHERE binding_id = ?
+            """,
+            (int(binding_id),),
+        ).fetchone()
+        generation = int(
+            hashlib.sha256(
+                f"{summary['total_count']}:{summary['max_id']}".encode("utf-8")
+            ).hexdigest()[:15],
+            16,
+        )
+        section = f"binding:{int(binding_id)}:events"
+        filters_hash = input_filters_hash(
+            {
+                "scenario_id": int(scenario_id),
+                "variant_id": int(variant_id),
+                "binding_id": int(binding_id),
+            }
+        )
+        cursor_id = 0
+        if cursor is not None:
+            cursor_key = decode_catalog_cursor(
+                cursor,
+                self._catalog_cursor_secret,
+                section=section,
+                order="id",
+                limit=resolved_limit,
+                generation=generation,
+                actor_class=actor_class,
+                filters_hash=filters_hash,
+            )
+            if len(cursor_key) != 1:
+                raise CatalogQueryError(
+                    "TS_QUERY_CURSOR_MISMATCH", reason="key_arity"
+                )
+            cursor_id = int(cursor_key[0])
+        rows = self.connection.execute(
+            f"""
+            SELECT * FROM {events}
+            WHERE binding_id = ? AND id > ?
+            ORDER BY id LIMIT ?
+            """,
+            (int(binding_id), cursor_id, resolved_limit + 1),
+        ).fetchall()
+        has_more = len(rows) > resolved_limit
+        visible = rows[:resolved_limit]
+        items = []
+        for row in visible:
+            event = dict(row)
+            items.append(
+                {
+                    "event_id": int(event["id"]),
+                    "batch_id": event["batch_id"],
+                    "binding_id": int(event["binding_id"]),
+                    "event_type": event["event_type"],
+                    "actor": {
+                        "user_id": (
+                            int(event["actor_user_id"])
+                            if event["actor_user_id"] is not None
+                            else None
+                        ),
+                        "identity": event["actor_identity_snapshot"],
+                        "role": event["actor_role_snapshot"],
+                    },
+                    "reason": {
+                        "code": event["reason_code"],
+                        "text": event["reason_text"],
+                    },
+                    "before": json.loads(event["before_json"]),
+                    "after": json.loads(event["after_json"]),
+                    "request_id": event["request_id"],
+                    "occurred_at": event["occurred_at"],
+                }
+            )
+        next_cursor = None
+        if has_more and visible:
+            next_cursor = encode_catalog_cursor(
+                {
+                    "s": section,
+                    "o": "id",
+                    "l": resolved_limit,
+                    "g": generation,
+                    "k": [int(visible[-1]["id"])],
+                    "t": int(time.time()),
+                    "a": actor_class,
+                    "f": filters_hash,
+                },
+                self._catalog_cursor_secret,
+            )
+        return {
+            "items": items,
+            "page": {
+                "limit": resolved_limit,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+            },
+            "summary": {"total_count": int(summary["total_count"])},
+            "meta": {
+                "scenario_id": int(scenario_id),
+                "variant_id": int(variant_id),
+                "binding_id": int(binding_id),
+                "generation": generation,
+            },
+        }
+
+    def assert_case_bindings_executable(
+        self, *, scenario_id: int, variant_id: int
+    ) -> None:
+        """Fail closed before any run can consume a stale canonical binding."""
+
+        page = self.read_case_bindings(
+            scenario_id=scenario_id, variant_id=variant_id
+        )
+        blocked = [
+            {
+                "binding_id": item["binding_id"],
+                "state": item["state"],
+                "linkable_object_id": item["object"]["id"],
+                "binding_role_key": item["binding_role"]["key"],
+            }
+            for item in page["items"]
+            if item["status"] == "active"
+            and item["state"] not in {"valid_current", "valid_pinned"}
+        ]
+        if blocked:
+            raise BindingMutationError(
+                "TS_BINDING_EXECUTION_BLOCKED", details=blocked
+            )
 
     def list_catalog_results(
         self,

@@ -120,6 +120,11 @@ from app.time_series_associations import (
     association_detail_etag,
     association_error_payload,
 )
+from app.time_series_bindings import (
+    BindingMutationError,
+    binding_detail_etag,
+    binding_error_payload,
+)
 from app.transformations import TransformationError
 from app.runner import JuliaRunExecutor, LocalRunQueue
 from app.time_series_ingestion import (
@@ -234,6 +239,78 @@ class CatalogAssociationPrevalidationRequest(BaseModel):
 
 
 class CatalogAssociationCommitRequest(CatalogAssociationPrevalidationRequest):
+    prevalidation_token: str = Field(min_length=1)
+    confirmed: bool = False
+
+
+class CaseBindingRevisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["current", "pinned"]
+    revision_id: int = Field(gt=0)
+    content_hash: str = Field(min_length=1)
+
+
+class CaseBindingCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    client_operation_id: str = Field(min_length=1)
+    action: Literal["create"]
+    linkable_object_id: int = Field(gt=0)
+    binding_role_key: str = Field(min_length=1)
+    signal_id: int = Field(gt=0)
+    revision: CaseBindingRevisionRequest
+    catalog_association_id: int | None = Field(default=None, gt=0)
+    reason_code: str = Field(min_length=1)
+    reason_text: str | None = None
+
+
+class CaseBindingReplaceRequest(CaseBindingCreateRequest):
+    action: Literal["replace"]
+    binding_id: int = Field(gt=0)
+    expected_lifecycle_revision: int = Field(gt=0)
+    reason_text: str = Field(min_length=1)
+
+
+class CaseBindingRevalidateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    client_operation_id: str = Field(min_length=1)
+    action: Literal["revalidate_current", "revalidate_pinned"]
+    binding_id: int = Field(gt=0)
+    expected_lifecycle_revision: int = Field(gt=0)
+    reason_code: str = Field(min_length=1)
+    reason_text: str | None = None
+
+
+class CaseBindingLifecycleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    client_operation_id: str = Field(min_length=1)
+    action: Literal["remove", "restore"]
+    binding_id: int = Field(gt=0)
+    expected_lifecycle_revision: int = Field(gt=0)
+    reason_code: str = Field(min_length=1)
+    reason_text: str = Field(min_length=1)
+
+
+CaseBindingOperationRequest = Annotated[
+    CaseBindingCreateRequest
+    | CaseBindingReplaceRequest
+    | CaseBindingRevalidateRequest
+    | CaseBindingLifecycleRequest,
+    Field(discriminator="action"),
+]
+
+
+class CaseBindingPrevalidationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_bindings_revision: int = Field(ge=0)
+    operations: list[CaseBindingOperationRequest] = Field(min_length=1, max_length=200)
+
+
+class CaseBindingCommitRequest(CaseBindingPrevalidationRequest):
     prevalidation_token: str = Field(min_length=1)
     confirmed: bool = False
 
@@ -720,15 +797,18 @@ def create_app(
     async def stable_association_request_validation(
         request: Request, error: RequestValidationError
     ):
-        if request.url.path not in {
+        association_contract = request.url.path in {
             "/api/time-series/catalog/association-prevalidations",
             "/api/time-series/catalog/association-batches",
-        }:
+        }
+        binding_contract = request.url.path.endswith(
+            "/time-series-binding-prevalidations"
+        ) or request.url.path.endswith("/time-series-binding-batches")
+        if not association_contract and not binding_contract:
             return await request_validation_exception_handler(request, error)
         location = list(error.errors()[0].get("loc", ()))
         missing_commit_precondition = (
-            request.url.path
-            == "/api/time-series/catalog/association-batches"
+            request.url.path.endswith("-batches")
             and any(
                 str(part).lower()
                 in {"prevalidation_token", "if-match", "idempotency-key"}
@@ -743,9 +823,14 @@ def create_app(
                 "body",
                 "header",
                 "add",
+                "create",
                 "replace",
                 "archive",
                 "revalidate",
+                "revalidate_current",
+                "revalidate_pinned",
+                "remove",
+                "restore",
             }
         ]
         field = ""
@@ -755,7 +840,8 @@ def create_app(
             else:
                 field += ("." if field else "") + str(part)
         request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
-        refusal = AssociationMutationError(
+        error_type = BindingMutationError if binding_contract else AssociationMutationError
+        refusal = error_type(
             "TS_PRECONDITION_REQUIRED"
             if missing_commit_precondition
             else "TS_LINK_PAYLOAD_INVALID",
@@ -763,7 +849,11 @@ def create_app(
             reason="request_validation",
         )
         return JSONResponse(
-            association_error_payload(refusal, request_id=request_id),
+            (
+                binding_error_payload(refusal, request_id=request_id)
+                if binding_contract
+                else association_error_payload(refusal, request_id=request_id)
+            ),
             status_code=428 if missing_commit_precondition else 400,
             headers={"Cache-Control": "private, no-store"},
         )
@@ -2067,6 +2157,219 @@ def create_app(
             status_code=(
                 200 if replayed or result.get("outcome") == "unchanged" else 201
             ),
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+    @app.get(
+        "/api/scenarios/{scenario_id}/case-variants/{variant_id}/time-series-bindings"
+    )
+    async def get_case_time_series_bindings(
+        scenario_id: int, variant_id: int, request: Request
+    ):
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            page = analyst_store.read_case_bindings(
+                scenario_id=scenario_id, variant_id=variant_id
+            )
+        except KeyError:
+            return JSONResponse(
+                {"detail": "not found"},
+                status_code=404,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        page["meta"]["request_id"] = request_id
+        return JSONResponse(
+            page, headers={"Cache-Control": "private, must-revalidate"}
+        )
+
+    @app.get(
+        "/api/scenarios/{scenario_id}/case-variants/{variant_id}/time-series-bindings/{binding_id}"
+    )
+    async def get_case_time_series_binding(
+        scenario_id: int, variant_id: int, binding_id: int, request: Request
+    ):
+        user = request.state.current_user or {}
+        actor_class = f"{user.get('role', 'analyst')}:{user.get('id', 'auth-disabled')}"
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            detail = analyst_store.read_case_binding(
+                scenario_id=scenario_id,
+                variant_id=variant_id,
+                binding_id=binding_id,
+            )
+        except KeyError:
+            return JSONResponse(
+                {"detail": "not found"},
+                status_code=404,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        etag = binding_detail_etag(detail, actor_class=actor_class)
+        if request.headers.get("if-none-match") == etag:
+            return Response(
+                status_code=304,
+                headers={"ETag": etag, "Cache-Control": "private, must-revalidate"},
+            )
+        detail["request_id"] = request_id
+        return JSONResponse(
+            detail,
+            headers={"ETag": etag, "Cache-Control": "private, must-revalidate"},
+        )
+
+    @app.get(
+        "/api/scenarios/{scenario_id}/case-variants/{variant_id}/time-series-bindings/{binding_id}/events"
+    )
+    async def get_case_time_series_binding_events(
+        scenario_id: int,
+        variant_id: int,
+        binding_id: int,
+        request: Request,
+        limit: int = 50,
+        cursor: str | None = None,
+    ):
+        user = request.state.current_user or {}
+        actor_class = f"{user.get('role', 'analyst')}:{user.get('id', 'auth-disabled')}"
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            page = analyst_store.read_case_binding_events(
+                scenario_id=scenario_id,
+                variant_id=variant_id,
+                binding_id=binding_id,
+                limit=limit,
+                cursor=cursor,
+                actor_class=actor_class,
+            )
+        except KeyError:
+            return JSONResponse(
+                {"detail": "not found"},
+                status_code=404,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        except CatalogQueryError as error:
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=410 if error.code == "TS_QUERY_CURSOR_EXPIRED" else 400,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        page["meta"]["request_id"] = request_id
+        return JSONResponse(
+            page, headers={"Cache-Control": "private, must-revalidate"}
+        )
+
+    @app.post(
+        "/api/scenarios/{scenario_id}/case-variants/{variant_id}/time-series-binding-prevalidations"
+    )
+    async def prevalidate_case_time_series_bindings(
+        scenario_id: int,
+        variant_id: int,
+        payload: CaseBindingPrevalidationRequest,
+        request: Request,
+    ):
+        user = request.state.current_user or {}
+        actor_class = f"{user.get('role', 'analyst')}:{user.get('id', 'auth-disabled')}"
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            result = analyst_store.prevalidate_case_binding_batch(
+                scenario_id=scenario_id,
+                variant_id=variant_id,
+                document=payload.model_dump(exclude_none=False),
+                actor_class=actor_class,
+            )
+        except BindingMutationError as error:
+            return JSONResponse(
+                binding_error_payload(error, request_id=request_id),
+                status_code=400,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        except KeyError:
+            return JSONResponse(
+                {"detail": "not found"},
+                status_code=404,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        result["request_id"] = request_id
+        return JSONResponse(result, headers={"Cache-Control": "private, no-store"})
+
+    @app.post(
+        "/api/scenarios/{scenario_id}/case-variants/{variant_id}/time-series-binding-batches",
+        responses={
+            201: {"description": "Binding batch created"},
+            409: {"description": "Confirmation or idempotency conflict"},
+            410: {"description": "Prevalidation expired"},
+            412: {"description": "Observed precondition changed"},
+            422: {"description": "Domain batch rejection"},
+            428: {"description": "Required commit guard missing"},
+        },
+    )
+    async def commit_case_time_series_bindings(
+        scenario_id: int,
+        variant_id: int,
+        payload: CaseBindingCommitRequest,
+        request: Request,
+        if_match: str = Header(alias="If-Match"),
+        idempotency_key: str = Header(alias="Idempotency-Key"),
+    ):
+        user = request.state.current_user or {
+            "id": None,
+            "email": "internal_analyst",
+            "role": "analyst",
+        }
+        actor_class = f"{user.get('role', 'analyst')}:{user.get('id', 'auth-disabled')}"
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        document = payload.model_dump(
+            exclude={"prevalidation_token", "confirmed"}, exclude_none=False
+        )
+        try:
+            token = payload.prevalidation_token.strip()
+            if_match = str(if_match or "").strip()
+            idempotency_key = str(idempotency_key or "").strip()
+            if not token or not if_match or not idempotency_key:
+                missing = (
+                    "prevalidation_token"
+                    if not token
+                    else "If-Match"
+                    if not if_match
+                    else "Idempotency-Key"
+                )
+                raise BindingMutationError(
+                    "TS_PRECONDITION_REQUIRED", field=missing
+                )
+            result, replayed = analyst_store.commit_case_binding_batch(
+                scenario_id=scenario_id,
+                variant_id=variant_id,
+                document=document,
+                actor_user=user,
+                actor_class=actor_class,
+                request_id=request_id,
+                prevalidation_token=token,
+                if_match=if_match,
+                idempotency_key=idempotency_key,
+                confirmed=payload.confirmed,
+            )
+        except BindingMutationError as error:
+            error.context.setdefault("normalized_request", document)
+            status_by_code = {
+                "TS_PRECONDITION_REQUIRED": 428,
+                "TS_LINK_PREVALIDATION_EXPIRED": 410,
+                "TS_LINK_PRECONDITION_CHANGED": 412,
+                "TS_LINK_BATCH_REJECTED": 422,
+                "TS_LINK_CONFLICT": 409,
+                "TS_LINK_CONFIRMATION_REQUIRED": 409,
+                "TS_IDEMPOTENCY_CONFLICT": 409,
+            }
+            return JSONResponse(
+                binding_error_payload(error, request_id=request_id),
+                status_code=status_by_code.get(error.code, 400),
+                headers={"Cache-Control": "private, no-store"},
+            )
+        except KeyError:
+            return JSONResponse(
+                {"detail": "not found"},
+                status_code=404,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        return JSONResponse(
+            result,
+            status_code=200 if replayed else 201,
             headers={"Cache-Control": "private, no-store"},
         )
 
@@ -3521,6 +3824,9 @@ def create_app(
     async def run_case_input_variant(scenario_id: int, variant_id: int, payload: CaseInputVariantRunRequest):
         try:
             case, variant = get_case_and_variant_for_scenario(scenario_id, variant_id)
+            analyst_store.assert_case_bindings_executable(
+                scenario_id=scenario_id, variant_id=variant_id
+            )
             materialized = analyst_store.materialize_system_case_for_variant(
                 scenario_id=scenario_id,
                 case_input_variant_id=variant_id,
@@ -3529,6 +3835,12 @@ def create_app(
             )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
+        except BindingMutationError as error:
+            return JSONResponse(
+                binding_error_payload(error, request_id=f"req_{secrets.token_hex(8)}"),
+                status_code=409,
+                headers={"Cache-Control": "private, no-store"},
+            )
         except (DraftGenerationError, InputVariantRangeError, MissingRequiredSignalsError, VariantStaleError) as error:
             return JSONResponse(
                 error_response_body("input_variant", str(error), phase="python_validation"),
