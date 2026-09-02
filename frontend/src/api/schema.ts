@@ -738,6 +738,126 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/catalog-associations/{association_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Object Catalog Association */
+        get: operations["get_object_catalog_association_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/catalog-associations/{association_id}/object-series-derivation-prevalidations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prevalidate Object Series Derivation */
+        post: operations["prevalidate_object_series_derivation_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__object_series_derivation_prevalidations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/catalog-associations/{association_id}/object-series-derivations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Commit Object Series Derivation */
+        post: operations["commit_object_series_derivation_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__object_series_derivations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/catalog-associations/{association_id}/shared-series/revision-ingestions/points": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prepare Shared Series Points Ingestion */
+        post: operations["prepare_shared_series_points_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__shared_series_revision_ingestions_points_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/catalog-associations/{association_id}/shared-series/revision-ingestions/{ingestion_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Shared Series Ingestion */
+        get: operations["get_shared_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__shared_series_revision_ingestions__ingestion_id__get"];
+        put?: never;
+        post?: never;
+        /** Cancel Shared Series Ingestion */
+        delete: operations["cancel_shared_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__shared_series_revision_ingestions__ingestion_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/catalog-associations/{association_id}/shared-series/revision-ingestions/{ingestion_id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Preview Shared Series Ingestion */
+        get: operations["preview_shared_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__shared_series_revision_ingestions__ingestion_id__preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/catalog-associations/{association_id}/shared-series/revision-ingestions/{ingestion_id}/publications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish Shared Series Ingestion */
+        post: operations["publish_shared_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__shared_series_revision_ingestions__ingestion_id__publications_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series": {
         parameters: {
             query?: never;
@@ -3128,6 +3248,36 @@ export interface components {
             /** Unit Key */
             unit_key: string;
         };
+        /**
+         * ObjectSeriesDerivationRequest
+         * @description Copy a shared generic source into a series owned by this object.
+         */
+        ObjectSeriesDerivationRequest: {
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Description */
+            description?: string | null;
+            /** Display Name */
+            display_name?: string | null;
+            /** Intended Binding Role Key */
+            intended_binding_role_key?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
+            /** Object Series Key */
+            object_series_key: string;
+            /** Prevalidation Token */
+            prevalidation_token?: string | null;
+            /** Reason Code */
+            reason_code: string;
+            /** Reason Text */
+            reason_text?: string | null;
+            source_revision?: components["schemas"]["ObjectSeriesExpectedBaseRequest"] | null;
+        };
         /** ObjectSeriesExpectedBaseRequest */
         ObjectSeriesExpectedBaseRequest: {
             /** Content Hash */
@@ -3387,6 +3537,54 @@ export interface components {
         ScenarioVersionCreateRequest: {
             /** System Case Json */
             system_case_json: string;
+        };
+        /**
+         * SharedSeriesPointsIngestionRequest
+         * @description A load aimed at a shared generic source, started from one object.
+         *
+         *     ``expected_base`` is mandatory here: a shared source always has a sealed
+         *     revision, and a blind overwrite of what other projects consume is exactly
+         *     what chapter 7.9 refuses.
+         */
+        SharedSeriesPointsIngestionRequest: {
+            expected_base: components["schemas"]["ObjectSeriesExpectedBaseRequest"];
+            /**
+             * Mode
+             * @default replace_full
+             * @enum {string}
+             */
+            mode: "replace_full" | "append_tail";
+            /** Points */
+            points: components["schemas"]["ObjectSeriesPointRequest"][];
+            revision_contract?: components["schemas"]["ObjectSeriesRevisionContractRequest"] | null;
+            source?: components["schemas"]["ObjectSeriesIngestionSourceRequest"] | null;
+        };
+        /**
+         * SharedSeriesPublicationRequest
+         * @description `Publicar para todos`: permission, reason, comprehension and impact.
+         *
+         *     Chapter 8.6 asks for all four before the shared publication is enabled, and
+         *     revalidates the impact at confirmation time (AC-SHR-04, AC-SHR-06).
+         */
+        SharedSeriesPublicationRequest: {
+            /**
+             * Comprehension Acknowledged
+             * @default false
+             */
+            comprehension_acknowledged: boolean;
+            /**
+             * Confirm
+             * @default false
+             */
+            confirm: boolean;
+            /** Impact Fingerprint */
+            impact_fingerprint: string;
+            /** Reason Code */
+            reason_code: string;
+            /** Reason Text */
+            reason_text?: string | null;
+            /** Validation Token */
+            validation_token: string;
         };
         /** SystemCaseValidationRequest */
         SystemCaseValidationRequest: {
@@ -5189,6 +5387,301 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_object_catalog_association_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__get: {
+        parameters: {
+            query?: {
+                intent?: string;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+                linkable_object_id: number;
+                association_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prevalidate_object_series_derivation_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__object_series_derivation_prevalidations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                linkable_object_id: number;
+                association_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ObjectSeriesDerivationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    commit_object_series_derivation_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__object_series_derivations_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                project_id: number;
+                linkable_object_id: number;
+                association_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ObjectSeriesDerivationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prepare_shared_series_points_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__shared_series_revision_ingestions_points_post: {
+        parameters: {
+            query?: {
+                intent?: string;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+                linkable_object_id: number;
+                association_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SharedSeriesPointsIngestionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_shared_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__shared_series_revision_ingestions__ingestion_id__get: {
+        parameters: {
+            query?: {
+                intent?: string;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+                linkable_object_id: number;
+                association_id: number;
+                ingestion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_shared_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__shared_series_revision_ingestions__ingestion_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                linkable_object_id: number;
+                association_id: number;
+                ingestion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_shared_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__shared_series_revision_ingestions__ingestion_id__preview_get: {
+        parameters: {
+            query?: {
+                max_rows?: number | null;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+                linkable_object_id: number;
+                association_id: number;
+                ingestion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_shared_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__shared_series_revision_ingestions__ingestion_id__publications_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string | null;
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                project_id: number;
+                linkable_object_id: number;
+                association_id: number;
+                ingestion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SharedSeriesPublicationRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

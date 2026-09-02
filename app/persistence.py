@@ -117,14 +117,18 @@ from app.time_series_catalog_read import (
     sample_preview_rows,
 )
 from app.object_time_series import (
+    DERIVE_OBJECT_SERIES_OPERATION_KIND,
     INGESTION_ERROR_LIMIT,
     INGESTION_PREVIEW_MAX_ROWS,
     FILE_MAX_ACTIVE_JOBS,
     FILE_INGESTION_OPERATION_KIND,
     PUBLISH_INGESTION_OPERATION_KIND,
+    PUBLISH_SHARED_OPERATION_KIND,
+    SHARED_CONSUMER_SAMPLE_LIMIT,
     ObjectSeriesError,
     check_file_temporal_contract,
     check_temporal_contract,
+    derivation_prevalidation_token,
     ingestion_expiry,
     ingestion_validation_token,
     new_ingestion_key,
@@ -138,6 +142,9 @@ from app.object_time_series import (
     object_series_schema_statements,
     object_series_table_names,
     payload_checksum,
+    shared_decision_alternatives,
+    shared_impact_fingerprint,
+    shared_source_etag,
     summarize_normalized,
     utc_presentation,
 )
@@ -1744,6 +1751,42 @@ class AnalystStore:
     def _ensure_object_series_tables(self) -> None:
         for statement in object_series_schema_statements(self.database_backend):
             self.connection.execute(statement)
+        # TS7-013 binds a staged shared revision to the association that opened
+        # it, so an already-landed TS7-010 table gains the column additively.
+        self._ensure_canonical_space_column(
+            self._object_series_table("time_series_ingestions"),
+            "catalog_association_id",
+            "BIGINT" if self.database_backend == "postgresql" else "INTEGER",
+        )
+
+    def _ensure_canonical_space_column(
+        self, table: str, column: str, definition: str
+    ) -> None:
+        """Add one column to a schema-qualified expansion table, once."""
+
+        if self.database_backend == "postgresql":
+            schema_name, table_name = table.split(".", 1)
+            existing = {
+                row["column_name"]
+                for row in self.connection.execute(
+                    """
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_schema = ? AND table_name = ?
+                    """,
+                    (schema_name, table_name),
+                ).fetchall()
+            }
+        else:
+            existing = {
+                row["name"]
+                for row in self.connection.execute(
+                    f"PRAGMA table_info({table})"
+                ).fetchall()
+            }
+        if column not in existing:
+            self.connection.execute(
+                f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
+            )
 
     def _ensure_catalog_projection_read_columns(self) -> None:
         """Expand an already-landed TS7-005 projection for TS7-006 rows."""
@@ -5513,6 +5556,7 @@ class AnalystStore:
         return self.connection.execute(
             f"""
             SELECT association.*, role.role_key, role.display_name AS role_display_name,
+                   role.status AS role_status,
                    entry.series_key, entry.display_name AS signal_display_name,
                    entry.visibility_scope, entry.owner_project_id,
                    entry.owner_project_name, entry.set_status, entry.signal_status,
@@ -9254,175 +9298,193 @@ class AnalystStore:
                 linkable = self.authorize_object_series_root(
                     project_id=project_id, linkable_object_id=linkable_object_id
                 )
-                if linkable["status"] != "active":
-                    raise ObjectSeriesError(
-                        "TS_OBJECT_SERIES_NOT_FOUND",
-                        detail="the owner object is archived",
-                        linkable_object_id=int(linkable["id"]),
-                    )
-                object_series_key = normalize_object_series_key(
-                    document.get("object_series_key")
-                )
-                metadata = normalize_curated_metadata(document.get("metadata"))
-                contract = normalize_temporal_contract(
-                    document.get("temporal_contract")
-                )
-                source_expectation = normalize_source_expectation(
-                    document.get("source_expectation")
-                )
-                timezone_name = str(document.get("timezone") or "UTC").strip()
-                classification = self._resolve_object_series_classification(
-                    document, object_type_key=linkable["object_type_key"]
-                )
-
-                definitions = self._object_series_table("object_series_definitions")
-                taken = self.connection.execute(
-                    f"""
-                    SELECT time_series_set_id FROM {definitions}
-                    WHERE owner_linkable_object_id = ? AND object_series_key = ?
-                    """,
-                    (int(linkable["id"]), object_series_key),
-                ).fetchone()
-                if taken is not None:
-                    # The key stays reserved for the whole life of the object,
-                    # archived or not (chapter 7.1).
-                    raise ObjectSeriesError(
-                        "TS_OBJECT_SERIES_KEY_CONFLICT",
-                        detail="the object already used this local key",
-                        object_series_key=object_series_key,
-                    )
-
-                now = utc_now_iso()
-                sets_table = self._canonical("time_series_sets")
-                signals_table = self._canonical("time_series_signals")
-                revisions_table = self._canonical("time_series_set_revisions")
-                display_name = str(
-                    document.get("display_name") or object_series_key
-                ).strip()
-                description = str(document.get("description") or "").strip()
-
-                # The set names its single signal and the signal names its set.
-                # The pointer is written last, inside the same transaction, so
-                # the deferred reference of chapter 2.3 is satisfied at commit.
-                set_id = self._insert_canonical_row(
-                    f"""
-                    INSERT INTO {sets_table} (
-                        owner_project_id, name, version_number, version_label,
-                        visibility_scope, series_kind, owner_linkable_object_id,
-                        object_series_key, object_specific_signal_id, status,
-                        description, data_kind, timezone, created_at, updated_at,
-                        created_by, updated_by
-                    ) VALUES (?, ?, 1, 'object', 'project', 'object_specific',
-                              ?, ?, 0, 'draft', ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        int(linkable["project_id"]),
-                        object_series_key,
-                        int(linkable["id"]),
-                        object_series_key,
-                        description,
-                        classification["data_class_key"],
-                        timezone_name,
-                        now,
-                        now,
-                        actor,
-                        actor,
-                    ),
-                )
-                signal_id = self._insert_canonical_row(
-                    f"""
-                    INSERT INTO {signals_table} (
-                        time_series_set_id, series_kind, series_key, display_name,
-                        description, status, created_at, created_by
-                    ) VALUES (?, 'object_specific', ?, ?, ?, 'active', ?, ?)
-                    """,
-                    (set_id, object_series_key, display_name, description, now, actor),
-                )
-                self.connection.execute(
-                    f"UPDATE {sets_table} SET object_specific_signal_id = ? WHERE id = ?",
-                    (signal_id, set_id),
-                )
-
-                # Revision 1 opens ``building``: it records the contract but no
-                # period and no value, and it is not selectable (chapter 7.2).
-                revision_id = self._insert_canonical_row(
-                    f"""
-                    INSERT INTO {revisions_table} (
-                        time_series_set_id, revision_number, data_class_id,
-                        timezone, timestamp_convention, state, change_summary,
-                        metadata_json, created_at, created_by
-                    ) VALUES (?, 1, ?, ?, ?, 'building', 'definition_created',
-                              ?, ?, ?)
-                    """,
-                    (
-                        set_id,
-                        classification["data_class_id"],
-                        timezone_name,
-                        contract["timestamp_convention"],
-                        json.dumps(
-                            {"temporal_contract": contract}, sort_keys=True
-                        ),
-                        now,
-                        actor,
-                    ),
-                )
-                self.connection.execute(
-                    f"""
-                    INSERT INTO {self._canonical('time_series_revision_signals')} (
-                        set_revision_id, signal_id, time_series_set_id,
-                        semantic_type_id, unit_id, data_class_id, signal_role,
-                        aggregation, ordinal, metadata_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, 'input', ?, 0, '{{}}')
-                    """,
-                    (
-                        revision_id,
-                        signal_id,
-                        set_id,
-                        classification["semantic_type_id"],
-                        classification["unit_id"],
-                        classification["data_class_id"],
-                        classification["aggregation"],
-                    ),
-                )
-                self.connection.execute(
-                    f"""
-                    INSERT INTO {definitions} (
-                        time_series_set_id, signal_id, owner_linkable_object_id,
-                        owner_project_id, object_series_key,
-                        intended_binding_role_id, semantic_type_id, unit_id,
-                        data_class_id, aggregation, timezone, regularity,
-                        nominal_resolution_seconds, timestamp_convention,
-                        source_expectation_json, metadata_json, resource_version,
-                        created_at, created_by, updated_at, updated_by
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1,
-                              ?, ?, ?, ?)
-                    """,
-                    (
-                        set_id,
-                        signal_id,
-                        int(linkable["id"]),
-                        int(linkable["project_id"]),
-                        object_series_key,
-                        classification["binding_role_id"],
-                        classification["semantic_type_id"],
-                        classification["unit_id"],
-                        classification["data_class_id"],
-                        classification["aggregation"],
-                        timezone_name,
-                        contract["regularity"],
-                        contract["nominal_resolution_seconds"],
-                        contract["timestamp_convention"],
-                        json.dumps(source_expectation, sort_keys=True),
-                        json.dumps(metadata, sort_keys=True),
-                        now,
-                        actor,
-                        now,
-                        actor,
-                    ),
+                signal_id = self._insert_object_series_definition(
+                    linkable=linkable, document=document, actor=actor
                 )
                 return self._read_object_series(
                     linkable=linkable, signal_id=signal_id
                 )
+
+    def _insert_object_series_definition(
+        self,
+        *,
+        linkable: Mapping[str, Any],
+        document: Mapping[str, Any],
+        actor: str,
+    ) -> int:
+        """Write one local identity and its ``building`` revision 1.
+
+        Shared by the ordinary definition call and by the derivation of
+        chapter 7.9, which seals the same revision from a copied snapshot.
+        """
+
+        if linkable["status"] != "active":
+            raise ObjectSeriesError(
+                "TS_OBJECT_SERIES_NOT_FOUND",
+                detail="the owner object is archived",
+                linkable_object_id=int(linkable["id"]),
+            )
+        object_series_key = normalize_object_series_key(
+            document.get("object_series_key")
+        )
+        metadata = normalize_curated_metadata(document.get("metadata"))
+        contract = normalize_temporal_contract(
+            document.get("temporal_contract")
+        )
+        source_expectation = normalize_source_expectation(
+            document.get("source_expectation")
+        )
+        timezone_name = str(document.get("timezone") or "UTC").strip()
+        classification = self._resolve_object_series_classification(
+            document, object_type_key=linkable["object_type_key"]
+        )
+
+        definitions = self._object_series_table("object_series_definitions")
+        taken = self.connection.execute(
+            f"""
+            SELECT time_series_set_id FROM {definitions}
+            WHERE owner_linkable_object_id = ? AND object_series_key = ?
+            """,
+            (int(linkable["id"]), object_series_key),
+        ).fetchone()
+        if taken is not None:
+            # The key stays reserved for the whole life of the object,
+            # archived or not (chapter 7.1).
+            raise ObjectSeriesError(
+                "TS_OBJECT_SERIES_KEY_CONFLICT",
+                detail="the object already used this local key",
+                object_series_key=object_series_key,
+            )
+
+        now = utc_now_iso()
+        sets_table = self._canonical("time_series_sets")
+        signals_table = self._canonical("time_series_signals")
+        revisions_table = self._canonical("time_series_set_revisions")
+        display_name = str(
+            document.get("display_name") or object_series_key
+        ).strip()
+        description = str(document.get("description") or "").strip()
+
+        # The set names its single signal and the signal names its set.
+        # The pointer is written last, inside the same transaction, so
+        # the deferred reference of chapter 2.3 is satisfied at commit.
+        set_id = self._insert_canonical_row(
+            f"""
+            INSERT INTO {sets_table} (
+                owner_project_id, name, version_number, version_label,
+                visibility_scope, series_kind, owner_linkable_object_id,
+                object_series_key, object_specific_signal_id, status,
+                description, data_kind, timezone, created_at, updated_at,
+                created_by, updated_by
+            ) VALUES (?, ?, 1, 'object', 'project', 'object_specific',
+                      ?, ?, 0, 'draft', ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(linkable["project_id"]),
+                object_series_key,
+                int(linkable["id"]),
+                object_series_key,
+                description,
+                classification["data_class_key"],
+                timezone_name,
+                now,
+                now,
+                actor,
+                actor,
+            ),
+        )
+        signal_id = self._insert_canonical_row(
+            f"""
+            INSERT INTO {signals_table} (
+                time_series_set_id, series_kind, series_key, display_name,
+                description, status, created_at, created_by
+            ) VALUES (?, 'object_specific', ?, ?, ?, 'active', ?, ?)
+            """,
+            (set_id, object_series_key, display_name, description, now, actor),
+        )
+        self.connection.execute(
+            f"UPDATE {sets_table} SET object_specific_signal_id = ? WHERE id = ?",
+            (signal_id, set_id),
+        )
+
+        # Revision 1 opens ``building``: it records the contract but no
+        # period and no value, and it is not selectable (chapter 7.2).
+        revision_id = self._insert_canonical_row(
+            f"""
+            INSERT INTO {revisions_table} (
+                time_series_set_id, revision_number, data_class_id,
+                timezone, timestamp_convention, state, change_summary,
+                metadata_json, created_at, created_by
+            ) VALUES (?, 1, ?, ?, ?, 'building', 'definition_created',
+                      ?, ?, ?)
+            """,
+            (
+                set_id,
+                classification["data_class_id"],
+                timezone_name,
+                contract["timestamp_convention"],
+                json.dumps(
+                    {"temporal_contract": contract}, sort_keys=True
+                ),
+                now,
+                actor,
+            ),
+        )
+        self.connection.execute(
+            f"""
+            INSERT INTO {self._canonical('time_series_revision_signals')} (
+                set_revision_id, signal_id, time_series_set_id,
+                semantic_type_id, unit_id, data_class_id, signal_role,
+                aggregation, ordinal, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, 'input', ?, 0, '{{}}')
+            """,
+            (
+                revision_id,
+                signal_id,
+                set_id,
+                classification["semantic_type_id"],
+                classification["unit_id"],
+                classification["data_class_id"],
+                classification["aggregation"],
+            ),
+        )
+        self.connection.execute(
+            f"""
+            INSERT INTO {definitions} (
+                time_series_set_id, signal_id, owner_linkable_object_id,
+                owner_project_id, object_series_key,
+                intended_binding_role_id, semantic_type_id, unit_id,
+                data_class_id, aggregation, timezone, regularity,
+                nominal_resolution_seconds, timestamp_convention,
+                source_expectation_json, metadata_json, resource_version,
+                created_at, created_by, updated_at, updated_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1,
+                      ?, ?, ?, ?)
+            """,
+            (
+                set_id,
+                signal_id,
+                int(linkable["id"]),
+                int(linkable["project_id"]),
+                object_series_key,
+                classification["binding_role_id"],
+                classification["semantic_type_id"],
+                classification["unit_id"],
+                classification["data_class_id"],
+                classification["aggregation"],
+                timezone_name,
+                contract["regularity"],
+                contract["nominal_resolution_seconds"],
+                contract["timestamp_convention"],
+                json.dumps(source_expectation, sort_keys=True),
+                json.dumps(metadata, sort_keys=True),
+                now,
+                actor,
+                now,
+                actor,
+            ),
+        )
+        return int(signal_id)
 
     def patch_object_series(
         self,
@@ -11098,7 +11160,13 @@ class AnalystStore:
             (str(ingestion_key),),
         ).fetchone()
 
-    def _read_object_series_ingestion_row(self, ingestion_id: int) -> dict[str, Any]:
+    def _read_object_series_ingestion_row(
+        self,
+        ingestion_id: int,
+        *,
+        actor_role: str = "analyst",
+        intent: str = "shared",
+    ) -> dict[str, Any]:
         row = self._ingestion_row(ingestion_id)
         if row is None:
             raise ObjectSeriesError(
@@ -11106,20 +11174,54 @@ class AnalystStore:
             )
         normalized = json.loads(row["normalized_json"] or "{}")
         errors = json.loads(row["validation_json"] or "{}").get("errors", [])
-        impact = self._object_series_binding_impact(
-            signal_id=int(row["signal_id"]), set_id=int(row["time_series_set_id"])
-        )
+        shared = row["target_kind"] == "catalog_shared"
+        if shared:
+            # A shared job answers the impact of the whole set, and it always
+            # requires an explicit confirmation (chapter 7.9).
+            association = self._catalog_association_row(
+                int(row["catalog_association_id"])
+            )
+            contract_changes = bool(
+                json.loads(row["contract_json"] or "{}").get("changed")
+            )
+            view = self._shared_decision_view(
+                linkable=self.get_linkable_object(int(row["linkable_object_id"])),
+                association=association,
+                actor_role=actor_role,
+                intent=intent,
+                contract_changes=contract_changes,
+                # The incompleteness is read off the diagnosis the validator
+                # already produced, so a batch that failed for another reason
+                # is not mislabelled as a partial set (chapter 7.9).
+                payload_incomplete=any(
+                    entry.get("code") == "TS_INGEST_SIGNAL_SET_INCOMPLETE"
+                    for entry in errors
+                ),
+            )
+            impact = view["impact"]
+            target = {
+                "source_kind": "catalog",
+                "signal_id": int(row["signal_id"]),
+                "set_id": int(row["time_series_set_id"]),
+                "association_id": int(row["catalog_association_id"]),
+            }
+        else:
+            view = None
+            impact = self._object_series_binding_impact(
+                signal_id=int(row["signal_id"]), set_id=int(row["time_series_set_id"])
+            )
+            target = {
+                "source_kind": "object_specific",
+                "signal_id": int(row["signal_id"]),
+                "set_id": int(row["time_series_set_id"]),
+            }
         content_hash = row["content_hash"]
         receipt = {
             "ingestion_id": row["ingestion_key"],
             "channel": row["channel"],
             "state": row["state"],
             "mode": row["mode"],
-            "target": {
-                "source_kind": "object_specific",
-                "signal_id": int(row["signal_id"]),
-                "set_id": int(row["time_series_set_id"]),
-            },
+            "target": target,
             "base": (
                 None
                 if row["base_revision_id"] is None
@@ -11149,7 +11251,9 @@ class AnalystStore:
                 },
             },
             "impact": impact,
-            "requires_confirmation": impact["will_become_stale"] > 0,
+            "requires_confirmation": (
+                True if shared else impact["will_become_stale"] > 0
+            ),
             "validation_token": (
                 None
                 if content_hash is None
@@ -11174,6 +11278,18 @@ class AnalystStore:
             "expires_at": row["expires_at"],
             "published_revision_id": row["published_revision_id"],
         }
+        if shared and view is not None:
+            receipt["impact_fingerprint"] = view["impact_fingerprint"]
+            receipt["recommendation"] = view["recommendation"]
+            receipt["derivation_required"] = view["derivation_required"]
+            receipt["derivation_required_codes"] = view["derivation_required_codes"]
+            receipt["alternatives"] = view["alternatives"]
+            receipt["set_signals"] = view["set_signals"]
+            receipt["links"] = view["links"]
+            receipt["etag"] = shared_source_etag(
+                set_id=int(row["time_series_set_id"]),
+                current_revision_id=impact["source"]["current_revision_id"],
+            )
         if str(row["channel"]).startswith("file_"):
             submitted = json.loads(row["submitted_json"] or "{}")
             receipt["file"] = {
@@ -12147,6 +12263,1828 @@ class AnalystStore:
             },
             "resource_version": series["resource_version"],
             "object_series": series,
+        }
+
+    # -- Shared generic source from the object (TS7-013, chapter 7.9) -------
+    #
+    # ``SHARED_TARGET`` is a mutation base of its own. It is reachable only
+    # through an active association that matches signal, role and object, so a
+    # client cannot turn a local load into a shared revision by editing one
+    # path segment. An administrative integration that does not start from an
+    # object uses the canonical revision resource of the set and never
+    # simulates an ``association_id``.
+
+    def _shared_source_association(
+        self, *, linkable: Mapping[str, Any], association_id: int
+    ):
+        """The association this object really owns, or a 404 that leaks nothing."""
+
+        row = self._catalog_association_row(int(association_id))
+        if row is None or int(row["linkable_object_id"]) != int(linkable["id"]):
+            raise ObjectSeriesError(
+                "TS_OBJECT_SERIES_NOT_FOUND",
+                detail="no catalog association with that id belongs to this object",
+                association_id=int(association_id),
+            )
+        return row
+
+    def _shared_source_set(self, set_id: int):
+        return self.connection.execute(
+            f"""
+            SELECT canonical_set.id, canonical_set.visibility_scope,
+                   canonical_set.owner_project_id, canonical_set.status,
+                   canonical_set.current_revision_id, canonical_set.name,
+                   canonical_set.timezone, project.name AS owner_project_name,
+                   revision.revision_number AS current_revision_number,
+                   revision.content_hash AS current_content_hash
+            FROM {self._canonical('time_series_sets')} AS canonical_set
+            JOIN projects AS project ON project.id = canonical_set.owner_project_id
+            LEFT JOIN {self._canonical('time_series_set_revisions')} AS revision
+              ON revision.id = canonical_set.current_revision_id
+            WHERE canonical_set.id = ?
+            """,
+            (int(set_id),),
+        ).fetchone()
+
+    def _shared_source_signals(self, *, set_id: int, revision_id: int | None):
+        """Every active signal the atomic revision of this set must carry."""
+
+        if revision_id is None:
+            return []
+        return [
+            dict(row)
+            for row in self.connection.execute(
+                f"""
+                SELECT signal.id AS signal_id, signal.series_key,
+                       signal.display_name, signal.status,
+                       revision_signal.semantic_type_id, revision_signal.unit_id,
+                       revision_signal.data_class_id, revision_signal.signal_role,
+                       revision_signal.aggregation, revision_signal.ordinal,
+                       semantic_type.semantic_key AS semantic_type_key,
+                       unit.unit_key AS unit_key
+                FROM {self._canonical('time_series_revision_signals')}
+                     AS revision_signal
+                JOIN {self._canonical('time_series_signals')} AS signal
+                  ON signal.id = revision_signal.signal_id
+                JOIN time_series_semantic_types AS semantic_type
+                  ON semantic_type.id = revision_signal.semantic_type_id
+                JOIN measurement_units AS unit ON unit.id = revision_signal.unit_id
+                WHERE revision_signal.set_revision_id = ?
+                  AND signal.status = 'active'
+                ORDER BY revision_signal.ordinal, signal.id
+                """,
+                (int(revision_id),),
+            ).fetchall()
+        ]
+
+    def _shared_source_impact(
+        self,
+        *,
+        association: Mapping[str, Any],
+        contract_changes: bool = False,
+    ) -> dict[str, Any]:
+        """What a shared revision on this set would do to everyone (7.9).
+
+        The unit of a generic revision is the set, so the blast radius is read
+        over the whole set and not over the one signal this association happens
+        to point at.
+        """
+
+        set_id = int(association["time_series_set_id"])
+        owner_object_id = int(association["linkable_object_id"])
+        set_row = self._shared_source_set(set_id)
+        pointer = None if set_row is None else set_row["current_revision_id"]
+        associations_table = self.link_layer_table_names()[
+            "time_series_catalog_associations"
+        ]
+        bindings_table = self.link_layer_table_names()["case_time_series_bindings"]
+        linkables = self._linkable("linkable_objects")
+
+        association_rows = self.connection.execute(
+            f"""
+            SELECT association.linkable_object_id AS linkable_object_id,
+                   linkable.project_id AS project_id
+            FROM {associations_table} AS association
+            JOIN {linkables} AS linkable
+              ON linkable.id = association.linkable_object_id
+            WHERE association.time_series_set_id = ?
+              AND association.status = 'active'
+            ORDER BY association.linkable_object_id
+            """,
+            (set_id,),
+        ).fetchall()
+        binding_rows = self.connection.execute(
+            f"""
+            SELECT binding.linkable_object_id AS linkable_object_id,
+                   binding.case_input_variant_id AS case_input_variant_id,
+                   binding.set_revision_id AS set_revision_id,
+                   linkable.project_id AS project_id
+            FROM {bindings_table} AS binding
+            JOIN {linkables} AS linkable
+              ON linkable.id = binding.linkable_object_id
+            WHERE binding.time_series_set_id = ? AND binding.status = 'active'
+            ORDER BY binding.linkable_object_id, binding.id
+            """,
+            (set_id,),
+        ).fetchall()
+
+        on_current = sum(
+            1
+            for row in binding_rows
+            if pointer is not None and row["set_revision_id"] == pointer
+        )
+        consumers: dict[int, dict[str, Any]] = {}
+        for row in association_rows:
+            consumers.setdefault(
+                int(row["linkable_object_id"]),
+                {
+                    "linkable_object_id": int(row["linkable_object_id"]),
+                    "project_id": int(row["project_id"]),
+                    "relation": "association_only",
+                },
+            )
+        for row in binding_rows:
+            observed = (
+                "current"
+                if pointer is not None and row["set_revision_id"] == pointer
+                else "pinned"
+            )
+            consumer = consumers.setdefault(
+                int(row["linkable_object_id"]),
+                {
+                    "linkable_object_id": int(row["linkable_object_id"]),
+                    "project_id": int(row["project_id"]),
+                    "relation": observed,
+                },
+            )
+            # A pinned consumer is the louder fact, so it keeps the label.
+            if consumer["relation"] != "pinned":
+                consumer["relation"] = observed
+        listed = [consumers[key] for key in sorted(consumers)]
+        content_hash = None if set_row is None else set_row["current_content_hash"]
+        return {
+            "source": {
+                "set_id": set_id,
+                "set_name": None if set_row is None else set_row["name"],
+                "visibility_scope": (
+                    None if set_row is None else set_row["visibility_scope"]
+                ),
+                "owner_project_id": (
+                    None if set_row is None else int(set_row["owner_project_id"])
+                ),
+                "owner_project_name": (
+                    None if set_row is None else set_row["owner_project_name"]
+                ),
+                "current_revision_id": None if pointer is None else int(pointer),
+                "current_revision_number": (
+                    None
+                    if set_row is None or set_row["current_revision_number"] is None
+                    else int(set_row["current_revision_number"])
+                ),
+                "current_content_hash": (
+                    None if content_hash is None else f"sha256:{content_hash}"
+                ),
+                "signal_count": len(
+                    self._shared_source_signals(set_id=set_id, revision_id=pointer)
+                ),
+            },
+            "associations": {
+                "total": len(association_rows),
+                "other_objects": len(
+                    {
+                        int(row["linkable_object_id"])
+                        for row in association_rows
+                        if int(row["linkable_object_id"]) != owner_object_id
+                    }
+                ),
+            },
+            "bindings": {
+                "total_active": len(binding_rows),
+                "current": on_current,
+                "pinned": len(binding_rows) - on_current,
+                "projects_affected": len(
+                    {int(row["project_id"]) for row in binding_rows}
+                ),
+                "variants_affected": len(
+                    {int(row["case_input_variant_id"]) for row in binding_rows}
+                ),
+            },
+            "effect": {
+                # Publishing never moves a binding in silence: the ones that
+                # followed the pointer and the pinned ones both go stale (7.10).
+                "bindings_will_become_stale": len(binding_rows),
+                "associations_will_require_revalidation": (
+                    len(association_rows) if contract_changes else 0
+                ),
+            },
+            "listed_consumers": listed[:SHARED_CONSUMER_SAMPLE_LIMIT],
+            "consumers_truncated": len(listed) > SHARED_CONSUMER_SAMPLE_LIMIT,
+        }
+
+    def _shared_publication_authority(
+        self, *, association: Mapping[str, Any], actor_role: str
+    ) -> dict[str, Any]:
+        """Opening the flow never grants the right to publish (chapter 7.9)."""
+
+        role = str(actor_role or "analyst").strip().lower()
+        requires_admin = association["visibility_scope"] == "global"
+        if role == "external":
+            return {
+                "may_publish": False,
+                "requires_admin": requires_admin,
+                "refusal": "TS_INGEST_FORBIDDEN",
+            }
+        if requires_admin and role != "admin":
+            return {
+                "may_publish": False,
+                "requires_admin": True,
+                "refusal": "TS_SHARED_REVISION_ADMIN_REQUIRED",
+            }
+        if role not in {"admin", "analyst"}:
+            return {
+                "may_publish": False,
+                "requires_admin": requires_admin,
+                "refusal": "TS_INGEST_FORBIDDEN",
+            }
+        return {"may_publish": True, "requires_admin": requires_admin, "refusal": None}
+
+    def _shared_target_links(
+        self, *, project_id: int, linkable_object_id: int, association_id: int
+    ) -> dict[str, str]:
+        root = (
+            f"/api/projects/{int(project_id)}/linkable-objects/"
+            f"{int(linkable_object_id)}/time-series/catalog-associations/"
+            f"{int(association_id)}"
+        )
+        return {
+            "detail": root,
+            "catalog_detail": (
+                f"/api/time-series/catalog/associations/{int(association_id)}"
+            ),
+            "shared_point_ingestions": (
+                f"{root}/shared-series/revision-ingestions/points"
+            ),
+            "derivation_prevalidations": (
+                f"{root}/object-series-derivation-prevalidations"
+            ),
+            "derivations": f"{root}/object-series-derivations",
+        }
+
+    def _shared_decision_view(
+        self,
+        *,
+        linkable: Mapping[str, Any],
+        association: Mapping[str, Any],
+        actor_role: str,
+        intent: str,
+        contract_changes: bool = False,
+        payload_incomplete: bool = False,
+    ) -> dict[str, Any]:
+        """Impact, recommendation and the two ordered outcomes (chapter 8.6)."""
+
+        impact = self._shared_source_impact(
+            association=association, contract_changes=contract_changes
+        )
+        authority = self._shared_publication_authority(
+            association=association, actor_role=actor_role
+        )
+        signals = self._shared_source_signals(
+            set_id=int(association["time_series_set_id"]),
+            revision_id=impact["source"]["current_revision_id"],
+        )
+        blocking: list[str] = []
+        if not authority["may_publish"]:
+            blocking.append(authority["refusal"])
+        if association["status"] != "active":
+            blocking.append("TS_OBJECT_SERIES_NOT_FOUND")
+        if payload_incomplete:
+            # One association never authorizes a partial revision of a
+            # multi-signal set (chapter 7.9).
+            blocking.append("TS_INGEST_SIGNAL_SET_INCOMPLETE")
+        derivation_required = bool(blocking)
+        links = self._shared_target_links(
+            project_id=int(linkable["project_id"]),
+            linkable_object_id=int(linkable["id"]),
+            association_id=int(association["id"]),
+        )
+        alternatives = shared_decision_alternatives(
+            derivation_href=links["derivation_prevalidations"],
+            shared_href=links["shared_point_ingestions"],
+            derivation_required=derivation_required,
+            may_publish_shared=(
+                authority["may_publish"] and association["status"] == "active"
+            ),
+            requires_admin=authority["requires_admin"],
+            intent=intent,
+        )
+        recommendation = (
+            "derive_object_specific"
+            if derivation_required
+            or (
+                impact["associations"]["other_objects"] > 0
+                and str(intent).strip().lower() == "local"
+            )
+            else "publish_shared"
+        )
+        return {
+            "impact": impact,
+            "impact_fingerprint": shared_impact_fingerprint(impact),
+            "recommendation": recommendation,
+            "requires_confirmation": True,
+            "derivation_required": derivation_required,
+            "derivation_required_codes": blocking,
+            "alternatives": alternatives,
+            "set_signals": [
+                {
+                    "signal_id": int(signal["signal_id"]),
+                    "series_key": signal["series_key"],
+                    "display_name": signal["display_name"],
+                    "semantic_type_key": signal["semantic_type_key"],
+                    "unit_key": signal["unit_key"],
+                }
+                for signal in signals
+            ],
+            "links": links,
+        }
+
+    def read_object_catalog_association(
+        self,
+        *,
+        project_id: int,
+        linkable_object_id: int,
+        association_id: int,
+        actor_role: str = "analyst",
+        intent: str = "shared",
+    ) -> dict[str, Any]:
+        """The contextual view of one generic association, with its impact.
+
+        Chapter 8.6 requires the whole impact to be visible **before** the
+        caller decides, so this read already answers scope, owner, current
+        revision, associations, other objects and projects, and the bindings
+        that would go stale (AC-SHR-01).
+        """
+
+        with self._read_only_transaction():
+            linkable = self.authorize_object_series_root(
+                project_id=project_id, linkable_object_id=linkable_object_id
+            )
+            association = self._shared_source_association(
+                linkable=linkable, association_id=association_id
+            )
+            view = self._shared_decision_view(
+                linkable=linkable,
+                association=association,
+                actor_role=actor_role,
+                intent=intent,
+            )
+        return {
+            "association": {
+                "association_id": int(association["id"]),
+                "signal_id": int(association["signal_id"]),
+                "set_id": int(association["time_series_set_id"]),
+                "series_key": association["series_key"],
+                "display_name": association["signal_display_name"],
+                "binding_role_key": association["role_key"],
+                "status": association["status"],
+                "linkable_object_id": int(association["linkable_object_id"]),
+                "project_id": int(linkable["project_id"]),
+            },
+            **view,
+            "capabilities": {
+                "publish_shared": any(
+                    alternative["kind"] == "publish_shared"
+                    and alternative["available"]
+                    for alternative in view["alternatives"]
+                ),
+                "derive_object_specific": association["status"] == "active",
+                "preview_source": association["set_status"] != "archived",
+            },
+        }
+
+    def _require_shared_target(
+        self,
+        *,
+        linkable: Mapping[str, Any],
+        association: Mapping[str, Any],
+        actor_role: str,
+    ) -> dict[str, Any]:
+        """Everything ``SHARED_TARGET`` demands before it looks at a payload.
+
+        Chapter 7.9: an archived, incompatible or foreign association does not
+        open the flow, and opening the flow is not permission to publish. The
+        authority check runs before the source is read, so an `analyst` on a
+        `global` set is refused without learning anything else (AC-SHR-05).
+        """
+
+        if linkable["status"] != "active":
+            raise ObjectSeriesError(
+                "TS_OBJECT_SERIES_NOT_FOUND", detail="the object is archived"
+            )
+        if association["status"] != "active":
+            raise ObjectSeriesError(
+                "TS_OBJECT_SERIES_NOT_FOUND",
+                detail="an archived association does not open the shared flow",
+                association_id=int(association["id"]),
+            )
+        if association["role_status"] != "active":
+            raise ObjectSeriesError(
+                "TS_COMPAT_ROLE_NOT_ALLOWED",
+                detail="the binding role of the association is not active",
+                binding_role_key=association["role_key"],
+            )
+        authority = self._shared_publication_authority(
+            association=association, actor_role=actor_role
+        )
+        if not authority["may_publish"]:
+            raise ObjectSeriesError(
+                authority["refusal"],
+                detail=(
+                    "a global source is published only by an administrator"
+                    if authority["refusal"] == "TS_SHARED_REVISION_ADMIN_REQUIRED"
+                    else "this actor may not publish on the shared source"
+                ),
+                visibility_scope=association["visibility_scope"],
+                required_role="admin" if authority["requires_admin"] else "analyst",
+            )
+        if (
+            association["set_status"] == "archived"
+            or association["signal_status"] == "archived"
+        ):
+            raise ObjectSeriesError(
+                "TS_OBJECT_SERIES_NOT_FOUND", detail="the shared source is archived"
+            )
+        set_row = self._shared_source_set(int(association["time_series_set_id"]))
+        if set_row is None or set_row["current_revision_id"] is None:
+            raise ObjectSeriesError(
+                "TS_OBJECT_SERIES_NOT_FOUND",
+                detail="the shared source has no sealed revision",
+            )
+        signals = self._shared_source_signals(
+            set_id=int(association["time_series_set_id"]),
+            revision_id=int(set_row["current_revision_id"]),
+        )
+        if not any(
+            int(signal["signal_id"]) == int(association["signal_id"])
+            for signal in signals
+        ):
+            # Signal, role and object must all still match; a stale association
+            # is not a mutation base (chapter 7.4).
+            raise ObjectSeriesError(
+                "TS_OBJECT_SERIES_NOT_FOUND",
+                detail="the association does not match a signal of the current revision",
+                association_id=int(association["id"]),
+            )
+        return {"set": set_row, "signals": signals, "authority": authority}
+
+    def _shared_ingestion_contract(
+        self,
+        *,
+        association: Mapping[str, Any],
+        set_row: Mapping[str, Any],
+        document: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """The contract the shared revision declares, defaulted from the source."""
+
+        declared = document.get("revision_contract") or {}
+        if not isinstance(declared, Mapping):
+            raise ObjectSeriesError(
+                "TS_INGEST_VALIDATION_FAILED",
+                detail="revision_contract must be an object",
+            )
+        revision = self.connection.execute(
+            f"""
+            SELECT revision.timezone, revision.timestamp_convention,
+                   data_class.id AS data_class_id,
+                   data_class.data_class_key AS data_class_key
+            FROM {self._canonical('time_series_set_revisions')} AS revision
+            JOIN time_series_data_classes AS data_class
+              ON data_class.id = revision.data_class_id
+            WHERE revision.id = ?
+            """,
+            (int(set_row["current_revision_id"]),),
+        ).fetchone()
+        entry = self.connection.execute(
+            f"""
+            SELECT regularity, nominal_resolution_seconds
+            FROM {self._projection('time_series_catalog_entries')}
+            WHERE signal_id = ?
+            """,
+            (int(association["signal_id"]),),
+        ).fetchone()
+        data_class_key = str(
+            declared.get("data_class_key") or revision["data_class_key"]
+        ).strip()
+        data_class = self.connection.execute(
+            """
+            SELECT id, data_class_key, status FROM time_series_data_classes
+            WHERE data_class_key = ?
+            """,
+            (data_class_key,),
+        ).fetchone()
+        if data_class is None or data_class["status"] != "active":
+            raise ObjectSeriesError(
+                "TS_INGEST_VALIDATION_FAILED",
+                detail="the declared data class is unknown",
+                errors=[
+                    {
+                        "code": "TS_INGEST_TEMPORAL_CONTRACT_INVALID",
+                        "message": "unknown data_class_key",
+                        "location": {
+                            "record_index": 0,
+                            "json_pointer": "/revision_contract/data_class_key",
+                        },
+                    }
+                ],
+            )
+        regularity = str(
+            declared.get("regularity")
+            or (None if entry is None else entry["regularity"])
+            or "regular"
+        ).strip()
+        if regularity not in {"regular", "irregular"}:
+            raise ObjectSeriesError(
+                "TS_INGEST_VALIDATION_FAILED",
+                detail="the declared regularity is unknown",
+            )
+        resolution = declared.get(
+            "nominal_resolution_seconds",
+            None if entry is None else entry["nominal_resolution_seconds"],
+        )
+        timezone_name = str(declared.get("timezone") or revision["timezone"]).strip()
+        return {
+            "data_class_id": int(data_class["id"]),
+            "data_class_key": data_class["data_class_key"],
+            "timezone": timezone_name,
+            "timestamp_convention": revision["timestamp_convention"],
+            "regularity": regularity,
+            "nominal_resolution_seconds": (
+                None if resolution is None else float(resolution)
+            ),
+            # A contract change is not forbidden, but it is not silent either:
+            # chapter 7.9 makes the associations it would stale part of the
+            # impact the caller confirms.
+            "changed": (
+                data_class["data_class_key"] != revision["data_class_key"]
+                or timezone_name != revision["timezone"]
+            ),
+        }
+
+    def _shared_content_hash(
+        self,
+        *,
+        signals: list[dict[str, Any]],
+        contract: Mapping[str, Any],
+        periods: list[dict[str, Any]],
+        values: list[dict[str, Any]],
+    ) -> str:
+        """The canonical hash of a multi-signal snapshot that is not written yet."""
+
+        digest = CanonicalContentHash(
+            timezone=contract["timezone"],
+            timestamp_convention=contract["timestamp_convention"],
+            data_class_key=contract["data_class_key"],
+        )
+        ordinals: dict[str, int] = {}
+        for ordinal, signal in enumerate(signals):
+            ordinals[signal["series_key"]] = ordinal
+            digest.add_signal(
+                ordinal=ordinal,
+                series_key=signal["series_key"],
+                semantic_type_key=signal["semantic_type_key"],
+                unit_key=signal["unit_key"],
+                data_class_key=contract["data_class_key"],
+                signal_role=signal["signal_role"],
+                aggregation=signal["aggregation"],
+            )
+        for period in periods:
+            digest.add_period(
+                period_index=period["period_index"],
+                timestamp_start=period["timestamp_start"],
+                timestamp_end=period["timestamp_end"],
+                duration_hours=period["duration_hours"],
+            )
+        for value in sorted(
+            values,
+            key=lambda entry: (
+                ordinals.get(entry["series_key"], 0),
+                entry["period_index"],
+            ),
+        ):
+            digest.add_value(
+                ordinal=ordinals.get(value["series_key"], 0),
+                period_index=value["period_index"],
+                value=value["value"],
+            )
+        return digest.seal()
+
+    def prepare_shared_series_points_ingestion(
+        self,
+        *,
+        project_id: int,
+        linkable_object_id: int,
+        association_id: int,
+        document: Mapping[str, Any],
+        actor: str,
+        actor_role: str,
+        intent: str = "shared",
+    ) -> dict[str, Any]:
+        """Validate and stage a shared generic revision started from an object.
+
+        Nothing is published here: the job carries the impact the caller must
+        confirm, and the confirmation is a second, separate transaction
+        (chapters 7.9 and 8.6).
+        """
+
+        with self._lock:
+            with self._database_transaction():
+                linkable = self.authorize_object_series_root(
+                    project_id=project_id, linkable_object_id=linkable_object_id
+                )
+                association = self._shared_source_association(
+                    linkable=linkable, association_id=association_id
+                )
+                target = self._require_shared_target(
+                    linkable=linkable, association=association, actor_role=actor_role
+                )
+                receipt, refusal = self._stage_shared_series_points(
+                    linkable=linkable,
+                    association=association,
+                    set_row=target["set"],
+                    signals=target["signals"],
+                    document=document,
+                    actor=actor,
+                    actor_role=actor_role,
+                    intent=intent,
+                )
+            # An invalid job still commits so its errors can be read and the
+            # same job corrected (chapter 7.4); the refusal follows it.
+            if refusal is not None:
+                raise refusal
+            return receipt
+
+    def _stage_shared_series_points(
+        self,
+        *,
+        linkable: Mapping[str, Any],
+        association: Mapping[str, Any],
+        set_row: Mapping[str, Any],
+        signals: list[dict[str, Any]],
+        document: Mapping[str, Any],
+        actor: str,
+        actor_role: str,
+        intent: str,
+    ) -> tuple[dict[str, Any], ObjectSeriesError | None]:
+        mode = str(document.get("mode") or "replace_full").strip()
+        if mode not in {"replace_full", "append_tail"}:
+            raise ObjectSeriesError(
+                "TS_INGEST_VALIDATION_FAILED", detail="mode is not supported"
+            )
+        contract = self._shared_ingestion_contract(
+            association=association, set_row=set_row, document=document
+        )
+        current = self.connection.execute(
+            f"""
+            SELECT id, revision_number, content_hash
+            FROM {self._canonical('time_series_set_revisions')} WHERE id = ?
+            """,
+            (int(set_row["current_revision_id"]),),
+        ).fetchone()
+        expected_base = document.get("expected_base")
+        if not isinstance(expected_base, Mapping):
+            raise ObjectSeriesError(
+                "TS_INGEST_PRECONDITION_REQUIRED",
+                detail="expected_base must name the exact current revision",
+                field="expected_base",
+            )
+        declared_hash = str(expected_base.get("content_hash") or "").split(":")[-1]
+        if (
+            int(expected_base.get("revision_id") or 0) != int(current["id"])
+            or declared_hash != current["content_hash"]
+        ):
+            raise ObjectSeriesError(
+                "TS_INGEST_PRECONDITION_CHANGED",
+                detail="the declared base is not the current revision",
+                current_revision_id=int(current["id"]),
+            )
+
+        series_keys = tuple(signal["series_key"] for signal in signals)
+        normalized = normalize_points_payload(
+            document, series_keys=series_keys, mapping={}
+        )
+        errors = list(normalized["errors"])
+        periods = normalized["periods"]
+        values = normalized["values"]
+
+        if mode == "append_tail" and not errors:
+            base_snapshot = self._object_series_snapshot(int(current["id"]))
+            base_periods = base_snapshot["periods"]
+            coverage_end = base_periods[-1]["timestamp_end"] if base_periods else None
+            if periods and coverage_end is not None:
+                if periods[0]["timestamp_start"] < coverage_end:
+                    raise ObjectSeriesError(
+                        "TS_INGEST_APPEND_CONFLICT",
+                        detail="the tail overlaps the current coverage",
+                    )
+                if (
+                    contract["regularity"] == "regular"
+                    and periods[0]["timestamp_start"] != coverage_end
+                ):
+                    raise ObjectSeriesError(
+                        "TS_INGEST_APPEND_CONFLICT",
+                        detail="a regular tail must start where the coverage ends",
+                    )
+            offset = len(base_periods)
+            periods = base_periods + [
+                {**period, "period_index": period["period_index"] + offset}
+                for period in periods
+            ]
+            values = base_snapshot["values"] + [
+                {**value, "period_index": value["period_index"] + offset}
+                for value in values
+            ]
+
+        errors.extend(check_temporal_contract(periods, contract=contract))
+        content_hash = (
+            None
+            if errors
+            else self._shared_content_hash(
+                signals=signals, contract=contract, periods=periods, values=values
+            )
+        )
+        state = "ready_to_publish" if not errors else "invalid"
+        now = utc_now_iso()
+        ingestion_key = new_ingestion_key()
+        ingestion_id = self._insert_canonical_row(
+            f"""
+            INSERT INTO {self._object_series_table('time_series_ingestions')} (
+                ingestion_key, project_id, linkable_object_id, time_series_set_id,
+                signal_id, catalog_association_id, target_kind, channel, state,
+                mode, actor, base_revision_id, base_content_hash, contract_json,
+                source_json, mapping_json, submitted_json, normalized_json,
+                validation_json, payload_checksum, content_hash, created_at,
+                updated_at, expires_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 'catalog_shared', 'api_points', ?, ?, ?,
+                      ?, ?, ?, ?, '{{}}', ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                ingestion_key,
+                int(linkable["project_id"]),
+                int(linkable["id"]),
+                int(association["time_series_set_id"]),
+                int(association["signal_id"]),
+                int(association["id"]),
+                state,
+                mode,
+                actor,
+                int(current["id"]),
+                current["content_hash"],
+                json.dumps(contract, sort_keys=True),
+                json.dumps(document.get("source") or {}, sort_keys=True),
+                json.dumps(document.get("points") or [], sort_keys=True),
+                json.dumps(summarize_normalized(periods, values), sort_keys=True),
+                json.dumps({"errors": errors}, sort_keys=True),
+                payload_checksum(document.get("points") or []),
+                content_hash,
+                now,
+                now,
+                ingestion_expiry(now),
+            ),
+        )
+        self._write_ingestion_staging(
+            ingestion_id=ingestion_id, periods=periods, values=values
+        )
+        receipt = self._read_object_series_ingestion_row(
+            ingestion_id, actor_role=actor_role, intent=intent
+        )
+        if errors:
+            return receipt, ObjectSeriesError(
+                "TS_INGEST_VALIDATION_FAILED",
+                detail=f"{len(errors)} records require correction",
+                errors=errors,
+                ingestion=receipt,
+            )
+        return receipt, None
+
+    def _resolve_shared_series_ingestion(
+        self,
+        *,
+        project_id: int,
+        linkable_object_id: int,
+        association_id: int,
+        ingestion_key: str,
+    ):
+        """Knowing the opaque id never skips authorization (AC-SEG-03)."""
+
+        linkable = self.authorize_object_series_root(
+            project_id=project_id, linkable_object_id=linkable_object_id
+        )
+        association = self._shared_source_association(
+            linkable=linkable, association_id=association_id
+        )
+        ingestion = self._ingestion_row_by_key(ingestion_key)
+        if (
+            ingestion is None
+            or ingestion["target_kind"] != "catalog_shared"
+            or ingestion["catalog_association_id"] is None
+            or int(ingestion["catalog_association_id"]) != int(association["id"])
+            or int(ingestion["linkable_object_id"]) != int(linkable["id"])
+            or int(ingestion["project_id"]) != int(linkable["project_id"])
+        ):
+            raise ObjectSeriesError(
+                "TS_OBJECT_SERIES_NOT_FOUND",
+                detail="no ingestion with that id belongs to this target",
+            )
+        return linkable, association, ingestion
+
+    def read_shared_series_ingestion(
+        self,
+        *,
+        project_id: int,
+        linkable_object_id: int,
+        association_id: int,
+        ingestion_key: str,
+        actor_role: str = "analyst",
+        intent: str = "shared",
+    ) -> dict[str, Any]:
+        _, _, ingestion = self._resolve_shared_series_ingestion(
+            project_id=project_id,
+            linkable_object_id=linkable_object_id,
+            association_id=association_id,
+            ingestion_key=ingestion_key,
+        )
+        return self._read_object_series_ingestion_row(
+            int(ingestion["id"]), actor_role=actor_role, intent=intent
+        )
+
+    def read_shared_series_ingestion_preview(
+        self,
+        *,
+        project_id: int,
+        linkable_object_id: int,
+        association_id: int,
+        ingestion_key: str,
+        max_rows: int | None = None,
+    ) -> dict[str, Any]:
+        """A bounded normalized sample of what is staged - never a download."""
+
+        _, association, ingestion = self._resolve_shared_series_ingestion(
+            project_id=project_id,
+            linkable_object_id=linkable_object_id,
+            association_id=association_id,
+            ingestion_key=ingestion_key,
+        )
+        if ingestion["state"] == "cancelled":
+            raise ObjectSeriesError(
+                "TS_INGEST_SESSION_UNAVAILABLE", detail="the job was cancelled"
+            )
+        limit = INGESTION_PREVIEW_MAX_ROWS if max_rows is None else int(max_rows)
+        if limit < 1 or limit > INGESTION_PREVIEW_MAX_ROWS:
+            raise ObjectSeriesError(
+                "TS_QUERY_INVALID",
+                field="max_rows",
+                detail="max_rows is out of range",
+                maximum=INGESTION_PREVIEW_MAX_ROWS,
+            )
+        staging = self._read_ingestion_staging(int(ingestion["id"]))
+        by_period: dict[int, list[dict[str, Any]]] = {}
+        for value in staging["values"]:
+            by_period.setdefault(value["period_index"], []).append(value)
+        rows = []
+        for period in staging["periods"][:limit]:
+            for value in sorted(
+                by_period.get(period["period_index"], []),
+                key=lambda entry: entry["series_key"],
+            ):
+                rows.append(
+                    {
+                        "period_index": period["period_index"],
+                        "timestamp_start": utc_presentation(period["timestamp_start"]),
+                        "timestamp_end": utc_presentation(period["timestamp_end"]),
+                        "series_key": value["series_key"],
+                        "value": value["value"],
+                        "quality_flag": value["quality_flag"],
+                    }
+                )
+        return {
+            "ingestion_id": ingestion["ingestion_key"],
+            "set_id": int(association["time_series_set_id"]),
+            "source_row_count": len(staging["periods"]),
+            "returned_row_count": len(rows),
+            "max_rows": limit,
+            "rows": rows,
+        }
+
+    def cancel_shared_series_ingestion(
+        self,
+        *,
+        project_id: int,
+        linkable_object_id: int,
+        association_id: int,
+        ingestion_key: str,
+        actor: str,
+    ) -> None:
+        with self._lock:
+            with self._database_transaction():
+                _, _, ingestion = self._resolve_shared_series_ingestion(
+                    project_id=project_id,
+                    linkable_object_id=linkable_object_id,
+                    association_id=association_id,
+                    ingestion_key=ingestion_key,
+                )
+                if ingestion["state"] == "published":
+                    raise ObjectSeriesError(
+                        "TS_INGEST_SESSION_UNAVAILABLE",
+                        detail="a published job is not cancellable",
+                    )
+                self.connection.execute(
+                    f"""
+                    UPDATE {self._object_series_table('time_series_ingestions')}
+                    SET state = 'cancelled', submitted_json = '[]', updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (utc_now_iso(), int(ingestion["id"])),
+                )
+                self._write_ingestion_staging(
+                    ingestion_id=int(ingestion["id"]), periods=[], values=[]
+                )
+
+    def publish_shared_series_ingestion(
+        self,
+        *,
+        project_id: int,
+        linkable_object_id: int,
+        association_id: int,
+        ingestion_key: str,
+        validation_token: str,
+        confirm: bool,
+        comprehension_acknowledged: bool,
+        impact_fingerprint: str,
+        reason_code: str,
+        reason_text: str,
+        if_match: str,
+        idempotency_key: str,
+        actor: str,
+        actor_role: str,
+    ) -> tuple[dict[str, Any], bool]:
+        """Publish for everyone, in one transaction, once (chapters 7.9, 9.7)."""
+
+        with self._lock:
+            with self._database_transaction():
+                linkable, association, ingestion = (
+                    self._resolve_shared_series_ingestion(
+                        project_id=project_id,
+                        linkable_object_id=linkable_object_id,
+                        association_id=association_id,
+                        ingestion_key=ingestion_key,
+                    )
+                )
+                target = self._require_shared_target(
+                    linkable=linkable, association=association, actor_role=actor_role
+                )
+                try:
+                    claim = self._claim_idempotency(
+                        actor_id=actor,
+                        operation_kind=PUBLISH_SHARED_OPERATION_KIND,
+                        scope_key=(
+                            f"shared-series:{int(association['time_series_set_id'])}"
+                        ),
+                        idempotency_key=idempotency_key,
+                        request_hash=idempotency_request_hash(
+                            {
+                                "ingestion_key": ingestion["ingestion_key"],
+                                "content_hash": ingestion["content_hash"],
+                                "base_revision_id": ingestion["base_revision_id"],
+                                "if_match": if_match,
+                                "confirm": bool(confirm),
+                                "impact_fingerprint": impact_fingerprint,
+                                "reason_code": reason_code,
+                            }
+                        ),
+                    )
+                except CanonicalRevisionError as error:
+                    if error.code == "TS_IDEMPOTENCY_KEY_CONFLICT":
+                        raise ObjectSeriesError(
+                            "TS_INGEST_IDEMPOTENCY_CONFLICT",
+                            detail="the key was already used for another payload",
+                            idempotency_key=idempotency_key,
+                        ) from error
+                    raise
+                if claim["state"] == "completed":
+                    return claim["response"], True
+                receipt = self._publish_shared_series_revision(
+                    linkable=linkable,
+                    association=association,
+                    target=target,
+                    ingestion=ingestion,
+                    validation_token=validation_token,
+                    confirm=confirm,
+                    comprehension_acknowledged=comprehension_acknowledged,
+                    impact_fingerprint=impact_fingerprint,
+                    reason_code=reason_code,
+                    reason_text=reason_text,
+                    if_match=if_match,
+                    actor=actor,
+                    actor_role=actor_role,
+                )
+                self._complete_idempotency(
+                    claim_id=claim["id"],
+                    response=receipt,
+                    http_status=200 if receipt["outcome"] == "unchanged" else 201,
+                )
+                return receipt, False
+
+    def _publish_shared_series_revision(
+        self,
+        *,
+        linkable: Mapping[str, Any],
+        association: Mapping[str, Any],
+        target: Mapping[str, Any],
+        ingestion: Mapping[str, Any],
+        validation_token: str,
+        confirm: bool,
+        comprehension_acknowledged: bool,
+        impact_fingerprint: str,
+        reason_code: str,
+        reason_text: str,
+        if_match: str,
+        actor: str,
+        actor_role: str,
+    ) -> dict[str, Any]:
+        set_row = target["set"]
+        signals = target["signals"]
+        set_id = int(association["time_series_set_id"])
+        if ingestion["state"] in {"cancelled", "published"}:
+            raise ObjectSeriesError(
+                "TS_INGEST_SESSION_UNAVAILABLE",
+                detail="the job is not publishable any more",
+                state=ingestion["state"],
+            )
+        if ingestion["state"] != "ready_to_publish" or ingestion["content_hash"] is None:
+            raise ObjectSeriesError(
+                "TS_INGEST_VALIDATION_FAILED",
+                detail="the job has not validated cleanly",
+                errors=json.loads(ingestion["validation_json"] or "{}").get(
+                    "errors", []
+                ),
+            )
+        if ingestion["expires_at"] <= utc_now_iso():
+            raise ObjectSeriesError(
+                "TS_INGEST_SESSION_UNAVAILABLE", detail="the job expired"
+            )
+        expected_token = ingestion_validation_token(
+            ingestion_key=ingestion["ingestion_key"],
+            content_hash=ingestion["content_hash"],
+            secret=self._catalog_cursor_secret,
+        )
+        if str(validation_token or "").strip() != expected_token:
+            raise ObjectSeriesError(
+                "TS_INGEST_PRECONDITION_CHANGED",
+                detail="the validation token does not describe this content",
+            )
+        if not str(reason_code or "").strip():
+            raise ObjectSeriesError(
+                "TS_INGEST_PRECONDITION_REQUIRED",
+                detail="reason_code is required",
+                field="reason_code",
+            )
+        contract = json.loads(ingestion["contract_json"] or "{}")
+        impact = self._shared_source_impact(
+            association=association, contract_changes=bool(contract.get("changed"))
+        )
+        if not confirm or not comprehension_acknowledged:
+            # Chapter 8.6 asks for permission, reason, comprehension mark and a
+            # final review that repeats the impact (AC-SHR-04).
+            raise ObjectSeriesError(
+                "TS_SHARED_REVISION_CONFIRMATION_REQUIRED",
+                detail="publishing for everyone needs an explicit confirmation",
+                impact=impact,
+                impact_fingerprint=shared_impact_fingerprint(impact),
+                missing=(
+                    "confirm" if not confirm else "comprehension_acknowledged"
+                ),
+            )
+        expected_etag = shared_source_etag(
+            set_id=set_id, current_revision_id=set_row["current_revision_id"]
+        )
+        if str(if_match or "").strip() != expected_etag:
+            raise ObjectSeriesError(
+                "TS_INGEST_PRECONDITION_CHANGED",
+                detail="the shared source changed since the ETag was read",
+                expected=expected_etag,
+                requires_new_confirmation=True,
+            )
+        if int(set_row["current_revision_id"]) != int(ingestion["base_revision_id"]):
+            raise ObjectSeriesError(
+                "TS_INGEST_PRECONDITION_CHANGED",
+                detail="the current revision moved since the batch validated",
+                requires_new_confirmation=True,
+            )
+        observed_fingerprint = shared_impact_fingerprint(impact)
+        if str(impact_fingerprint or "").strip() != observed_fingerprint:
+            # AC-SHR-06: any movement between preview and confirmation blocks
+            # the action and demands a fresh confirmation.
+            raise ObjectSeriesError(
+                "TS_INGEST_PRECONDITION_CHANGED",
+                detail="the impact changed since it was previewed",
+                impact=impact,
+                impact_fingerprint=observed_fingerprint,
+                requires_new_confirmation=True,
+            )
+
+        staged = self._read_ingestion_staging(int(ingestion["id"]))
+        now = utc_now_iso()
+        receipt = self._publish_canonical_set_revision(
+            project_id=int(set_row["owner_project_id"]),
+            name=set_row["name"],
+            signals=normalize_canonical_signals(
+                [
+                    {
+                        "series_key": signal["series_key"],
+                        "display_name": signal["display_name"],
+                        "semantic_type_key": signal["semantic_type_key"],
+                        "unit_key": signal["unit_key"],
+                        "signal_role": signal["signal_role"],
+                        "aggregation": signal["aggregation"],
+                    }
+                    for signal in signals
+                ]
+            ),
+            periods=normalize_canonical_periods(staged["periods"]),
+            values=staged["values"],
+            data_class_key=contract["data_class_key"],
+            revision_timezone=contract["timezone"],
+            timestamp_convention=contract["timestamp_convention"],
+            version_label=None,
+            description="",
+            source={
+                **json.loads(ingestion["source_json"] or "{}"),
+                "source_key": f"shared-series:{ingestion['ingestion_key']}",
+                "checksum": ingestion["payload_checksum"],
+            },
+            change_summary=reason_code,
+            metadata={
+                "shared_revision": {
+                    "association_id": int(association["id"]),
+                    "linkable_object_id": int(linkable["id"]),
+                    "reason_code": reason_code,
+                    "reason_text": reason_text,
+                    "confirmed_impact_fingerprint": observed_fingerprint,
+                }
+            },
+            lineage=[],
+            actor=actor,
+            set_id=set_id,
+        )
+        if receipt["content_hash"] != ingestion["content_hash"]:
+            raise ObjectSeriesError(
+                "TS_INGEST_PRECONDITION_CHANGED",
+                detail="the stored snapshot does not match the validated hash",
+            )
+        self._close_object_series_ingestion(
+            ingestion_id=int(ingestion["id"]),
+            revision_id=int(receipt["revision_id"]),
+            now=now,
+        )
+        # The stale states stay visible and unresolved: publication and binding
+        # replacement are separate transactions (AC-SHR-08, chapter 7.10).
+        after = self._shared_source_impact(association=association)
+        return {
+            "outcome": receipt["outcome"],
+            "set_id": set_id,
+            "association_id": int(association["id"]),
+            "revision_id": int(receipt["revision_id"]),
+            "revision_number": int(receipt["revision_number"]),
+            "state": "sealed",
+            "content_hash": f"sha256:{receipt['content_hash']}",
+            "signal_ids": receipt["signal_ids"],
+            "source": {
+                "kind": json.loads(ingestion["source_json"] or "{}").get("kind", "api"),
+                "checksum": ingestion["payload_checksum"],
+            },
+            "reason": {"code": reason_code, "text": reason_text},
+            "confirmed_impact": impact,
+            "staleness": {
+                "bindings_now_stale": impact["effect"]["bindings_will_become_stale"],
+                "bindings_still_stale": after["bindings"]["total_active"],
+                "resolved_in_this_action": 0,
+                "resolution_required": (
+                    impact["effect"]["bindings_will_become_stale"] > 0
+                ),
+            },
+            "etag": shared_source_etag(
+                set_id=set_id, current_revision_id=int(receipt["revision_id"])
+            ),
+            "impact_after": after,
+            "impact_fingerprint_after": shared_impact_fingerprint(after),
+        }
+
+    # -- Deriving a local copy instead of touching the shared source -------
+    #
+    # Chapter 7.9. Deriving is the safe outcome: it creates a local identity by
+    # copy, with lineage, and it neither modifies the shared source nor
+    # reassigns the associations and bindings that already exist.
+
+    def _derivation_source(
+        self, *, association: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """The exact revision and hash the copy is pinned to (chapter 7.9)."""
+
+        set_row = self._shared_source_set(int(association["time_series_set_id"]))
+        if set_row is None or set_row["current_revision_id"] is None:
+            raise ObjectSeriesError(
+                "TS_OBJECT_SERIES_NOT_FOUND",
+                detail="the shared source has no sealed revision to copy",
+            )
+        revision = self.connection.execute(
+            f"""
+            SELECT revision.id, revision.revision_number, revision.content_hash,
+                   revision.timezone, revision.timestamp_convention,
+                   data_class.data_class_key AS data_class_key
+            FROM {self._canonical('time_series_set_revisions')} AS revision
+            JOIN time_series_data_classes AS data_class
+              ON data_class.id = revision.data_class_id
+            WHERE revision.id = ?
+            """,
+            (int(set_row["current_revision_id"]),),
+        ).fetchone()
+        signal = self.connection.execute(
+            f"""
+            SELECT signal.id AS signal_id, signal.series_key,
+                   signal.display_name, signal.description,
+                   semantic_type.semantic_key AS semantic_type_key,
+                   unit.unit_key AS unit_key,
+                   revision_signal.aggregation AS aggregation
+            FROM {self._canonical('time_series_revision_signals')} AS revision_signal
+            JOIN {self._canonical('time_series_signals')} AS signal
+              ON signal.id = revision_signal.signal_id
+            JOIN time_series_semantic_types AS semantic_type
+              ON semantic_type.id = revision_signal.semantic_type_id
+            JOIN measurement_units AS unit ON unit.id = revision_signal.unit_id
+            WHERE revision_signal.set_revision_id = ? AND revision_signal.signal_id = ?
+            """,
+            (int(revision["id"]), int(association["signal_id"])),
+        ).fetchone()
+        if signal is None:
+            raise ObjectSeriesError(
+                "TS_OBJECT_SERIES_NOT_FOUND",
+                detail="the association does not match a signal of the current revision",
+                association_id=int(association["id"]),
+            )
+        entry = self.connection.execute(
+            f"""
+            SELECT regularity, nominal_resolution_seconds, coverage_start,
+                   coverage_end, period_count
+            FROM {self._projection('time_series_catalog_entries')}
+            WHERE signal_id = ?
+            """,
+            (int(association["signal_id"]),),
+        ).fetchone()
+        return {
+            "set": set_row,
+            "revision": revision,
+            "signal": signal,
+            "entry": entry,
+        }
+
+    def _derived_definition_document(
+        self,
+        *,
+        association: Mapping[str, Any],
+        source: Mapping[str, Any],
+        document: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """The local definition the copy will be born with.
+
+        The classification is inherited from the source signal: a derivation
+        that changed semantic type or unit would not be a copy (chapter 7.9).
+        """
+
+        signal = source["signal"]
+        entry = source["entry"]
+        return {
+            "object_series_key": document.get("object_series_key"),
+            "display_name": (
+                document.get("display_name") or signal["display_name"]
+            ),
+            "description": (
+                document.get("description") or signal["description"] or ""
+            ),
+            "intended_binding_role_key": (
+                document.get("intended_binding_role_key") or association["role_key"]
+            ),
+            "semantic_type_key": signal["semantic_type_key"],
+            "unit_key": signal["unit_key"],
+            "data_class_key": source["revision"]["data_class_key"],
+            "aggregation": signal["aggregation"],
+            "timezone": source["revision"]["timezone"],
+            "temporal_contract": {
+                "regularity": (
+                    "regular" if entry is None else entry["regularity"]
+                ),
+                "nominal_resolution_seconds": (
+                    None if entry is None else entry["nominal_resolution_seconds"]
+                ),
+                "timestamp_convention": source["revision"]["timestamp_convention"],
+            },
+            "source_expectation": {
+                "kind": "api",
+                "display_name": f"Copia de {signal['series_key']}",
+            },
+            "metadata": document.get("metadata") or {},
+        }
+
+    def _derivation_view(
+        self,
+        *,
+        linkable: Mapping[str, Any],
+        association: Mapping[str, Any],
+        source: Mapping[str, Any],
+        proposed: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        impact = self._shared_source_impact(association=association)
+        links = self._shared_target_links(
+            project_id=int(linkable["project_id"]),
+            linkable_object_id=int(linkable["id"]),
+            association_id=int(association["id"]),
+        )
+        entry = source["entry"]
+        return {
+            "source": {
+                "set_id": int(association["time_series_set_id"]),
+                "signal_id": int(association["signal_id"]),
+                "series_key": source["signal"]["series_key"],
+                "revision_id": int(source["revision"]["id"]),
+                "revision_number": int(source["revision"]["revision_number"]),
+                "content_hash": f"sha256:{source['revision']['content_hash']}",
+                "visibility_scope": association["visibility_scope"],
+                "owner_project_id": int(association["owner_project_id"]),
+                "owner_project_name": association["owner_project_name"],
+            },
+            "proposed": {
+                **{
+                    key: proposed[key]
+                    for key in (
+                        "object_series_key",
+                        "display_name",
+                        "description",
+                        "intended_binding_role_key",
+                        "semantic_type_key",
+                        "unit_key",
+                        "data_class_key",
+                        "timezone",
+                        "temporal_contract",
+                    )
+                },
+                "visibility_scope": "object_specific",
+                "owner_linkable_object_id": int(linkable["id"]),
+                "period_count": 0 if entry is None else int(entry["period_count"]),
+                "coverage_start": (
+                    None if entry is None else utc_presentation(entry["coverage_start"])
+                ),
+                "coverage_end": (
+                    None if entry is None else utc_presentation(entry["coverage_end"])
+                ),
+            },
+            "differences": [
+                {
+                    "field": "visibility_scope",
+                    "before": association["visibility_scope"],
+                    "after": "object_specific",
+                },
+                {
+                    "field": "owner",
+                    "before": f"project:{int(association['owner_project_id'])}",
+                    "after": f"linkable_object:{int(linkable['id'])}",
+                },
+                {
+                    "field": "consumers",
+                    "before": impact["associations"]["total"],
+                    "after": 0,
+                },
+            ],
+            # Deriving never moves what already exists (AC-SHR-07).
+            "reassignments": {"associations": 0, "bindings": 0},
+            "impact": impact,
+            "links": links,
+        }
+
+    def prevalidate_object_series_derivation(
+        self,
+        *,
+        project_id: int,
+        linkable_object_id: int,
+        association_id: int,
+        document: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Compare the shared source with the local copy it would produce.
+
+        Phase one of the two-phase derivation: it fixes the source revision and
+        hash so the commit can refuse a source that moved underneath it.
+        """
+
+        with self._read_only_transaction():
+            linkable = self.authorize_object_series_root(
+                project_id=project_id, linkable_object_id=linkable_object_id
+            )
+            association = self._shared_source_association(
+                linkable=linkable, association_id=association_id
+            )
+            if association["status"] != "active":
+                raise ObjectSeriesError(
+                    "TS_OBJECT_SERIES_NOT_FOUND",
+                    detail="an archived association does not open the derivation",
+                    association_id=int(association["id"]),
+                )
+            source = self._derivation_source(association=association)
+            proposed = self._derived_definition_document(
+                association=association, source=source, document=document
+            )
+            object_series_key = normalize_object_series_key(
+                proposed["object_series_key"]
+            )
+            taken = self.connection.execute(
+                f"""
+                SELECT time_series_set_id
+                FROM {self._object_series_table('object_series_definitions')}
+                WHERE owner_linkable_object_id = ? AND object_series_key = ?
+                """,
+                (int(linkable["id"]), object_series_key),
+            ).fetchone()
+            view = self._derivation_view(
+                linkable=linkable,
+                association=association,
+                source=source,
+                proposed=proposed,
+            )
+        blockers = (
+            []
+            if taken is None
+            else [
+                {
+                    "code": "TS_OBJECT_SERIES_KEY_CONFLICT",
+                    "message": "the object already used this local key",
+                    "location": {
+                        "record_index": 0,
+                        "json_pointer": "/object_series_key",
+                    },
+                }
+            ]
+        )
+        return {
+            **view,
+            "can_commit": not blockers,
+            "blockers": blockers,
+            "requires_confirmation": True,
+            "prevalidation_token": derivation_prevalidation_token(
+                association_id=int(association["id"]),
+                source_revision_id=int(source["revision"]["id"]),
+                content_hash=source["revision"]["content_hash"],
+                object_series_key=object_series_key,
+                secret=self._catalog_cursor_secret,
+            ),
+        }
+
+    def commit_object_series_derivation(
+        self,
+        *,
+        project_id: int,
+        linkable_object_id: int,
+        association_id: int,
+        document: Mapping[str, Any],
+        actor: str,
+        idempotency_key: str,
+    ) -> tuple[dict[str, Any], bool]:
+        """Create the local identity by copy, in one transaction (chapter 7.9)."""
+
+        with self._lock:
+            with self._database_transaction():
+                linkable = self.authorize_object_series_root(
+                    project_id=project_id, linkable_object_id=linkable_object_id
+                )
+                association = self._shared_source_association(
+                    linkable=linkable, association_id=association_id
+                )
+                if association["status"] != "active":
+                    raise ObjectSeriesError(
+                        "TS_OBJECT_SERIES_NOT_FOUND",
+                        detail="an archived association does not open the derivation",
+                        association_id=int(association["id"]),
+                    )
+                if not bool(document.get("confirmed")):
+                    raise ObjectSeriesError(
+                        "TS_LINK_CONFIRMATION_REQUIRED",
+                        detail="the derivation is confirmed explicitly",
+                        association_id=int(association["id"]),
+                    )
+                if not str(document.get("reason_code") or "").strip():
+                    raise ObjectSeriesError(
+                        "TS_INGEST_PRECONDITION_REQUIRED",
+                        detail="reason_code is required",
+                        field="reason_code",
+                    )
+                source = self._derivation_source(association=association)
+                proposed = self._derived_definition_document(
+                    association=association, source=source, document=document
+                )
+                object_series_key = normalize_object_series_key(
+                    proposed["object_series_key"]
+                )
+                declared = document.get("source_revision")
+                declared_token = str(document.get("prevalidation_token") or "").strip()
+                if not isinstance(declared, Mapping) and not declared_token:
+                    # The derivation is a two-phase action: the commit names the
+                    # exact revision and hash it compared (chapter 7.9).
+                    raise ObjectSeriesError(
+                        "TS_INGEST_PRECONDITION_REQUIRED",
+                        detail="name the source revision the copy was compared with",
+                        field="source_revision",
+                    )
+                if isinstance(declared, Mapping):
+                    declared_hash = str(
+                        declared.get("content_hash") or ""
+                    ).split(":")[-1]
+                    if (
+                        int(declared.get("revision_id") or 0)
+                        != int(source["revision"]["id"])
+                        or declared_hash != source["revision"]["content_hash"]
+                    ):
+                        raise ObjectSeriesError(
+                            "TS_INGEST_PRECONDITION_CHANGED",
+                            detail="the shared source moved since it was compared",
+                            current_revision_id=int(source["revision"]["id"]),
+                        )
+                expected_token = derivation_prevalidation_token(
+                    association_id=int(association["id"]),
+                    source_revision_id=int(source["revision"]["id"]),
+                    content_hash=source["revision"]["content_hash"],
+                    object_series_key=object_series_key,
+                    secret=self._catalog_cursor_secret,
+                )
+                if declared_token and declared_token != expected_token:
+                    raise ObjectSeriesError(
+                        "TS_INGEST_PRECONDITION_CHANGED",
+                        detail="the comparison no longer describes this source",
+                    )
+                try:
+                    claim = self._claim_idempotency(
+                        actor_id=actor,
+                        operation_kind=DERIVE_OBJECT_SERIES_OPERATION_KIND,
+                        scope_key=(
+                            f"object-derivation:{int(linkable['id'])}"
+                            f":{object_series_key}"
+                        ),
+                        idempotency_key=idempotency_key,
+                        request_hash=idempotency_request_hash(
+                            {
+                                "association_id": int(association["id"]),
+                                "source_revision_id": int(source["revision"]["id"]),
+                                "content_hash": source["revision"]["content_hash"],
+                                "object_series_key": object_series_key,
+                                "reason_code": document.get("reason_code"),
+                            }
+                        ),
+                    )
+                except CanonicalRevisionError as error:
+                    if error.code == "TS_IDEMPOTENCY_KEY_CONFLICT":
+                        raise ObjectSeriesError(
+                            "TS_INGEST_IDEMPOTENCY_CONFLICT",
+                            detail="the key was already used for another payload",
+                            idempotency_key=idempotency_key,
+                        ) from error
+                    raise
+                if claim["state"] == "completed":
+                    return claim["response"], True
+                receipt = self._derive_object_series_from_catalog(
+                    linkable=linkable,
+                    association=association,
+                    source=source,
+                    proposed=proposed,
+                    document=document,
+                    actor=actor,
+                )
+                self._complete_idempotency(
+                    claim_id=claim["id"], response=receipt, http_status=201
+                )
+                return receipt, False
+
+    def _derive_object_series_from_catalog(
+        self,
+        *,
+        linkable: Mapping[str, Any],
+        association: Mapping[str, Any],
+        source: Mapping[str, Any],
+        proposed: Mapping[str, Any],
+        document: Mapping[str, Any],
+        actor: str,
+    ) -> dict[str, Any]:
+        source_revision_id = int(source["revision"]["id"])
+        source_signal_id = int(association["signal_id"])
+        signal_id = self._insert_object_series_definition(
+            linkable=linkable, document=proposed, actor=actor
+        )
+        row = self._object_series_row(
+            linkable_object_id=int(linkable["id"]), signal_id=signal_id
+        )
+        set_id = int(row["time_series_set_id"])
+        revisions_table = self._canonical("time_series_set_revisions")
+        building = self.connection.execute(
+            f"""
+            SELECT id, revision_number FROM {revisions_table}
+            WHERE time_series_set_id = ? AND state = 'building'
+            ORDER BY revision_number DESC LIMIT 1
+            """,
+            (set_id,),
+        ).fetchone()
+        revision_id = int(building["id"])
+        revision_number = int(building["revision_number"])
+        now = utc_now_iso()
+        source_id, _ = self._register_canonical_source(
+            int(linkable["project_id"]),
+            {
+                "kind": "api",
+                "source_key": (
+                    f"catalog-copy:{int(association['id'])}:{source_revision_id}"
+                ),
+                "checksum": source["revision"]["content_hash"],
+                "display_name": f"Copia de {source['signal']['series_key']}",
+            },
+            actor,
+            now,
+        )
+        self.connection.execute(
+            f"""
+            UPDATE {revisions_table}
+            SET time_series_source_id = ?, change_summary = ?, metadata_json = ?,
+                created_at = ?, created_by = ?
+            WHERE id = ?
+            """,
+            (
+                source_id,
+                str(document.get("reason_code") or "catalog_object_specific_copy"),
+                json.dumps(
+                    {
+                        "temporal_contract": proposed["temporal_contract"],
+                        "reason_text": str(document.get("reason_text") or ""),
+                        "derived_from": {
+                            "association_id": int(association["id"]),
+                            "set_id": int(association["time_series_set_id"]),
+                            "signal_id": source_signal_id,
+                            "revision_id": source_revision_id,
+                            "content_hash": (
+                                f"sha256:{source['revision']['content_hash']}"
+                            ),
+                        },
+                    },
+                    sort_keys=True,
+                ),
+                now,
+                actor,
+                revision_id,
+            ),
+        )
+
+        # Copy only the periods and the values of the identified signal, even
+        # when the source revision belongs to a multi-signal set (chapter 7.9).
+        snapshot = self._object_series_snapshot(source_revision_id)
+        periods = snapshot["periods"]
+        values = [
+            {**value, "series_key": row["object_series_key"]}
+            for value in snapshot["values"]
+            if value["series_key"] == source["signal"]["series_key"]
+        ]
+        periods_table = self._canonical("time_series_periods")
+        self.connection.executemany(
+            f"""
+            INSERT INTO {periods_table} (
+                set_revision_id, period_index, timestamp_start, timestamp_end,
+                duration_hours
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    revision_id,
+                    period["period_index"],
+                    period["timestamp_start"],
+                    period["timestamp_end"],
+                    period["duration_hours"],
+                )
+                for period in periods
+            ],
+        )
+        period_ids = {
+            int(entry["period_index"]): int(entry["id"])
+            for entry in self.connection.execute(
+                f"SELECT id, period_index FROM {periods_table} WHERE set_revision_id = ?",
+                (revision_id,),
+            ).fetchall()
+        }
+        self._insert_canonical_values(
+            values_table=self._canonical("time_series_values"),
+            revision_id=revision_id,
+            values=values,
+            signal_ids={row["object_series_key"]: signal_id},
+            period_ids=period_ids,
+        )
+        content_hash = self._stream_canonical_content_hash(
+            revision_id=revision_id,
+            revision_timezone=proposed["timezone"],
+            timestamp_convention=proposed["temporal_contract"]["timestamp_convention"],
+            data_class_key=proposed["data_class_key"],
+        )
+        self.connection.execute(
+            f"""
+            UPDATE {revisions_table}
+            SET state = 'sealed', content_hash = ?, validation_payload_json = ?
+            WHERE id = ?
+            """,
+            (
+                content_hash,
+                json.dumps(
+                    {
+                        "signal_count": 1,
+                        "period_count": len(periods),
+                        "value_count": len(values),
+                        "coverage_start": (
+                            periods[0]["timestamp_start"] if periods else None
+                        ),
+                        "coverage_end": (
+                            periods[-1]["timestamp_end"] if periods else None
+                        ),
+                    },
+                    sort_keys=True,
+                ),
+                revision_id,
+            ),
+        )
+        self.connection.execute(
+            f"""
+            UPDATE {self._canonical('time_series_sets')}
+            SET current_revision_id = ?, content_hash = ?, status = 'validated',
+                updated_at = ?, updated_by = ?
+            WHERE id = ?
+            """,
+            (revision_id, content_hash, now, actor, set_id),
+        )
+        self.connection.execute(
+            f"""
+            INSERT INTO {self._canonical('time_series_revision_lineage')} (
+                derived_set_revision_id, derived_signal_id, source_set_revision_id,
+                source_signal_id, lineage_kind, source_content_hash,
+                source_owner_linkable_object_id, target_owner_linkable_object_id,
+                created_at, created_by, reason_code, reason_text
+            ) VALUES (?, ?, ?, ?, 'catalog_object_specific_copy', ?, NULL, ?, ?, ?, ?, ?)
+            """,
+            (
+                revision_id,
+                signal_id,
+                source_revision_id,
+                source_signal_id,
+                source["revision"]["content_hash"],
+                int(linkable["id"]),
+                now,
+                actor,
+                str(document.get("reason_code") or "catalog_object_specific_copy"),
+                str(document.get("reason_text") or ""),
+            ),
+        )
+        self._raise_catalog_generation(now=now)
+        series = self._read_object_series(linkable=linkable, signal_id=signal_id)
+        return {
+            "outcome": "derived",
+            "object_series": series,
+            "lineage": {
+                "kind": "catalog_object_specific_copy",
+                "source_set_id": int(association["time_series_set_id"]),
+                "source_signal_id": source_signal_id,
+                "source_revision_id": source_revision_id,
+                "source_content_hash": (
+                    f"sha256:{source['revision']['content_hash']}"
+                ),
+                "derived_revision_id": revision_id,
+                "derived_revision_number": revision_number,
+            },
+            # The source, its associations and its bindings are untouched.
+            "reassignments": {"associations": 0, "bindings": 0},
+            "source_unchanged": {
+                "set_id": int(association["time_series_set_id"]),
+                "current_revision_id": source_revision_id,
+                "current_content_hash": (
+                    f"sha256:{source['revision']['content_hash']}"
+                ),
+            },
+            "suggested_binding_request": {
+                "action": "create",
+                "linkable_object_id": int(linkable["id"]),
+                "binding_role_key": proposed["intended_binding_role_key"],
+                "signal_id": signal_id,
+                "revision": {
+                    "mode": "current",
+                    "revision_id": revision_id,
+                    "content_hash": f"sha256:{content_hash}",
+                },
+                "catalog_association_id": None,
+                "reason_code": "variant_input_selected",
+            },
         }
 
     def _read_only_transaction(self):

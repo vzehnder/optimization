@@ -610,6 +610,57 @@ class ObjectSeriesPublicationRequest(BaseModel):
     reason_text: str | None = None
 
 
+class SharedSeriesPointsIngestionRequest(BaseModel):
+    """A load aimed at a shared generic source, started from one object.
+
+    ``expected_base`` is mandatory here: a shared source always has a sealed
+    revision, and a blind overwrite of what other projects consume is exactly
+    what chapter 7.9 refuses.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["replace_full", "append_tail"] = "replace_full"
+    expected_base: ObjectSeriesExpectedBaseRequest
+    revision_contract: ObjectSeriesRevisionContractRequest | None = None
+    source: ObjectSeriesIngestionSourceRequest | None = None
+    points: list[ObjectSeriesPointRequest] = Field(min_length=1)
+
+
+class SharedSeriesPublicationRequest(BaseModel):
+    """`Publicar para todos`: permission, reason, comprehension and impact.
+
+    Chapter 8.6 asks for all four before the shared publication is enabled, and
+    revalidates the impact at confirmation time (AC-SHR-04, AC-SHR-06).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    validation_token: str = Field(min_length=1)
+    impact_fingerprint: str = Field(min_length=1)
+    confirm: bool = False
+    comprehension_acknowledged: bool = False
+    reason_code: str = Field(min_length=1)
+    reason_text: str | None = None
+
+
+class ObjectSeriesDerivationRequest(BaseModel):
+    """Copy a shared generic source into a series owned by this object."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    object_series_key: str = Field(min_length=1)
+    display_name: str | None = None
+    description: str | None = None
+    intended_binding_role_key: str | None = None
+    metadata: dict[str, Any] | None = None
+    source_revision: ObjectSeriesExpectedBaseRequest | None = None
+    reason_code: str = Field(min_length=1)
+    reason_text: str | None = None
+    confirmed: bool = False
+    prevalidation_token: str | None = None
+
+
 class CaseInputVariantRunRequest(BaseModel):
     range_start: str = Field(min_length=1)
     range_end: str = Field(min_length=1)
@@ -2930,6 +2981,42 @@ def create_app(
             request_id=request_id,
         )
 
+    # -- SHARED_TARGET: a shared generic source seen from the object -------
+    #
+    # TS7-013, chapter 7.9. The dangerous branch gets its own base so a client
+    # cannot turn a local load into a shared revision by editing a path
+    # segment, and the impact is answered before the caller decides.
+
+    ASSOCIATION_ROOT = f"{OBJECT_ROOT}/catalog-associations/{{association_id}}"
+
+    def object_series_actor_role(request: Request) -> str:
+        user = request.state.current_user or {}
+        return str(user.get("role") or "analyst")
+
+    @app.get(ASSOCIATION_ROOT)
+    async def get_object_catalog_association(
+        project_id: int,
+        linkable_object_id: int,
+        association_id: int,
+        request: Request,
+        intent: str = "shared",
+    ):
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            view = analyst_store.read_object_catalog_association(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                association_id=association_id,
+                actor_role=object_series_actor_role(request),
+                intent=intent,
+            )
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        view["request_id"] = request_id
+        return JSONResponse(
+            view, headers={"Cache-Control": "private, no-store"}
+        )
+
     OBJECT_TARGET = f"{OBJECT_ROOT}/object-series/{{signal_id}}"
 
     @app.get(f"{OBJECT_TARGET}/revisions")
@@ -3221,6 +3308,212 @@ def create_app(
             status_code=(
                 200 if replayed or publication["outcome"] == "unchanged" else 201
             ),
+            headers={
+                "ETag": object_series_etag(
+                    signal_id=series["signal_id"],
+                    resource_version=series["resource_version"],
+                ),
+                "Cache-Control": "private, no-store",
+            },
+        )
+
+    SHARED_TARGET = f"{ASSOCIATION_ROOT}/shared-series"
+
+    @app.post(f"{SHARED_TARGET}/revision-ingestions/points", status_code=201)
+    async def prepare_shared_series_points_ingestion(
+        project_id: int,
+        linkable_object_id: int,
+        association_id: int,
+        payload: SharedSeriesPointsIngestionRequest,
+        request: Request,
+        intent: str = "shared",
+    ):
+        try:
+            ingestion = analyst_store.prepare_shared_series_points_ingestion(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                association_id=association_id,
+                document=payload.model_dump(),
+                actor=object_series_actor(request),
+                actor_role=object_series_actor_role(request),
+                intent=intent,
+            )
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        return ingestion_response(ingestion, request, status_code=201)
+
+    @app.get(f"{SHARED_TARGET}/revision-ingestions/{{ingestion_id}}")
+    async def get_shared_series_ingestion(
+        project_id: int,
+        linkable_object_id: int,
+        association_id: int,
+        ingestion_id: str,
+        request: Request,
+        intent: str = "shared",
+    ):
+        try:
+            ingestion = analyst_store.read_shared_series_ingestion(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                association_id=association_id,
+                ingestion_key=ingestion_id,
+                actor_role=object_series_actor_role(request),
+                intent=intent,
+            )
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        return ingestion_response(ingestion, request)
+
+    @app.get(f"{SHARED_TARGET}/revision-ingestions/{{ingestion_id}}/preview")
+    async def preview_shared_series_ingestion(
+        project_id: int,
+        linkable_object_id: int,
+        association_id: int,
+        ingestion_id: str,
+        request: Request,
+        max_rows: int | None = None,
+    ):
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            preview = analyst_store.read_shared_series_ingestion_preview(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                association_id=association_id,
+                ingestion_key=ingestion_id,
+                max_rows=max_rows,
+            )
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        preview["request_id"] = request_id
+        return JSONResponse(preview, headers={"Cache-Control": "private, no-store"})
+
+    @app.delete(
+        f"{SHARED_TARGET}/revision-ingestions/{{ingestion_id}}", status_code=204
+    )
+    async def cancel_shared_series_ingestion(
+        project_id: int,
+        linkable_object_id: int,
+        association_id: int,
+        ingestion_id: str,
+        request: Request,
+    ):
+        try:
+            analyst_store.cancel_shared_series_ingestion(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                association_id=association_id,
+                ingestion_key=ingestion_id,
+                actor=object_series_actor(request),
+            )
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        return Response(status_code=204, headers={"Cache-Control": "private, no-store"})
+
+    @app.post(f"{SHARED_TARGET}/revision-ingestions/{{ingestion_id}}/publications")
+    async def publish_shared_series_ingestion(
+        project_id: int,
+        linkable_object_id: int,
+        association_id: int,
+        ingestion_id: str,
+        payload: SharedSeriesPublicationRequest,
+        request: Request,
+        if_match: str | None = Header(default=None, alias="If-Match"),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ):
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            missing = (
+                "If-Match"
+                if not str(if_match or "").strip()
+                else "Idempotency-Key"
+                if not str(idempotency_key or "").strip()
+                else None
+            )
+            if missing is not None:
+                raise ObjectSeriesError(
+                    "TS_INGEST_PRECONDITION_REQUIRED", field=missing
+                )
+            publication, replayed = analyst_store.publish_shared_series_ingestion(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                association_id=association_id,
+                ingestion_key=ingestion_id,
+                validation_token=payload.validation_token,
+                confirm=payload.confirm,
+                comprehension_acknowledged=payload.comprehension_acknowledged,
+                impact_fingerprint=payload.impact_fingerprint,
+                reason_code=payload.reason_code,
+                reason_text=payload.reason_text or "",
+                if_match=if_match,
+                idempotency_key=idempotency_key,
+                actor=object_series_actor(request),
+                actor_role=object_series_actor_role(request),
+            )
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        return JSONResponse(
+            {"publication": publication, "request_id": request_id},
+            status_code=(
+                200 if replayed or publication["outcome"] == "unchanged" else 201
+            ),
+            headers={
+                "ETag": publication["etag"],
+                "Cache-Control": "private, no-store",
+            },
+        )
+
+    @app.post(f"{ASSOCIATION_ROOT}/object-series-derivation-prevalidations")
+    async def prevalidate_object_series_derivation(
+        project_id: int,
+        linkable_object_id: int,
+        association_id: int,
+        payload: ObjectSeriesDerivationRequest,
+        request: Request,
+    ):
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            comparison = analyst_store.prevalidate_object_series_derivation(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                association_id=association_id,
+                document=payload.model_dump(exclude_none=True),
+            )
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        comparison["request_id"] = request_id
+        return JSONResponse(
+            comparison, headers={"Cache-Control": "private, no-store"}
+        )
+
+    @app.post(f"{ASSOCIATION_ROOT}/object-series-derivations", status_code=201)
+    async def commit_object_series_derivation(
+        project_id: int,
+        linkable_object_id: int,
+        association_id: int,
+        payload: ObjectSeriesDerivationRequest,
+        request: Request,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ):
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            if not str(idempotency_key or "").strip():
+                raise ObjectSeriesError(
+                    "TS_INGEST_PRECONDITION_REQUIRED", field="Idempotency-Key"
+                )
+            derivation, replayed = analyst_store.commit_object_series_derivation(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                association_id=association_id,
+                document=payload.model_dump(exclude_none=True),
+                actor=object_series_actor(request),
+                idempotency_key=str(idempotency_key),
+            )
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        series = derivation["object_series"]
+        return JSONResponse(
+            {"derivation": derivation, "request_id": request_id},
+            status_code=200 if replayed else 201,
             headers={
                 "ETag": object_series_etag(
                     signal_id=series["signal_id"],

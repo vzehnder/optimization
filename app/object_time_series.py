@@ -48,6 +48,8 @@ API_POINTS_MAX_PERIODS = 10_000
 API_POINTS_MAX_CELLS = 100_000
 INGESTION_ERROR_LIMIT = 200
 INGESTION_PREVIEW_MAX_ROWS = 200
+# Chapter 7.9 shows a sample of consumers, never an unbounded collection.
+SHARED_CONSUMER_SAMPLE_LIMIT = 50
 INGESTION_LIFETIME_SECONDS = 24 * 60 * 60
 FILE_CSV_MAX_BYTES = 100 * 1024 * 1024
 FILE_XLSX_MAX_BYTES = 25 * 1024 * 1024
@@ -80,6 +82,8 @@ QUALITY_FLAGS = ("measured", "estimated", "forecast", "interpolated", "suspect")
 
 PUBLISH_INGESTION_OPERATION_KIND = "publish_object_series_revision"
 FILE_INGESTION_OPERATION_KIND = "prepare_object_series_file_ingestion"
+PUBLISH_SHARED_OPERATION_KIND = "publish_shared_series_revision"
+DERIVE_OBJECT_SERIES_OPERATION_KIND = "derive_object_specific_series"
 
 CSV_MEDIA_TYPES = ("text/csv", "application/csv")
 XLSX_MEDIA_TYPE = (
@@ -177,6 +181,21 @@ OBJECT_SERIES_ERROR_CATALOG = {
         "https://errors.example/time-series/shared-revision-confirmation-required",
         "The publication requires explicit confirmation",
         409,
+    ),
+    "TS_SHARED_REVISION_ADMIN_REQUIRED": (
+        "https://errors.example/time-series/shared-revision-admin-required",
+        "A global source is published only by an administrator",
+        403,
+    ),
+    "TS_LINK_CONFIRMATION_REQUIRED": (
+        "https://errors.example/time-series/link-confirmation-required",
+        "The operation requires explicit confirmation",
+        409,
+    ),
+    "TS_SHARED_DERIVATION_REQUIRED": (
+        "https://errors.example/time-series/shared-derivation-required",
+        "The shared source cannot receive this content",
+        422,
     ),
     "TS_QUERY_INVALID": (
         "https://errors.example/time-series/query-invalid",
@@ -477,6 +496,7 @@ def object_series_schema_statements(backend: str) -> list[str]:
             time_series_set_id {reference} NOT NULL
                 REFERENCES {canonical['time_series_sets']}(id),
             signal_id {reference} NOT NULL,
+            catalog_association_id {reference},
             target_kind TEXT NOT NULL,
             channel TEXT NOT NULL,
             state TEXT NOT NULL,
@@ -1161,6 +1181,97 @@ def ingestion_validation_token(
         secret, f"{ingestion_key}:{content_hash}".encode("utf-8"), hashlib.sha256
     ).hexdigest()[:32]
     return f"tsv_{digest}"
+
+
+def derivation_prevalidation_token(
+    *,
+    association_id: int,
+    source_revision_id: int,
+    content_hash: str,
+    object_series_key: str,
+    secret: bytes,
+) -> str:
+    """Pin the comparison to one source revision and one local key (7.9)."""
+
+    material = (
+        f"{int(association_id)}:{int(source_revision_id)}:{content_hash}:"
+        f"{object_series_key}"
+    )
+    digest = hmac.new(secret, material.encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+    return f"tsd_{digest}"
+
+
+def shared_source_etag(*, set_id: int, current_revision_id: int | None) -> str:
+    """The strong validator of a shared generic source (chapter 8.6)."""
+
+    return f'"shared-{int(set_id)}-{0 if current_revision_id is None else int(current_revision_id)}"'
+
+
+def shared_impact_fingerprint(impact: Mapping[str, Any]) -> str:
+    """Everything the decision was taken on, in one comparable value.
+
+    Chapter 8.6 revalidates the impact at confirmation time: if any of the
+    numbers the caller was shown moved, the action blocks and a new
+    confirmation is demanded (AC-SHR-06).
+    """
+
+    observed = {
+        "source": impact["source"],
+        "associations": impact["associations"],
+        "bindings": impact["bindings"],
+        "effect": impact["effect"],
+    }
+    digest = hashlib.sha256(
+        json.dumps(observed, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:32]
+    return f"tsi_{digest}"
+
+
+def shared_decision_alternatives(
+    *,
+    derivation_href: str,
+    shared_href: str,
+    derivation_required: bool,
+    may_publish_shared: bool,
+    requires_admin: bool,
+    intent: str,
+) -> list[dict[str, Any]]:
+    """The two outcomes, ordered, and never labelled `save` or `update`.
+
+    Chapter 8.4 fixes the visible language: the shared branch is
+    `Publicar para todos`, so its stable key is `publish_for_everyone` and no
+    neutral verb is offered as a synonym (AC-SHR-03 backend half).
+    """
+
+    local = {
+        "kind": "derive_object_specific",
+        "label_key": "create_specific_for_this_object",
+        "available": True,
+        "requires_admin": False,
+        "unavailable_code": None,
+        "href": derivation_href,
+    }
+    shared = {
+        "kind": "publish_shared",
+        "label_key": "publish_for_everyone",
+        "available": bool(may_publish_shared),
+        "requires_admin": bool(requires_admin),
+        "unavailable_code": (
+            None
+            if may_publish_shared
+            else (
+                "TS_SHARED_REVISION_ADMIN_REQUIRED"
+                if requires_admin
+                else "TS_INGEST_FORBIDDEN"
+            )
+        ),
+        "href": shared_href,
+    }
+    # The local outcome leads whenever the caller declared a local intent, and
+    # whenever deriving is the only outcome left (chapter 8.6 step 3).
+    if derivation_required or str(intent).strip().lower() == "local":
+        return [local, shared]
+    return [shared, local]
 
 
 def parse_offset_timestamp(value: Any, *, record_index: int) -> datetime:

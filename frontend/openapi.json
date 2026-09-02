@@ -2228,6 +2228,110 @@
         "title": "ObjectSeriesCreateRequest",
         "type": "object"
       },
+      "ObjectSeriesDerivationRequest": {
+        "additionalProperties": false,
+        "description": "Copy a shared generic source into a series owned by this object.",
+        "properties": {
+          "confirmed": {
+            "default": false,
+            "title": "Confirmed",
+            "type": "boolean"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "intended_binding_role_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intended Binding Role Key"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "object_series_key": {
+            "minLength": 1,
+            "title": "Object Series Key",
+            "type": "string"
+          },
+          "prevalidation_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prevalidation Token"
+          },
+          "reason_code": {
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "reason_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Text"
+          },
+          "source_revision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ObjectSeriesExpectedBaseRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "object_series_key",
+          "reason_code"
+        ],
+        "title": "ObjectSeriesDerivationRequest",
+        "type": "object"
+      },
       "ObjectSeriesExpectedBaseRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2960,6 +3064,107 @@
           "system_case_json"
         ],
         "title": "ScenarioVersionCreateRequest",
+        "type": "object"
+      },
+      "SharedSeriesPointsIngestionRequest": {
+        "additionalProperties": false,
+        "description": "A load aimed at a shared generic source, started from one object.\n\n``expected_base`` is mandatory here: a shared source always has a sealed\nrevision, and a blind overwrite of what other projects consume is exactly\nwhat chapter 7.9 refuses.",
+        "properties": {
+          "expected_base": {
+            "$ref": "#/components/schemas/ObjectSeriesExpectedBaseRequest"
+          },
+          "mode": {
+            "default": "replace_full",
+            "enum": [
+              "replace_full",
+              "append_tail"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/ObjectSeriesPointRequest"
+            },
+            "minItems": 1,
+            "title": "Points",
+            "type": "array"
+          },
+          "revision_contract": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ObjectSeriesRevisionContractRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ObjectSeriesIngestionSourceRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "expected_base",
+          "points"
+        ],
+        "title": "SharedSeriesPointsIngestionRequest",
+        "type": "object"
+      },
+      "SharedSeriesPublicationRequest": {
+        "additionalProperties": false,
+        "description": "`Publicar para todos`: permission, reason, comprehension and impact.\n\nChapter 8.6 asks for all four before the shared publication is enabled, and\nrevalidates the impact at confirmation time (AC-SHR-04, AC-SHR-06).",
+        "properties": {
+          "comprehension_acknowledged": {
+            "default": false,
+            "title": "Comprehension Acknowledged",
+            "type": "boolean"
+          },
+          "confirm": {
+            "default": false,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "impact_fingerprint": {
+            "minLength": 1,
+            "title": "Impact Fingerprint",
+            "type": "string"
+          },
+          "reason_code": {
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "reason_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Text"
+          },
+          "validation_token": {
+            "minLength": 1,
+            "title": "Validation Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "validation_token",
+          "impact_fingerprint",
+          "reason_code"
+        ],
+        "title": "SharedSeriesPublicationRequest",
         "type": "object"
       },
       "SystemCaseValidationRequest": {
@@ -5659,6 +5864,609 @@
           }
         },
         "summary": "Get Object Time Series Context"
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/catalog-associations/{association_id}": {
+      "get": {
+        "operationId": "get_object_catalog_association_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkable_object_id",
+            "required": true,
+            "schema": {
+              "title": "Linkable Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "association_id",
+            "required": true,
+            "schema": {
+              "title": "Association Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "intent",
+            "required": false,
+            "schema": {
+              "default": "shared",
+              "title": "Intent",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Object Catalog Association"
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/catalog-associations/{association_id}/object-series-derivation-prevalidations": {
+      "post": {
+        "operationId": "prevalidate_object_series_derivation_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__object_series_derivation_prevalidations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkable_object_id",
+            "required": true,
+            "schema": {
+              "title": "Linkable Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "association_id",
+            "required": true,
+            "schema": {
+              "title": "Association Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObjectSeriesDerivationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Prevalidate Object Series Derivation"
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/catalog-associations/{association_id}/object-series-derivations": {
+      "post": {
+        "operationId": "commit_object_series_derivation_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__object_series_derivations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkable_object_id",
+            "required": true,
+            "schema": {
+              "title": "Linkable Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "association_id",
+            "required": true,
+            "schema": {
+              "title": "Association Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObjectSeriesDerivationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Commit Object Series Derivation"
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/catalog-associations/{association_id}/shared-series/revision-ingestions/points": {
+      "post": {
+        "operationId": "prepare_shared_series_points_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__shared_series_revision_ingestions_points_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkable_object_id",
+            "required": true,
+            "schema": {
+              "title": "Linkable Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "association_id",
+            "required": true,
+            "schema": {
+              "title": "Association Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "intent",
+            "required": false,
+            "schema": {
+              "default": "shared",
+              "title": "Intent",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SharedSeriesPointsIngestionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Prepare Shared Series Points Ingestion"
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/catalog-associations/{association_id}/shared-series/revision-ingestions/{ingestion_id}": {
+      "delete": {
+        "operationId": "cancel_shared_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__shared_series_revision_ingestions__ingestion_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkable_object_id",
+            "required": true,
+            "schema": {
+              "title": "Linkable Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "association_id",
+            "required": true,
+            "schema": {
+              "title": "Association Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ingestion_id",
+            "required": true,
+            "schema": {
+              "title": "Ingestion Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Shared Series Ingestion"
+      },
+      "get": {
+        "operationId": "get_shared_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__shared_series_revision_ingestions__ingestion_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkable_object_id",
+            "required": true,
+            "schema": {
+              "title": "Linkable Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "association_id",
+            "required": true,
+            "schema": {
+              "title": "Association Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ingestion_id",
+            "required": true,
+            "schema": {
+              "title": "Ingestion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "intent",
+            "required": false,
+            "schema": {
+              "default": "shared",
+              "title": "Intent",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Shared Series Ingestion"
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/catalog-associations/{association_id}/shared-series/revision-ingestions/{ingestion_id}/preview": {
+      "get": {
+        "operationId": "preview_shared_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__shared_series_revision_ingestions__ingestion_id__preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkable_object_id",
+            "required": true,
+            "schema": {
+              "title": "Linkable Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "association_id",
+            "required": true,
+            "schema": {
+              "title": "Association Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ingestion_id",
+            "required": true,
+            "schema": {
+              "title": "Ingestion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_rows",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Rows"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Shared Series Ingestion"
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/catalog-associations/{association_id}/shared-series/revision-ingestions/{ingestion_id}/publications": {
+      "post": {
+        "operationId": "publish_shared_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_catalog_associations__association_id__shared_series_revision_ingestions__ingestion_id__publications_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkable_object_id",
+            "required": true,
+            "schema": {
+              "title": "Linkable Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "association_id",
+            "required": true,
+            "schema": {
+              "title": "Association Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ingestion_id",
+            "required": true,
+            "schema": {
+              "title": "Ingestion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SharedSeriesPublicationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Publish Shared Series Ingestion"
       }
     },
     "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series": {
