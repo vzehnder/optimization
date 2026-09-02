@@ -17,6 +17,7 @@ import hmac
 import json
 import time
 import unicodedata
+from typing import Any
 
 from app.time_series_canonical import canonical_space_table_name
 
@@ -569,15 +570,27 @@ def catalog_page_sql(
 
 
 
+# The availability of one row, computed the same way in both arms so a filter
+# and the projected item can never disagree (chapter 7.2).
+_AVAILABILITY_SQL = (
+    "CASE WHEN {set_status} = 'archived' OR {signal_status} = 'archived' "
+    "THEN 'archived' WHEN {current_revision} IS NULL "
+    "THEN 'awaiting_data' ELSE 'ready' END"
+)
+
+
 def object_context_page_sql(
     *,
     entries_table: str,
     associations_table: str,
     sets_table: str,
     signals_table: str,
+    definitions_table: str | None = None,
     linkable_object_id: int,
     cursor_key: list | None,
     limit: int,
+    filters: dict[str, Any] | None = None,
+    object_type_id: int | None = None,
 ) -> tuple[str, tuple]:
     """Contextual list of one object as the ``UNION ALL`` of chapter 9.5.
 
@@ -588,10 +601,80 @@ def object_context_page_sql(
 
     Both arms carry the keyset and their own bound, so the union materializes at
     most two pages before its final ordering instead of every row an object can
-    reach.
+    reach. Every filter of chapter 7.4 is applied inside each arm, so a page is
+    a page of the filtered union and its cursor stays exact.
     """
 
     ordering = "ORDER BY updated_at DESC, signal_id ASC"
+    resolved_filters = dict(filters or {})
+    kind = resolved_filters.get("kind", "all")
+
+    def arm_filters(*, catalog: bool) -> tuple[str, list]:
+        clauses: list[str] = []
+        parameters: list = []
+        if catalog:
+            semantic_column = "entry.semantic_type_key"
+            data_class_column = "entry.data_class_key"
+            unit_column = "entry.unit_key"
+            semantic_id_column = "entry.semantic_type_id"
+            unit_id_column = "entry.unit_id"
+            search_column = "entry.search_text_normalized"
+            availability = _AVAILABILITY_SQL.format(
+                set_status="entry.set_status",
+                signal_status="entry.signal_status",
+                current_revision="entry.current_revision_id",
+            )
+        else:
+            semantic_column = "semantic_type.semantic_key"
+            data_class_column = "data_class.data_class_key"
+            unit_column = "unit.unit_key"
+            semantic_id_column = "definition.semantic_type_id"
+            unit_id_column = "definition.unit_id"
+            search_column = (
+                "LOWER(signal.display_name || ' ' || signal.series_key "
+                "|| ' ' || signal.description)"
+            )
+            availability = _AVAILABILITY_SQL.format(
+                set_status="the_set.status",
+                signal_status="signal.status",
+                current_revision="the_set.current_revision_id",
+            )
+        for name, column in (
+            ("semantic_type_key", semantic_column),
+            ("data_class_key", data_class_column),
+            ("unit_key", unit_column),
+        ):
+            values = resolved_filters.get(name)
+            if values:
+                clauses.append(
+                    f"{column} IN ({', '.join('?' for _ in values)})"
+                )
+                parameters.extend(values)
+        availability_values = resolved_filters.get("availability")
+        if availability_values:
+            clauses.append(
+                f"{availability} IN ({', '.join('?' for _ in availability_values)})"
+            )
+            parameters.extend(availability_values)
+        for token in resolved_filters.get("q", "").split():
+            clauses.append(f"{search_column} LIKE ?")
+            parameters.append(f"%{token}%")
+        role_key = resolved_filters.get("compatible_role_key")
+        if role_key:
+            # The positive matrix decides, exactly as it does for an execution
+            # binding: type, object type, role and canonical unit must agree.
+            clauses.append(
+                "EXISTS (SELECT 1 FROM time_series_role_compatibilities AS rule "
+                "JOIN time_series_binding_roles AS compatible_role "
+                "ON compatible_role.id = rule.binding_role_id "
+                f"WHERE rule.semantic_type_id = {semantic_id_column} "
+                "AND rule.object_type_id = ? AND rule.status = 'active' "
+                "AND compatible_role.role_key = ? "
+                "AND compatible_role.status = 'active' "
+                f"AND compatible_role.canonical_unit_id = {unit_id_column})"
+            )
+            parameters.extend((object_type_id, role_key))
+        return ("".join(f" AND {clause}" for clause in clauses), parameters)
 
     def arm_keyset(updated_at_column: str, signal_id_column: str) -> str:
         if cursor_key is None:
@@ -610,6 +693,9 @@ def object_context_page_sql(
         else [cursor_key[0], cursor_key[0], cursor_key[0], cursor_key[1]]
     )
 
+    catalog_filter_sql, catalog_filter_parameters = arm_filters(catalog=True)
+    local_filter_sql, local_filter_parameters = arm_filters(catalog=False)
+
     catalog_arm = f"""
         SELECT * FROM (
             SELECT 'catalog' AS source, entry.signal_id AS signal_id,
@@ -619,17 +705,36 @@ def object_context_page_sql(
                    entry.semantic_type_key AS semantic_type_key,
                    entry.unit_key AS unit_key,
                    entry.updated_at AS updated_at,
-                   association.binding_role_id AS binding_role_id
+                   association.binding_role_id AS binding_role_id,
+                   association.id AS association_id
             FROM {associations_table} AS association
             JOIN {entries_table} AS entry
               ON entry.signal_id = association.signal_id
             WHERE association.linkable_object_id = ?
               AND association.status = 'active'
               {arm_keyset("entry.updated_at", "entry.signal_id")}
+              {catalog_filter_sql}
             {ordering}
             LIMIT ?
         ) AS catalog_arm
     """
+    # The local arm carries its classification from the definition of TS7-010,
+    # never from the projection: an object-specific signal has no row there.
+    definition_join = (
+        f"""
+            JOIN {definitions_table} AS definition
+              ON definition.time_series_set_id = the_set.id
+            JOIN time_series_semantic_types AS semantic_type
+              ON semantic_type.id = definition.semantic_type_id
+            JOIN measurement_units AS unit ON unit.id = definition.unit_id
+            JOIN time_series_data_classes AS data_class
+              ON data_class.id = definition.data_class_id
+        """
+        if definitions_table
+        else ""
+    )
+    local_semantic = "semantic_type.semantic_key" if definitions_table else "CAST(NULL AS TEXT)"
+    local_unit = "unit.unit_key" if definitions_table else "CAST(NULL AS TEXT)"
     local_arm = f"""
         SELECT * FROM (
             SELECT 'object_specific' AS source,
@@ -639,28 +744,50 @@ def object_context_page_sql(
                    the_set.id AS time_series_set_id,
                    -- Each arm is its own subquery, so an untyped NULL would
                    -- settle on a type before the union and stop matching.
-                   CAST(NULL AS TEXT) AS semantic_type_key,
-                   CAST(NULL AS TEXT) AS unit_key,
+                   {local_semantic} AS semantic_type_key,
+                   {local_unit} AS unit_key,
                    the_set.updated_at AS updated_at,
-                   CAST(NULL AS BIGINT) AS binding_role_id
+                   CAST(NULL AS BIGINT) AS binding_role_id,
+                   CAST(NULL AS BIGINT) AS association_id
             FROM {sets_table} AS the_set
             JOIN {signals_table} AS signal
               ON signal.id = the_set.object_specific_signal_id
+            {definition_join}
             WHERE the_set.owner_linkable_object_id = ?
               AND the_set.series_kind = 'object_specific'
               {arm_keyset("the_set.updated_at", "signal.id")}
+              {local_filter_sql}
             ORDER BY the_set.updated_at DESC, signal.id ASC
             LIMIT ?
         ) AS local_arm
     """
-    parameters: list = [int(linkable_object_id), *keyset_parameters, limit + 1]
-    parameters.extend([int(linkable_object_id), *keyset_parameters, limit + 1])
+    arms = []
+    parameters: list = []
+    if kind in {"all", "catalog"}:
+        arms.append(catalog_arm)
+        parameters.extend(
+            [
+                int(linkable_object_id),
+                *keyset_parameters,
+                *catalog_filter_parameters,
+                limit + 1,
+            ]
+        )
+    if kind in {"all", "object_specific"}:
+        arms.append(local_arm)
+        parameters.extend(
+            [
+                int(linkable_object_id),
+                *keyset_parameters,
+                *local_filter_parameters,
+                limit + 1,
+            ]
+        )
     parameters.append(limit + 1)
+    union = "\n            UNION ALL\n".join(arms)
     sql = f"""
         SELECT * FROM (
-            {catalog_arm}
-            UNION ALL
-            {local_arm}
+            {union}
         ) AS object_context
         {ordering}
         LIMIT ?

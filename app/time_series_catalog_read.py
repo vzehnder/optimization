@@ -591,3 +591,59 @@ def input_list_item(row: dict[str, Any], *, actor_role: str) -> dict[str, Any]:
             "revisions": f"/api/time-series/catalog/inputs/{signal_id}/revisions",
         },
     }
+
+
+_OBJECT_CONTEXT_AVAILABILITY = ("awaiting_data", "ready", "archived", "owner_archived")
+
+
+def parse_object_context_filters(query_params) -> dict[str, Any]:
+    """The combinable dimensions of the contextual object list (chapter 7.4).
+
+    It shares the vocabulary of the global catalog - the same keys mean the
+    same thing - and adds only the discriminator that the union needs.
+    """
+
+    filters: dict[str, Any] = {}
+    kind = str(query_params.get("kind") or "all").strip()
+    if kind not in {"all", "catalog", "object_specific"}:
+        raise CatalogQueryError("TS_QUERY_INVALID", field="kind")
+    filters["kind"] = kind
+
+    q = str(query_params.get("q") or "").strip()
+    if len(q) > 200:
+        raise CatalogQueryError("TS_QUERY_INVALID", field="q", maximum=200)
+    if q:
+        filters["q"] = normalize_search_text(q)
+
+    for parameter in ("semantic_type_key", "data_class_key", "unit_key"):
+        values = sorted(
+            {
+                str(value).strip()
+                for value in query_params.getlist(parameter)
+                if str(value).strip()
+            }
+        )
+        if values:
+            filters[parameter] = values
+
+    availability = sorted(
+        {
+            str(value).strip()
+            for value in query_params.getlist("availability")
+            if str(value).strip()
+        }
+    )
+    if availability:
+        unknown = [
+            value for value in availability if value not in _OBJECT_CONTEXT_AVAILABILITY
+        ]
+        if unknown:
+            raise CatalogQueryError(
+                "TS_QUERY_INVALID", field="availability", value=unknown[0]
+            )
+        filters["availability"] = availability
+
+    role_key = str(query_params.get("compatible_role_key") or "").strip()
+    if role_key:
+        filters["compatible_role_key"] = role_key
+    return filters

@@ -88,6 +88,7 @@ from app.time_series_canonical import (
 )
 from app.time_series_catalog_projection import (
     CATALOG_ENTRY_COLUMNS,
+    CATALOG_PAGE_MAX_LIMIT,
     CATALOG_SECTION_INPUTS,
     CatalogQueryError,
     catalog_projection_content_hash,
@@ -114,6 +115,27 @@ from app.time_series_catalog_read import (
     input_filters_hash,
     input_filters_sql,
     sample_preview_rows,
+)
+from app.object_time_series import (
+    INGESTION_ERROR_LIMIT,
+    INGESTION_PREVIEW_MAX_ROWS,
+    PUBLISH_INGESTION_OPERATION_KIND,
+    ObjectSeriesError,
+    check_temporal_contract,
+    ingestion_expiry,
+    ingestion_validation_token,
+    new_ingestion_key,
+    normalize_curated_metadata,
+    normalize_object_series_key,
+    normalize_points_payload,
+    normalize_source_expectation,
+    normalize_temporal_contract,
+    object_series_etag,
+    object_series_schema_statements,
+    object_series_table_names,
+    payload_checksum,
+    summarize_normalized,
+    utc_presentation,
 )
 from app.time_series_associations import (
     AssociationMutationError,
@@ -1375,6 +1397,7 @@ class AnalystStore:
         )
         self._ensure_link_layer()
         self._ensure_catalog_projection()
+        self._ensure_object_series_tables()
         self._ensure_external_user_role_constraint()
         self._ensure_column(
             "project_client_access", "portal_view", "INTEGER NOT NULL DEFAULT 1"
@@ -1713,6 +1736,10 @@ class AnalystStore:
         for statement in catalog_projection_schema_statements(self.database_backend):
             self.connection.execute(statement)
         self._ensure_catalog_projection_read_columns()
+
+    def _ensure_object_series_tables(self) -> None:
+        for statement in object_series_schema_statements(self.database_backend):
+            self.connection.execute(statement)
 
     def _ensure_catalog_projection_read_columns(self) -> None:
         """Expand an already-landed TS7-005 projection for TS7-006 rows."""
@@ -8982,6 +9009,2468 @@ class AnalystStore:
                 "linkable_object_id": int(linkable_object_id),
                 "catalog_generation": generation,
             },
+        }
+
+    # -- Object-specific series (TS7-010, chapters 7.1 to 7.8) --------------
+    #
+    # The root of every call below is the normalized object, never a signal id:
+    # the register row is resolved and authorized first, and only then does a
+    # series of that object resolve (chapters 7.4, 9.9).
+
+    def _object_series_table(self, logical: str) -> str:
+        return object_series_table_names(self.database_backend)[logical]
+
+    def authorize_object_series_root(
+        self, *, project_id: int, linkable_object_id: int
+    ) -> dict[str, Any]:
+        """Resolve the object of the route, or refuse without leaking ids."""
+
+        try:
+            linkable = self.get_linkable_object(int(linkable_object_id))
+        except LinkableObjectError as error:
+            raise ObjectSeriesError(
+                "TS_OBJECT_SERIES_NOT_FOUND",
+                detail="the object is not registered as linkable",
+                linkable_object_id=int(linkable_object_id),
+            ) from error
+        if int(linkable["project_id"]) != int(project_id):
+            raise ObjectSeriesError(
+                "TS_COMPAT_PROJECT_CONTEXT_MISMATCH",
+                detail="the object belongs to another project",
+                linkable_object_id=int(linkable_object_id),
+                project_id=int(project_id),
+            )
+        return linkable
+
+    def _resolve_object_series_classification(
+        self, document: Mapping[str, Any], *, object_type_key: str
+    ) -> dict[str, Any]:
+        """One evaluator decides type, unit, class and role (chapter 3.5)."""
+
+        semantic_type_key = str(document.get("semantic_type_key") or "").strip()
+        unit_key = str(document.get("unit_key") or "").strip()
+        data_class_key = str(document.get("data_class_key") or "").strip()
+        role_key = str(document.get("intended_binding_role_key") or "").strip()
+        for field, value in (
+            ("semantic_type_key", semantic_type_key),
+            ("unit_key", unit_key),
+            ("data_class_key", data_class_key),
+            ("intended_binding_role_key", role_key),
+        ):
+            if not value:
+                raise ObjectSeriesError(
+                    "TS_OBJECT_SERIES_DEFINITION_INVALID", field=field, reason="required"
+                )
+        semantic_type = self.connection.execute(
+            """
+            SELECT id, semantic_key, canonical_unit_id, default_aggregation, status
+            FROM time_series_semantic_types WHERE semantic_key = ?
+            """,
+            (semantic_type_key,),
+        ).fetchone()
+        unit = self.connection.execute(
+            "SELECT id, unit_key, status FROM measurement_units WHERE unit_key = ?",
+            (unit_key,),
+        ).fetchone()
+        data_class = self.connection.execute(
+            """
+            SELECT id, data_class_key, status
+            FROM time_series_data_classes WHERE data_class_key = ?
+            """,
+            (data_class_key,),
+        ).fetchone()
+        role = self.connection.execute(
+            "SELECT id, role_key, status FROM time_series_binding_roles WHERE role_key = ?",
+            (role_key,),
+        ).fetchone()
+        for field, row in (
+            ("semantic_type_key", semantic_type),
+            ("unit_key", unit),
+            ("data_class_key", data_class),
+            ("intended_binding_role_key", role),
+        ):
+            if row is None or row["status"] != "active":
+                raise ObjectSeriesError(
+                    "TS_OBJECT_SERIES_DEFINITION_INVALID",
+                    field=field,
+                    reason="unknown_or_inactive",
+                )
+        decision = self.evaluate_time_series_compatibility(
+            semantic_type_key=semantic_type_key,
+            binding_role_key=role_key,
+            object_type_key=object_type_key,
+            unit_key=unit_key,
+            usage="association",
+        )
+        if not decision["allowed"]:
+            raise ObjectSeriesError(
+                "TS_COMPAT_ROLE_NOT_ALLOWED",
+                detail="type, unit, role and object are not a useful combination",
+                errors=[
+                    {
+                        "code": entry["code"],
+                        "message": entry.get("message", entry["code"]),
+                        "location": {"record_index": 0, "json_pointer": "/"},
+                    }
+                    for entry in decision.get("errors", [])
+                ],
+            )
+        return {
+            "semantic_type_id": int(semantic_type["id"]),
+            "semantic_type_key": semantic_type["semantic_key"],
+            "unit_id": int(unit["id"]),
+            "unit_key": unit["unit_key"],
+            "data_class_id": int(data_class["id"]),
+            "data_class_key": data_class["data_class_key"],
+            "binding_role_id": int(role["id"]),
+            "binding_role_key": role["role_key"],
+            "aggregation": str(
+                document.get("aggregation") or semantic_type["default_aggregation"]
+            ),
+        }
+
+    def compatible_object_series_role_keys(
+        self, *, semantic_type_id: int, unit_id: int, object_type_id: int
+    ) -> list[str]:
+        """Executable compatibility is derived from the matrix, not from the
+        declared intention (chapter 7.5)."""
+
+        return [
+            row["role_key"]
+            for row in self.connection.execute(
+                """
+                SELECT role.role_key AS role_key
+                FROM time_series_role_compatibilities AS rule
+                JOIN time_series_binding_roles AS role
+                  ON role.id = rule.binding_role_id
+                WHERE rule.semantic_type_id = ?
+                  AND rule.object_type_id = ?
+                  AND rule.status = 'active'
+                  AND role.status = 'active'
+                  AND role.canonical_unit_id = ?
+                ORDER BY role.role_key
+                """,
+                (int(semantic_type_id), int(object_type_id), int(unit_id)),
+            ).fetchall()
+        ]
+
+    def create_object_series_definition(
+        self,
+        *,
+        project_id: int,
+        linkable_object_id: int,
+        document: Mapping[str, Any],
+        actor: str,
+    ) -> dict[str, Any]:
+        """Definition only, in one transaction, with no periods and no values.
+
+        The object exists first (AC-ESP-01): this call refuses an unknown or
+        foreign object before it looks at the payload, and it never creates the
+        object it is called under.
+        """
+
+        with self._lock:
+            with self._database_transaction():
+                linkable = self.authorize_object_series_root(
+                    project_id=project_id, linkable_object_id=linkable_object_id
+                )
+                if linkable["status"] != "active":
+                    raise ObjectSeriesError(
+                        "TS_OBJECT_SERIES_NOT_FOUND",
+                        detail="the owner object is archived",
+                        linkable_object_id=int(linkable["id"]),
+                    )
+                object_series_key = normalize_object_series_key(
+                    document.get("object_series_key")
+                )
+                metadata = normalize_curated_metadata(document.get("metadata"))
+                contract = normalize_temporal_contract(
+                    document.get("temporal_contract")
+                )
+                source_expectation = normalize_source_expectation(
+                    document.get("source_expectation")
+                )
+                timezone_name = str(document.get("timezone") or "UTC").strip()
+                classification = self._resolve_object_series_classification(
+                    document, object_type_key=linkable["object_type_key"]
+                )
+
+                definitions = self._object_series_table("object_series_definitions")
+                taken = self.connection.execute(
+                    f"""
+                    SELECT time_series_set_id FROM {definitions}
+                    WHERE owner_linkable_object_id = ? AND object_series_key = ?
+                    """,
+                    (int(linkable["id"]), object_series_key),
+                ).fetchone()
+                if taken is not None:
+                    # The key stays reserved for the whole life of the object,
+                    # archived or not (chapter 7.1).
+                    raise ObjectSeriesError(
+                        "TS_OBJECT_SERIES_KEY_CONFLICT",
+                        detail="the object already used this local key",
+                        object_series_key=object_series_key,
+                    )
+
+                now = utc_now_iso()
+                sets_table = self._canonical("time_series_sets")
+                signals_table = self._canonical("time_series_signals")
+                revisions_table = self._canonical("time_series_set_revisions")
+                display_name = str(
+                    document.get("display_name") or object_series_key
+                ).strip()
+                description = str(document.get("description") or "").strip()
+
+                # The set names its single signal and the signal names its set.
+                # The pointer is written last, inside the same transaction, so
+                # the deferred reference of chapter 2.3 is satisfied at commit.
+                set_id = self._insert_canonical_row(
+                    f"""
+                    INSERT INTO {sets_table} (
+                        owner_project_id, name, version_number, version_label,
+                        visibility_scope, series_kind, owner_linkable_object_id,
+                        object_series_key, object_specific_signal_id, status,
+                        description, data_kind, timezone, created_at, updated_at,
+                        created_by, updated_by
+                    ) VALUES (?, ?, 1, 'object', 'project', 'object_specific',
+                              ?, ?, 0, 'draft', ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        int(linkable["project_id"]),
+                        object_series_key,
+                        int(linkable["id"]),
+                        object_series_key,
+                        description,
+                        classification["data_class_key"],
+                        timezone_name,
+                        now,
+                        now,
+                        actor,
+                        actor,
+                    ),
+                )
+                signal_id = self._insert_canonical_row(
+                    f"""
+                    INSERT INTO {signals_table} (
+                        time_series_set_id, series_kind, series_key, display_name,
+                        description, status, created_at, created_by
+                    ) VALUES (?, 'object_specific', ?, ?, ?, 'active', ?, ?)
+                    """,
+                    (set_id, object_series_key, display_name, description, now, actor),
+                )
+                self.connection.execute(
+                    f"UPDATE {sets_table} SET object_specific_signal_id = ? WHERE id = ?",
+                    (signal_id, set_id),
+                )
+
+                # Revision 1 opens ``building``: it records the contract but no
+                # period and no value, and it is not selectable (chapter 7.2).
+                revision_id = self._insert_canonical_row(
+                    f"""
+                    INSERT INTO {revisions_table} (
+                        time_series_set_id, revision_number, data_class_id,
+                        timezone, timestamp_convention, state, change_summary,
+                        metadata_json, created_at, created_by
+                    ) VALUES (?, 1, ?, ?, ?, 'building', 'definition_created',
+                              ?, ?, ?)
+                    """,
+                    (
+                        set_id,
+                        classification["data_class_id"],
+                        timezone_name,
+                        contract["timestamp_convention"],
+                        json.dumps(
+                            {"temporal_contract": contract}, sort_keys=True
+                        ),
+                        now,
+                        actor,
+                    ),
+                )
+                self.connection.execute(
+                    f"""
+                    INSERT INTO {self._canonical('time_series_revision_signals')} (
+                        set_revision_id, signal_id, time_series_set_id,
+                        semantic_type_id, unit_id, data_class_id, signal_role,
+                        aggregation, ordinal, metadata_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, 'input', ?, 0, '{{}}')
+                    """,
+                    (
+                        revision_id,
+                        signal_id,
+                        set_id,
+                        classification["semantic_type_id"],
+                        classification["unit_id"],
+                        classification["data_class_id"],
+                        classification["aggregation"],
+                    ),
+                )
+                self.connection.execute(
+                    f"""
+                    INSERT INTO {definitions} (
+                        time_series_set_id, signal_id, owner_linkable_object_id,
+                        owner_project_id, object_series_key,
+                        intended_binding_role_id, semantic_type_id, unit_id,
+                        data_class_id, aggregation, timezone, regularity,
+                        nominal_resolution_seconds, timestamp_convention,
+                        source_expectation_json, metadata_json, resource_version,
+                        created_at, created_by, updated_at, updated_by
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1,
+                              ?, ?, ?, ?)
+                    """,
+                    (
+                        set_id,
+                        signal_id,
+                        int(linkable["id"]),
+                        int(linkable["project_id"]),
+                        object_series_key,
+                        classification["binding_role_id"],
+                        classification["semantic_type_id"],
+                        classification["unit_id"],
+                        classification["data_class_id"],
+                        classification["aggregation"],
+                        timezone_name,
+                        contract["regularity"],
+                        contract["nominal_resolution_seconds"],
+                        contract["timestamp_convention"],
+                        json.dumps(source_expectation, sort_keys=True),
+                        json.dumps(metadata, sort_keys=True),
+                        now,
+                        actor,
+                        now,
+                        actor,
+                    ),
+                )
+                return self._read_object_series(
+                    linkable=linkable, signal_id=signal_id
+                )
+
+    def patch_object_series(
+        self,
+        *,
+        project_id: int,
+        linkable_object_id: int,
+        signal_id: int,
+        document: Mapping[str, Any],
+        if_match: str,
+        actor: str,
+    ) -> dict[str, Any]:
+        """Rename, redescribe or recurate - nothing else (chapter 7.5).
+
+        Owner, local key, semantic type, unit and ``series_kind`` are not
+        editable here and never travel in this payload, so no patch can
+        reassign the owner (AC-ESP-05).
+        """
+
+        with self._lock:
+            with self._database_transaction():
+                linkable = self.authorize_object_series_root(
+                    project_id=project_id, linkable_object_id=linkable_object_id
+                )
+                row = self._object_series_row(
+                    linkable_object_id=int(linkable["id"]), signal_id=int(signal_id)
+                )
+                if row is None:
+                    raise ObjectSeriesError(
+                        "TS_OBJECT_SERIES_NOT_FOUND",
+                        detail="no local series with that id belongs to this object",
+                        signal_id=int(signal_id),
+                    )
+                expected = object_series_etag(
+                    signal_id=int(row["signal_id"]),
+                    resource_version=int(row["resource_version"]),
+                )
+                if str(if_match or "").strip() != expected:
+                    raise ObjectSeriesError(
+                        "TS_INGEST_PRECONDITION_CHANGED",
+                        detail="the series changed since the ETag was read",
+                        expected=expected,
+                    )
+                display_name = str(
+                    document.get("display_name", row["display_name"]) or ""
+                ).strip()
+                if not display_name:
+                    raise ObjectSeriesError(
+                        "TS_OBJECT_SERIES_DEFINITION_INVALID",
+                        field="display_name",
+                        reason="required",
+                    )
+                description = str(
+                    document.get("description", row["description"]) or ""
+                ).strip()
+                metadata = (
+                    normalize_curated_metadata(document["metadata"])
+                    if "metadata" in document
+                    else json.loads(row["metadata_json"] or "{}")
+                )
+                now = utc_now_iso()
+                self.connection.execute(
+                    f"""
+                    UPDATE {self._canonical('time_series_signals')}
+                    SET display_name = ?, description = ?
+                    WHERE id = ?
+                    """,
+                    (display_name, description, int(row["signal_id"])),
+                )
+                self.connection.execute(
+                    f"""
+                    UPDATE {self._object_series_table('object_series_definitions')}
+                    SET metadata_json = ?, resource_version = resource_version + 1,
+                        updated_at = ?, updated_by = ?
+                    WHERE time_series_set_id = ?
+                    """,
+                    (
+                        json.dumps(metadata, sort_keys=True),
+                        now,
+                        actor,
+                        int(row["time_series_set_id"]),
+                    ),
+                )
+                self.connection.execute(
+                    f"""
+                    UPDATE {self._canonical('time_series_sets')}
+                    SET description = ?, updated_at = ?, updated_by = ?
+                    WHERE id = ?
+                    """,
+                    (description, now, actor, int(row["time_series_set_id"])),
+                )
+                return self._read_object_series(
+                    linkable=linkable, signal_id=int(row["signal_id"])
+                )
+
+    def read_object_series(
+        self, *, project_id: int, linkable_object_id: int, signal_id: int
+    ) -> dict[str, Any]:
+        linkable = self.authorize_object_series_root(
+            project_id=project_id, linkable_object_id=linkable_object_id
+        )
+        return self._read_object_series(linkable=linkable, signal_id=int(signal_id))
+
+    def _object_series_row(self, *, linkable_object_id: int, signal_id: int):
+        definitions = self._object_series_table("object_series_definitions")
+        return self.connection.execute(
+            f"""
+            SELECT definition.*, the_set.status AS set_status,
+                   the_set.current_revision_id AS current_revision_id,
+                   the_set.updated_at AS set_updated_at,
+                   signal.display_name AS display_name,
+                   signal.description AS description,
+                   signal.status AS signal_status,
+                   semantic_type.semantic_key AS semantic_type_key,
+                   unit.unit_key AS unit_key,
+                   data_class.data_class_key AS data_class_key,
+                   role.role_key AS intended_binding_role_key,
+                   object_type.id AS object_type_id
+            FROM {definitions} AS definition
+            JOIN {self._canonical('time_series_sets')} AS the_set
+              ON the_set.id = definition.time_series_set_id
+            JOIN {self._canonical('time_series_signals')} AS signal
+              ON signal.id = definition.signal_id
+            JOIN {self._linkable('linkable_objects')} AS registered
+              ON registered.id = definition.owner_linkable_object_id
+            JOIN linkable_object_types AS object_type
+              ON object_type.id = registered.object_type_id
+            JOIN time_series_semantic_types AS semantic_type
+              ON semantic_type.id = definition.semantic_type_id
+            JOIN measurement_units AS unit ON unit.id = definition.unit_id
+            JOIN time_series_data_classes AS data_class
+              ON data_class.id = definition.data_class_id
+            JOIN time_series_binding_roles AS role
+              ON role.id = definition.intended_binding_role_id
+            WHERE definition.signal_id = ?
+              AND definition.owner_linkable_object_id = ?
+            """,
+            (int(signal_id), int(linkable_object_id)),
+        ).fetchone()
+
+    def _read_object_series(
+        self, *, linkable: Mapping[str, Any], signal_id: int
+    ) -> dict[str, Any]:
+        row = self._object_series_row(
+            linkable_object_id=int(linkable["id"]), signal_id=int(signal_id)
+        )
+        if row is None:
+            # A signal of another object or of the catalog is not a resource
+            # under this root, even for an internal user (chapter 7.10).
+            raise ObjectSeriesError(
+                "TS_OBJECT_SERIES_NOT_FOUND",
+                detail="no local series with that id belongs to this object",
+                signal_id=int(signal_id),
+            )
+        return self._project_object_series(row, linkable=linkable)
+
+    def _project_object_series(
+        self, row: Mapping[str, Any], *, linkable: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        revisions_table = self._canonical("time_series_set_revisions")
+        current = None
+        if row["current_revision_id"] is not None:
+            current = self.connection.execute(
+                f"""
+                SELECT id, revision_number, content_hash, created_at,
+                       validation_payload_json
+                FROM {revisions_table} WHERE id = ?
+                """,
+                (int(row["current_revision_id"]),),
+            ).fetchone()
+        building = self.connection.execute(
+            f"""
+            SELECT id, revision_number FROM {revisions_table}
+            WHERE time_series_set_id = ? AND state = 'building'
+            ORDER BY revision_number DESC LIMIT 1
+            """,
+            (int(row["time_series_set_id"]),),
+        ).fetchone()
+
+        compatible_roles = self.compatible_object_series_role_keys(
+            semantic_type_id=int(row["semantic_type_id"]),
+            unit_id=int(row["unit_id"]),
+            object_type_id=int(row["object_type_id"]),
+        )
+        if linkable["status"] != "active":
+            availability = "owner_archived"
+        elif row["set_status"] == "archived" or row["signal_status"] == "archived":
+            availability = "archived"
+        elif current is None:
+            availability = "awaiting_data"
+        else:
+            availability = "ready"
+        binding_ready = availability == "ready" and bool(compatible_roles)
+        coverage = (
+            json.loads(current["validation_payload_json"] or "{}")
+            if current is not None
+            else {}
+        )
+        return {
+            "source_kind": "object_specific",
+            "signal_id": int(row["signal_id"]),
+            "set_id": int(row["time_series_set_id"]),
+            "owner": {
+                "project_id": int(row["owner_project_id"]),
+                "linkable_object_id": int(row["owner_linkable_object_id"]),
+                "object_kind": linkable["object_kind"],
+                "object_type_key": linkable["object_type_key"],
+            },
+            "object_series_key": row["object_series_key"],
+            "display_name": row["display_name"],
+            "description": row["description"],
+            "classification": {
+                "semantic_type_key": row["semantic_type_key"],
+                "unit_key": row["unit_key"],
+                "data_class_key": row["data_class_key"],
+                "aggregation": row["aggregation"],
+                "intended_binding_role_key": row["intended_binding_role_key"],
+            },
+            "temporal_contract": {
+                "regularity": row["regularity"],
+                "nominal_resolution_seconds": row["nominal_resolution_seconds"],
+                "timestamp_convention": row["timestamp_convention"],
+                "timezone": row["timezone"],
+            },
+            "source_expectation": json.loads(row["source_expectation_json"] or "{}"),
+            "metadata": json.loads(row["metadata_json"] or "{}"),
+            "set_status": row["set_status"],
+            "availability": availability,
+            "current_revision": (
+                None
+                if current is None
+                else {
+                    "revision_id": int(current["id"]),
+                    "revision_number": int(current["revision_number"]),
+                    "content_hash": current["content_hash"],
+                    "created_at": current["created_at"],
+                    "coverage_start": coverage.get("coverage_start"),
+                    "coverage_end": coverage.get("coverage_end"),
+                    "period_count": coverage.get("period_count"),
+                    "value_count": coverage.get("value_count"),
+                }
+            ),
+            "building_revision": (
+                None
+                if building is None
+                else {
+                    "revision_id": int(building["id"]),
+                    "revision_number": int(building["revision_number"]),
+                }
+            ),
+            "binding_ready": binding_ready,
+            "compatible_role_keys": compatible_roles,
+            "resource_version": int(row["resource_version"]),
+        }
+
+    def read_object_time_series_context(
+        self,
+        *,
+        project_id: int,
+        linkable_object_id: int,
+        limit: int | None = None,
+        cursor: str | None = None,
+        filters: Mapping[str, Any] | None = None,
+        actor_class: str = "internal",
+    ) -> dict[str, Any]:
+        """The contextual list of one object: associations and local series.
+
+        The union is a read model and nothing else (chapter 7.4): every row
+        carries the mandatory ``source_kind`` discriminator, no row carries
+        values or an unbounded consumer list, and every mutation lives on its
+        own typed subresource.
+        """
+
+        linkable = self.authorize_object_series_root(
+            project_id=project_id, linkable_object_id=linkable_object_id
+        )
+        resolved_limit = normalize_catalog_limit(limit)
+        resolved_filters = dict(filters or {})
+        section = f"object-context:{int(linkable['id'])}"
+        filters_digest = input_filters_hash(resolved_filters)
+        tables = {
+            "entries_table": self._projection("time_series_catalog_entries"),
+            "associations_table": self.link_layer_table_names()[
+                "time_series_catalog_associations"
+            ],
+            "sets_table": self._canonical("time_series_sets"),
+            "signals_table": self._canonical("time_series_signals"),
+            "definitions_table": self._object_series_table(
+                "object_series_definitions"
+            ),
+        }
+        with self._read_only_transaction():
+            generation = self.catalog_generation()
+            cursor_key = None
+            if cursor is not None:
+                cursor_key = decode_catalog_cursor(
+                    cursor,
+                    self._catalog_cursor_secret,
+                    section=section,
+                    order="-updated_at",
+                    limit=resolved_limit,
+                    generation=generation,
+                    actor_class=actor_class,
+                    filters_hash=filters_digest,
+                )
+            sql, parameters = object_context_page_sql(
+                **tables,
+                linkable_object_id=int(linkable["id"]),
+                cursor_key=cursor_key,
+                limit=resolved_limit,
+                filters=resolved_filters,
+                object_type_id=int(linkable["object_type_id"]),
+            )
+            rows = [
+                dict(row) for row in self.connection.execute(sql, parameters).fetchall()
+            ]
+            total_sql, total_parameters = object_context_page_sql(
+                **tables,
+                linkable_object_id=int(linkable["id"]),
+                cursor_key=None,
+                limit=CATALOG_PAGE_MAX_LIMIT,
+                filters=resolved_filters,
+                object_type_id=int(linkable["object_type_id"]),
+            )
+            total_count = len(
+                self.connection.execute(total_sql, total_parameters).fetchall()
+            )
+
+        has_more = len(rows) > resolved_limit
+        visible = rows[:resolved_limit]
+        items = [
+            self._object_context_item(row, linkable=linkable) for row in visible
+        ]
+        next_cursor = None
+        if has_more and visible:
+            next_cursor = encode_catalog_cursor(
+                {
+                    "s": section,
+                    "o": "-updated_at",
+                    "l": resolved_limit,
+                    "g": generation,
+                    "k": [visible[-1]["updated_at"], visible[-1]["signal_id"]],
+                    "t": int(time.time()),
+                    "a": actor_class,
+                    "f": filters_digest,
+                },
+                self._catalog_cursor_secret,
+            )
+        return {
+            "items": items,
+            "page": {
+                "limit": resolved_limit,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+            },
+            "summary": {"total_count": total_count},
+            "meta": {
+                "section": "object_context",
+                "project_id": int(linkable["project_id"]),
+                "linkable_object_id": int(linkable["id"]),
+                "catalog_generation": generation,
+            },
+        }
+
+    def _object_context_item(
+        self, row: Mapping[str, Any], *, linkable: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        project_id = int(linkable["project_id"])
+        object_id = int(linkable["id"])
+        signal_id = int(row["signal_id"])
+        if row["source"] == "object_specific":
+            series = self._read_object_series(linkable=linkable, signal_id=signal_id)
+            return {
+                "source_kind": "object_specific",
+                "signal_id": signal_id,
+                "set_id": series["set_id"],
+                "series_key": series["object_series_key"],
+                "display_name": series["display_name"],
+                "semantic_type_key": series["classification"]["semantic_type_key"],
+                "unit_key": series["classification"]["unit_key"],
+                "data_class_key": series["classification"]["data_class_key"],
+                "availability": series["availability"],
+                "current_revision": series["current_revision"],
+                "temporal_contract": series["temporal_contract"],
+                "compatible_role_keys": series["compatible_role_keys"],
+                # A local series has no catalog association behind it and no
+                # binding of its own until TS7-012 creates one.
+                "association": None,
+                "binding_state": "unbound",
+                "capabilities": {
+                    "edit_definition": True,
+                    "ingest_points": series["availability"]
+                    in {"awaiting_data", "ready"},
+                    "preview": series["current_revision"] is not None,
+                    "bind": series["binding_ready"],
+                },
+                "links": {
+                    "detail": (
+                        f"/api/projects/{project_id}/linkable-objects/{object_id}"
+                        f"/time-series/object-series/{signal_id}"
+                    )
+                },
+                "updated_at": row["updated_at"],
+            }
+
+        entry = self.connection.execute(
+            f"""
+            SELECT * FROM {self._projection('time_series_catalog_entries')}
+            WHERE signal_id = ?
+            """,
+            (signal_id,),
+        ).fetchone()
+        association = self.connection.execute(
+            f"""
+            SELECT association.id AS association_id, role.role_key AS role_key,
+                   association.status AS status
+            FROM {self.link_layer_table_names()['time_series_catalog_associations']}
+                 AS association
+            JOIN time_series_binding_roles AS role
+              ON role.id = association.binding_role_id
+            WHERE association.id = ?
+            """,
+            (int(row["association_id"]),),
+        ).fetchone()
+        bindings = self.connection.execute(
+            f"""
+            SELECT COUNT(*) AS total
+            FROM {self.link_layer_table_names()['case_time_series_bindings']}
+            WHERE signal_id = ? AND linkable_object_id = ? AND status = 'active'
+            """,
+            (signal_id, object_id),
+        ).fetchone()
+        return {
+            "source_kind": "catalog",
+            "signal_id": signal_id,
+            "set_id": int(entry["time_series_set_id"]),
+            "series_key": entry["series_key"],
+            "display_name": entry["display_name"],
+            "semantic_type_key": entry["semantic_type_key"],
+            "unit_key": entry["unit_key"],
+            "data_class_key": entry["data_class_key"],
+            "availability": (
+                "archived"
+                if entry["set_status"] == "archived"
+                or entry["signal_status"] == "archived"
+                else "ready"
+            ),
+            "current_revision": {
+                "revision_id": int(entry["current_revision_id"]),
+                "revision_number": int(entry["revision_number"]),
+                "coverage_start": utc_presentation(entry["coverage_start"]),
+                "coverage_end": utc_presentation(entry["coverage_end"]),
+                "period_count": int(entry["period_count"]),
+                "value_count": int(entry["value_count"]),
+            },
+            "temporal_contract": {
+                "regularity": entry["regularity"],
+                "nominal_resolution_seconds": entry["nominal_resolution_seconds"],
+                "timestamp_convention": "period_start",
+                "timezone": entry["source_timezone"],
+            },
+            "compatible_role_keys": self.compatible_object_series_role_keys(
+                semantic_type_id=int(entry["semantic_type_id"]),
+                unit_id=int(entry["unit_id"]),
+                object_type_id=int(linkable["object_type_id"]),
+            ),
+            "association": (
+                None
+                if association is None
+                else {
+                    "association_id": int(association["association_id"]),
+                    "binding_role_key": association["role_key"],
+                    "status": association["status"],
+                }
+            ),
+            "binding_state": "bound" if int(bindings["total"]) else "unbound",
+            "capabilities": {
+                "edit_definition": False,
+                "ingest_points": False,
+                "preview": True,
+                "bind": True,
+            },
+            "links": {
+                "detail": f"/api/time-series/catalog/inputs/{signal_id}",
+                "association": (
+                    None
+                    if association is None
+                    else (
+                        f"/api/projects/{project_id}/linkable-objects/{object_id}"
+                        f"/time-series/catalog-associations/"
+                        f"{int(association['association_id'])}"
+                    )
+                ),
+            },
+            "updated_at": row["updated_at"],
+        }
+
+    def read_object_series_revisions(
+        self,
+        *,
+        project_id: int,
+        linkable_object_id: int,
+        signal_id: int,
+        limit: int | None = None,
+        cursor: str | None = None,
+        actor_class: str = "internal",
+    ) -> dict[str, Any]:
+        """Paginated revision metadata of one local identity (chapter 7.4)."""
+
+        linkable = self.authorize_object_series_root(
+            project_id=project_id, linkable_object_id=linkable_object_id
+        )
+        row = self._object_series_row(
+            linkable_object_id=int(linkable["id"]), signal_id=int(signal_id)
+        )
+        if row is None:
+            raise ObjectSeriesError(
+                "TS_OBJECT_SERIES_NOT_FOUND",
+                detail="no local series with that id belongs to this object",
+                signal_id=int(signal_id),
+            )
+        resolved_limit = normalize_catalog_limit(limit)
+        section = f"object-series:{int(signal_id)}:revisions"
+        filters_digest = input_filters_hash({"signal_id": int(signal_id)})
+        with self._read_only_transaction():
+            generation = self.catalog_generation()
+            keyset = ""
+            parameters: list[Any] = [int(signal_id)]
+            if cursor is not None:
+                cursor_key = decode_catalog_cursor(
+                    cursor,
+                    self._catalog_cursor_secret,
+                    section=section,
+                    order="-revision_number",
+                    limit=resolved_limit,
+                    generation=generation,
+                    actor_class=actor_class,
+                    filters_hash=filters_digest,
+                )
+                if len(cursor_key) != 2:
+                    raise CatalogQueryError(
+                        "TS_QUERY_CURSOR_MISMATCH", reason="key_arity"
+                    )
+                keyset = (
+                    "AND (revision.revision_number < ? OR "
+                    "(revision.revision_number = ? AND revision.id > ?))"
+                )
+                parameters.extend((cursor_key[0], cursor_key[0], cursor_key[1]))
+            parameters.append(resolved_limit + 1)
+            rows = self.connection.execute(
+                f"""
+                SELECT revision.id, revision.revision_number, revision.state,
+                       revision.content_hash, revision.created_at,
+                       revision.created_by, revision.change_summary,
+                       revision.validation_payload_json,
+                       source.kind AS source_kind
+                FROM {self._canonical('time_series_revision_signals')} AS revision_signal
+                JOIN {self._canonical('time_series_set_revisions')} AS revision
+                  ON revision.id = revision_signal.set_revision_id
+                LEFT JOIN {self._canonical('time_series_sources')} AS source
+                  ON source.id = revision.time_series_source_id
+                WHERE revision_signal.signal_id = ?
+                  {keyset}
+                ORDER BY revision.revision_number DESC, revision.id ASC
+                LIMIT ?
+                """,
+                tuple(parameters),
+            ).fetchall()
+            total_count = int(
+                self.connection.execute(
+                    f"""
+                    SELECT COUNT(*) AS total
+                    FROM {self._canonical('time_series_revision_signals')}
+                    WHERE signal_id = ?
+                    """,
+                    (int(signal_id),),
+                ).fetchone()["total"]
+            )
+        has_more = len(rows) > resolved_limit
+        visible = rows[:resolved_limit]
+        items = []
+        for entry in visible:
+            payload = json.loads(entry["validation_payload_json"] or "{}")
+            items.append(
+                {
+                    "id": int(entry["id"]),
+                    "number": int(entry["revision_number"]),
+                    "state": entry["state"],
+                    "content_hash": (
+                        None
+                        if entry["content_hash"] is None
+                        else f"sha256:{entry['content_hash']}"
+                    ),
+                    "created_at": entry["created_at"],
+                    "created_by": entry["created_by"],
+                    "change_summary": entry["change_summary"],
+                    "source_kind": entry["source_kind"] or "api",
+                    "coverage_start": utc_presentation(payload.get("coverage_start")),
+                    "coverage_end": utc_presentation(payload.get("coverage_end")),
+                    "period_count": payload.get("period_count"),
+                    "value_count": payload.get("value_count"),
+                }
+            )
+        next_cursor = None
+        if has_more and visible:
+            next_cursor = encode_catalog_cursor(
+                {
+                    "s": section,
+                    "o": "-revision_number",
+                    "l": resolved_limit,
+                    "g": generation,
+                    "k": [visible[-1]["revision_number"], visible[-1]["id"]],
+                    "t": int(time.time()),
+                    "a": actor_class,
+                    "f": filters_digest,
+                },
+                self._catalog_cursor_secret,
+            )
+        return {
+            "items": items,
+            "page": {
+                "limit": resolved_limit,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+            },
+            "summary": {"total_count": total_count},
+            "meta": {
+                "section": "object_series_revisions",
+                "signal_id": int(signal_id),
+                "catalog_generation": generation,
+            },
+        }
+
+    def read_object_series_preview(
+        self,
+        *,
+        project_id: int,
+        linkable_object_id: int,
+        signal_id: int,
+        revision_id: int,
+        range_from: str,
+        range_to: str,
+        sampling: str,
+        max_points: int,
+    ) -> dict[str, Any]:
+        """Bounded values of one exact revision; never an unbounded export.
+
+        The preview keeps the contract of the global catalog (chapter 7.10):
+        an explicit revision, an explicit range, and a hard point ceiling.
+        """
+
+        linkable = self.authorize_object_series_root(
+            project_id=project_id, linkable_object_id=linkable_object_id
+        )
+        row = self._object_series_row(
+            linkable_object_id=int(linkable["id"]), signal_id=int(signal_id)
+        )
+        if row is None:
+            raise ObjectSeriesError(
+                "TS_OBJECT_SERIES_NOT_FOUND",
+                detail="no local series with that id belongs to this object",
+                signal_id=int(signal_id),
+            )
+        revision = self.connection.execute(
+            f"""
+            SELECT revision.id, revision.state, revision.content_hash,
+                   unit.unit_key, unit.symbol AS unit_symbol
+            FROM {self._canonical('time_series_set_revisions')} AS revision
+            JOIN {self._canonical('time_series_revision_signals')} AS revision_signal
+              ON revision_signal.set_revision_id = revision.id
+             AND revision_signal.signal_id = ?
+            JOIN measurement_units AS unit ON unit.id = revision_signal.unit_id
+            WHERE revision.id = ? AND revision.time_series_set_id = ?
+            """,
+            (int(signal_id), int(revision_id), int(row["time_series_set_id"])),
+        ).fetchone()
+        if revision is None:
+            raise ObjectSeriesError(
+                "TS_OBJECT_SERIES_NOT_FOUND",
+                detail="that revision does not belong to this local series",
+                revision_id=int(revision_id),
+            )
+        if revision["state"] != "sealed":
+            raise ObjectSeriesError(
+                "TS_INGEST_SESSION_UNAVAILABLE",
+                detail="the revision is not sealed",
+                revision_id=int(revision_id),
+            )
+        rows = [
+            dict(entry)
+            for entry in self.connection.execute(
+                f"""
+                SELECT period.timestamp_start, period.timestamp_end,
+                       value.value_numeric, value.quality_flag
+                FROM {self._canonical('time_series_values')} AS value
+                JOIN {self._canonical('time_series_periods')} AS period
+                  ON period.id = value.time_series_period_id
+                 AND period.set_revision_id = value.set_revision_id
+                WHERE value.set_revision_id = ? AND value.signal_id = ?
+                  AND period.timestamp_start >= ? AND period.timestamp_end <= ?
+                ORDER BY period.timestamp_start, period.id
+                """,
+                (int(revision_id), int(signal_id), range_from, range_to),
+            ).fetchall()
+        ]
+        if sampling == "none" and len(rows) > max_points:
+            raise ObjectSeriesError(
+                "TS_QUERY_INVALID",
+                detail="the range holds more points than max_points",
+                source_point_count=len(rows),
+                max_points=max_points,
+            )
+        sampled = sample_preview_rows(rows, strategy=sampling, limit=max_points)
+        return {
+            "signal_id": int(signal_id),
+            "source_kind": "object_specific",
+            "revision": {
+                "id": int(revision_id),
+                "content_hash": f"sha256:{revision['content_hash']}",
+            },
+            "requested_range": {"from": range_from, "to": range_to},
+            "effective_range": (
+                {
+                    "from": utc_presentation(rows[0]["timestamp_start"]),
+                    "to": utc_presentation(rows[-1]["timestamp_end"]),
+                }
+                if rows
+                else None
+            ),
+            "sampling": sampling,
+            "max_points": max_points,
+            "source_point_count": len(rows),
+            "returned_point_count": len(sampled),
+            "unit": {
+                "key": revision["unit_key"],
+                "symbol": revision["unit_symbol"],
+            },
+            "points": [
+                {
+                    "timestamp_start": utc_presentation(entry["timestamp_start"]),
+                    "timestamp_end": utc_presentation(entry["timestamp_end"]),
+                    "value": float(entry["value_numeric"]),
+                    "quality_flag": entry["quality_flag"],
+                }
+                for entry in sampled
+            ],
+        }
+
+    # -- Points ingestion against an object target (chapters 7.6 to 7.8) ----
+
+    def _object_series_binding_impact(self, *, signal_id: int, set_id: int):
+        """What the current bindings of this identity will feel (chapter 7.10)."""
+
+        bindings = self.link_layer_table_names()["case_time_series_bindings"]
+        current_revision = self.connection.execute(
+            f"""
+            SELECT current_revision_id FROM {self._canonical('time_series_sets')}
+            WHERE id = ?
+            """,
+            (int(set_id),),
+        ).fetchone()
+        pointer = (
+            None
+            if current_revision is None
+            else current_revision["current_revision_id"]
+        )
+        rows = self.connection.execute(
+            f"""
+            SELECT set_revision_id FROM {bindings}
+            WHERE signal_id = ? AND status = 'active'
+            """,
+            (int(signal_id),),
+        ).fetchall()
+        on_current = sum(
+            1 for row in rows if pointer is not None and row["set_revision_id"] == pointer
+        )
+        return {
+            "bindings_current": on_current,
+            "bindings_pinned": len(rows) - on_current,
+            # Publishing never moves a binding in silence: every active one
+            # turns stale until it is resolved explicitly.
+            "will_become_stale": len(rows),
+        }
+
+    def _object_series_ingestion_contract(
+        self, row: Mapping[str, Any], document: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        declared = document.get("revision_contract") or {}
+        if not isinstance(declared, Mapping):
+            raise ObjectSeriesError(
+                "TS_INGEST_VALIDATION_FAILED",
+                detail="revision_contract must be an object",
+            )
+        data_class_key = str(
+            declared.get("data_class_key") or row["data_class_key"]
+        ).strip()
+        data_class = self.connection.execute(
+            """
+            SELECT id, data_class_key, status FROM time_series_data_classes
+            WHERE data_class_key = ?
+            """,
+            (data_class_key,),
+        ).fetchone()
+        if data_class is None or data_class["status"] != "active":
+            raise ObjectSeriesError(
+                "TS_INGEST_VALIDATION_FAILED",
+                detail="the declared data class is unknown",
+                errors=[
+                    {
+                        "code": "TS_INGEST_TEMPORAL_CONTRACT_INVALID",
+                        "message": "unknown data_class_key",
+                        "location": {
+                            "record_index": 0,
+                            "json_pointer": "/revision_contract/data_class_key",
+                        },
+                    }
+                ],
+            )
+        regularity = str(declared.get("regularity") or row["regularity"]).strip()
+        if regularity not in {"regular", "irregular"}:
+            raise ObjectSeriesError(
+                "TS_INGEST_VALIDATION_FAILED",
+                detail="the declared regularity is unknown",
+            )
+        resolution = declared.get(
+            "nominal_resolution_seconds", row["nominal_resolution_seconds"]
+        )
+        return {
+            "data_class_id": int(data_class["id"]),
+            "data_class_key": data_class["data_class_key"],
+            "timezone": str(declared.get("timezone") or row["timezone"]).strip(),
+            "timestamp_convention": row["timestamp_convention"],
+            "regularity": regularity,
+            "nominal_resolution_seconds": (
+                None if resolution is None else float(resolution)
+            ),
+            # A change of semantic type or unit never enters disguised as a
+            # load: they are not part of this payload at all (chapter 7.5).
+            "changed": (
+                data_class["data_class_key"] != row["data_class_key"]
+                or str(declared.get("timezone") or row["timezone"]).strip()
+                != row["timezone"]
+                or regularity != row["regularity"]
+            ),
+        }
+
+    def _object_series_snapshot(self, revision_id: int) -> dict[str, Any]:
+        """Read one sealed revision back as a normalized snapshot."""
+
+        periods = [
+            {
+                "period_index": int(row["period_index"]),
+                "timestamp_start": row["timestamp_start"],
+                "timestamp_end": row["timestamp_end"],
+                "duration_hours": float(row["duration_hours"]),
+                "source_row_number": None,
+            }
+            for row in self.connection.execute(
+                f"""
+                SELECT period_index, timestamp_start, timestamp_end, duration_hours
+                FROM {self._canonical('time_series_periods')}
+                WHERE set_revision_id = ? ORDER BY period_index
+                """,
+                (int(revision_id),),
+            ).fetchall()
+        ]
+        values = [
+            {
+                "series_key": row["series_key"],
+                "period_index": int(row["period_index"]),
+                "value": float(row["value_numeric"]),
+                "quality_flag": row["quality_flag"],
+                "source_row_number": None,
+            }
+            for row in self.connection.execute(
+                f"""
+                SELECT signal.series_key AS series_key,
+                       period.period_index AS period_index,
+                       value.value_numeric AS value_numeric,
+                       value.quality_flag AS quality_flag
+                FROM {self._canonical('time_series_values')} AS value
+                JOIN {self._canonical('time_series_periods')} AS period
+                  ON period.id = value.time_series_period_id
+                JOIN {self._canonical('time_series_signals')} AS signal
+                  ON signal.id = value.signal_id
+                WHERE value.set_revision_id = ?
+                ORDER BY period.period_index
+                """,
+                (int(revision_id),),
+            ).fetchall()
+        ]
+        return {"periods": periods, "values": values}
+
+    def _object_series_content_hash(
+        self,
+        *,
+        row: Mapping[str, Any],
+        contract: Mapping[str, Any],
+        periods: list[dict[str, Any]],
+        values: list[dict[str, Any]],
+    ) -> str:
+        """The canonical hash of a snapshot that is not written yet.
+
+        It walks the same fields in the same order as the streaming hash of the
+        sealed revision, so validation and publication cannot disagree.
+        """
+
+        digest = CanonicalContentHash(
+            timezone=contract["timezone"],
+            timestamp_convention=contract["timestamp_convention"],
+            data_class_key=contract["data_class_key"],
+        )
+        digest.add_signal(
+            ordinal=0,
+            series_key=row["object_series_key"],
+            semantic_type_key=row["semantic_type_key"],
+            unit_key=row["unit_key"],
+            data_class_key=contract["data_class_key"],
+            signal_role="input",
+            aggregation=row["aggregation"],
+        )
+        for period in periods:
+            digest.add_period(
+                period_index=period["period_index"],
+                timestamp_start=period["timestamp_start"],
+                timestamp_end=period["timestamp_end"],
+                duration_hours=period["duration_hours"],
+            )
+        for value in sorted(values, key=lambda entry: entry["period_index"]):
+            digest.add_value(
+                ordinal=0, period_index=value["period_index"], value=value["value"]
+            )
+        return digest.seal()
+
+    def prepare_object_series_points_ingestion(
+        self,
+        *,
+        project_id: int,
+        linkable_object_id: int,
+        signal_id: int,
+        document: Mapping[str, Any],
+        actor: str,
+    ) -> dict[str, Any]:
+        """Validate one JSON batch and stage it; publishing is a second step.
+
+        Nothing staged is selectable by a binding: the snapshot lives in its
+        own tables until the publication transaction copies it into the
+        canonical ones (chapter 9.7).
+        """
+
+        with self._lock:
+            with self._database_transaction():
+                linkable = self.authorize_object_series_root(
+                    project_id=project_id, linkable_object_id=linkable_object_id
+                )
+                row = self._object_series_row(
+                    linkable_object_id=int(linkable["id"]), signal_id=int(signal_id)
+                )
+                if row is None or linkable["status"] != "active":
+                    raise ObjectSeriesError(
+                        "TS_OBJECT_SERIES_NOT_FOUND",
+                        detail="no local series with that id belongs to this object",
+                        signal_id=int(signal_id),
+                    )
+                if row["set_status"] == "archived" or row["signal_status"] == "archived":
+                    raise ObjectSeriesError(
+                        "TS_OBJECT_SERIES_NOT_FOUND",
+                        detail="the local series is archived",
+                        signal_id=int(signal_id),
+                    )
+                receipt, refusal = self._stage_object_series_points(
+                    linkable=linkable, row=row, document=document, actor=actor
+                )
+            # A job that failed validation is still a job: it commits so the
+            # client can read its errors, fix the mapping and revalidate. Only
+            # then is the refusal raised (chapter 7.4).
+            if refusal is not None:
+                raise refusal
+            return receipt
+
+    def _stage_object_series_points(
+        self,
+        *,
+        linkable: Mapping[str, Any],
+        row: Mapping[str, Any],
+        document: Mapping[str, Any],
+        actor: str,
+    ) -> tuple[dict[str, Any], ObjectSeriesError | None]:
+        mode = str(document.get("mode") or "replace_full").strip()
+        if mode not in {"replace_full", "append_tail"}:
+            raise ObjectSeriesError(
+                "TS_INGEST_VALIDATION_FAILED", detail="mode is not supported"
+            )
+        contract = self._object_series_ingestion_contract(row, document)
+        current_revision_id = row["current_revision_id"]
+        current = None
+        if current_revision_id is not None:
+            current = self.connection.execute(
+                f"""
+                SELECT id, revision_number, content_hash
+                FROM {self._canonical('time_series_set_revisions')}
+                WHERE id = ?
+                """,
+                (int(current_revision_id),),
+            ).fetchone()
+
+        expected_base = document.get("expected_base")
+        if current is None:
+            if mode != "replace_full":
+                raise ObjectSeriesError(
+                    "TS_INGEST_APPEND_CONFLICT",
+                    detail="the first load only accepts replace_full",
+                )
+            if expected_base is not None:
+                raise ObjectSeriesError(
+                    "TS_INGEST_PRECONDITION_CHANGED",
+                    detail="the series has no current revision yet",
+                )
+        else:
+            if not isinstance(expected_base, Mapping):
+                raise ObjectSeriesError(
+                    "TS_INGEST_PRECONDITION_REQUIRED",
+                    detail="expected_base must name the exact current revision",
+                    field="expected_base",
+                )
+            declared_hash = str(expected_base.get("content_hash") or "").split(":")[-1]
+            if (
+                int(expected_base.get("revision_id") or 0) != int(current["id"])
+                or declared_hash != current["content_hash"]
+            ):
+                raise ObjectSeriesError(
+                    "TS_INGEST_PRECONDITION_CHANGED",
+                    detail="the declared base is not the current revision",
+                    current_revision_id=int(current["id"]),
+                )
+
+        series_key = row["object_series_key"]
+        normalized = normalize_points_payload(
+            document, series_keys=(series_key,), mapping={}
+        )
+        errors = list(normalized["errors"])
+        periods = normalized["periods"]
+        values = normalized["values"]
+
+        if mode == "append_tail" and current is not None and not errors:
+            base_snapshot = self._object_series_snapshot(int(current["id"]))
+            base_periods = base_snapshot["periods"]
+            coverage_end = base_periods[-1]["timestamp_end"] if base_periods else None
+            if periods and coverage_end is not None:
+                if periods[0]["timestamp_start"] < coverage_end:
+                    raise ObjectSeriesError(
+                        "TS_INGEST_APPEND_CONFLICT",
+                        detail="the tail overlaps the current coverage",
+                    )
+                if (
+                    contract["regularity"] == "regular"
+                    and periods[0]["timestamp_start"] != coverage_end
+                ):
+                    raise ObjectSeriesError(
+                        "TS_INGEST_APPEND_CONFLICT",
+                        detail="a regular tail must start where the coverage ends",
+                    )
+            # ``append_tail`` still produces a self-contained snapshot: the hash
+            # and the stored revision describe the whole resulting coverage.
+            offset = len(base_periods)
+            periods = base_periods + [
+                {**period, "period_index": period["period_index"] + offset}
+                for period in periods
+            ]
+            values = base_snapshot["values"] + [
+                {**value, "period_index": value["period_index"] + offset}
+                for value in values
+            ]
+
+        errors.extend(check_temporal_contract(periods, contract=contract))
+        content_hash = (
+            None
+            if errors
+            else self._object_series_content_hash(
+                row=row, contract=contract, periods=periods, values=values
+            )
+        )
+        mapping_only = bool(errors) and all(
+            entry["code"] == "TS_INGEST_MAPPING_INVALID" for entry in errors
+        )
+        state = (
+            "ready_to_publish"
+            if not errors
+            else ("awaiting_mapping" if mapping_only else "invalid")
+        )
+
+        now = utc_now_iso()
+        ingestion_key = new_ingestion_key()
+        ingestion_id = self._insert_canonical_row(
+            f"""
+            INSERT INTO {self._object_series_table('time_series_ingestions')} (
+                ingestion_key, project_id, linkable_object_id, time_series_set_id,
+                signal_id, target_kind, channel, state, mode, actor,
+                base_revision_id, base_content_hash, contract_json, source_json,
+                mapping_json, submitted_json, normalized_json, validation_json,
+                payload_checksum, content_hash, created_at, updated_at, expires_at
+            ) VALUES (?, ?, ?, ?, ?, 'object_specific', 'api_points', ?, ?, ?,
+                      ?, ?, ?, ?, '{{}}', ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                ingestion_key,
+                int(row["owner_project_id"]),
+                int(linkable["id"]),
+                int(row["time_series_set_id"]),
+                int(row["signal_id"]),
+                state,
+                mode,
+                actor,
+                None if current is None else int(current["id"]),
+                None if current is None else current["content_hash"],
+                json.dumps(contract, sort_keys=True),
+                json.dumps(document.get("source") or {}, sort_keys=True),
+                json.dumps(document.get("points") or [], sort_keys=True),
+                json.dumps(
+                    summarize_normalized(periods, values), sort_keys=True
+                ),
+                json.dumps({"errors": errors}, sort_keys=True),
+                payload_checksum(document.get("points") or []),
+                content_hash,
+                now,
+                now,
+                ingestion_expiry(now),
+            ),
+        )
+        self._write_ingestion_staging(
+            ingestion_id=ingestion_id, periods=periods, values=values
+        )
+        receipt = self._read_object_series_ingestion_row(ingestion_id)
+        if errors:
+            return receipt, ObjectSeriesError(
+                "TS_INGEST_MAPPING_INVALID"
+                if mapping_only
+                else "TS_INGEST_VALIDATION_FAILED",
+                detail=f"{len(errors)} records require correction",
+                errors=errors,
+                ingestion=receipt,
+            )
+        return receipt, None
+
+    def _write_ingestion_staging(
+        self,
+        *,
+        ingestion_id: int,
+        periods: list[dict[str, Any]],
+        values: list[dict[str, Any]],
+    ) -> None:
+        periods_table = self._object_series_table("time_series_ingestion_periods")
+        values_table = self._object_series_table("time_series_ingestion_values")
+        self.connection.execute(
+            f"DELETE FROM {values_table} WHERE ingestion_id = ?", (int(ingestion_id),)
+        )
+        self.connection.execute(
+            f"DELETE FROM {periods_table} WHERE ingestion_id = ?", (int(ingestion_id),)
+        )
+        if periods:
+            self.connection.executemany(
+                f"""
+                INSERT INTO {periods_table} (
+                    ingestion_id, period_index, timestamp_start, timestamp_end,
+                    duration_hours, source_row_number
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        int(ingestion_id),
+                        period["period_index"],
+                        period["timestamp_start"],
+                        period["timestamp_end"],
+                        period["duration_hours"],
+                        period.get("source_row_number"),
+                    )
+                    for period in periods
+                ],
+            )
+        if values:
+            self.connection.executemany(
+                f"""
+                INSERT INTO {values_table} (
+                    ingestion_id, series_key, period_index, value_numeric,
+                    quality_flag, source_row_number
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        int(ingestion_id),
+                        value["series_key"],
+                        value["period_index"],
+                        value["value"],
+                        value.get("quality_flag"),
+                        value.get("source_row_number"),
+                    )
+                    for value in values
+                ],
+            )
+
+    def _read_ingestion_staging(self, ingestion_id: int) -> dict[str, Any]:
+        periods = [
+            {
+                "period_index": int(row["period_index"]),
+                "timestamp_start": row["timestamp_start"],
+                "timestamp_end": row["timestamp_end"],
+                "duration_hours": float(row["duration_hours"]),
+                "source_row_number": row["source_row_number"],
+            }
+            for row in self.connection.execute(
+                f"""
+                SELECT period_index, timestamp_start, timestamp_end,
+                       duration_hours, source_row_number
+                FROM {self._object_series_table('time_series_ingestion_periods')}
+                WHERE ingestion_id = ? ORDER BY period_index
+                """,
+                (int(ingestion_id),),
+            ).fetchall()
+        ]
+        values = [
+            {
+                "series_key": row["series_key"],
+                "period_index": int(row["period_index"]),
+                "value": float(row["value_numeric"]),
+                "quality_flag": row["quality_flag"],
+                "source_row_number": row["source_row_number"],
+            }
+            for row in self.connection.execute(
+                f"""
+                SELECT series_key, period_index, value_numeric, quality_flag,
+                       source_row_number
+                FROM {self._object_series_table('time_series_ingestion_values')}
+                WHERE ingestion_id = ? ORDER BY period_index, series_key
+                """,
+                (int(ingestion_id),),
+            ).fetchall()
+        ]
+        return {"periods": periods, "values": values}
+
+    def _ingestion_row(self, ingestion_id: int):
+        return self.connection.execute(
+            f"""
+            SELECT * FROM {self._object_series_table('time_series_ingestions')}
+            WHERE id = ?
+            """,
+            (int(ingestion_id),),
+        ).fetchone()
+
+    def _ingestion_row_by_key(self, ingestion_key: str):
+        return self.connection.execute(
+            f"""
+            SELECT * FROM {self._object_series_table('time_series_ingestions')}
+            WHERE ingestion_key = ?
+            """,
+            (str(ingestion_key),),
+        ).fetchone()
+
+    def _read_object_series_ingestion_row(self, ingestion_id: int) -> dict[str, Any]:
+        row = self._ingestion_row(ingestion_id)
+        if row is None:
+            raise ObjectSeriesError(
+                "TS_INGEST_SESSION_UNAVAILABLE", detail="the job no longer exists"
+            )
+        normalized = json.loads(row["normalized_json"] or "{}")
+        errors = json.loads(row["validation_json"] or "{}").get("errors", [])
+        impact = self._object_series_binding_impact(
+            signal_id=int(row["signal_id"]), set_id=int(row["time_series_set_id"])
+        )
+        content_hash = row["content_hash"]
+        return {
+            "ingestion_id": row["ingestion_key"],
+            "channel": row["channel"],
+            "state": row["state"],
+            "mode": row["mode"],
+            "target": {
+                "source_kind": "object_specific",
+                "signal_id": int(row["signal_id"]),
+                "set_id": int(row["time_series_set_id"]),
+            },
+            "base": (
+                None
+                if row["base_revision_id"] is None
+                else {
+                    "revision_id": int(row["base_revision_id"]),
+                    "content_hash": f"sha256:{row['base_content_hash']}",
+                }
+            ),
+            "normalized": {
+                **normalized,
+                "coverage_start": utc_presentation(normalized.get("coverage_start")),
+                "coverage_end": utc_presentation(normalized.get("coverage_end")),
+                "content_hash": None if content_hash is None else f"sha256:{content_hash}",
+            },
+            "contract": json.loads(row["contract_json"] or "{}"),
+            "mapping": json.loads(row["mapping_json"] or "{}"),
+            "validation": {
+                "valid": not errors,
+                "error_count": len(errors),
+                "errors": errors[:INGESTION_ERROR_LIMIT],
+                "errors_truncated": len(errors) > INGESTION_ERROR_LIMIT,
+            },
+            "impact": impact,
+            "requires_confirmation": impact["will_become_stale"] > 0,
+            "validation_token": (
+                None
+                if content_hash is None
+                else ingestion_validation_token(
+                    ingestion_key=row["ingestion_key"],
+                    content_hash=content_hash,
+                    secret=self._catalog_cursor_secret,
+                )
+            ),
+            "capabilities": {
+                "publish": row["state"] == "ready_to_publish",
+                "remap": row["state"] in {"awaiting_mapping", "invalid"},
+                "cancel": row["state"]
+                in {"awaiting_mapping", "invalid", "ready_to_publish"},
+                "preview": row["state"] != "cancelled",
+            },
+            "created_at": row["created_at"],
+            "expires_at": row["expires_at"],
+            "published_revision_id": row["published_revision_id"],
+        }
+
+    def _resolve_object_series_ingestion(
+        self,
+        *,
+        project_id: int,
+        linkable_object_id: int,
+        signal_id: int,
+        ingestion_key: str,
+    ):
+        """Knowing the opaque id never skips authorization (AC-SEG-03).
+
+        The object of the route is resolved and authorized first; the job is
+        then required to belong to exactly that object, project and target.
+        """
+
+        linkable = self.authorize_object_series_root(
+            project_id=project_id, linkable_object_id=linkable_object_id
+        )
+        row = self._object_series_row(
+            linkable_object_id=int(linkable["id"]), signal_id=int(signal_id)
+        )
+        if row is None:
+            raise ObjectSeriesError(
+                "TS_OBJECT_SERIES_NOT_FOUND",
+                detail="no local series with that id belongs to this object",
+                signal_id=int(signal_id),
+            )
+        ingestion = self._ingestion_row_by_key(ingestion_key)
+        if (
+            ingestion is None
+            or int(ingestion["linkable_object_id"]) != int(linkable["id"])
+            or int(ingestion["project_id"]) != int(linkable["project_id"])
+            or int(ingestion["signal_id"]) != int(row["signal_id"])
+        ):
+            raise ObjectSeriesError(
+                "TS_OBJECT_SERIES_NOT_FOUND",
+                detail="no ingestion with that id belongs to this target",
+            )
+        return linkable, row, ingestion
+
+    def read_object_series_ingestion(
+        self,
+        *,
+        project_id: int,
+        linkable_object_id: int,
+        signal_id: int,
+        ingestion_key: str,
+    ) -> dict[str, Any]:
+        _, _, ingestion = self._resolve_object_series_ingestion(
+            project_id=project_id,
+            linkable_object_id=linkable_object_id,
+            signal_id=signal_id,
+            ingestion_key=ingestion_key,
+        )
+        return self._read_object_series_ingestion_row(int(ingestion["id"]))
+
+    def read_object_series_ingestion_preview(
+        self,
+        *,
+        project_id: int,
+        linkable_object_id: int,
+        signal_id: int,
+        ingestion_key: str,
+        max_rows: int | None = None,
+    ) -> dict[str, Any]:
+        """A bounded normalized sample of what is staged - never a download."""
+
+        _, row, ingestion = self._resolve_object_series_ingestion(
+            project_id=project_id,
+            linkable_object_id=linkable_object_id,
+            signal_id=signal_id,
+            ingestion_key=ingestion_key,
+        )
+        if ingestion["state"] == "cancelled":
+            raise ObjectSeriesError(
+                "TS_INGEST_SESSION_UNAVAILABLE", detail="the job was cancelled"
+            )
+        limit = INGESTION_PREVIEW_MAX_ROWS if max_rows is None else int(max_rows)
+        if limit < 1 or limit > INGESTION_PREVIEW_MAX_ROWS:
+            raise ObjectSeriesError(
+                "TS_QUERY_INVALID",
+                field="max_rows",
+                detail="max_rows is out of range",
+                maximum=INGESTION_PREVIEW_MAX_ROWS,
+            )
+        staging = self._read_ingestion_staging(int(ingestion["id"]))
+        by_period = {
+            value["period_index"]: value for value in staging["values"]
+        }
+        rows = []
+        for period in staging["periods"][:limit]:
+            value = by_period.get(period["period_index"])
+            rows.append(
+                {
+                    "period_index": period["period_index"],
+                    "timestamp_start": utc_presentation(period["timestamp_start"]),
+                    "timestamp_end": utc_presentation(period["timestamp_end"]),
+                    "series_key": row["object_series_key"],
+                    "value": None if value is None else value["value"],
+                    "quality_flag": None if value is None else value["quality_flag"],
+                }
+            )
+        return {
+            "ingestion_id": ingestion["ingestion_key"],
+            "unit_key": row["unit_key"],
+            "source_row_count": len(staging["periods"]),
+            "returned_row_count": len(rows),
+            "max_rows": limit,
+            "rows": rows,
+        }
+
+    def update_object_series_ingestion_mapping(
+        self,
+        *,
+        project_id: int,
+        linkable_object_id: int,
+        signal_id: int,
+        ingestion_key: str,
+        mapping: Mapping[str, Any],
+        actor: str,
+    ) -> dict[str, Any]:
+        """Fix the mapping of a staged batch and revalidate it (chapter 7.4)."""
+
+        with self._lock:
+            with self._database_transaction():
+                _, row, ingestion = self._resolve_object_series_ingestion(
+                    project_id=project_id,
+                    linkable_object_id=linkable_object_id,
+                    signal_id=signal_id,
+                    ingestion_key=ingestion_key,
+                )
+                if ingestion["state"] in {"published", "cancelled"}:
+                    raise ObjectSeriesError(
+                        "TS_INGEST_SESSION_UNAVAILABLE",
+                        detail="the job is closed",
+                        state=ingestion["state"],
+                    )
+                value_keys = mapping.get("value_keys")
+                if not isinstance(value_keys, Mapping) or not value_keys:
+                    raise ObjectSeriesError(
+                        "TS_INGEST_MAPPING_INVALID",
+                        detail="value_keys must map every incoming key",
+                    )
+                resolved = {str(key): str(value) for key, value in value_keys.items()}
+                unknown = sorted(
+                    value
+                    for value in resolved.values()
+                    if value != row["object_series_key"]
+                )
+                if unknown:
+                    raise ObjectSeriesError(
+                        "TS_INGEST_MAPPING_INVALID",
+                        detail="the mapping names a signal the target does not have",
+                        errors=[
+                            {
+                                "code": "TS_INGEST_MAPPING_INVALID",
+                                "message": f"'{value}' is not a signal of the target",
+                                "location": {
+                                    "record_index": 0,
+                                    "json_pointer": f"/mapping/value_keys/{value}",
+                                },
+                            }
+                            for value in unknown
+                        ],
+                    )
+                document = {
+                    "mode": ingestion["mode"],
+                    "points": json.loads(ingestion["submitted_json"] or "[]"),
+                }
+                contract = json.loads(ingestion["contract_json"] or "{}")
+                normalized = normalize_points_payload(
+                    document,
+                    series_keys=(row["object_series_key"],),
+                    mapping=resolved,
+                )
+                errors = list(normalized["errors"])
+                errors.extend(
+                    check_temporal_contract(normalized["periods"], contract=contract)
+                )
+                content_hash = (
+                    None
+                    if errors
+                    else self._object_series_content_hash(
+                        row=row,
+                        contract=contract,
+                        periods=normalized["periods"],
+                        values=normalized["values"],
+                    )
+                )
+                mapping_only = bool(errors) and all(
+                    entry["code"] == "TS_INGEST_MAPPING_INVALID" for entry in errors
+                )
+                state = (
+                    "ready_to_publish"
+                    if not errors
+                    else ("awaiting_mapping" if mapping_only else "invalid")
+                )
+                self.connection.execute(
+                    f"""
+                    UPDATE {self._object_series_table('time_series_ingestions')}
+                    SET mapping_json = ?, normalized_json = ?, validation_json = ?,
+                        content_hash = ?, state = ?, actor = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        json.dumps({"value_keys": resolved}, sort_keys=True),
+                        json.dumps(
+                            summarize_normalized(
+                                normalized["periods"], normalized["values"]
+                            ),
+                            sort_keys=True,
+                        ),
+                        json.dumps({"errors": errors}, sort_keys=True),
+                        content_hash,
+                        state,
+                        actor,
+                        utc_now_iso(),
+                        int(ingestion["id"]),
+                    ),
+                )
+                self._write_ingestion_staging(
+                    ingestion_id=int(ingestion["id"]),
+                    periods=normalized["periods"],
+                    values=normalized["values"],
+                )
+                receipt = self._read_object_series_ingestion_row(int(ingestion["id"]))
+                refusal = (
+                    None
+                    if not errors
+                    else ObjectSeriesError(
+                        "TS_INGEST_MAPPING_INVALID"
+                        if mapping_only
+                        else "TS_INGEST_VALIDATION_FAILED",
+                        detail=f"{len(errors)} records require correction",
+                        errors=errors,
+                        ingestion=receipt,
+                    )
+                )
+            # The corrected job keeps its new state even when it is still
+            # invalid, so a second correction starts from what was stored.
+            if refusal is not None:
+                raise refusal
+            return receipt
+
+    def cancel_object_series_ingestion(
+        self,
+        *,
+        project_id: int,
+        linkable_object_id: int,
+        signal_id: int,
+        ingestion_key: str,
+        actor: str,
+    ) -> dict[str, Any]:
+        """Withdraw an unpublished job and its staging (chapter 7.4)."""
+
+        with self._lock:
+            with self._database_transaction():
+                _, _, ingestion = self._resolve_object_series_ingestion(
+                    project_id=project_id,
+                    linkable_object_id=linkable_object_id,
+                    signal_id=signal_id,
+                    ingestion_key=ingestion_key,
+                )
+                if ingestion["state"] == "published":
+                    raise ObjectSeriesError(
+                        "TS_INGEST_SESSION_UNAVAILABLE",
+                        detail="a published job cannot be cancelled",
+                    )
+                self._write_ingestion_staging(
+                    ingestion_id=int(ingestion["id"]), periods=[], values=[]
+                )
+                self.connection.execute(
+                    f"""
+                    UPDATE {self._object_series_table('time_series_ingestions')}
+                    SET state = 'cancelled', content_hash = NULL, actor = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (actor, utc_now_iso(), int(ingestion["id"])),
+                )
+                return self._read_object_series_ingestion_row(int(ingestion["id"]))
+
+    def publish_object_series_ingestion(
+        self,
+        *,
+        project_id: int,
+        linkable_object_id: int,
+        signal_id: int,
+        ingestion_key: str,
+        validation_token: str,
+        confirm: bool,
+        reason_code: str,
+        reason_text: str,
+        if_match: str,
+        idempotency_key: str,
+        actor: str,
+    ) -> tuple[dict[str, Any], bool]:
+        """Seal the staged snapshot in one transaction (chapters 7.8, 9.7).
+
+        Either the revision exists complete and current when the transaction
+        commits, or it never existed: no interval exposes a half-written
+        revision as the current one (AC-ESP-10).
+        """
+
+        with self._lock:
+            with self._database_transaction():
+                linkable, row, ingestion = self._resolve_object_series_ingestion(
+                    project_id=project_id,
+                    linkable_object_id=linkable_object_id,
+                    signal_id=signal_id,
+                    ingestion_key=ingestion_key,
+                )
+                claim = self._claim_object_series_publication(
+                    ingestion=ingestion,
+                    actor=actor,
+                    idempotency_key=idempotency_key,
+                    if_match=if_match,
+                    confirm=confirm,
+                    reason_code=reason_code,
+                )
+                if claim["state"] == "completed":
+                    return claim["response"], True
+                receipt = self._publish_object_series_revision(
+                    linkable=linkable,
+                    row=row,
+                    ingestion=ingestion,
+                    validation_token=validation_token,
+                    confirm=confirm,
+                    reason_code=reason_code,
+                    reason_text=reason_text,
+                    if_match=if_match,
+                    actor=actor,
+                )
+                self._complete_idempotency(
+                    claim_id=claim["id"],
+                    response=receipt,
+                    http_status=200 if receipt["outcome"] == "unchanged" else 201,
+                )
+                return receipt, False
+
+    def _claim_object_series_publication(
+        self,
+        *,
+        ingestion: Mapping[str, Any],
+        actor: str,
+        idempotency_key: str,
+        if_match: str,
+        confirm: bool,
+        reason_code: str,
+    ) -> dict[str, Any]:
+        try:
+            return self._claim_idempotency(
+                actor_id=actor,
+                operation_kind=PUBLISH_INGESTION_OPERATION_KIND,
+                scope_key=f"object-series:{int(ingestion['time_series_set_id'])}",
+                idempotency_key=idempotency_key,
+                request_hash=idempotency_request_hash(
+                    {
+                        "ingestion_key": ingestion["ingestion_key"],
+                        "content_hash": ingestion["content_hash"],
+                        "base_revision_id": ingestion["base_revision_id"],
+                        "if_match": if_match,
+                        "confirm": bool(confirm),
+                        "reason_code": reason_code,
+                    }
+                ),
+            )
+        except CanonicalRevisionError as error:
+            if error.code == "TS_IDEMPOTENCY_KEY_CONFLICT":
+                raise ObjectSeriesError(
+                    "TS_INGEST_IDEMPOTENCY_CONFLICT",
+                    detail="the key was already used for another payload",
+                    idempotency_key=idempotency_key,
+                ) from error
+            raise
+
+    def _publish_object_series_revision(
+        self,
+        *,
+        linkable: Mapping[str, Any],
+        row: Mapping[str, Any],
+        ingestion: Mapping[str, Any],
+        validation_token: str,
+        confirm: bool,
+        reason_code: str,
+        reason_text: str,
+        if_match: str,
+        actor: str,
+    ) -> dict[str, Any]:
+        set_id = int(row["time_series_set_id"])
+        locked = self._lock_canonical_set(set_id)
+        if locked is None:
+            raise ObjectSeriesError(
+                "TS_OBJECT_SERIES_NOT_FOUND", detail="the target set disappeared"
+            )
+        if linkable["status"] != "active" or locked["status"] == "archived":
+            raise ObjectSeriesError(
+                "TS_OBJECT_SERIES_NOT_FOUND", detail="the owner or the set is archived"
+            )
+        if ingestion["state"] in {"cancelled", "published"}:
+            raise ObjectSeriesError(
+                "TS_INGEST_SESSION_UNAVAILABLE",
+                detail="the job is not publishable any more",
+                state=ingestion["state"],
+            )
+        if ingestion["state"] != "ready_to_publish" or ingestion["content_hash"] is None:
+            raise ObjectSeriesError(
+                "TS_INGEST_VALIDATION_FAILED",
+                detail="the job has not validated cleanly",
+                errors=json.loads(ingestion["validation_json"] or "{}").get(
+                    "errors", []
+                ),
+            )
+        if ingestion["expires_at"] <= utc_now_iso():
+            raise ObjectSeriesError(
+                "TS_INGEST_SESSION_UNAVAILABLE", detail="the job expired"
+            )
+
+        expected_etag = object_series_etag(
+            signal_id=int(row["signal_id"]),
+            resource_version=int(row["resource_version"]),
+        )
+        if str(if_match or "").strip() != expected_etag:
+            raise ObjectSeriesError(
+                "TS_INGEST_PRECONDITION_CHANGED",
+                detail="the series changed since the ETag was read",
+                expected=expected_etag,
+            )
+        expected_token = ingestion_validation_token(
+            ingestion_key=ingestion["ingestion_key"],
+            content_hash=ingestion["content_hash"],
+            secret=self._catalog_cursor_secret,
+        )
+        if str(validation_token or "").strip() != expected_token:
+            raise ObjectSeriesError(
+                "TS_INGEST_PRECONDITION_CHANGED",
+                detail="the validation token does not describe this content",
+            )
+        current_pointer = locked["current_revision_id"]
+        base_pointer = ingestion["base_revision_id"]
+        if (current_pointer is None) != (base_pointer is None) or (
+            current_pointer is not None
+            and int(current_pointer) != int(base_pointer)
+        ):
+            raise ObjectSeriesError(
+                "TS_INGEST_PRECONDITION_CHANGED",
+                detail="the current revision moved since the batch validated",
+            )
+
+        impact = self._object_series_binding_impact(
+            signal_id=int(row["signal_id"]), set_id=set_id
+        )
+        if impact["will_become_stale"] > 0 and not confirm:
+            raise ObjectSeriesError(
+                "TS_SHARED_REVISION_CONFIRMATION_REQUIRED",
+                detail="the publication turns live bindings stale",
+                impact=impact,
+            )
+        if not str(reason_code or "").strip():
+            raise ObjectSeriesError(
+                "TS_INGEST_PRECONDITION_REQUIRED",
+                detail="reason_code is required",
+                field="reason_code",
+            )
+
+        contract = json.loads(ingestion["contract_json"] or "{}")
+        staged = self._read_ingestion_staging(int(ingestion["id"]))
+        now = utc_now_iso()
+
+        # A republication whose content equals the current revision is a no-op:
+        # no revision, no pointer move, no staleness, no generation (chapter 7.8).
+        if current_pointer is not None:
+            current = self.connection.execute(
+                f"""
+                SELECT id, revision_number, content_hash
+                FROM {self._canonical('time_series_set_revisions')} WHERE id = ?
+                """,
+                (int(current_pointer),),
+            ).fetchone()
+            if current is not None and current["content_hash"] == ingestion["content_hash"]:
+                self._close_object_series_ingestion(
+                    ingestion_id=int(ingestion["id"]),
+                    revision_id=int(current["id"]),
+                    now=now,
+                )
+                series = self._read_object_series(
+                    linkable=linkable, signal_id=int(row["signal_id"])
+                )
+                return self._object_series_publication_receipt(
+                    series=series,
+                    outcome="unchanged",
+                    revision_id=int(current["id"]),
+                    revision_number=int(current["revision_number"]),
+                    content_hash=current["content_hash"],
+                    source_checksum=ingestion["payload_checksum"],
+                    source_kind=json.loads(ingestion["source_json"] or "{}").get(
+                        "kind", "api"
+                    ),
+                    impact=impact,
+                    now_stale=0,
+                )
+
+        revisions_table = self._canonical("time_series_set_revisions")
+        building = self.connection.execute(
+            f"""
+            SELECT id, revision_number FROM {revisions_table}
+            WHERE time_series_set_id = ? AND state = 'building'
+            ORDER BY revision_number DESC LIMIT 1
+            """,
+            (set_id,),
+        ).fetchone()
+        source_id, _ = self._register_canonical_source(
+            int(row["owner_project_id"]),
+            {
+                **json.loads(ingestion["source_json"] or "{}"),
+                "source_key": f"object-series:{ingestion['ingestion_key']}",
+                "checksum": ingestion["payload_checksum"],
+            },
+            actor,
+            now,
+        )
+        if building is not None:
+            # The first separate load completes and seals the revision 1 that
+            # the definition already opened (chapter 7.8).
+            revision_id = int(building["id"])
+            revision_number = int(building["revision_number"])
+            self.connection.execute(
+                f"""
+                UPDATE {revisions_table}
+                SET time_series_source_id = ?, data_class_id = ?, timezone = ?,
+                    timestamp_convention = ?, change_summary = ?,
+                    metadata_json = ?, created_at = ?, created_by = ?
+                WHERE id = ?
+                """,
+                (
+                    source_id,
+                    contract["data_class_id"],
+                    contract["timezone"],
+                    contract["timestamp_convention"],
+                    reason_code,
+                    json.dumps(
+                        {"temporal_contract": contract, "reason_text": reason_text},
+                        sort_keys=True,
+                    ),
+                    now,
+                    actor,
+                    revision_id,
+                ),
+            )
+            self.connection.execute(
+                f"""
+                UPDATE {self._canonical('time_series_revision_signals')}
+                SET semantic_type_id = ?, unit_id = ?, data_class_id = ?,
+                    aggregation = ?
+                WHERE set_revision_id = ? AND signal_id = ?
+                """,
+                (
+                    int(row["semantic_type_id"]),
+                    int(row["unit_id"]),
+                    contract["data_class_id"],
+                    row["aggregation"],
+                    revision_id,
+                    int(row["signal_id"]),
+                ),
+            )
+        else:
+            highest = self.connection.execute(
+                f"""
+                SELECT MAX(revision_number) AS highest FROM {revisions_table}
+                WHERE time_series_set_id = ?
+                """,
+                (set_id,),
+            ).fetchone()
+            revision_number = int(highest["highest"] or 0) + 1
+            revision_id = self._insert_canonical_row(
+                f"""
+                INSERT INTO {revisions_table} (
+                    time_series_set_id, revision_number, supersedes_revision_id,
+                    time_series_source_id, data_class_id, timezone,
+                    timestamp_convention, state, change_summary, metadata_json,
+                    created_at, created_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'building', ?, ?, ?, ?)
+                """,
+                (
+                    set_id,
+                    revision_number,
+                    current_pointer,
+                    source_id,
+                    contract["data_class_id"],
+                    contract["timezone"],
+                    contract["timestamp_convention"],
+                    reason_code,
+                    json.dumps(
+                        {"temporal_contract": contract, "reason_text": reason_text},
+                        sort_keys=True,
+                    ),
+                    now,
+                    actor,
+                ),
+            )
+            self.connection.execute(
+                f"""
+                INSERT INTO {self._canonical('time_series_revision_signals')} (
+                    set_revision_id, signal_id, time_series_set_id,
+                    semantic_type_id, unit_id, data_class_id, signal_role,
+                    aggregation, ordinal, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, 'input', ?, 0, '{{}}')
+                """,
+                (
+                    revision_id,
+                    int(row["signal_id"]),
+                    set_id,
+                    int(row["semantic_type_id"]),
+                    int(row["unit_id"]),
+                    contract["data_class_id"],
+                    row["aggregation"],
+                ),
+            )
+
+        periods_table = self._canonical("time_series_periods")
+        self.connection.executemany(
+            f"""
+            INSERT INTO {periods_table} (
+                set_revision_id, period_index, timestamp_start, timestamp_end,
+                duration_hours
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    revision_id,
+                    period["period_index"],
+                    period["timestamp_start"],
+                    period["timestamp_end"],
+                    period["duration_hours"],
+                )
+                for period in staged["periods"]
+            ],
+        )
+        period_ids = {
+            int(entry["period_index"]): int(entry["id"])
+            for entry in self.connection.execute(
+                f"SELECT id, period_index FROM {periods_table} WHERE set_revision_id = ?",
+                (revision_id,),
+            ).fetchall()
+        }
+        self._insert_canonical_values(
+            values_table=self._canonical("time_series_values"),
+            revision_id=revision_id,
+            values=staged["values"],
+            signal_ids={row["object_series_key"]: int(row["signal_id"])},
+            period_ids=period_ids,
+        )
+
+        value_count = int(
+            self.connection.execute(
+                f"""
+                SELECT COUNT(*) AS total FROM {self._canonical('time_series_values')}
+                WHERE set_revision_id = ?
+                """,
+                (revision_id,),
+            ).fetchone()["total"]
+        )
+        if value_count != len(staged["periods"]):
+            raise ObjectSeriesError(
+                "TS_INGEST_VALIDATION_FAILED",
+                detail="the snapshot is not dense",
+                period_count=len(staged["periods"]),
+                value_count=value_count,
+            )
+        content_hash = self._stream_canonical_content_hash(
+            revision_id=revision_id,
+            revision_timezone=contract["timezone"],
+            timestamp_convention=contract["timestamp_convention"],
+            data_class_key=contract["data_class_key"],
+        )
+        if content_hash != ingestion["content_hash"]:
+            raise ObjectSeriesError(
+                "TS_INGEST_PRECONDITION_CHANGED",
+                detail="the stored snapshot does not match the validated hash",
+            )
+
+        self.connection.execute(
+            f"""
+            UPDATE {revisions_table}
+            SET state = 'sealed', content_hash = ?, validation_payload_json = ?
+            WHERE id = ?
+            """,
+            (
+                content_hash,
+                json.dumps(
+                    {
+                        "signal_count": 1,
+                        "period_count": len(staged["periods"]),
+                        "value_count": value_count,
+                        "coverage_start": staged["periods"][0]["timestamp_start"],
+                        "coverage_end": staged["periods"][-1]["timestamp_end"],
+                    },
+                    sort_keys=True,
+                ),
+                revision_id,
+            ),
+        )
+        self.connection.execute(
+            f"""
+            UPDATE {self._canonical('time_series_sets')}
+            SET current_revision_id = ?, content_hash = ?, data_kind = ?,
+                timezone = ?, status = 'validated', updated_at = ?, updated_by = ?
+            WHERE id = ?
+            """,
+            (
+                revision_id,
+                content_hash,
+                contract["data_class_key"],
+                contract["timezone"],
+                now,
+                actor,
+                set_id,
+            ),
+        )
+        self.connection.execute(
+            f"""
+            UPDATE {self._object_series_table('object_series_definitions')}
+            SET data_class_id = ?, timezone = ?, regularity = ?,
+                nominal_resolution_seconds = ?,
+                resource_version = resource_version + 1,
+                updated_at = ?, updated_by = ?
+            WHERE time_series_set_id = ?
+            """,
+            (
+                contract["data_class_id"],
+                contract["timezone"],
+                contract["regularity"],
+                contract["nominal_resolution_seconds"],
+                now,
+                actor,
+                set_id,
+            ),
+        )
+        self._close_object_series_ingestion(
+            ingestion_id=int(ingestion["id"]), revision_id=revision_id, now=now
+        )
+        # The local set never enters the global projection, but the object
+        # context list reads the same generation, so it rises exactly once.
+        self._raise_catalog_generation(now=now)
+
+        series = self._read_object_series(
+            linkable=linkable, signal_id=int(row["signal_id"])
+        )
+        return self._object_series_publication_receipt(
+            series=series,
+            outcome="new_revision",
+            revision_id=revision_id,
+            revision_number=revision_number,
+            content_hash=content_hash,
+            source_checksum=ingestion["payload_checksum"],
+            source_kind=json.loads(ingestion["source_json"] or "{}").get("kind", "api"),
+            impact=impact,
+            now_stale=impact["will_become_stale"],
+        )
+
+    def _close_object_series_ingestion(
+        self, *, ingestion_id: int, revision_id: int, now: str
+    ) -> None:
+        self.connection.execute(
+            f"""
+            UPDATE {self._object_series_table('time_series_ingestions')}
+            SET state = 'published', published_revision_id = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (int(revision_id), now, int(ingestion_id)),
+        )
+        self._write_ingestion_staging(
+            ingestion_id=int(ingestion_id), periods=[], values=[]
+        )
+
+    def _object_series_publication_receipt(
+        self,
+        *,
+        series: dict[str, Any],
+        outcome: str,
+        revision_id: int,
+        revision_number: int,
+        content_hash: str,
+        source_checksum: str,
+        source_kind: str,
+        impact: Mapping[str, Any],
+        now_stale: int,
+    ) -> dict[str, Any]:
+        return {
+            "outcome": outcome,
+            "set_id": series["set_id"],
+            "signal_ids": [series["signal_id"]],
+            "revision_id": int(revision_id),
+            "revision_number": int(revision_number),
+            "state": "sealed",
+            "content_hash": f"sha256:{content_hash}",
+            "source": {"kind": source_kind, "checksum": source_checksum},
+            "availability": series["availability"],
+            "binding_ready": series["binding_ready"],
+            "staleness": {
+                "bindings_current": impact["bindings_current"],
+                "bindings_pinned": impact["bindings_pinned"],
+                "now_stale": now_stale,
+            },
+            "resource_version": series["resource_version"],
+            "object_series": series,
         }
 
     def _read_only_transaction(self):

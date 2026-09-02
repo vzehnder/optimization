@@ -113,6 +113,7 @@ from app.time_series_catalog_read import (
     input_list_item,
     parse_input_filters,
     parse_legacy_preview_query,
+    parse_object_context_filters,
     parse_preview_query,
     parse_result_filters,
 )
@@ -125,6 +126,11 @@ from app.time_series_bindings import (
     BindingMutationError,
     binding_detail_etag,
     binding_error_payload,
+)
+from app.object_time_series import (
+    ObjectSeriesError,
+    object_series_etag,
+    object_series_problem,
 )
 from app.transformations import TransformationError
 from app.runner import JuliaRunExecutor, LocalRunQueue
@@ -487,6 +493,109 @@ class CaseTimeSeriesBindingRequest(BaseModel):
     time_series_set_id: int
 
 
+class ObjectSeriesTemporalContractRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    regularity: Literal["regular", "irregular"]
+    nominal_resolution_seconds: float | None = None
+    timestamp_convention: Literal["period_start", "period_end"] = "period_start"
+
+
+class ObjectSeriesSourceExpectationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["api", "csv", "xlsx", "manual"] = "api"
+    display_name: str = ""
+
+
+class ObjectSeriesCreateRequest(BaseModel):
+    # ``extra="forbid"`` is the structural half of chapter 7.4: owner, project
+    # and entity pair are never accepted in the payload as authority.
+    model_config = ConfigDict(extra="forbid")
+
+    object_series_key: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    description: str = ""
+    intended_binding_role_key: str = Field(min_length=1)
+    semantic_type_key: str = Field(min_length=1)
+    unit_key: str = Field(min_length=1)
+    data_class_key: str = Field(min_length=1)
+    timezone: str = Field(default="UTC", min_length=1)
+    temporal_contract: ObjectSeriesTemporalContractRequest
+    source_expectation: ObjectSeriesSourceExpectationRequest | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class ObjectSeriesPatchRequest(BaseModel):
+    # Only the editable face of chapter 7.5 exists here, so owner, local key,
+    # semantic type, unit and ``series_kind`` are refused structurally.
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str | None = Field(default=None, min_length=1)
+    description: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class ObjectSeriesExpectedBaseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision_id: int = Field(gt=0)
+    content_hash: str = Field(min_length=1)
+
+
+class ObjectSeriesRevisionContractRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data_class_key: str | None = None
+    timezone: str | None = None
+    regularity: Literal["regular", "irregular"] | None = None
+    nominal_resolution_seconds: float | None = None
+
+
+class ObjectSeriesIngestionSourceRequest(BaseModel):
+    # ``stored_path``, ``created_by`` and ``checksum`` are computed by the
+    # server and are never accepted as truth (chapter 7.5).
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["api"] = "api"
+    display_name: str = ""
+    external_reference: str = ""
+
+
+class ObjectSeriesPointRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    timestamp_start: str = Field(min_length=1)
+    timestamp_end: str | None = None
+    duration_seconds: float | None = None
+    values: dict[str, Any]
+
+
+class ObjectSeriesPointsIngestionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["replace_full", "append_tail"] = "replace_full"
+    expected_base: ObjectSeriesExpectedBaseRequest | None = None
+    revision_contract: ObjectSeriesRevisionContractRequest | None = None
+    source: ObjectSeriesIngestionSourceRequest | None = None
+    points: list[ObjectSeriesPointRequest] = Field(min_length=1)
+
+
+class ObjectSeriesIngestionMappingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value_keys: dict[str, str]
+
+
+class ObjectSeriesPublicationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    validation_token: str = Field(min_length=1)
+    confirm: bool = False
+    reason_code: str = Field(min_length=1)
+    reason_text: str | None = None
+
+
 class CaseInputVariantRunRequest(BaseModel):
     range_start: str = Field(min_length=1)
     range_end: str = Field(min_length=1)
@@ -799,6 +908,33 @@ def create_app(
     async def stable_association_request_validation(
         request: Request, error: RequestValidationError
     ):
+        if "/linkable-objects/" in request.url.path:
+            # The object-scoped surface answers problem+json on every channel
+            # (chapter 7.11), including a payload its schema refuses outright.
+            location = [
+                str(part)
+                for part in error.errors()[0].get("loc", ())
+                if str(part) not in {"body", "header"}
+            ]
+            missing_precondition = any(
+                part.lower() in {"if-match", "idempotency-key"} for part in location
+            )
+            request_id = (
+                request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+            )
+            refusal = ObjectSeriesError(
+                "TS_INGEST_PRECONDITION_REQUIRED"
+                if missing_precondition
+                else "TS_OBJECT_SERIES_DEFINITION_INVALID",
+                detail=error.errors()[0].get("msg", "the payload is not valid"),
+                field=".".join(location) or "body",
+            )
+            return JSONResponse(
+                object_series_problem(refusal, request_id=request_id),
+                status_code=refusal.status,
+                media_type="application/problem+json",
+                headers={"Cache-Control": "private, no-store"},
+            )
         association_contract = request.url.path in {
             "/api/time-series/catalog/association-prevalidations",
             "/api/time-series/catalog/association-batches",
@@ -2544,6 +2680,443 @@ def create_app(
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         return {"semantic_type": semantic_type}
+
+    # -- Path B: object-specific series (TS7-010, chapter 7) ----------------
+    #
+    # The canonical root is the normalized object. Every handler resolves the
+    # register row and its project first, and refuses before it looks at a
+    # signal id, an ingestion id or the payload.
+
+    OBJECT_ROOT = (
+        "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series"
+    )
+
+    def object_series_actor(request: Request) -> str:
+        user = request.state.current_user or {}
+        return str(user.get("email") or "internal_analyst")
+
+    def object_series_refusal(
+        error: ObjectSeriesError, request: Request
+    ) -> JSONResponse:
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        return JSONResponse(
+            object_series_problem(error, request_id=request_id),
+            status_code=error.status,
+            media_type="application/problem+json",
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+    def object_series_links(
+        project_id: int, linkable_object_id: int, signal_id: int
+    ) -> dict[str, str]:
+        target = (
+            f"/api/projects/{project_id}/linkable-objects/{linkable_object_id}"
+            f"/time-series/object-series/{signal_id}"
+        )
+        return {
+            "detail": target,
+            "revisions": f"{target}/revisions",
+            "preview": f"{target}/preview",
+            "point_ingestions": f"{target}/revision-ingestions/points",
+        }
+
+    def object_series_response(
+        series: dict[str, Any],
+        *,
+        project_id: int,
+        linkable_object_id: int,
+        request_id: str,
+        status_code: int = 200,
+    ) -> JSONResponse:
+        etag = object_series_etag(
+            signal_id=series["signal_id"],
+            resource_version=series["resource_version"],
+        )
+        body = {
+            "object_series": series,
+            "capabilities": {
+                "edit_definition": series["availability"] not in {"archived", "owner_archived"},
+                "ingest_points": series["availability"]
+                in {"awaiting_data", "ready"},
+                "preview": series["current_revision"] is not None,
+                "bind": series["binding_ready"],
+            },
+            "links": object_series_links(
+                project_id, linkable_object_id, series["signal_id"]
+            ),
+            "request_id": request_id,
+        }
+        return JSONResponse(
+            body,
+            status_code=status_code,
+            headers={"ETag": etag, "Cache-Control": "private, must-revalidate"},
+        )
+
+    @app.get(OBJECT_ROOT)
+    async def get_object_time_series_context(
+        project_id: int,
+        linkable_object_id: int,
+        request: Request,
+        limit: int = 50,
+        cursor: str | None = None,
+    ):
+        """Generic associations and local series in one paged read model."""
+
+        user = request.state.current_user or {}
+        actor_class = f"{user.get('role', 'analyst')}:{user.get('id', 'auth-disabled')}"
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            page = analyst_store.read_object_time_series_context(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                limit=limit,
+                cursor=cursor,
+                filters=parse_object_context_filters(request.query_params),
+                actor_class=actor_class,
+            )
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        except CatalogQueryError as error:
+            status_code = 410 if error.code == "TS_QUERY_CURSOR_EXPIRED" else 400
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=status_code,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        page["meta"]["request_id"] = request_id
+        return JSONResponse(
+            page, headers={"Cache-Control": "private, must-revalidate"}
+        )
+
+    @app.post(f"{OBJECT_ROOT}/object-series", status_code=201)
+    async def create_object_specific_time_series(
+        project_id: int,
+        linkable_object_id: int,
+        payload: ObjectSeriesCreateRequest,
+        request: Request,
+        idempotency_key: str = Header(alias="Idempotency-Key"),
+    ):
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            if not str(idempotency_key or "").strip():
+                raise ObjectSeriesError(
+                    "TS_INGEST_PRECONDITION_REQUIRED", field="Idempotency-Key"
+                )
+            series = analyst_store.create_object_series_definition(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                document=payload.model_dump(exclude_none=True),
+                actor=object_series_actor(request),
+            )
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        return object_series_response(
+            series,
+            project_id=project_id,
+            linkable_object_id=linkable_object_id,
+            request_id=request_id,
+            status_code=201,
+        )
+
+    @app.patch(f"{OBJECT_ROOT}/object-series/{{signal_id}}")
+    async def patch_object_specific_time_series(
+        project_id: int,
+        linkable_object_id: int,
+        signal_id: int,
+        payload: ObjectSeriesPatchRequest,
+        request: Request,
+        if_match: str | None = Header(default=None, alias="If-Match"),
+    ):
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            if not str(if_match or "").strip():
+                raise ObjectSeriesError(
+                    "TS_INGEST_PRECONDITION_REQUIRED", field="If-Match"
+                )
+            series = analyst_store.patch_object_series(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                signal_id=signal_id,
+                document=payload.model_dump(exclude_unset=True),
+                if_match=if_match,
+                actor=object_series_actor(request),
+            )
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        return object_series_response(
+            series,
+            project_id=project_id,
+            linkable_object_id=linkable_object_id,
+            request_id=request_id,
+        )
+
+    @app.get(f"{OBJECT_ROOT}/object-series/{{signal_id}}")
+    async def get_object_specific_time_series(
+        project_id: int, linkable_object_id: int, signal_id: int, request: Request
+    ):
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            series = analyst_store.read_object_series(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                signal_id=signal_id,
+            )
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        etag = object_series_etag(
+            signal_id=series["signal_id"],
+            resource_version=series["resource_version"],
+        )
+        if request.headers.get("if-none-match") == etag:
+            return Response(
+                status_code=304,
+                headers={"ETag": etag, "Cache-Control": "private, must-revalidate"},
+            )
+        return object_series_response(
+            series,
+            project_id=project_id,
+            linkable_object_id=linkable_object_id,
+            request_id=request_id,
+        )
+
+    OBJECT_TARGET = f"{OBJECT_ROOT}/object-series/{{signal_id}}"
+
+    @app.get(f"{OBJECT_TARGET}/revisions")
+    async def get_object_series_revisions(
+        project_id: int,
+        linkable_object_id: int,
+        signal_id: int,
+        request: Request,
+        limit: int = 50,
+        cursor: str | None = None,
+    ):
+        user = request.state.current_user or {}
+        actor_class = f"{user.get('role', 'analyst')}:{user.get('id', 'auth-disabled')}"
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            page = analyst_store.read_object_series_revisions(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                signal_id=signal_id,
+                limit=limit,
+                cursor=cursor,
+                actor_class=actor_class,
+            )
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        except CatalogQueryError as error:
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=410 if error.code == "TS_QUERY_CURSOR_EXPIRED" else 400,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        page["meta"]["request_id"] = request_id
+        return JSONResponse(
+            page, headers={"Cache-Control": "private, must-revalidate"}
+        )
+
+    @app.get(f"{OBJECT_TARGET}/preview")
+    async def get_object_series_preview(
+        project_id: int,
+        linkable_object_id: int,
+        signal_id: int,
+        request: Request,
+    ):
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            query = parse_preview_query(request.query_params)
+            preview = analyst_store.read_object_series_preview(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                signal_id=signal_id,
+                **query,
+            )
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        except CatalogQueryError as error:
+            return JSONResponse(
+                catalog_error_payload(error, request_id=request_id),
+                status_code=422 if error.code == "TS_PREVIEW_TOO_LARGE" else 400,
+                headers={"Cache-Control": "private, no-store"},
+            )
+        preview["request_id"] = request_id
+        return JSONResponse(
+            preview,
+            headers={
+                "ETag": catalog_preview_etag(preview),
+                "Cache-Control": "private, no-store",
+            },
+        )
+
+    def ingestion_response(
+        ingestion: dict[str, Any], request: Request, *, status_code: int = 200
+    ) -> JSONResponse:
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        return JSONResponse(
+            {"ingestion": ingestion, "request_id": request_id},
+            status_code=status_code,
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+    @app.post(f"{OBJECT_TARGET}/revision-ingestions/points", status_code=201)
+    async def prepare_object_series_points_ingestion(
+        project_id: int,
+        linkable_object_id: int,
+        signal_id: int,
+        payload: ObjectSeriesPointsIngestionRequest,
+        request: Request,
+    ):
+        try:
+            ingestion = analyst_store.prepare_object_series_points_ingestion(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                signal_id=signal_id,
+                document=payload.model_dump(),
+                actor=object_series_actor(request),
+            )
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        return ingestion_response(ingestion, request, status_code=201)
+
+    @app.get(f"{OBJECT_TARGET}/revision-ingestions/{{ingestion_id}}")
+    async def get_object_series_ingestion(
+        project_id: int,
+        linkable_object_id: int,
+        signal_id: int,
+        ingestion_id: str,
+        request: Request,
+    ):
+        try:
+            ingestion = analyst_store.read_object_series_ingestion(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                signal_id=signal_id,
+                ingestion_key=ingestion_id,
+            )
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        return ingestion_response(ingestion, request)
+
+    @app.put(f"{OBJECT_TARGET}/revision-ingestions/{{ingestion_id}}/mapping")
+    async def remap_object_series_ingestion(
+        project_id: int,
+        linkable_object_id: int,
+        signal_id: int,
+        ingestion_id: str,
+        payload: ObjectSeriesIngestionMappingRequest,
+        request: Request,
+    ):
+        try:
+            ingestion = analyst_store.update_object_series_ingestion_mapping(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                signal_id=signal_id,
+                ingestion_key=ingestion_id,
+                mapping=payload.model_dump(),
+                actor=object_series_actor(request),
+            )
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        return ingestion_response(ingestion, request)
+
+    @app.get(f"{OBJECT_TARGET}/revision-ingestions/{{ingestion_id}}/preview")
+    async def preview_object_series_ingestion(
+        project_id: int,
+        linkable_object_id: int,
+        signal_id: int,
+        ingestion_id: str,
+        request: Request,
+        max_rows: int | None = None,
+    ):
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            preview = analyst_store.read_object_series_ingestion_preview(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                signal_id=signal_id,
+                ingestion_key=ingestion_id,
+                max_rows=max_rows,
+            )
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        preview["request_id"] = request_id
+        return JSONResponse(preview, headers={"Cache-Control": "private, no-store"})
+
+    @app.delete(
+        f"{OBJECT_TARGET}/revision-ingestions/{{ingestion_id}}", status_code=204
+    )
+    async def cancel_object_series_ingestion(
+        project_id: int,
+        linkable_object_id: int,
+        signal_id: int,
+        ingestion_id: str,
+        request: Request,
+    ):
+        try:
+            analyst_store.cancel_object_series_ingestion(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                signal_id=signal_id,
+                ingestion_key=ingestion_id,
+                actor=object_series_actor(request),
+            )
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        return Response(status_code=204, headers={"Cache-Control": "private, no-store"})
+
+    @app.post(f"{OBJECT_TARGET}/revision-ingestions/{{ingestion_id}}/publications")
+    async def publish_object_series_ingestion(
+        project_id: int,
+        linkable_object_id: int,
+        signal_id: int,
+        ingestion_id: str,
+        payload: ObjectSeriesPublicationRequest,
+        request: Request,
+        if_match: str | None = Header(default=None, alias="If-Match"),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ):
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            missing = (
+                "If-Match"
+                if not str(if_match or "").strip()
+                else "Idempotency-Key"
+                if not str(idempotency_key or "").strip()
+                else None
+            )
+            if missing is not None:
+                raise ObjectSeriesError(
+                    "TS_INGEST_PRECONDITION_REQUIRED", field=missing
+                )
+            publication, replayed = analyst_store.publish_object_series_ingestion(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                signal_id=signal_id,
+                ingestion_key=ingestion_id,
+                validation_token=payload.validation_token,
+                confirm=payload.confirm,
+                reason_code=payload.reason_code,
+                reason_text=payload.reason_text or "",
+                if_match=if_match,
+                idempotency_key=idempotency_key,
+                actor=object_series_actor(request),
+            )
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        series = publication["object_series"]
+        return JSONResponse(
+            {"publication": publication, "request_id": request_id},
+            status_code=(
+                200 if replayed or publication["outcome"] == "unchanged" else 201
+            ),
+            headers={
+                "ETag": object_series_etag(
+                    signal_id=series["signal_id"],
+                    resource_version=series["resource_version"],
+                ),
+                "Cache-Control": "private, no-store",
+            },
+        )
 
     @app.get("/api/projects/{project_id}/portal-configuration")
     async def get_portal_configuration(project_id: int):
