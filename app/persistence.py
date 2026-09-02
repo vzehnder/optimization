@@ -15,7 +15,7 @@ import uuid
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from app.auth import VALID_USER_ROLES
 from app.database import connect_database, database_url_from_env, postgres_schema_from_sqlite
@@ -278,6 +278,14 @@ def _is_canonical_duplicate_value(error: Exception) -> bool:
 
 
 CONSOLE_LEASE_SECONDS = 300
+
+
+class CanonicalRunValidationError(RuntimeError):
+    """Carries a failed public validator result out of an atomic materialization."""
+
+    def __init__(self, validation_result: Any):
+        self.validation_result = validation_result
+        super().__init__(str(getattr(validation_result, "message", "validation failed")))
 
 
 def iso_timestamp_plus_seconds(timestamp: str, seconds: int) -> str:
@@ -7403,15 +7411,16 @@ class AnalystStore:
         validations = self.link_layer_table_names()["time_series_link_validations"]
         return self.connection.execute(
             f"""
-            SELECT binding.*, role.role_key,
+            SELECT binding.*, role.role_key, role.execution_contract_key,
                    role.display_name AS role_display_name,
                    role.status AS role_status,
                    entry.series_key, entry.display_name AS signal_display_name,
                    entry.visibility_scope, entry.owner_project_id,
+                   entry.set_version_number,
                    entry.current_revision_id,
                    current_revision.content_hash AS current_content_hash,
                    entry.set_status, entry.signal_status,
-                   validation.validation_mode,
+                   validation.id AS validation_id, validation.validation_mode,
                    validation.validated_set_revision_id,
                    validation.observed_current_revision_id,
                    validation.compatibility_fingerprint,
@@ -7421,10 +7430,13 @@ class AnalystStore:
                    validation.reason_code AS validation_reason_code,
                    validation.reason_text AS validation_reason_text,
                    revision.state AS revision_state,
-                   revision.content_hash AS revision_content_hash
+                   revision.content_hash AS revision_content_hash,
+                   compatibility.rule_version AS compatibility_rule_version
             FROM {bindings} AS binding
             JOIN time_series_binding_roles AS role
               ON role.id = binding.binding_role_id
+            JOIN time_series_role_compatibilities AS compatibility
+              ON compatibility.id = binding.compatibility_rule_id
             JOIN {self._projection('time_series_catalog_entries')} AS entry
               ON entry.signal_id = binding.signal_id
             JOIN {self._canonical('time_series_set_revisions')} AS current_revision
@@ -7843,6 +7855,496 @@ class AnalystStore:
             raise BindingMutationError(
                 "TS_BINDING_EXECUTION_BLOCKED", details=blocked
             )
+
+    @contextlib.contextmanager
+    def _run_materialization_transaction(self):
+        """Open the authoritative materialization unit with an eager SQLite lock."""
+
+        if self.database_backend == "postgresql":
+            with self.connection.transaction():
+                yield
+            return
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+        except Exception:
+            self.connection.rollback()
+            raise
+        else:
+            self.connection.commit()
+
+    def _lock_canonical_run_inputs(self, *, variant_id: int) -> None:
+        if self.database_backend != "postgresql":
+            return
+        self.connection.execute(
+            "SELECT id FROM case_input_variants WHERE id = ? FOR UPDATE",
+            (int(variant_id),),
+        ).fetchone()
+        bindings = self.link_layer_table_names()["case_time_series_bindings"]
+        rows = self.connection.execute(
+            f"""
+            SELECT DISTINCT time_series_set_id, set_revision_id
+            FROM {bindings}
+            WHERE case_input_variant_id = ? AND status = 'active'
+            ORDER BY time_series_set_id, set_revision_id
+            """,
+            (int(variant_id),),
+        ).fetchall()
+        set_ids = sorted({int(row["time_series_set_id"]) for row in rows})
+        revision_ids = sorted({int(row["set_revision_id"]) for row in rows})
+        for table, ids in (
+            (self._canonical("time_series_sets"), set_ids),
+            (self._canonical("time_series_set_revisions"), revision_ids),
+        ):
+            if not ids:
+                continue
+            placeholders = ", ".join("?" for _ in ids)
+            self.connection.execute(
+                f"SELECT id FROM {table} WHERE id IN ({placeholders}) "
+                "ORDER BY id FOR KEY SHARE",
+                tuple(ids),
+            ).fetchall()
+
+    @staticmethod
+    def _canonical_binding_scope(binding: Mapping[str, Any]) -> tuple[str | None, str | None]:
+        object_type_key = str(binding["object"]["object_type_key"])
+        if object_type_key == "global:system":
+            return None, None
+        return object_type_key, str(binding["object"]["object_key"])
+
+    def _reusable_materialized_scenario_version(
+        self,
+        *,
+        scenario_id: int,
+        system_case: Mapping[str, Any],
+        materialization_fingerprint: str,
+    ) -> dict[str, Any] | None:
+        expected_payload = json.dumps(
+            system_case, sort_keys=True, separators=(",", ":")
+        )
+        rows = self.connection.execute(
+            """
+            SELECT id, system_case_json, generation_metadata_json
+            FROM scenario_versions
+            WHERE scenario_id = ?
+            ORDER BY id DESC
+            """,
+            (int(scenario_id),),
+        ).fetchall()
+        for row in rows:
+            existing_metadata = json.loads(row["generation_metadata_json"] or "{}")
+            if (
+                existing_metadata.get("materialization_fingerprint")
+                != materialization_fingerprint
+            ):
+                continue
+            existing_payload = json.dumps(
+                json.loads(row["system_case_json"]),
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            if existing_payload == expected_payload:
+                return self.get_scenario_version(int(row["id"]), include_document=False)
+        return None
+
+    def materialize_run_from_canonical_bindings(
+        self,
+        *,
+        scenario_id: int,
+        variant_id: int,
+        range_start: str,
+        range_end: str,
+        validate_text: Callable[[str], Any],
+        actor_user: Mapping[str, Any],
+        request_id: str,
+        expected_bindings_revision: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Create the immutable input snapshot and queued run in one transaction.
+
+        ``None`` means that this variant has no active TS-7 binding and the
+        pre-cutover legacy materializer remains authoritative.
+        """
+
+        with self._lock:
+            with self._run_materialization_transaction():
+                self._canonical_binding_context(
+                    scenario_id=scenario_id, variant_id=variant_id
+                )
+                self._lock_canonical_run_inputs(variant_id=variant_id)
+                context = self._canonical_binding_context(
+                    scenario_id=scenario_id, variant_id=variant_id
+                )
+                binding_rows = self.connection.execute(
+                    f"""
+                    SELECT id
+                    FROM {self.link_layer_table_names()['case_time_series_bindings']}
+                    WHERE case_input_variant_id = ? AND status = 'active'
+                    ORDER BY id
+                    """,
+                    (int(variant_id),),
+                ).fetchall()
+                if not binding_rows:
+                    return None
+                if (
+                    expected_bindings_revision is not None
+                    and int(expected_bindings_revision) != context["bindings_revision"]
+                ):
+                    raise BindingMutationError(
+                        "TS_LINK_PRECONDITION_CHANGED",
+                        expected_bindings_revision=int(expected_bindings_revision),
+                        actual_bindings_revision=context["bindings_revision"],
+                    )
+
+                bindings = [
+                    self.read_case_binding(
+                        scenario_id=scenario_id,
+                        variant_id=variant_id,
+                        binding_id=int(row["id"]),
+                    )
+                    for row in binding_rows
+                ]
+                blocked = [
+                    {
+                        "binding_id": item["binding_id"],
+                        "state": item["state"],
+                        "linkable_object_id": item["object"]["id"],
+                        "binding_role_key": item["binding_role"]["key"],
+                    }
+                    for item in bindings
+                    if item["state"] not in {"valid_current", "valid_pinned"}
+                ]
+                if blocked:
+                    raise BindingMutationError(
+                        "TS_BINDING_EXECUTION_BLOCKED", details=blocked
+                    )
+
+                base_system_case = self._generate_base_system_case_for_variant(
+                    scenario_id
+                )
+                legacy_shape_bindings: list[dict[str, Any]] = []
+                materialization_rows: list[
+                    tuple[dict[str, Any], dict[str, Any], dict[str, Any]]
+                ] = []
+                revision_cache: dict[int, dict[str, Any]] = {}
+                hash_cache: dict[int, str] = {}
+                for binding in bindings:
+                    raw_row = self._canonical_binding_row(binding["binding_id"])
+                    if raw_row is None:
+                        raise BindingMutationError(
+                            "TS_BINDING_EXECUTION_BLOCKED",
+                            details=[
+                                {
+                                    "binding_id": binding["binding_id"],
+                                    "state": "invalid",
+                                    "reason": "binding_disappeared",
+                                }
+                            ],
+                        )
+                    raw = dict(raw_row)
+                    contract_key = str(raw.get("execution_contract_key") or "")
+                    if not contract_key:
+                        raise BindingMutationError(
+                            "TS_BINDING_EXECUTION_BLOCKED",
+                            details=[
+                                {
+                                    "binding_id": binding["binding_id"],
+                                    "state": "invalid",
+                                    "reason": "execution_contract_missing",
+                                }
+                            ],
+                        )
+                    entity_type, entity_id = self._canonical_binding_scope(binding)
+                    legacy_shape_bindings.append(
+                        {
+                            "signal_key": contract_key,
+                            "entity_type": entity_type,
+                            "entity_id": entity_id,
+                            "time_series_set_id": binding["time_series_set_id"],
+                        }
+                    )
+
+                    revision_id = int(binding["set_revision_id"])
+                    revision = revision_cache.get(revision_id)
+                    if revision is None:
+                        revision = self.read_canonical_revision(revision_id)
+                        revision_cache[revision_id] = revision
+                    actual_hash = hash_cache.get(revision_id)
+                    if actual_hash is None:
+                        actual_hash = self._stream_canonical_content_hash(
+                            revision_id=revision_id,
+                            revision_timezone=str(revision["timezone"]),
+                            timestamp_convention=str(revision["timestamp_convention"]),
+                            data_class_key=str(revision["data_class_key"]),
+                        )
+                        hash_cache[revision_id] = actual_hash
+                    if (
+                        revision.get("state") != "sealed"
+                        or revision.get("content_hash")
+                        != binding["bound_content_hash"]
+                        or actual_hash != binding["bound_content_hash"]
+                    ):
+                        raise BindingMutationError(
+                            "TS_BINDING_EXECUTION_BLOCKED",
+                            details=[
+                                {
+                                    "binding_id": binding["binding_id"],
+                                    "state": "invalid",
+                                    "reason": "content_hash_mismatch",
+                                    "expected_content_hash": binding[
+                                        "bound_content_hash"
+                                    ],
+                                    "actual_content_hash": actual_hash,
+                                }
+                            ],
+                        )
+                    source_key = binding["signal"]["series_key"]
+                    source_values = revision["values"].get(source_key)
+                    if source_values is None or len(source_values) != len(
+                        revision["periods"]
+                    ):
+                        raise BindingMutationError(
+                            "TS_BINDING_EXECUTION_BLOCKED",
+                            details=[
+                                {
+                                    "binding_id": binding["binding_id"],
+                                    "state": "invalid",
+                                    "reason": "bound_signal_missing",
+                                }
+                            ],
+                        )
+                    adapted_set = {
+                        "id": binding["time_series_set_id"],
+                        "periods": revision["periods"],
+                        "values": [
+                            {
+                                "period_index": int(period["period_index"]),
+                                "signal_key": contract_key,
+                                "value_numeric": source_values[index],
+                            }
+                            for index, period in enumerate(revision["periods"])
+                        ],
+                    }
+                    materialization_rows.append((binding, raw, adapted_set))
+
+                missing = [
+                    status
+                    for status in evaluate_variant_completeness(
+                        discover_required_signals(base_system_case),
+                        legacy_shape_bindings,
+                    )
+                    if not status.bound
+                ]
+                if missing:
+                    raise MissingRequiredSignalsError(missing)
+
+                bound_signal_series: dict[Any, list[dict[str, Any]]] = {}
+                lineage: list[dict[str, Any]] = []
+                for binding, raw, adapted_set in materialization_rows:
+                    contract_key = str(raw["execution_contract_key"])
+                    entity_type, entity_id = self._canonical_binding_scope(binding)
+                    binding_key: Any = contract_key
+                    if entity_type is not None or entity_id is not None:
+                        binding_key = (contract_key, entity_type, entity_id)
+                    bound_signal_series[binding_key] = resolve_bound_signal_series(
+                        adapted_set, contract_key, range_start, range_end
+                    )
+                    validation_evidence = {
+                        "validation_id": int(raw["validation_id"]),
+                        "mode": raw["validation_mode"],
+                        "validated_set_revision_id": int(
+                            raw["validated_set_revision_id"]
+                        ),
+                        "observed_current_revision_id": int(
+                            raw["observed_current_revision_id"]
+                        ),
+                        "compatibility_fingerprint": raw[
+                            "compatibility_fingerprint"
+                        ],
+                        "object_scope_fingerprint": raw[
+                            "object_scope_fingerprint"
+                        ],
+                        "variant_dependency_fingerprint": raw[
+                            "variant_dependency_fingerprint"
+                        ],
+                        "validated_at": raw["validated_at"],
+                        "validated_by": raw["validated_by"],
+                    }
+                    validation_fingerprint = hashlib.sha256(
+                        json.dumps(
+                            validation_evidence,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                    ).hexdigest()
+                    revision = revision_cache[int(binding["set_revision_id"])]
+                    lineage.append(
+                        {
+                            "binding_id": binding["binding_id"],
+                            "state": binding["state"],
+                            "linkable_object_id": binding["object"]["id"],
+                            "object_type_key": binding["object"]["object_type_key"],
+                            "object_key": binding["object"]["object_key"],
+                            "binding_role_key": binding["binding_role"]["key"],
+                            "signal_id": binding["signal_id"],
+                            "signal_key": contract_key,
+                            "source_signal_key": binding["signal"]["series_key"],
+                            "time_series_set_id": binding["time_series_set_id"],
+                            "set_version_number": int(raw["set_version_number"]),
+                            "set_revision_id": binding["set_revision_id"],
+                            "revision_number": int(revision["revision_number"]),
+                            "content_hash": binding["bound_content_hash"],
+                            "source_kind": raw["source_kind"],
+                            "owner_project_id": int(raw["owner_project_id"]),
+                            "compatibility_rule_id": binding[
+                                "compatibility_rule_id"
+                            ],
+                            "compatibility_rule_version": int(
+                                raw["compatibility_rule_version"]
+                            ),
+                            "compatibility_fingerprint": raw[
+                                "compatibility_fingerprint"
+                            ],
+                            "validation_id": int(raw["validation_id"]),
+                            "validation_mode": raw["validation_mode"],
+                            "validation_fingerprint": validation_fingerprint,
+                            "validated_at": raw["validated_at"],
+                            "validated_by": raw["validated_by"],
+                            "revision_mode": binding["revision"]["mode"],
+                            "observed_current_revision_id": binding["revision"][
+                                "observed_current_revision_id"
+                            ],
+                            "pin_reason": (
+                                raw["validation_reason_text"]
+                                if binding["revision"]["mode"] == "pinned"
+                                else None
+                            ),
+                            "validated_range": {
+                                "start": range_start,
+                                "end": range_end,
+                            },
+                        }
+                    )
+
+                system_case = dict(base_system_case)
+                system_case["time_series"] = materialize_variant_time_series(
+                    bound_signal_series
+                )
+                variant = self.get_case_input_variant(variant_id)
+                provenance = derive_case_hierarchy_provenance(base_system_case)
+                actor = {
+                    "id": (
+                        int(actor_user["id"])
+                        if actor_user.get("id") is not None
+                        else None
+                    ),
+                    "email": str(actor_user.get("email") or "internal_analyst"),
+                    "display_name": str(
+                        actor_user.get("display_name") or "Internal analyst"
+                    ),
+                    "role": str(actor_user.get("role") or "analyst"),
+                }
+                lineage_metadata = {
+                    **provenance,
+                    "kind": "case_input_variant",
+                    "input_variant": {
+                        "id": int(variant_id),
+                        "display_name": variant["display_name"],
+                    },
+                    "bindings_revision": context["bindings_revision"],
+                    "date_range": {"start": range_start, "end": range_end},
+                    "series_bindings": lineage,
+                }
+                generation_metadata = {
+                    **lineage_metadata,
+                    "actor": actor,
+                    "request_id": request_id,
+                }
+                fingerprint_payload = {
+                    "system_case": system_case,
+                    "lineage": lineage_metadata,
+                }
+                materialization_fingerprint = hashlib.sha256(
+                    json.dumps(
+                        fingerprint_payload,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest()
+                generation_metadata["materialization_fingerprint"] = (
+                    materialization_fingerprint
+                )
+
+                system_case_text = json.dumps(system_case, sort_keys=True)
+                validation_result = validate_text(system_case_text)
+                if not getattr(validation_result, "ok", False):
+                    raise CanonicalRunValidationError(validation_result)
+
+                scenario_version = self._reusable_materialized_scenario_version(
+                    scenario_id=scenario_id,
+                    system_case=system_case,
+                    materialization_fingerprint=materialization_fingerprint,
+                )
+                reused = scenario_version is not None
+                if scenario_version is None:
+                    system_case_metadata = extract_system_case_metadata(system_case)
+                    version_cursor = self.connection.execute(
+                        """
+                        INSERT INTO scenario_versions (
+                            scenario_id, version_number, system_case_json,
+                            case_name, schema_version, period_count,
+                            asset_counts_json, validation_payload_json,
+                            generation_metadata_json, created_at, created_by
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            int(scenario_id),
+                            self._next_version_number(scenario_id),
+                            system_case_text,
+                            system_case_metadata["case_name"],
+                            system_case_metadata["schema_version"],
+                            system_case_metadata["period_count"],
+                            json.dumps(
+                                system_case_metadata["asset_counts"], sort_keys=True
+                            ),
+                            json.dumps(validation_result.payload, sort_keys=True),
+                            json.dumps(generation_metadata, sort_keys=True),
+                            utc_now_iso(),
+                            actor["email"],
+                        ),
+                    )
+                    scenario_version = self.get_scenario_version(
+                        int(version_cursor.lastrowid), include_document=False
+                    )
+
+                run_cursor = self.connection.execute(
+                    """
+                    INSERT INTO runs (
+                        scenario_version_id, status, created_at, triggered_by,
+                        trigger_type, triggered_by_user_id,
+                        triggered_by_display_name, materialized_lineage_json
+                    ) VALUES (?, 'queued', ?, ?, 'manual', ?, ?, ?)
+                    """,
+                    (
+                        scenario_version["id"],
+                        utc_now_iso(),
+                        actor["email"],
+                        actor["id"],
+                        actor["display_name"],
+                        json.dumps(
+                            {
+                                "materialization_fingerprint": materialization_fingerprint,
+                                "bindings_revision": context["bindings_revision"],
+                                "series_bindings": lineage,
+                            },
+                            sort_keys=True,
+                        ),
+                    ),
+                )
+                return {
+                    "run": self.get_run(int(run_cursor.lastrowid)),
+                    "scenario_version": scenario_version,
+                    "scenario_version_reused": reused,
+                }
 
     def list_catalog_results(
         self,

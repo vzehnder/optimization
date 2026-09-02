@@ -1,6 +1,6 @@
 # TS7-009: Materialize A Run From Its Bindings
 
-Status: Todo
+Status: In Review
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter7/spec_ts7_catalogo_global_y_series_especificas.md` (4.8, 2.7)
@@ -23,12 +23,12 @@ rebuildable, and are not fused with inputs.
 
 ## Acceptance criteria
 
-- [ ] A run keeps the exact lineage of every binding inside its immutable `scenario_version` (AC-BIN-07).
-- [ ] Materialization verifies the pinned hash against what it reads and refuses on mismatch.
-- [ ] A stale or invalid binding blocks the run instead of materializing a guess.
-- [ ] An interrupted materialization leaves no partially visible snapshot.
-- [ ] TS-4 result indices stay rebuildable and are not merged with inputs (AC-LEG-04).
-- [ ] Re-materializing an already materialized scenario version is idempotent.
+- [x] A run keeps the exact lineage of every binding inside its immutable `scenario_version` (AC-BIN-07).
+- [x] Materialization verifies the pinned hash against what it reads and refuses on mismatch.
+- [x] A stale or invalid binding blocks the run instead of materializing a guess.
+- [x] An interrupted materialization leaves no partially visible snapshot.
+- [x] TS-4 result indices stay rebuildable and are not merged with inputs (AC-LEG-04).
+- [x] Re-materializing an already materialized scenario version is idempotent.
 
 ## Blocked by
 

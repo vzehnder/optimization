@@ -53,6 +53,7 @@ from app.required_signals import MissingRequiredSignalsError
 from app.variant_staleness import VariantStaleError
 from app.persistence import (
     AnalystStore,
+    CanonicalRunValidationError,
     DEFAULT_PUBLICATION_ARTIFACT_TYPES,
     build_hydraulic_diagram_layout_snapshot,
     derive_case_hierarchy_provenance,
@@ -489,6 +490,7 @@ class CaseTimeSeriesBindingRequest(BaseModel):
 class CaseInputVariantRunRequest(BaseModel):
     range_start: str = Field(min_length=1)
     range_end: str = Field(min_length=1)
+    expected_bindings_revision: int | None = Field(default=None, ge=0)
 
 
 class CaseInputVariantWriteRequest(BaseModel):
@@ -3821,9 +3823,35 @@ def create_app(
         return {"status": "valid", "series_bindings": validated["series_bindings"]}
 
     @app.post("/api/scenarios/{scenario_id}/case/variants/{variant_id}/run", status_code=201)
-    async def run_case_input_variant(scenario_id: int, variant_id: int, payload: CaseInputVariantRunRequest):
+    async def run_case_input_variant(
+        scenario_id: int,
+        variant_id: int,
+        payload: CaseInputVariantRunRequest,
+        request: Request,
+    ):
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
         try:
             case, variant = get_case_and_variant_for_scenario(scenario_id, variant_id)
+            actor_user = getattr(request.state, "current_user", None) or {
+                "id": None,
+                "email": "internal_analyst",
+                "display_name": "Internal analyst",
+                "role": "analyst",
+            }
+            canonical = analyst_store.materialize_run_from_canonical_bindings(
+                scenario_id=scenario_id,
+                variant_id=variant_id,
+                range_start=payload.range_start,
+                range_end=payload.range_end,
+                validate_text=service.validate_text,
+                actor_user=actor_user,
+                request_id=request_id,
+                expected_bindings_revision=payload.expected_bindings_revision,
+            )
+            if canonical is not None:
+                run = canonical["run"]
+                local_run_queue.enqueue(run["id"])
+                return run
             analyst_store.assert_case_bindings_executable(
                 scenario_id=scenario_id, variant_id=variant_id
             )
@@ -3837,9 +3865,13 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         except BindingMutationError as error:
             return JSONResponse(
-                binding_error_payload(error, request_id=f"req_{secrets.token_hex(8)}"),
+                binding_error_payload(error, request_id=request_id),
                 status_code=409,
                 headers={"Cache-Control": "private, no-store"},
+            )
+        except CanonicalRunValidationError as error:
+            return JSONResponse(
+                validation_response_body(error.validation_result), status_code=400
             )
         except (DraftGenerationError, InputVariantRangeError, MissingRequiredSignalsError, VariantStaleError) as error:
             return JSONResponse(
