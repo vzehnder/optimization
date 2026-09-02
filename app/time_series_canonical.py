@@ -339,6 +339,38 @@ def canonical_schema_statements(backend: str) -> list[str]:
         """
     )
 
+    # Keep the two discovery paths structurally disjoint. The global catalog
+    # is only ever allowed to select from the first view; object-scoped reads
+    # use the second one under an already-authorized owner root (chapter 7.3).
+    catalog_view = canonical_space_table_name(
+        "catalog_time_series_signals", backend
+    )
+    object_view = canonical_space_table_name(
+        "object_specific_time_series_signals", backend
+    )
+    view_verb = "CREATE OR REPLACE VIEW" if postgres else "CREATE VIEW IF NOT EXISTS"
+    statements.extend(
+        [
+            f"""
+            {view_verb} {catalog_view} AS
+            SELECT signal.*
+            FROM {table['time_series_signals']} AS signal
+            JOIN {table['time_series_sets']} AS the_set
+              ON the_set.id = signal.time_series_set_id
+            WHERE the_set.series_kind = 'catalog'
+            """,
+            f"""
+            {view_verb} {object_view} AS
+            SELECT signal.*, the_set.owner_linkable_object_id,
+                   the_set.object_series_key
+            FROM {table['time_series_signals']} AS signal
+            JOIN {table['time_series_sets']} AS the_set
+              ON the_set.id = signal.time_series_set_id
+            WHERE the_set.series_kind = 'object_specific'
+            """,
+        ]
+    )
+
     statements.extend(
         [
             f"""
@@ -744,6 +776,11 @@ CANONICAL_ERROR_CATALOG = {
         "timeseries.set.not_found",
         "set_id",
         "El set canonico no existe.",
+    ),
+    "TS_SET_KIND_MISMATCH": (
+        "timeseries.set.kind_mismatch",
+        "set_id",
+        "El escritor de catalogo no puede reutilizar una identidad de otro tipo.",
     ),
 }
 

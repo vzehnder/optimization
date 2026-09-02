@@ -18,6 +18,31 @@
         "title": "AuthSessionResponse",
         "type": "object"
       },
+      "Body_prepare_object_series_file_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions_files_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          },
+          "mapping": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapping"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_prepare_object_series_file_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions_files_post",
+        "type": "object"
+      },
       "Body_upload_draft_time_series_source_api_scenarios__scenario_id__draft_time_series_sources_upload_post": {
         "properties": {
           "sheet_name": {
@@ -126,8 +151,411 @@
         "title": "BootstrapAdminRequest",
         "type": "object"
       },
+      "CaseBindingCommitRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmed": {
+            "default": false,
+            "title": "Confirmed",
+            "type": "boolean"
+          },
+          "expected_bindings_revision": {
+            "minimum": 0.0,
+            "title": "Expected Bindings Revision",
+            "type": "integer"
+          },
+          "operations": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "create": "#/components/schemas/CaseBindingCreateRequest",
+                  "remove": "#/components/schemas/CaseBindingLifecycleRequest",
+                  "replace": "#/components/schemas/CaseBindingReplaceRequest",
+                  "restore": "#/components/schemas/CaseBindingLifecycleRequest",
+                  "revalidate_current": "#/components/schemas/CaseBindingRevalidateRequest",
+                  "revalidate_pinned": "#/components/schemas/CaseBindingRevalidateRequest"
+                },
+                "propertyName": "action"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/CaseBindingCreateRequest"
+                },
+                {
+                  "$ref": "#/components/schemas/CaseBindingReplaceRequest"
+                },
+                {
+                  "$ref": "#/components/schemas/CaseBindingRevalidateRequest"
+                },
+                {
+                  "$ref": "#/components/schemas/CaseBindingLifecycleRequest"
+                }
+              ]
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Operations",
+            "type": "array"
+          },
+          "prevalidation_token": {
+            "minLength": 1,
+            "title": "Prevalidation Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_bindings_revision",
+          "operations",
+          "prevalidation_token"
+        ],
+        "title": "CaseBindingCommitRequest",
+        "type": "object"
+      },
+      "CaseBindingCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "const": "create",
+            "title": "Action",
+            "type": "string"
+          },
+          "binding_role_key": {
+            "minLength": 1,
+            "title": "Binding Role Key",
+            "type": "string"
+          },
+          "catalog_association_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog Association Id"
+          },
+          "client_operation_id": {
+            "minLength": 1,
+            "title": "Client Operation Id",
+            "type": "string"
+          },
+          "linkable_object_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Linkable Object Id",
+            "type": "integer"
+          },
+          "reason_code": {
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "reason_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Text"
+          },
+          "revision": {
+            "$ref": "#/components/schemas/CaseBindingRevisionRequest"
+          },
+          "signal_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Signal Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "client_operation_id",
+          "action",
+          "linkable_object_id",
+          "binding_role_key",
+          "signal_id",
+          "revision",
+          "reason_code"
+        ],
+        "title": "CaseBindingCreateRequest",
+        "type": "object"
+      },
+      "CaseBindingLifecycleRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "remove",
+              "restore"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "binding_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Binding Id",
+            "type": "integer"
+          },
+          "client_operation_id": {
+            "minLength": 1,
+            "title": "Client Operation Id",
+            "type": "string"
+          },
+          "expected_lifecycle_revision": {
+            "exclusiveMinimum": 0.0,
+            "title": "Expected Lifecycle Revision",
+            "type": "integer"
+          },
+          "reason_code": {
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "reason_text": {
+            "minLength": 1,
+            "title": "Reason Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_operation_id",
+          "action",
+          "binding_id",
+          "expected_lifecycle_revision",
+          "reason_code",
+          "reason_text"
+        ],
+        "title": "CaseBindingLifecycleRequest",
+        "type": "object"
+      },
+      "CaseBindingPrevalidationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_bindings_revision": {
+            "minimum": 0.0,
+            "title": "Expected Bindings Revision",
+            "type": "integer"
+          },
+          "operations": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "create": "#/components/schemas/CaseBindingCreateRequest",
+                  "remove": "#/components/schemas/CaseBindingLifecycleRequest",
+                  "replace": "#/components/schemas/CaseBindingReplaceRequest",
+                  "restore": "#/components/schemas/CaseBindingLifecycleRequest",
+                  "revalidate_current": "#/components/schemas/CaseBindingRevalidateRequest",
+                  "revalidate_pinned": "#/components/schemas/CaseBindingRevalidateRequest"
+                },
+                "propertyName": "action"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/CaseBindingCreateRequest"
+                },
+                {
+                  "$ref": "#/components/schemas/CaseBindingReplaceRequest"
+                },
+                {
+                  "$ref": "#/components/schemas/CaseBindingRevalidateRequest"
+                },
+                {
+                  "$ref": "#/components/schemas/CaseBindingLifecycleRequest"
+                }
+              ]
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Operations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "expected_bindings_revision",
+          "operations"
+        ],
+        "title": "CaseBindingPrevalidationRequest",
+        "type": "object"
+      },
+      "CaseBindingReplaceRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "const": "replace",
+            "title": "Action",
+            "type": "string"
+          },
+          "binding_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Binding Id",
+            "type": "integer"
+          },
+          "binding_role_key": {
+            "minLength": 1,
+            "title": "Binding Role Key",
+            "type": "string"
+          },
+          "catalog_association_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog Association Id"
+          },
+          "client_operation_id": {
+            "minLength": 1,
+            "title": "Client Operation Id",
+            "type": "string"
+          },
+          "expected_lifecycle_revision": {
+            "exclusiveMinimum": 0.0,
+            "title": "Expected Lifecycle Revision",
+            "type": "integer"
+          },
+          "linkable_object_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Linkable Object Id",
+            "type": "integer"
+          },
+          "reason_code": {
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "reason_text": {
+            "minLength": 1,
+            "title": "Reason Text",
+            "type": "string"
+          },
+          "revision": {
+            "$ref": "#/components/schemas/CaseBindingRevisionRequest"
+          },
+          "signal_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Signal Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "client_operation_id",
+          "action",
+          "linkable_object_id",
+          "binding_role_key",
+          "signal_id",
+          "revision",
+          "reason_code",
+          "reason_text",
+          "binding_id",
+          "expected_lifecycle_revision"
+        ],
+        "title": "CaseBindingReplaceRequest",
+        "type": "object"
+      },
+      "CaseBindingRevalidateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "revalidate_current",
+              "revalidate_pinned"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "binding_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Binding Id",
+            "type": "integer"
+          },
+          "client_operation_id": {
+            "minLength": 1,
+            "title": "Client Operation Id",
+            "type": "string"
+          },
+          "expected_lifecycle_revision": {
+            "exclusiveMinimum": 0.0,
+            "title": "Expected Lifecycle Revision",
+            "type": "integer"
+          },
+          "reason_code": {
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "reason_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Text"
+          }
+        },
+        "required": [
+          "client_operation_id",
+          "action",
+          "binding_id",
+          "expected_lifecycle_revision",
+          "reason_code"
+        ],
+        "title": "CaseBindingRevalidateRequest",
+        "type": "object"
+      },
+      "CaseBindingRevisionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "content_hash": {
+            "minLength": 1,
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "current",
+              "pinned"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "revision_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Revision Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mode",
+          "revision_id",
+          "content_hash"
+        ],
+        "title": "CaseBindingRevisionRequest",
+        "type": "object"
+      },
       "CaseInputVariantRunRequest": {
         "properties": {
+          "expected_bindings_revision": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Bindings Revision"
+          },
           "range_end": {
             "minLength": 1,
             "title": "Range End",
@@ -1695,6 +2123,539 @@
           "password"
         ],
         "title": "LoginRequest",
+        "type": "object"
+      },
+      "ObjectSeriesArchiveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason_code": {
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "reason_text": {
+            "minLength": 1,
+            "title": "Reason Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason_code",
+          "reason_text"
+        ],
+        "title": "ObjectSeriesArchiveRequest",
+        "type": "object"
+      },
+      "ObjectSeriesCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "data_class_key": {
+            "minLength": 1,
+            "title": "Data Class Key",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "intended_binding_role_key": {
+            "minLength": 1,
+            "title": "Intended Binding Role Key",
+            "type": "string"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "object_series_key": {
+            "minLength": 1,
+            "title": "Object Series Key",
+            "type": "string"
+          },
+          "semantic_type_key": {
+            "minLength": 1,
+            "title": "Semantic Type Key",
+            "type": "string"
+          },
+          "source_expectation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ObjectSeriesSourceExpectationRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "temporal_contract": {
+            "$ref": "#/components/schemas/ObjectSeriesTemporalContractRequest"
+          },
+          "timezone": {
+            "default": "UTC",
+            "minLength": 1,
+            "title": "Timezone",
+            "type": "string"
+          },
+          "unit_key": {
+            "minLength": 1,
+            "title": "Unit Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "object_series_key",
+          "display_name",
+          "intended_binding_role_key",
+          "semantic_type_key",
+          "unit_key",
+          "data_class_key",
+          "temporal_contract"
+        ],
+        "title": "ObjectSeriesCreateRequest",
+        "type": "object"
+      },
+      "ObjectSeriesExpectedBaseRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "content_hash": {
+            "minLength": 1,
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "revision_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Revision Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision_id",
+          "content_hash"
+        ],
+        "title": "ObjectSeriesExpectedBaseRequest",
+        "type": "object"
+      },
+      "ObjectSeriesIngestionMappingRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "columns": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Columns"
+          },
+          "expected_base": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ObjectSeriesExpectedBaseRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "replace_full",
+                  "append_tail"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "revision_contract": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ObjectSeriesRevisionContractRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sheet_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sheet Name"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "value_keys": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Keys"
+          }
+        },
+        "title": "ObjectSeriesIngestionMappingRequest",
+        "type": "object"
+      },
+      "ObjectSeriesIngestionSourceRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "default": "",
+            "title": "Display Name",
+            "type": "string"
+          },
+          "external_reference": {
+            "default": "",
+            "title": "External Reference",
+            "type": "string"
+          },
+          "kind": {
+            "const": "api",
+            "default": "api",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "title": "ObjectSeriesIngestionSourceRequest",
+        "type": "object"
+      },
+      "ObjectSeriesPatchRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          }
+        },
+        "title": "ObjectSeriesPatchRequest",
+        "type": "object"
+      },
+      "ObjectSeriesPointRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "timestamp_end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp End"
+          },
+          "timestamp_start": {
+            "minLength": 1,
+            "title": "Timestamp Start",
+            "type": "string"
+          },
+          "values": {
+            "additionalProperties": true,
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "timestamp_start",
+          "values"
+        ],
+        "title": "ObjectSeriesPointRequest",
+        "type": "object"
+      },
+      "ObjectSeriesPointsIngestionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_base": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ObjectSeriesExpectedBaseRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mode": {
+            "default": "replace_full",
+            "enum": [
+              "replace_full",
+              "append_tail"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/ObjectSeriesPointRequest"
+            },
+            "minItems": 1,
+            "title": "Points",
+            "type": "array"
+          },
+          "revision_contract": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ObjectSeriesRevisionContractRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ObjectSeriesIngestionSourceRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "points"
+        ],
+        "title": "ObjectSeriesPointsIngestionRequest",
+        "type": "object"
+      },
+      "ObjectSeriesPublicationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm": {
+            "default": false,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "reason_code": {
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "reason_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Text"
+          },
+          "validation_token": {
+            "minLength": 1,
+            "title": "Validation Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "validation_token",
+          "reason_code"
+        ],
+        "title": "ObjectSeriesPublicationRequest",
+        "type": "object"
+      },
+      "ObjectSeriesRevisionContractRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "data_class_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Class Key"
+          },
+          "nominal_resolution_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nominal Resolution Seconds"
+          },
+          "regularity": {
+            "anyOf": [
+              {
+                "enum": [
+                  "regular",
+                  "irregular"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regularity"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          }
+        },
+        "title": "ObjectSeriesRevisionContractRequest",
+        "type": "object"
+      },
+      "ObjectSeriesSourceExpectationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "default": "",
+            "title": "Display Name",
+            "type": "string"
+          },
+          "kind": {
+            "default": "api",
+            "enum": [
+              "api",
+              "csv",
+              "xlsx",
+              "manual"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "title": "ObjectSeriesSourceExpectationRequest",
+        "type": "object"
+      },
+      "ObjectSeriesTemporalContractRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "nominal_resolution_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nominal Resolution Seconds"
+          },
+          "regularity": {
+            "enum": [
+              "regular",
+              "irregular"
+            ],
+            "title": "Regularity",
+            "type": "string"
+          },
+          "timestamp_convention": {
+            "default": "period_start",
+            "enum": [
+              "period_start",
+              "period_end"
+            ],
+            "title": "Timestamp Convention",
+            "type": "string"
+          }
+        },
+        "required": [
+          "regularity"
+        ],
+        "title": "ObjectSeriesTemporalContractRequest",
         "type": "object"
       },
       "OperatorConsoleCreateRequest": {
@@ -4627,6 +5588,1022 @@
         "summary": "Create Dashboard Template"
       }
     },
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series": {
+      "get": {
+        "description": "Generic associations and local series in one paged read model.",
+        "operationId": "get_object_time_series_context_api_projects__project_id__linkable_objects__linkable_object_id__time_series_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkable_object_id",
+            "required": true,
+            "schema": {
+              "title": "Linkable Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Object Time Series Context"
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series": {
+      "post": {
+        "operationId": "create_object_specific_time_series_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkable_object_id",
+            "required": true,
+            "schema": {
+              "title": "Linkable Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObjectSeriesCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Object Specific Time Series"
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series/{signal_id}": {
+      "get": {
+        "operationId": "get_object_specific_time_series_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkable_object_id",
+            "required": true,
+            "schema": {
+              "title": "Linkable Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "signal_id",
+            "required": true,
+            "schema": {
+              "title": "Signal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Object Specific Time Series"
+      },
+      "patch": {
+        "operationId": "patch_object_specific_time_series_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkable_object_id",
+            "required": true,
+            "schema": {
+              "title": "Linkable Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "signal_id",
+            "required": true,
+            "schema": {
+              "title": "Signal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObjectSeriesPatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Object Specific Time Series"
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series/{signal_id}/archive": {
+      "post": {
+        "operationId": "archive_object_specific_time_series_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__archive_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkable_object_id",
+            "required": true,
+            "schema": {
+              "title": "Linkable Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "signal_id",
+            "required": true,
+            "schema": {
+              "title": "Signal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObjectSeriesArchiveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Archive Object Specific Time Series"
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series/{signal_id}/preview": {
+      "get": {
+        "operationId": "get_object_series_preview_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkable_object_id",
+            "required": true,
+            "schema": {
+              "title": "Linkable Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "signal_id",
+            "required": true,
+            "schema": {
+              "title": "Signal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Object Series Preview"
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series/{signal_id}/revision-ingestions/files": {
+      "post": {
+        "operationId": "prepare_object_series_file_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions_files_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkable_object_id",
+            "required": true,
+            "schema": {
+              "title": "Linkable Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "signal_id",
+            "required": true,
+            "schema": {
+              "title": "Signal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_prepare_object_series_file_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions_files_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Prepare Object Series File Ingestion"
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series/{signal_id}/revision-ingestions/points": {
+      "post": {
+        "operationId": "prepare_object_series_points_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions_points_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkable_object_id",
+            "required": true,
+            "schema": {
+              "title": "Linkable Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "signal_id",
+            "required": true,
+            "schema": {
+              "title": "Signal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObjectSeriesPointsIngestionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Prepare Object Series Points Ingestion"
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series/{signal_id}/revision-ingestions/{ingestion_id}": {
+      "delete": {
+        "operationId": "cancel_object_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions__ingestion_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkable_object_id",
+            "required": true,
+            "schema": {
+              "title": "Linkable Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "signal_id",
+            "required": true,
+            "schema": {
+              "title": "Signal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ingestion_id",
+            "required": true,
+            "schema": {
+              "title": "Ingestion Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Object Series Ingestion"
+      },
+      "get": {
+        "operationId": "get_object_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions__ingestion_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkable_object_id",
+            "required": true,
+            "schema": {
+              "title": "Linkable Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "signal_id",
+            "required": true,
+            "schema": {
+              "title": "Signal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ingestion_id",
+            "required": true,
+            "schema": {
+              "title": "Ingestion Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Object Series Ingestion"
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series/{signal_id}/revision-ingestions/{ingestion_id}/mapping": {
+      "put": {
+        "operationId": "remap_object_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions__ingestion_id__mapping_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkable_object_id",
+            "required": true,
+            "schema": {
+              "title": "Linkable Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "signal_id",
+            "required": true,
+            "schema": {
+              "title": "Signal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ingestion_id",
+            "required": true,
+            "schema": {
+              "title": "Ingestion Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObjectSeriesIngestionMappingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remap Object Series Ingestion"
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series/{signal_id}/revision-ingestions/{ingestion_id}/preview": {
+      "get": {
+        "operationId": "preview_object_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions__ingestion_id__preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkable_object_id",
+            "required": true,
+            "schema": {
+              "title": "Linkable Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "signal_id",
+            "required": true,
+            "schema": {
+              "title": "Signal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ingestion_id",
+            "required": true,
+            "schema": {
+              "title": "Ingestion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_rows",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Rows"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Object Series Ingestion"
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series/{signal_id}/revision-ingestions/{ingestion_id}/publications": {
+      "post": {
+        "operationId": "publish_object_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions__ingestion_id__publications_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkable_object_id",
+            "required": true,
+            "schema": {
+              "title": "Linkable Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "signal_id",
+            "required": true,
+            "schema": {
+              "title": "Signal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ingestion_id",
+            "required": true,
+            "schema": {
+              "title": "Ingestion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObjectSeriesPublicationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Publish Object Series Ingestion"
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series/{signal_id}/revisions": {
+      "get": {
+        "operationId": "get_object_series_revisions_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revisions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkable_object_id",
+            "required": true,
+            "schema": {
+              "title": "Linkable Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "signal_id",
+            "required": true,
+            "schema": {
+              "title": "Signal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Object Series Revisions"
+      }
+    },
     "/api/projects/{project_id}/portal-configuration": {
       "get": {
         "operationId": "get_portal_configuration_api_projects__project_id__portal_configuration_get",
@@ -6208,6 +8185,326 @@
           }
         },
         "summary": "Get Scenario"
+      }
+    },
+    "/api/scenarios/{scenario_id}/case-variants/{variant_id}/time-series-binding-batches": {
+      "post": {
+        "operationId": "commit_case_time_series_bindings_api_scenarios__scenario_id__case_variants__variant_id__time_series_binding_batches_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "variant_id",
+            "required": true,
+            "schema": {
+              "title": "Variant Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "title": "If-Match",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaseBindingCommitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "201": {
+            "description": "Binding batch created"
+          },
+          "409": {
+            "description": "Confirmation or idempotency conflict"
+          },
+          "410": {
+            "description": "Prevalidation expired"
+          },
+          "412": {
+            "description": "Observed precondition changed"
+          },
+          "422": {
+            "description": "Domain batch rejection"
+          },
+          "428": {
+            "description": "Required commit guard missing"
+          }
+        },
+        "summary": "Commit Case Time Series Bindings"
+      }
+    },
+    "/api/scenarios/{scenario_id}/case-variants/{variant_id}/time-series-binding-prevalidations": {
+      "post": {
+        "operationId": "prevalidate_case_time_series_bindings_api_scenarios__scenario_id__case_variants__variant_id__time_series_binding_prevalidations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "variant_id",
+            "required": true,
+            "schema": {
+              "title": "Variant Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaseBindingPrevalidationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Prevalidate Case Time Series Bindings"
+      }
+    },
+    "/api/scenarios/{scenario_id}/case-variants/{variant_id}/time-series-bindings": {
+      "get": {
+        "operationId": "get_case_time_series_bindings_api_scenarios__scenario_id__case_variants__variant_id__time_series_bindings_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "variant_id",
+            "required": true,
+            "schema": {
+              "title": "Variant Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Case Time Series Bindings"
+      }
+    },
+    "/api/scenarios/{scenario_id}/case-variants/{variant_id}/time-series-bindings/{binding_id}": {
+      "get": {
+        "operationId": "get_case_time_series_binding_api_scenarios__scenario_id__case_variants__variant_id__time_series_bindings__binding_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "variant_id",
+            "required": true,
+            "schema": {
+              "title": "Variant Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "binding_id",
+            "required": true,
+            "schema": {
+              "title": "Binding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Case Time Series Binding"
+      }
+    },
+    "/api/scenarios/{scenario_id}/case-variants/{variant_id}/time-series-bindings/{binding_id}/events": {
+      "get": {
+        "operationId": "get_case_time_series_binding_events_api_scenarios__scenario_id__case_variants__variant_id__time_series_bindings__binding_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "variant_id",
+            "required": true,
+            "schema": {
+              "title": "Variant Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "binding_id",
+            "required": true,
+            "schema": {
+              "title": "Binding Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Case Time Series Binding Events"
       }
     },
     "/api/scenarios/{scenario_id}/case/default-variant": {

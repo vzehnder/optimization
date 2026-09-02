@@ -131,6 +131,7 @@ from app.object_time_series import (
     ObjectSeriesError,
     object_series_etag,
     object_series_problem,
+    parse_object_series_file_upload,
 )
 from app.transformations import TransformationError
 from app.runner import JuliaRunExecutor, LocalRunQueue
@@ -536,6 +537,13 @@ class ObjectSeriesPatchRequest(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
+class ObjectSeriesArchiveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason_code: str = Field(min_length=1)
+    reason_text: str = Field(min_length=1)
+
+
 class ObjectSeriesExpectedBaseRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -584,7 +592,13 @@ class ObjectSeriesPointsIngestionRequest(BaseModel):
 class ObjectSeriesIngestionMappingRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    value_keys: dict[str, str]
+    value_keys: dict[str, str] | None = None
+    mode: Literal["replace_full", "append_tail"] | None = None
+    expected_base: ObjectSeriesExpectedBaseRequest | None = None
+    sheet_name: str | None = None
+    revision_contract: ObjectSeriesRevisionContractRequest | None = None
+    columns: dict[str, Any] | None = None
+    source: dict[str, Any] | None = None
 
 
 class ObjectSeriesPublicationRequest(BaseModel):
@@ -2717,7 +2731,9 @@ def create_app(
             "detail": target,
             "revisions": f"{target}/revisions",
             "preview": f"{target}/preview",
+            "archive": f"{target}/archive",
             "point_ingestions": f"{target}/revision-ingestions/points",
+            "file_ingestions": f"{target}/revision-ingestions/files",
         }
 
     def object_series_response(
@@ -2740,6 +2756,8 @@ def create_app(
                 in {"awaiting_data", "ready"},
                 "preview": series["current_revision"] is not None,
                 "bind": series["binding_ready"],
+                "archive": series["availability"]
+                not in {"archived", "owner_archived"},
             },
             "links": object_series_links(
                 project_id, linkable_object_id, series["signal_id"]
@@ -2879,6 +2897,39 @@ def create_app(
             request_id=request_id,
         )
 
+    @app.post(f"{OBJECT_ROOT}/object-series/{{signal_id}}/archive")
+    async def archive_object_specific_time_series(
+        project_id: int,
+        linkable_object_id: int,
+        signal_id: int,
+        payload: ObjectSeriesArchiveRequest,
+        request: Request,
+        if_match: str | None = Header(default=None, alias="If-Match"),
+    ):
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            if not str(if_match or "").strip():
+                raise ObjectSeriesError(
+                    "TS_INGEST_PRECONDITION_REQUIRED", field="If-Match"
+                )
+            series = analyst_store.archive_object_series(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                signal_id=signal_id,
+                if_match=if_match,
+                actor=object_series_actor(request),
+                reason_code=payload.reason_code,
+                reason_text=payload.reason_text,
+            )
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        return object_series_response(
+            series,
+            project_id=project_id,
+            linkable_object_id=linkable_object_id,
+            request_id=request_id,
+        )
+
     OBJECT_TARGET = f"{OBJECT_ROOT}/object-series/{{signal_id}}"
 
     @app.get(f"{OBJECT_TARGET}/revisions")
@@ -2978,6 +3029,67 @@ def create_app(
             return object_series_refusal(error, request)
         return ingestion_response(ingestion, request, status_code=201)
 
+    @app.post(f"{OBJECT_TARGET}/revision-ingestions/files", status_code=202)
+    async def prepare_object_series_file_ingestion(
+        project_id: int,
+        linkable_object_id: int,
+        signal_id: int,
+        request: Request,
+        file: UploadFile = File(...),
+        mapping: str | None = Form(None),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ):
+        try:
+            if not str(idempotency_key or "").strip():
+                raise ObjectSeriesError(
+                    "TS_INGEST_PRECONDITION_REQUIRED", field="Idempotency-Key"
+                )
+            # Parsing and normalization deliberately happen before the store
+            # opens the short staging transaction.
+            series = analyst_store.read_object_series(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                signal_id=signal_id,
+            )
+            try:
+                document = None if mapping is None else json.loads(mapping)
+            except json.JSONDecodeError as error:
+                raise ObjectSeriesError(
+                    "TS_INGEST_MAPPING_INVALID",
+                    detail="mapping must be a JSON object",
+                ) from error
+            if document is not None and not isinstance(document, dict):
+                raise ObjectSeriesError(
+                    "TS_INGEST_MAPPING_INVALID",
+                    detail="mapping must be a JSON object",
+                )
+            content = await file.read()
+            uploaded = parse_object_series_file_upload(
+                original_filename=file.filename or "source.csv",
+                media_type=file.content_type,
+                content=content,
+                series_key=series["object_series_key"],
+                sheet_name=(
+                    None
+                    if document is None
+                    else str(document.get("sheet_name") or "").strip() or None
+                ),
+            )
+            ingestion = analyst_store.prepare_object_series_file_ingestion(
+                project_id=project_id,
+                linkable_object_id=linkable_object_id,
+                signal_id=signal_id,
+                uploaded=uploaded,
+                document=document,
+                idempotency_key=str(idempotency_key),
+                actor=object_series_actor(request),
+            )
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        finally:
+            await file.close()
+        return ingestion_response(ingestion, request, status_code=202)
+
     @app.get(f"{OBJECT_TARGET}/revision-ingestions/{{ingestion_id}}")
     async def get_object_series_ingestion(
         project_id: int,
@@ -3012,7 +3124,7 @@ def create_app(
                 linkable_object_id=linkable_object_id,
                 signal_id=signal_id,
                 ingestion_key=ingestion_id,
-                mapping=payload.model_dump(),
+                mapping=payload.model_dump(exclude_none=True),
                 actor=object_series_actor(request),
             )
         except ObjectSeriesError as error:

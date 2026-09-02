@@ -1,4 +1,4 @@
-"""Object-specific series: definition, staging and API-points ingestion.
+"""Object-specific series: definition, staging, points and file ingestion.
 
 TS-7 chapter 7 opens a second path into the canonical content model. A series
 that is born from an object reuses ``time_series_sets`` / ``signals`` /
@@ -18,16 +18,21 @@ Both live in the same physical space as the rest of the expansion: schema
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import hmac
+import io
 import json
 import math
 import re
 import time
+import zipfile
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.time_series_canonical import canonical_space_table_name
+from app.time_series_ingestion import TimeSeriesIngestionError, parse_xlsx_rows
 
 
 OBJECT_SERIES_LOGICAL_TABLES = (
@@ -44,6 +49,14 @@ API_POINTS_MAX_CELLS = 100_000
 INGESTION_ERROR_LIMIT = 200
 INGESTION_PREVIEW_MAX_ROWS = 200
 INGESTION_LIFETIME_SECONDS = 24 * 60 * 60
+FILE_CSV_MAX_BYTES = 100 * 1024 * 1024
+FILE_XLSX_MAX_BYTES = 25 * 1024 * 1024
+FILE_XLSX_MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
+FILE_XLSX_MAX_COMPRESSION_RATIO = 100
+FILE_MAX_PERIODS = 1_000_000
+FILE_MAX_CELLS = 5_000_000
+FILE_MAX_COLUMNS = 200
+FILE_MAX_ACTIVE_JOBS = 3
 
 OBJECT_SERIES_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 METADATA_MAX_BYTES = 16 * 1024
@@ -66,6 +79,12 @@ METADATA_FORBIDDEN_KEY_HINTS = ("password", "secret", "token", "credential", "ke
 QUALITY_FLAGS = ("measured", "estimated", "forecast", "interpolated", "suspect")
 
 PUBLISH_INGESTION_OPERATION_KIND = "publish_object_series_revision"
+FILE_INGESTION_OPERATION_KIND = "prepare_object_series_file_ingestion"
+
+CSV_MEDIA_TYPES = ("text/csv", "application/csv")
+XLSX_MEDIA_TYPE = (
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
 
 
 OBJECT_SERIES_ERROR_CATALOG = {
@@ -544,6 +563,597 @@ def new_ingestion_key() -> str:
     return f"tsi_{hashlib.sha256(str(time.time_ns()).encode()).hexdigest()[:24]}"
 
 
+def parse_object_series_file_upload(
+    *,
+    original_filename: str,
+    media_type: str | None,
+    content: bytes,
+    series_key: str,
+    sheet_name: str | None = None,
+) -> dict[str, Any]:
+    """Inspect an uploaded file without opening a canonical transaction."""
+
+    filename = re.sub(
+        r"[^A-Za-z0-9._-]+", "_", original_filename.replace("\\", "/").split("/")[-1]
+    ) or "source.csv"
+    normalized_media_type = str(media_type or "").split(";", 1)[0].strip().lower()
+    is_csv = filename.lower().endswith(".csv") and normalized_media_type in CSV_MEDIA_TYPES
+    is_xlsx = filename.lower().endswith(".xlsx") and normalized_media_type == XLSX_MEDIA_TYPE
+    if not is_csv and not is_xlsx:
+        raise ObjectSeriesError(
+            "TS_INGEST_FORMAT_UNSUPPORTED",
+            detail="the first file channel accepts CSV or XLSX",
+        )
+    maximum_bytes = FILE_XLSX_MAX_BYTES if is_xlsx else FILE_CSV_MAX_BYTES
+    if len(content) > maximum_bytes:
+        raise ObjectSeriesError(
+            "TS_INGEST_PAYLOAD_TOO_LARGE",
+            detail="the uploaded file exceeds the transport budget",
+            maximum_bytes=maximum_bytes,
+        )
+    if is_xlsx:
+        try:
+            with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                members = archive.infolist()
+                uncompressed_bytes = sum(member.file_size for member in members)
+                compressed_bytes = sum(member.compress_size for member in members)
+        except zipfile.BadZipFile as error:
+            raise ObjectSeriesError(
+                "TS_INGEST_VALIDATION_FAILED",
+                detail="XLSX source file could not be read",
+            ) from error
+        if (
+            uncompressed_bytes > FILE_XLSX_MAX_UNCOMPRESSED_BYTES
+            or uncompressed_bytes
+            > max(compressed_bytes, 1) * FILE_XLSX_MAX_COMPRESSION_RATIO
+        ):
+            raise ObjectSeriesError(
+                "TS_INGEST_PAYLOAD_TOO_LARGE",
+                detail="the XLSX archive exceeds its expansion budget",
+                maximum_uncompressed_bytes=FILE_XLSX_MAX_UNCOMPRESSED_BYTES,
+                maximum_compression_ratio=FILE_XLSX_MAX_COMPRESSION_RATIO,
+            )
+    available_sheets: list[str] = []
+    selected_sheet: str | None = None
+    if is_xlsx:
+        try:
+            parsed_sheet, available_sheets, columns, rows = parse_xlsx_rows(
+                content, sheet_name=sheet_name
+            )
+            worksheets = {}
+            for available_sheet in available_sheets:
+                _, _, sheet_columns, sheet_rows = parse_xlsx_rows(
+                    content, sheet_name=available_sheet
+                )
+                worksheets[available_sheet] = {
+                    "columns": sheet_columns,
+                    "rows": sheet_rows,
+                }
+        except TimeSeriesIngestionError as error:
+            raise ObjectSeriesError(
+                "TS_INGEST_VALIDATION_FAILED",
+                detail=str(error),
+            ) from error
+        selected_sheet = parsed_sheet if sheet_name or len(available_sheets) == 1 else None
+    else:
+        worksheets = {}
+        try:
+            text = content.decode("utf-8-sig")
+        except UnicodeDecodeError as error:
+            raise ObjectSeriesError(
+                "TS_INGEST_VALIDATION_FAILED",
+                detail="CSV files must be UTF-8 encoded",
+                errors=[
+                    {
+                        "code": "TS_INGEST_VALUE_INVALID",
+                        "message": "CSV files must be UTF-8 encoded",
+                        "location": {"record_index": 0, "source_row_number": 1},
+                    }
+                ],
+            ) from error
+        reader = csv.DictReader(io.StringIO(text))
+        columns = [str(column or "").strip() for column in (reader.fieldnames or [])]
+        rows = [
+            {column: str(row.get(column) or "") for column in columns}
+            for row in reader
+        ]
+    if not columns or any(not column for column in columns) or len(set(columns)) != len(columns):
+        raise ObjectSeriesError(
+            "TS_INGEST_MAPPING_INVALID",
+            detail="CSV headers must be non-empty and unique",
+        )
+    normalized = {
+        re.sub(r"[^a-z0-9]+", "_", column.lower()).strip("_"): column
+        for column in columns
+    }
+    quota_errors: list[dict[str, Any]] = []
+    if len(columns) > FILE_MAX_COLUMNS:
+        quota_errors.append(
+            _file_error(
+                "TS_INGEST_QUOTA_EXCEEDED",
+                "the file exceeds the column quota",
+                record_index=0,
+                source_row_number=1,
+                column=None,
+                sheet=selected_sheet,
+            )
+        )
+    if len(rows) > FILE_MAX_PERIODS:
+        quota_errors.append(
+            _file_error(
+                "TS_INGEST_QUOTA_EXCEEDED",
+                "the file exceeds the period quota",
+                record_index=FILE_MAX_PERIODS,
+                source_row_number=FILE_MAX_PERIODS + 2,
+                column=None,
+                sheet=selected_sheet,
+            )
+        )
+    if len(rows) * len(columns) > FILE_MAX_CELLS:
+        quota_errors.append(
+            _file_error(
+                "TS_INGEST_QUOTA_EXCEEDED",
+                "the file exceeds the cell quota",
+                record_index=0,
+                source_row_number=1,
+                column=None,
+                sheet=selected_sheet,
+            )
+        )
+    return {
+        "original_filename": filename,
+        "media_type": normalized_media_type,
+        "available_sheets": available_sheets,
+        "selected_sheet": selected_sheet,
+        "columns": columns,
+        "preview_rows": rows[:5],
+        "mapping_suggestions": {
+            "timestamp_start": next(
+                (
+                    normalized[key]
+                    for key in ("timestamp_start", "timestamp", "datetime")
+                    if key in normalized
+                ),
+                None,
+            ),
+            "timestamp_end": next(
+                (normalized[key] for key in ("timestamp_end", "end") if key in normalized),
+                None,
+            ),
+            "duration_hours": next(
+                (
+                    normalized[key]
+                    for key in ("duration_hours", "duration", "hours")
+                    if key in normalized
+                ),
+                None,
+            ),
+            "signals": [
+                {
+                    "series_key": series_key,
+                    "value": normalized.get(series_key),
+                    "quality_flag": next(
+                        (
+                            normalized[key]
+                            for key in ("quality_flag", "quality")
+                            if key in normalized
+                        ),
+                        None,
+                    ),
+                }
+            ],
+        },
+        "rows": rows,
+        "checksum": f"sha256:{hashlib.sha256(content).hexdigest()}",
+        "kind": "xlsx" if is_xlsx else "csv",
+        "errors": quota_errors,
+        "worksheets": worksheets,
+    }
+
+
+def _file_error(
+    code: str,
+    message: str,
+    *,
+    record_index: int,
+    source_row_number: int,
+    column: str | None,
+    sheet: str | None,
+) -> dict[str, Any]:
+    location: dict[str, Any] = {
+        "record_index": record_index,
+        "source_row_number": source_row_number,
+        "column": column,
+    }
+    if sheet is not None:
+        location["sheet"] = sheet
+    return {"code": code, "message": message, "location": location}
+
+
+def _parse_file_timestamp(
+    value: Any,
+    *,
+    timezone_name: str,
+    record_index: int,
+    source_row_number: int,
+    column: str,
+    sheet: str | None,
+) -> tuple[datetime | None, dict[str, Any] | None]:
+    text = str(value or "").strip()
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None, _file_error(
+            "TS_INGEST_TIMESTAMP_INVALID",
+            "timestamp must be ISO 8601",
+            record_index=record_index,
+            source_row_number=source_row_number,
+            column=column,
+            sheet=sheet,
+        )
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(timezone.utc), None
+    try:
+        zone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        return None, _file_error(
+            "TS_INGEST_TIMESTAMP_INVALID",
+            "revision_contract.timezone must be an IANA timezone",
+            record_index=record_index,
+            source_row_number=source_row_number,
+            column=column,
+            sheet=sheet,
+        )
+    candidates = []
+    for fold in (0, 1):
+        candidate = parsed.replace(tzinfo=zone, fold=fold)
+        roundtrip = candidate.astimezone(timezone.utc).astimezone(zone).replace(
+            tzinfo=None
+        )
+        if roundtrip == parsed:
+            candidates.append(candidate)
+    offsets = {candidate.utcoffset() for candidate in candidates}
+    if len(candidates) != 1 and len(offsets) != 1:
+        return None, _file_error(
+            "TS_INGEST_TIMESTAMP_AMBIGUOUS",
+            "local timestamp is ambiguous or does not exist in the declared timezone",
+            record_index=record_index,
+            source_row_number=source_row_number,
+            column=column,
+            sheet=sheet,
+        )
+    if not candidates:
+        return None, _file_error(
+            "TS_INGEST_TIMESTAMP_AMBIGUOUS",
+            "local timestamp is ambiguous or does not exist in the declared timezone",
+            record_index=record_index,
+            source_row_number=source_row_number,
+            column=column,
+            sheet=sheet,
+        )
+    return candidates[0].astimezone(timezone.utc), None
+
+
+def normalize_file_payload(
+    uploaded: Mapping[str, Any],
+    mapping: Mapping[str, Any],
+    *,
+    series_keys: tuple[str, ...],
+    contract: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Normalize mapped file rows into the same staging shape as JSON points."""
+
+    selected_upload = dict(uploaded)
+    if uploaded.get("kind") == "xlsx":
+        available_sheets = list(uploaded.get("available_sheets") or [])
+        requested_sheet = str(mapping.get("sheet_name") or "").strip()
+        if len(available_sheets) > 1 and not requested_sheet:
+            error = _file_error(
+                "TS_INGEST_MAPPING_INVALID",
+                "sheet_name is required when the workbook has multiple sheets",
+                record_index=0,
+                source_row_number=1,
+                column=None,
+                sheet=None,
+            )
+            return {
+                "periods": [],
+                "values": [],
+                "errors": [error],
+                "uploaded": selected_upload,
+            }
+        selected_sheet = requested_sheet or (available_sheets[0] if available_sheets else "")
+        worksheet = (uploaded.get("worksheets") or {}).get(selected_sheet)
+        if not selected_sheet or not isinstance(worksheet, Mapping):
+            error = _file_error(
+                "TS_INGEST_MAPPING_INVALID",
+                "sheet_name does not name a worksheet in the uploaded workbook",
+                record_index=0,
+                source_row_number=1,
+                column=None,
+                sheet=selected_sheet or None,
+            )
+            return {
+                "periods": [],
+                "values": [],
+                "errors": [error],
+                "uploaded": selected_upload,
+            }
+        selected_upload["selected_sheet"] = selected_sheet
+        selected_upload["columns"] = list(worksheet.get("columns") or [])
+        selected_upload["rows"] = list(worksheet.get("rows") or [])
+        selected_upload["preview_rows"] = selected_upload["rows"][:5]
+
+    upload_errors = list(selected_upload.get("errors") or [])
+    if upload_errors:
+        return {
+            "periods": [],
+            "values": [],
+            "errors": upload_errors,
+            "uploaded": selected_upload,
+        }
+    columns_mapping = mapping.get("columns")
+    if not isinstance(columns_mapping, Mapping):
+        return {
+            "periods": [],
+            "values": [],
+            "errors": [
+                _file_error(
+                    "TS_INGEST_MAPPING_INVALID",
+                    "columns mapping is required",
+                    record_index=0,
+                    source_row_number=1,
+                    column=None,
+                    sheet=selected_upload.get("selected_sheet"),
+                )
+            ],
+            "uploaded": selected_upload,
+        }
+    available_columns = {str(column) for column in selected_upload.get("columns") or []}
+    timestamp_column = str(columns_mapping.get("timestamp_start") or "").strip()
+    end_column = str(columns_mapping.get("timestamp_end") or "").strip() or None
+    duration_column = str(columns_mapping.get("duration_hours") or "").strip() or None
+    signal_mappings = columns_mapping.get("signals")
+    mapping_errors: list[dict[str, Any]] = []
+    if not timestamp_column or timestamp_column not in available_columns:
+        mapping_errors.append(
+            _file_error(
+                "TS_INGEST_MAPPING_INVALID",
+                "timestamp_start must name an uploaded column",
+                record_index=0,
+                source_row_number=1,
+                column=timestamp_column or None,
+                sheet=selected_upload.get("selected_sheet"),
+            )
+        )
+    if (end_column is None) == (duration_column is None):
+        mapping_errors.append(
+            _file_error(
+                "TS_INGEST_MAPPING_INVALID",
+                "map exactly one of timestamp_end and duration_hours",
+                record_index=0,
+                source_row_number=1,
+                column=end_column or duration_column,
+                sheet=selected_upload.get("selected_sheet"),
+            )
+        )
+    for column in (end_column, duration_column):
+        if column is not None and column not in available_columns:
+            mapping_errors.append(
+                _file_error(
+                    "TS_INGEST_MAPPING_INVALID",
+                    "the mapping names a column the file does not have",
+                    record_index=0,
+                    source_row_number=1,
+                    column=column,
+                    sheet=selected_upload.get("selected_sheet"),
+                )
+            )
+    by_series: dict[str, Mapping[str, Any]] = {}
+    signal_entries = (
+        [entry for entry in signal_mappings if isinstance(entry, Mapping)]
+        if isinstance(signal_mappings, list)
+        else []
+    )
+    signal_keys = [str(entry.get("series_key") or "") for entry in signal_entries]
+    if len(signal_keys) != len(set(signal_keys)):
+        mapping_errors.append(
+            _file_error(
+                "TS_INGEST_MAPPING_INVALID",
+                "a target series cannot be mapped more than once",
+                record_index=0,
+                source_row_number=1,
+                column=None,
+                sheet=selected_upload.get("selected_sheet"),
+            )
+        )
+    by_series = dict(zip(signal_keys, signal_entries))
+    if set(by_series) != set(series_keys):
+        mapping_errors.append(
+            _file_error(
+                "TS_INGEST_MAPPING_INVALID",
+                "signals must map every target series exactly once",
+                record_index=0,
+                source_row_number=1,
+                column=None,
+                sheet=selected_upload.get("selected_sheet"),
+            )
+        )
+    for series_key in series_keys:
+        entry = by_series.get(series_key) or {}
+        value_column = str(entry.get("value") or "").strip()
+        quality_column = str(entry.get("quality_flag") or "").strip() or None
+        if not value_column or value_column not in available_columns:
+            mapping_errors.append(
+                _file_error(
+                    "TS_INGEST_MAPPING_INVALID",
+                    f"'{series_key}' must name a value column",
+                    record_index=0,
+                    source_row_number=1,
+                    column=value_column or None,
+                    sheet=selected_upload.get("selected_sheet"),
+                )
+            )
+        if quality_column is not None and quality_column not in available_columns:
+            mapping_errors.append(
+                _file_error(
+                    "TS_INGEST_MAPPING_INVALID",
+                    "the quality mapping names a column the file does not have",
+                    record_index=0,
+                    source_row_number=1,
+                    column=quality_column,
+                    sheet=selected_upload.get("selected_sheet"),
+                )
+            )
+    if mapping_errors:
+        return {
+            "periods": [],
+            "values": [],
+            "errors": mapping_errors,
+            "uploaded": selected_upload,
+        }
+
+    points: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    rows = selected_upload.get("rows") or []
+    sheet = selected_upload.get("selected_sheet")
+    for record_index, row in enumerate(rows):
+        source_row = record_index + 2
+        start, error = _parse_file_timestamp(
+            row.get(timestamp_column),
+            timezone_name=str(contract.get("timezone") or "UTC"),
+            record_index=record_index,
+            source_row_number=source_row,
+            column=timestamp_column,
+            sheet=sheet,
+        )
+        if error is not None:
+            errors.append(error)
+            continue
+        point: dict[str, Any] = {"timestamp_start": start.isoformat()}
+        if end_column is not None:
+            end, error = _parse_file_timestamp(
+                row.get(end_column),
+                timezone_name=str(contract.get("timezone") or "UTC"),
+                record_index=record_index,
+                source_row_number=source_row,
+                column=end_column,
+                sheet=sheet,
+            )
+            if error is not None:
+                errors.append(error)
+                continue
+            point["timestamp_end"] = end.isoformat()
+        else:
+            raw_duration = str(row.get(duration_column) or "").strip()
+            try:
+                duration_hours = float(raw_duration)
+            except ValueError:
+                duration_hours = math.nan
+            if not math.isfinite(duration_hours) or duration_hours <= 0:
+                errors.append(
+                    _file_error(
+                        "TS_INGEST_DURATION_INVALID",
+                        "duration_hours must be a positive finite number",
+                        record_index=record_index,
+                        source_row_number=source_row,
+                        column=duration_column,
+                        sheet=sheet,
+                    )
+                )
+                continue
+            point["duration_seconds"] = duration_hours * 3600.0
+        point_values: dict[str, Any] = {}
+        row_failed = False
+        for series_key in series_keys:
+            entry = by_series[series_key]
+            value_column = str(entry["value"])
+            raw_value = str(row.get(value_column) or "").strip()
+            try:
+                numeric = float(raw_value)
+            except ValueError:
+                numeric = math.nan
+            if not math.isfinite(numeric):
+                errors.append(
+                    _file_error(
+                        "TS_INGEST_VALUE_INVALID",
+                        "value must be a finite number",
+                        record_index=record_index,
+                        source_row_number=source_row,
+                        column=value_column,
+                        sheet=sheet,
+                    )
+                )
+                row_failed = True
+                continue
+            quality_column = str(entry.get("quality_flag") or "").strip() or None
+            quality = str(row.get(quality_column) or "").strip() if quality_column else ""
+            if quality and quality not in QUALITY_FLAGS:
+                errors.append(
+                    _file_error(
+                        "TS_INGEST_VALUE_INVALID",
+                        "quality_flag is not in the allowed catalog",
+                        record_index=record_index,
+                        source_row_number=source_row,
+                        column=quality_column,
+                        sheet=sheet,
+                    )
+                )
+                row_failed = True
+                continue
+            point_values[series_key] = {
+                "value": numeric,
+                "quality_flag": quality or None,
+            }
+        if not row_failed:
+            point["values"] = point_values
+            points.append(point)
+
+    if errors:
+        return {
+            "periods": [],
+            "values": [],
+            "errors": errors,
+            "uploaded": selected_upload,
+        }
+    normalized = normalize_points_payload(
+        {"points": points}, series_keys=series_keys, mapping={}
+    )
+    file_errors: list[dict[str, Any]] = []
+    for entry in normalized["errors"]:
+        record_index = int(entry["location"].get("record_index", 0))
+        pointer = str(entry["location"].get("json_pointer") or "")
+        column = timestamp_column
+        if "duration" in pointer or "timestamp_end" in pointer:
+            column = end_column or duration_column
+        elif "/values/" in pointer:
+            series_key = next(
+                (key for key in series_keys if f"/values/{key}" in pointer),
+                series_keys[0],
+            )
+            column = str(by_series[series_key].get("value") or "")
+        file_errors.append(
+            _file_error(
+                entry["code"],
+                entry["message"],
+                record_index=record_index,
+                source_row_number=record_index + 2,
+                column=column,
+                sheet=sheet,
+            )
+        )
+    for period in normalized["periods"]:
+        period["source_row_number"] = int(period["period_index"]) + 2
+    for value in normalized["values"]:
+        value["source_row_number"] = int(value["period_index"]) + 2
+    return {
+        "periods": normalized["periods"],
+        "values": normalized["values"],
+        "errors": file_errors,
+        "uploaded": selected_upload,
+    }
+
+
 def ingestion_validation_token(
     *, ingestion_key: str, content_hash: str, secret: bytes
 ) -> str:
@@ -919,6 +1529,49 @@ def check_temporal_contract(
                 }
             )
     return errors
+
+
+def check_file_temporal_contract(
+    periods: list[dict[str, Any]],
+    *,
+    contract: Mapping[str, Any],
+    mapping: Mapping[str, Any],
+    sheet: str | None,
+) -> list[dict[str, Any]]:
+    """Express temporal validation failures in the file-channel location shape."""
+
+    columns = mapping.get("columns") or {}
+    timestamp_column = str(columns.get("timestamp_start") or "") or None
+    duration_column = (
+        str(columns.get("timestamp_end") or "").strip()
+        or str(columns.get("duration_hours") or "").strip()
+        or None
+    )
+    by_index = {
+        int(period["period_index"]): period
+        for period in periods
+    }
+    translated = []
+    for error in check_temporal_contract(periods, contract=contract):
+        record_index = int(error["location"].get("record_index", 0))
+        period = by_index.get(record_index) or {}
+        translated.append(
+            _file_error(
+                error["code"],
+                error["message"],
+                record_index=record_index,
+                source_row_number=int(
+                    period.get("source_row_number") or record_index + 2
+                ),
+                column=(
+                    timestamp_column
+                    if "gap" in str(error["message"])
+                    else duration_column
+                ),
+                sheet=sheet,
+            )
+        )
+    return translated
 
 
 def utc_presentation(value: Any) -> str | None:

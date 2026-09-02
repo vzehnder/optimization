@@ -718,6 +718,215 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Object Time Series Context
+         * @description Generic associations and local series in one paged read model.
+         */
+        get: operations["get_object_time_series_context_api_projects__project_id__linkable_objects__linkable_object_id__time_series_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Object Specific Time Series */
+        post: operations["create_object_specific_time_series_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series/{signal_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Object Specific Time Series */
+        get: operations["get_object_specific_time_series_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Object Specific Time Series */
+        patch: operations["patch_object_specific_time_series_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__patch"];
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series/{signal_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Archive Object Specific Time Series */
+        post: operations["archive_object_specific_time_series_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series/{signal_id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Object Series Preview */
+        get: operations["get_object_series_preview_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series/{signal_id}/revision-ingestions/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prepare Object Series File Ingestion */
+        post: operations["prepare_object_series_file_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions_files_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series/{signal_id}/revision-ingestions/points": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prepare Object Series Points Ingestion */
+        post: operations["prepare_object_series_points_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions_points_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series/{signal_id}/revision-ingestions/{ingestion_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Object Series Ingestion */
+        get: operations["get_object_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions__ingestion_id__get"];
+        put?: never;
+        post?: never;
+        /** Cancel Object Series Ingestion */
+        delete: operations["cancel_object_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions__ingestion_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series/{signal_id}/revision-ingestions/{ingestion_id}/mapping": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Remap Object Series Ingestion */
+        put: operations["remap_object_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions__ingestion_id__mapping_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series/{signal_id}/revision-ingestions/{ingestion_id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Preview Object Series Ingestion */
+        get: operations["preview_object_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions__ingestion_id__preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series/{signal_id}/revision-ingestions/{ingestion_id}/publications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish Object Series Ingestion */
+        post: operations["publish_object_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions__ingestion_id__publications_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{linkable_object_id}/time-series/object-series/{signal_id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Object Series Revisions */
+        get: operations["get_object_series_revisions_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revisions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/portal-configuration": {
         parameters: {
             query?: never;
@@ -1243,6 +1452,91 @@ export interface paths {
         };
         /** Get Scenario */
         get: operations["get_scenario_api_scenarios__scenario_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/case-variants/{variant_id}/time-series-binding-batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Commit Case Time Series Bindings */
+        post: operations["commit_case_time_series_bindings_api_scenarios__scenario_id__case_variants__variant_id__time_series_binding_batches_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/case-variants/{variant_id}/time-series-binding-prevalidations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prevalidate Case Time Series Bindings */
+        post: operations["prevalidate_case_time_series_bindings_api_scenarios__scenario_id__case_variants__variant_id__time_series_binding_prevalidations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/case-variants/{variant_id}/time-series-bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Case Time Series Bindings */
+        get: operations["get_case_time_series_bindings_api_scenarios__scenario_id__case_variants__variant_id__time_series_bindings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/case-variants/{variant_id}/time-series-bindings/{binding_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Case Time Series Binding */
+        get: operations["get_case_time_series_binding_api_scenarios__scenario_id__case_variants__variant_id__time_series_bindings__binding_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/case-variants/{variant_id}/time-series-bindings/{binding_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Case Time Series Binding Events */
+        get: operations["get_case_time_series_binding_events_api_scenarios__scenario_id__case_variants__variant_id__time_series_bindings__binding_id__events_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2075,6 +2369,13 @@ export interface components {
             landing_path: string;
             user: components["schemas"]["CurrentUser"];
         };
+        /** Body_prepare_object_series_file_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions_files_post */
+        Body_prepare_object_series_file_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions_files_post: {
+            /** File */
+            file: string;
+            /** Mapping */
+            mapping?: string | null;
+        };
         /** Body_upload_draft_time_series_source_api_scenarios__scenario_id__draft_time_series_sources_upload_post */
         Body_upload_draft_time_series_source_api_scenarios__scenario_id__draft_time_series_sources_upload_post: {
             /** Sheet Name */
@@ -2113,8 +2414,129 @@ export interface components {
             /** Password */
             password: string;
         };
+        /** CaseBindingCommitRequest */
+        CaseBindingCommitRequest: {
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Expected Bindings Revision */
+            expected_bindings_revision: number;
+            /** Operations */
+            operations: (components["schemas"]["CaseBindingCreateRequest"] | components["schemas"]["CaseBindingReplaceRequest"] | components["schemas"]["CaseBindingRevalidateRequest"] | components["schemas"]["CaseBindingLifecycleRequest"])[];
+            /** Prevalidation Token */
+            prevalidation_token: string;
+        };
+        /** CaseBindingCreateRequest */
+        CaseBindingCreateRequest: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            action: "create";
+            /** Binding Role Key */
+            binding_role_key: string;
+            /** Catalog Association Id */
+            catalog_association_id?: number | null;
+            /** Client Operation Id */
+            client_operation_id: string;
+            /** Linkable Object Id */
+            linkable_object_id: number;
+            /** Reason Code */
+            reason_code: string;
+            /** Reason Text */
+            reason_text?: string | null;
+            revision: components["schemas"]["CaseBindingRevisionRequest"];
+            /** Signal Id */
+            signal_id: number;
+        };
+        /** CaseBindingLifecycleRequest */
+        CaseBindingLifecycleRequest: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            action: "remove" | "restore";
+            /** Binding Id */
+            binding_id: number;
+            /** Client Operation Id */
+            client_operation_id: string;
+            /** Expected Lifecycle Revision */
+            expected_lifecycle_revision: number;
+            /** Reason Code */
+            reason_code: string;
+            /** Reason Text */
+            reason_text: string;
+        };
+        /** CaseBindingPrevalidationRequest */
+        CaseBindingPrevalidationRequest: {
+            /** Expected Bindings Revision */
+            expected_bindings_revision: number;
+            /** Operations */
+            operations: (components["schemas"]["CaseBindingCreateRequest"] | components["schemas"]["CaseBindingReplaceRequest"] | components["schemas"]["CaseBindingRevalidateRequest"] | components["schemas"]["CaseBindingLifecycleRequest"])[];
+        };
+        /** CaseBindingReplaceRequest */
+        CaseBindingReplaceRequest: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            action: "replace";
+            /** Binding Id */
+            binding_id: number;
+            /** Binding Role Key */
+            binding_role_key: string;
+            /** Catalog Association Id */
+            catalog_association_id?: number | null;
+            /** Client Operation Id */
+            client_operation_id: string;
+            /** Expected Lifecycle Revision */
+            expected_lifecycle_revision: number;
+            /** Linkable Object Id */
+            linkable_object_id: number;
+            /** Reason Code */
+            reason_code: string;
+            /** Reason Text */
+            reason_text: string;
+            revision: components["schemas"]["CaseBindingRevisionRequest"];
+            /** Signal Id */
+            signal_id: number;
+        };
+        /** CaseBindingRevalidateRequest */
+        CaseBindingRevalidateRequest: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            action: "revalidate_current" | "revalidate_pinned";
+            /** Binding Id */
+            binding_id: number;
+            /** Client Operation Id */
+            client_operation_id: string;
+            /** Expected Lifecycle Revision */
+            expected_lifecycle_revision: number;
+            /** Reason Code */
+            reason_code: string;
+            /** Reason Text */
+            reason_text?: string | null;
+        };
+        /** CaseBindingRevisionRequest */
+        CaseBindingRevisionRequest: {
+            /** Content Hash */
+            content_hash: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "current" | "pinned";
+            /** Revision Id */
+            revision_id: number;
+        };
         /** CaseInputVariantRunRequest */
         CaseInputVariantRunRequest: {
+            /** Expected Bindings Revision */
+            expected_bindings_revision?: number | null;
             /** Range End */
             range_end: string;
             /** Range Start */
@@ -2667,6 +3089,184 @@ export interface components {
             next: string;
             /** Password */
             password: string;
+        };
+        /** ObjectSeriesArchiveRequest */
+        ObjectSeriesArchiveRequest: {
+            /** Reason Code */
+            reason_code: string;
+            /** Reason Text */
+            reason_text: string;
+        };
+        /** ObjectSeriesCreateRequest */
+        ObjectSeriesCreateRequest: {
+            /** Data Class Key */
+            data_class_key: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Display Name */
+            display_name: string;
+            /** Intended Binding Role Key */
+            intended_binding_role_key: string;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
+            /** Object Series Key */
+            object_series_key: string;
+            /** Semantic Type Key */
+            semantic_type_key: string;
+            source_expectation?: components["schemas"]["ObjectSeriesSourceExpectationRequest"] | null;
+            temporal_contract: components["schemas"]["ObjectSeriesTemporalContractRequest"];
+            /**
+             * Timezone
+             * @default UTC
+             */
+            timezone: string;
+            /** Unit Key */
+            unit_key: string;
+        };
+        /** ObjectSeriesExpectedBaseRequest */
+        ObjectSeriesExpectedBaseRequest: {
+            /** Content Hash */
+            content_hash: string;
+            /** Revision Id */
+            revision_id: number;
+        };
+        /** ObjectSeriesIngestionMappingRequest */
+        ObjectSeriesIngestionMappingRequest: {
+            /** Columns */
+            columns?: {
+                [key: string]: unknown;
+            } | null;
+            expected_base?: components["schemas"]["ObjectSeriesExpectedBaseRequest"] | null;
+            /** Mode */
+            mode?: ("replace_full" | "append_tail") | null;
+            revision_contract?: components["schemas"]["ObjectSeriesRevisionContractRequest"] | null;
+            /** Sheet Name */
+            sheet_name?: string | null;
+            /** Source */
+            source?: {
+                [key: string]: unknown;
+            } | null;
+            /** Value Keys */
+            value_keys?: {
+                [key: string]: string;
+            } | null;
+        };
+        /** ObjectSeriesIngestionSourceRequest */
+        ObjectSeriesIngestionSourceRequest: {
+            /**
+             * Display Name
+             * @default
+             */
+            display_name: string;
+            /**
+             * External Reference
+             * @default
+             */
+            external_reference: string;
+            /**
+             * Kind
+             * @default api
+             * @constant
+             */
+            kind: "api";
+        };
+        /** ObjectSeriesPatchRequest */
+        ObjectSeriesPatchRequest: {
+            /** Description */
+            description?: string | null;
+            /** Display Name */
+            display_name?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** ObjectSeriesPointRequest */
+        ObjectSeriesPointRequest: {
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /** Timestamp End */
+            timestamp_end?: string | null;
+            /** Timestamp Start */
+            timestamp_start: string;
+            /** Values */
+            values: {
+                [key: string]: unknown;
+            };
+        };
+        /** ObjectSeriesPointsIngestionRequest */
+        ObjectSeriesPointsIngestionRequest: {
+            expected_base?: components["schemas"]["ObjectSeriesExpectedBaseRequest"] | null;
+            /**
+             * Mode
+             * @default replace_full
+             * @enum {string}
+             */
+            mode: "replace_full" | "append_tail";
+            /** Points */
+            points: components["schemas"]["ObjectSeriesPointRequest"][];
+            revision_contract?: components["schemas"]["ObjectSeriesRevisionContractRequest"] | null;
+            source?: components["schemas"]["ObjectSeriesIngestionSourceRequest"] | null;
+        };
+        /** ObjectSeriesPublicationRequest */
+        ObjectSeriesPublicationRequest: {
+            /**
+             * Confirm
+             * @default false
+             */
+            confirm: boolean;
+            /** Reason Code */
+            reason_code: string;
+            /** Reason Text */
+            reason_text?: string | null;
+            /** Validation Token */
+            validation_token: string;
+        };
+        /** ObjectSeriesRevisionContractRequest */
+        ObjectSeriesRevisionContractRequest: {
+            /** Data Class Key */
+            data_class_key?: string | null;
+            /** Nominal Resolution Seconds */
+            nominal_resolution_seconds?: number | null;
+            /** Regularity */
+            regularity?: ("regular" | "irregular") | null;
+            /** Timezone */
+            timezone?: string | null;
+        };
+        /** ObjectSeriesSourceExpectationRequest */
+        ObjectSeriesSourceExpectationRequest: {
+            /**
+             * Display Name
+             * @default
+             */
+            display_name: string;
+            /**
+             * Kind
+             * @default api
+             * @enum {string}
+             */
+            kind: "api" | "csv" | "xlsx" | "manual";
+        };
+        /** ObjectSeriesTemporalContractRequest */
+        ObjectSeriesTemporalContractRequest: {
+            /** Nominal Resolution Seconds */
+            nominal_resolution_seconds?: number | null;
+            /**
+             * Regularity
+             * @enum {string}
+             */
+            regularity: "regular" | "irregular";
+            /**
+             * Timestamp Convention
+             * @default period_start
+             * @enum {string}
+             */
+            timestamp_convention: "period_start" | "period_end";
         };
         /** OperatorConsoleCreateRequest */
         OperatorConsoleCreateRequest: {
@@ -4575,6 +5175,516 @@ export interface operations {
             };
         };
     };
+    get_object_time_series_context_api_projects__project_id__linkable_objects__linkable_object_id__time_series_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+                linkable_object_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_object_specific_time_series_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                project_id: number;
+                linkable_object_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ObjectSeriesCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_object_specific_time_series_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                linkable_object_id: number;
+                signal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_object_specific_time_series_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string | null;
+            };
+            path: {
+                project_id: number;
+                linkable_object_id: number;
+                signal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ObjectSeriesPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_object_specific_time_series_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__archive_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string | null;
+            };
+            path: {
+                project_id: number;
+                linkable_object_id: number;
+                signal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ObjectSeriesArchiveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_object_series_preview_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                linkable_object_id: number;
+                signal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prepare_object_series_file_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions_files_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                project_id: number;
+                linkable_object_id: number;
+                signal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_prepare_object_series_file_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions_files_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prepare_object_series_points_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions_points_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                linkable_object_id: number;
+                signal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ObjectSeriesPointsIngestionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_object_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions__ingestion_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                linkable_object_id: number;
+                signal_id: number;
+                ingestion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_object_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions__ingestion_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                linkable_object_id: number;
+                signal_id: number;
+                ingestion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remap_object_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions__ingestion_id__mapping_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                linkable_object_id: number;
+                signal_id: number;
+                ingestion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ObjectSeriesIngestionMappingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_object_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions__ingestion_id__preview_get: {
+        parameters: {
+            query?: {
+                max_rows?: number | null;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+                linkable_object_id: number;
+                signal_id: number;
+                ingestion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_object_series_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions__ingestion_id__publications_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string | null;
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                project_id: number;
+                linkable_object_id: number;
+                signal_id: number;
+                ingestion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ObjectSeriesPublicationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_object_series_revisions_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revisions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+                linkable_object_id: number;
+                signal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_portal_configuration_api_projects__project_id__portal_configuration_get: {
         parameters: {
             query?: never;
@@ -5756,6 +6866,215 @@ export interface operations {
             header?: never;
             path: {
                 scenario_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    commit_case_time_series_bindings_api_scenarios__scenario_id__case_variants__variant_id__time_series_binding_batches_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "If-Match": string;
+                "Idempotency-Key": string;
+            };
+            path: {
+                scenario_id: number;
+                variant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CaseBindingCommitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Binding batch created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Confirmation or idempotency conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Prevalidation expired */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Observed precondition changed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Domain batch rejection */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Required commit guard missing */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    prevalidate_case_time_series_bindings_api_scenarios__scenario_id__case_variants__variant_id__time_series_binding_prevalidations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+                variant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CaseBindingPrevalidationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_case_time_series_bindings_api_scenarios__scenario_id__case_variants__variant_id__time_series_bindings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+                variant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_case_time_series_binding_api_scenarios__scenario_id__case_variants__variant_id__time_series_bindings__binding_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+                variant_id: number;
+                binding_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_case_time_series_binding_events_api_scenarios__scenario_id__case_variants__variant_id__time_series_bindings__binding_id__events_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                scenario_id: number;
+                variant_id: number;
+                binding_id: number;
             };
             cookie?: never;
         };
