@@ -2442,6 +2442,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/time-series/catalog/sets/{set_id}/scope-changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Change Global Time Series Set Scope */
+        post: operations["change_global_time_series_set_scope_api_time_series_catalog_sets__set_id__scope_changes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/time-series/catalog/sets/{set_id}/scope-prevalidations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prevalidate Global Time Series Set Scope */
+        post: operations["prevalidate_global_time_series_set_scope_api_time_series_catalog_sets__set_id__scope_prevalidations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/time-series/signal-catalog": {
         parameters: {
             query?: never;
@@ -3537,6 +3571,39 @@ export interface components {
         ScenarioVersionCreateRequest: {
             /** System Case Json */
             system_case_json: string;
+        };
+        /** ScopeChangeRequest */
+        ScopeChangeRequest: {
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Expected Scope Revision */
+            expected_scope_revision: number;
+            /** Observed Content Hash */
+            observed_content_hash: string;
+            /** Observed Revision Id */
+            observed_revision_id: number;
+            /** Prevalidation Token */
+            prevalidation_token: string;
+            /** Reason Code */
+            reason_code: string;
+            /** Reason Text */
+            reason_text: string;
+            /**
+             * Target Scope
+             * @enum {string}
+             */
+            target_scope: "project" | "global";
+        };
+        /** ScopePrevalidationRequest */
+        ScopePrevalidationRequest: {
+            /**
+             * Target Scope
+             * @enum {string}
+             */
+            target_scope: "project" | "global";
         };
         /**
          * SharedSeriesPointsIngestionRequest
@@ -9414,6 +9481,79 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    change_global_time_series_set_scope_api_time_series_catalog_sets__set_id__scope_changes_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string | null;
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                set_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScopeChangeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prevalidate_global_time_series_set_scope_api_time_series_catalog_sets__set_id__scope_prevalidations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                set_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScopePrevalidationRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

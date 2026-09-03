@@ -1,6 +1,6 @@
 # TS7-014: Promote And Demote A Set Scope Administratively
 
-Status: Todo
+Status: In Review
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter7/spec_ts7_catalogo_global_y_series_especificas.md` (5.1-5.4)
@@ -24,13 +24,13 @@ lands in the scope ledger with actor and reason.
 
 ## Acceptance criteria
 
-- [ ] Promotion changes the same row and preserves `owner_project_id`, revisions, associations and history (AC-SCO-01).
-- [ ] `analyst` receives `TS_SCOPE_ADMIN_REQUIRED` on promotion and on demotion (AC-SCO-02).
-- [ ] Demotion fails closed when consumers of other projects exist, with the impact enumerated (AC-SCO-03).
-- [ ] Repeating an already effective change returns `TS_SCOPE_ALREADY_EFFECTIVE` without writing (AC-SCO-04).
-- [ ] Prevalidation writes nothing and returns the same impact the confirmation will act on.
-- [ ] Every scope change records actor, reason, `request_id` and moment in the scope ledger.
-- [ ] A `project`-scoped source stays unusable from another project's object, before and after any failed promotion attempt.
+- [x] Promotion changes the same row and preserves `owner_project_id`, revisions, associations and history (AC-SCO-01).
+- [x] `analyst` receives `TS_SCOPE_ADMIN_REQUIRED` on promotion and on demotion (AC-SCO-02).
+- [x] Demotion fails closed when consumers of other projects exist, with the impact enumerated (AC-SCO-03).
+- [x] Repeating an already effective change returns `TS_SCOPE_ALREADY_EFFECTIVE` without writing (AC-SCO-04).
+- [x] Prevalidation writes nothing and returns the same impact the confirmation will act on.
+- [x] Every scope change records actor, reason, `request_id` and moment in the scope ledger.
+- [x] A `project`-scoped source stays unusable from another project's object, before and after any failed promotion attempt.
 
 ## Blocked by
 

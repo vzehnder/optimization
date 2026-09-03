@@ -122,6 +122,7 @@ from app.time_series_associations import (
     association_detail_etag,
     association_error_payload,
 )
+from app.time_series_scope import ScopeMutationError, scope_error_payload
 from app.time_series_bindings import (
     BindingMutationError,
     binding_detail_etag,
@@ -249,6 +250,22 @@ class CatalogAssociationPrevalidationRequest(BaseModel):
 class CatalogAssociationCommitRequest(CatalogAssociationPrevalidationRequest):
     prevalidation_token: str = Field(min_length=1)
     confirmed: bool = False
+
+
+class ScopePrevalidationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_scope: Literal["project", "global"]
+
+
+class ScopeChangeRequest(ScopePrevalidationRequest):
+    expected_scope_revision: int = Field(ge=0)
+    observed_revision_id: int = Field(gt=0)
+    observed_content_hash: str = Field(min_length=1)
+    prevalidation_token: str = Field(min_length=1)
+    confirmed: bool = False
+    reason_code: str = Field(min_length=1)
+    reason_text: str = Field(min_length=1)
 
 
 class CaseBindingRevisionRequest(BaseModel):
@@ -1004,14 +1021,20 @@ def create_app(
             "/api/time-series/catalog/association-prevalidations",
             "/api/time-series/catalog/association-batches",
         }
+        scope_contract = request.url.path.endswith("/scope-prevalidations") or (
+            request.url.path.endswith("/scope-changes")
+        )
         binding_contract = request.url.path.endswith(
             "/time-series-binding-prevalidations"
         ) or request.url.path.endswith("/time-series-binding-batches")
-        if not association_contract and not binding_contract:
+        if not association_contract and not binding_contract and not scope_contract:
             return await request_validation_exception_handler(request, error)
         location = list(error.errors()[0].get("loc", ()))
         missing_commit_precondition = (
-            request.url.path.endswith("-batches")
+            (
+                request.url.path.endswith("-batches")
+                or request.url.path.endswith("/scope-changes")
+            )
             and any(
                 str(part).lower()
                 in {"prevalidation_token", "if-match", "idempotency-key"}
@@ -1043,17 +1066,29 @@ def create_app(
             else:
                 field += ("." if field else "") + str(part)
         request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
-        error_type = BindingMutationError if binding_contract else AssociationMutationError
+        error_type = (
+            ScopeMutationError
+            if scope_contract
+            else BindingMutationError
+            if binding_contract
+            else AssociationMutationError
+        )
         refusal = error_type(
             "TS_PRECONDITION_REQUIRED"
             if missing_commit_precondition
-            else "TS_LINK_PAYLOAD_INVALID",
+            else (
+                "TS_SCOPE_INVALID_STATE"
+                if scope_contract
+                else "TS_LINK_PAYLOAD_INVALID"
+            ),
             field=field or "body",
             reason="request_validation",
         )
         return JSONResponse(
             (
-                binding_error_payload(refusal, request_id=request_id)
+                scope_error_payload(refusal, request_id=request_id)
+                if scope_contract
+                else binding_error_payload(refusal, request_id=request_id)
                 if binding_contract
                 else association_error_payload(refusal, request_id=request_id)
             ),
@@ -2360,6 +2395,112 @@ def create_app(
             status_code=(
                 200 if replayed or result.get("outcome") == "unchanged" else 201
             ),
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+    def scope_admin_refusal(request: Request) -> JSONResponse | None:
+        user = request.state.current_user or {}
+        if user.get("role") == "admin" or not auth_required:
+            return None
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        error = ScopeMutationError("TS_SCOPE_ADMIN_REQUIRED")
+        return JSONResponse(
+            scope_error_payload(error, request_id=request_id),
+            status_code=403,
+            media_type="application/problem+json",
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+    @app.post("/api/time-series/catalog/sets/{set_id}/scope-prevalidations")
+    async def prevalidate_global_time_series_set_scope(
+        set_id: int, payload: ScopePrevalidationRequest, request: Request
+    ):
+        refusal = scope_admin_refusal(request)
+        if refusal is not None:
+            return refusal
+        user = request.state.current_user or {}
+        actor_class = f"{user.get('role', 'admin')}:{user.get('id', 'auth-disabled')}"
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            result = analyst_store.prevalidate_time_series_set_scope_change(
+                set_id, target_scope=payload.target_scope, actor_class=actor_class
+            )
+        except KeyError:
+            return not_found_response()
+        result["request_id"] = request_id
+        return JSONResponse(
+            result,
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+    @app.post("/api/time-series/catalog/sets/{set_id}/scope-changes")
+    async def change_global_time_series_set_scope(
+        set_id: int,
+        payload: ScopeChangeRequest,
+        request: Request,
+        if_match: str | None = Header(default=None, alias="If-Match"),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ):
+        refusal = scope_admin_refusal(request)
+        if refusal is not None:
+            return refusal
+        user = request.state.current_user or {
+            "id": None,
+            "email": "internal_admin",
+            "role": "admin",
+        }
+        actor_class = f"{user.get('role', 'admin')}:{user.get('id', 'auth-disabled')}"
+        request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(8)}"
+        try:
+            token = payload.prevalidation_token.strip()
+            if_match = str(if_match or "").strip()
+            idempotency_key = str(idempotency_key or "").strip()
+            if not token or not if_match or not idempotency_key:
+                missing = (
+                    "prevalidation_token"
+                    if not token
+                    else "If-Match"
+                    if not if_match
+                    else "Idempotency-Key"
+                )
+                raise ScopeMutationError("TS_PRECONDITION_REQUIRED", field=missing)
+            result, replayed = analyst_store.commit_time_series_set_scope_change(
+                set_id,
+                target_scope=payload.target_scope,
+                expected_scope_revision=payload.expected_scope_revision,
+                observed_revision_id=payload.observed_revision_id,
+                observed_content_hash=payload.observed_content_hash,
+                actor_user=user,
+                actor_class=actor_class,
+                request_id=request_id,
+                prevalidation_token=token,
+                if_match=if_match,
+                idempotency_key=idempotency_key,
+                confirmed=payload.confirmed,
+                reason_code=payload.reason_code,
+                reason_text=payload.reason_text,
+            )
+        except KeyError:
+            return not_found_response()
+        except ScopeMutationError as error:
+            status_by_code = {
+                "TS_PRECONDITION_REQUIRED": 428,
+                "TS_SCOPE_PREVALIDATION_EXPIRED": 410,
+                "TS_SCOPE_PRECONDITION_CHANGED": 412,
+                "TS_SCOPE_CONFIRMATION_REQUIRED": 409,
+                "TS_SCOPE_ALREADY_EFFECTIVE": 409,
+                "TS_SCOPE_INVALID_STATE": 422,
+                "TS_IDEMPOTENCY_CONFLICT": 409,
+            }
+            return JSONResponse(
+                scope_error_payload(error, request_id=request_id),
+                status_code=status_by_code.get(error.code, 400),
+                media_type="application/problem+json",
+                headers={"Cache-Control": "private, no-store"},
+            )
+        return JSONResponse(
+            result,
+            status_code=200 if replayed else 201,
             headers={"Cache-Control": "private, no-store"},
         )
 

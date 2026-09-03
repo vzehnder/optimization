@@ -156,6 +156,13 @@ from app.time_series_associations import (
     normalize_association_request,
     verify_prevalidation_token,
 )
+from app.time_series_scope import (
+    ScopeMutationError,
+    issue_scope_prevalidation_token,
+    scope_commit_etag,
+    scope_request_hash,
+    verify_scope_prevalidation_token,
+)
 from app.time_series_bindings import (
     BindingMutationError,
     binding_commit_etag,
@@ -4238,6 +4245,457 @@ class AnalystStore:
                 "catalog_generation": generation,
             },
         }
+
+    # -- Administrative set scope changes (TS7-014) -----------------------
+
+    def _time_series_set_scope_impact(
+        self, set_id: int, *, target_scope: str
+    ) -> dict[str, Any]:
+        sets = self._canonical("time_series_sets")
+        revisions = self._canonical("time_series_set_revisions")
+        signals = self._canonical("time_series_signals")
+        associations = self.link_layer_table_names()[
+            "time_series_catalog_associations"
+        ]
+        bindings = self.link_layer_table_names()["case_time_series_bindings"]
+        linkables = self._linkable("linkable_objects")
+        row = self.connection.execute(
+            f"""
+            SELECT the_set.*, revision.content_hash AS revision_content_hash
+            FROM {sets} AS the_set
+            LEFT JOIN {revisions} AS revision
+              ON revision.id = the_set.current_revision_id
+            WHERE the_set.id = ?
+            """,
+            (int(set_id),),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"time-series set {set_id} not found")
+        item = dict(row)
+        owner_project_id = int(item["owner_project_id"])
+        association_rows = self.connection.execute(
+            f"""
+            SELECT association.id AS association_id, association.signal_id,
+                   association.linkable_object_id, linkable.project_id
+            FROM {associations} AS association
+            JOIN {signals} AS signal ON signal.id = association.signal_id
+            JOIN {linkables} AS linkable
+              ON linkable.id = association.linkable_object_id
+            WHERE signal.time_series_set_id = ? AND association.status = 'active'
+            ORDER BY association.id
+            """,
+            (int(set_id),),
+        ).fetchall()
+        binding_rows = self.connection.execute(
+            f"""
+            SELECT binding.id AS binding_id, binding.signal_id,
+                   binding.linkable_object_id, binding.case_input_variant_id,
+                   linkable.project_id
+            FROM {bindings} AS binding
+            JOIN {linkables} AS linkable
+              ON linkable.id = binding.linkable_object_id
+            WHERE binding.time_series_set_id = ? AND binding.status = 'active'
+            ORDER BY binding.id
+            """,
+            (int(set_id),),
+        ).fetchall()
+
+        def consumers(rows):
+            items = [
+                {
+                    key: int(value) if value is not None else None
+                    for key, value in dict(consumer).items()
+                }
+                for consumer in rows
+            ]
+            return {
+                "active_count": len(items),
+                "owner_project_count": sum(
+                    entry["project_id"] == owner_project_id for entry in items
+                ),
+                "other_project_count": sum(
+                    entry["project_id"] != owner_project_id for entry in items
+                ),
+                "items": items,
+            }
+
+        return {
+            "set": {
+                "id": int(item["id"]),
+                "series_kind": item["series_kind"],
+                "status": item["status"],
+                "owner_project_id": owner_project_id,
+                "visibility_scope": item["visibility_scope"],
+                "scope_revision": int(item["scope_revision"]),
+            },
+            "current_revision": (
+                {
+                    "id": int(item["current_revision_id"]),
+                    "content_hash": item["revision_content_hash"],
+                }
+                if item["current_revision_id"] is not None
+                else None
+            ),
+            "target_scope": target_scope,
+            "associations": consumers(association_rows),
+            "bindings": consumers(binding_rows),
+        }
+
+    def _time_series_set_scope_state_error(
+        self, set_id: int, impact: Mapping[str, Any]
+    ) -> dict[str, Any] | None:
+        the_set = impact["set"]
+        if the_set["series_kind"] != "catalog":
+            return {
+                "code": "TS_SCOPE_INVALID_STATE",
+                "context": {
+                    "reason": "object_specific",
+                    "series_kind": the_set["series_kind"],
+                },
+            }
+        current_revision = impact["current_revision"]
+        if the_set["status"] != "validated" or current_revision is None:
+            return {
+                "code": "TS_SCOPE_INVALID_STATE",
+                "context": {
+                    "reason": "set_not_active_with_sealed_revision",
+                    "set_status": the_set["status"],
+                },
+            }
+        revisions = self._canonical("time_series_set_revisions")
+        revision_state = self.connection.execute(
+            f"SELECT state FROM {revisions} WHERE id = ?",
+            (current_revision["id"],),
+        ).fetchone()
+        building_count = int(
+            self.connection.execute(
+                f"""
+                SELECT COUNT(*) AS total FROM {revisions}
+                WHERE time_series_set_id = ? AND state = 'building'
+                """,
+                (int(set_id),),
+            ).fetchone()["total"]
+        )
+        if revision_state is None or revision_state["state"] != "sealed" or building_count:
+            return {
+                "code": "TS_SCOPE_INVALID_STATE",
+                "context": {
+                    "reason": "set_not_active_with_sealed_revision",
+                    "revision_state": (
+                        None if revision_state is None else revision_state["state"]
+                    ),
+                    "building_revision_count": building_count,
+                },
+            }
+        signals = self._canonical("time_series_signals")
+        inactive_signal_count = int(
+            self.connection.execute(
+                f"""
+                SELECT COUNT(*) AS total FROM {signals}
+                WHERE time_series_set_id = ? AND status != 'active'
+                """,
+                (int(set_id),),
+            ).fetchone()["total"]
+        )
+        if inactive_signal_count:
+            return {
+                "code": "TS_SCOPE_INVALID_STATE",
+                "context": {
+                    "reason": "inactive_signal",
+                    "inactive_signal_count": inactive_signal_count,
+                },
+            }
+        revision_signals = self._canonical("time_series_revision_signals")
+        inactive_classification_count = int(
+            self.connection.execute(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM {revision_signals} AS revision_signal
+                JOIN time_series_semantic_types AS semantic_type
+                  ON semantic_type.id = revision_signal.semantic_type_id
+                JOIN measurement_units AS unit
+                  ON unit.id = revision_signal.unit_id
+                JOIN time_series_data_classes AS data_class
+                  ON data_class.id = revision_signal.data_class_id
+                WHERE revision_signal.set_revision_id = ?
+                  AND (semantic_type.status != 'active'
+                       OR unit.status != 'active'
+                       OR data_class.status != 'active')
+                """,
+                (current_revision["id"],),
+            ).fetchone()["total"]
+        )
+        if inactive_classification_count:
+            return {
+                "code": "TS_SCOPE_INVALID_STATE",
+                "context": {
+                    "reason": "inactive_classification",
+                    "inactive_classification_count": inactive_classification_count,
+                },
+            }
+        return None
+
+    def prevalidate_time_series_set_scope_change(
+        self, set_id: int, *, target_scope: str, actor_class: str
+    ) -> dict[str, Any]:
+        normalized = {"target_scope": str(target_scope)}
+        impact = self._time_series_set_scope_impact(
+            int(set_id), target_scope=normalized["target_scope"]
+        )
+        state_error = self._time_series_set_scope_state_error(int(set_id), impact)
+        request_hash = scope_request_hash(normalized)
+        commit_etag = scope_commit_etag(
+            {"impact": impact, "state_error": state_error},
+            actor_class=actor_class,
+        )
+        token, expires_at = issue_scope_prevalidation_token(
+            request_hash=request_hash,
+            commit_etag=commit_etag,
+            actor_class=actor_class,
+            secret=self._catalog_cursor_secret,
+        )
+        cross_project_consumers = (
+            impact["associations"]["other_project_count"]
+            + impact["bindings"]["other_project_count"]
+        )
+        state_errors: list[dict[str, Any]] = [] if state_error is None else [state_error]
+        if not state_errors and (
+            impact["set"]["visibility_scope"] == normalized["target_scope"]
+        ):
+            state_errors.append(
+                {
+                    "code": "TS_SCOPE_ALREADY_EFFECTIVE",
+                    "context": {"target_scope": normalized["target_scope"]},
+                }
+            )
+        elif (
+            not state_errors
+            and normalized["target_scope"] == "project"
+            and cross_project_consumers > 0
+        ):
+            state_errors.append(
+                {
+                    "code": "TS_SCOPE_INVALID_STATE",
+                    "context": {
+                        "reason": "other_project_consumers",
+                        "other_project_consumer_count": cross_project_consumers,
+                    },
+                }
+            )
+        can_commit = not state_errors
+        return {
+            "normalized_request": normalized,
+            "request_hash": request_hash,
+            "impact": impact,
+            "can_commit": can_commit,
+            "requires_confirmation": (
+                impact["set"]["series_kind"] == "catalog"
+                and impact["set"]["visibility_scope"] != normalized["target_scope"]
+            ),
+            "errors": state_errors,
+            "expires_at": expires_at,
+            "prevalidation_token": token,
+            "commit_etag": commit_etag,
+        }
+
+    def commit_time_series_set_scope_change(
+        self,
+        set_id: int,
+        *,
+        target_scope: str,
+        expected_scope_revision: int,
+        observed_revision_id: int,
+        observed_content_hash: str,
+        actor_user: Mapping[str, Any],
+        actor_class: str,
+        request_id: str,
+        prevalidation_token: str,
+        if_match: str,
+        idempotency_key: str,
+        confirmed: bool,
+        reason_code: str,
+        reason_text: str,
+    ) -> tuple[dict[str, Any], bool]:
+        normalized = {"target_scope": str(target_scope)}
+        normalized_reason_code = str(reason_code or "").strip()
+        normalized_reason_text = str(reason_text or "").strip()
+        if not normalized_reason_code or not normalized_reason_text:
+            raise ScopeMutationError(
+                "TS_SCOPE_INVALID_STATE",
+                field=("reason_code" if not normalized_reason_code else "reason_text"),
+                reason="reason_required",
+            )
+        request_hash = scope_request_hash(normalized)
+        verify_scope_prevalidation_token(
+            prevalidation_token,
+            request_hash=request_hash,
+            commit_etag=if_match,
+            actor_class=actor_class,
+            secret=self._catalog_cursor_secret,
+            check_expiry=False,
+        )
+        claim_hash = scope_request_hash(
+            {
+                **normalized,
+                "expected_scope_revision": int(expected_scope_revision),
+                "observed_revision_id": int(observed_revision_id),
+                "observed_content_hash": str(observed_content_hash),
+                "confirmed": bool(confirmed),
+                "reason_code": normalized_reason_code,
+                "reason_text": normalized_reason_text,
+            }
+        )
+        try:
+            with self._lock:
+                with self._database_transaction():
+                    claim = self._claim_idempotency(
+                        actor_id=actor_class,
+                        operation_kind="scope_change",
+                        scope_key=f"set:{int(set_id)}",
+                        idempotency_key=idempotency_key,
+                        request_hash=claim_hash,
+                    )
+                    if claim["state"] == "completed":
+                        return claim["response"], True
+                    verify_scope_prevalidation_token(
+                        prevalidation_token,
+                        request_hash=request_hash,
+                        commit_etag=if_match,
+                        actor_class=actor_class,
+                        secret=self._catalog_cursor_secret,
+                    )
+                    locked = self._lock_canonical_set(int(set_id))
+                    if locked is None:
+                        raise KeyError(f"time-series set {set_id} not found")
+                    impact = self._time_series_set_scope_impact(
+                        int(set_id), target_scope=target_scope
+                    )
+                    current_set = impact["set"]
+                    state_error = self._time_series_set_scope_state_error(
+                        int(set_id), impact
+                    )
+                    if current_set["visibility_scope"] == target_scope:
+                        raise ScopeMutationError(
+                            "TS_SCOPE_ALREADY_EFFECTIVE", target_scope=target_scope
+                        )
+                    actual_etag = scope_commit_etag(
+                        {"impact": impact, "state_error": state_error},
+                        actor_class=actor_class,
+                    )
+                    if actual_etag != if_match:
+                        raise ScopeMutationError(
+                            "TS_SCOPE_PRECONDITION_CHANGED",
+                            expected_etag=if_match,
+                            actual_etag=actual_etag,
+                            impact=impact,
+                        )
+                    if state_error is not None:
+                        raise ScopeMutationError(
+                            "TS_SCOPE_INVALID_STATE",
+                            **state_error["context"],
+                            impact=impact,
+                        )
+                    current_revision = impact["current_revision"]
+                    if (
+                        int(current_set["scope_revision"])
+                        != int(expected_scope_revision)
+                        or current_revision is None
+                        or int(current_revision["id"]) != int(observed_revision_id)
+                        or current_revision["content_hash"] != observed_content_hash
+                    ):
+                        raise ScopeMutationError(
+                            "TS_SCOPE_PRECONDITION_CHANGED", impact=impact
+                        )
+                    cross_project_consumers = (
+                        impact["associations"]["other_project_count"]
+                        + impact["bindings"]["other_project_count"]
+                    )
+                    if target_scope == "project" and cross_project_consumers > 0:
+                        raise ScopeMutationError(
+                            "TS_SCOPE_INVALID_STATE",
+                            reason="other_project_consumers",
+                            impact=impact,
+                        )
+                    if not confirmed:
+                        raise ScopeMutationError("TS_SCOPE_CONFIRMATION_REQUIRED")
+                    occurred_at = utc_now_iso()
+                    next_scope_revision = int(current_set["scope_revision"]) + 1
+                    sets = self._canonical("time_series_sets")
+                    self.connection.execute(
+                        f"""
+                        UPDATE {sets}
+                        SET visibility_scope = ?, scope_revision = ?,
+                            updated_at = ?, updated_by = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            target_scope,
+                            next_scope_revision,
+                            occurred_at,
+                            actor_user["email"],
+                            int(set_id),
+                        ),
+                    )
+                    self._project_catalog_entries(set_id=int(set_id), now=occurred_at)
+                    catalog_generation = self._raise_catalog_generation(now=occurred_at)
+                    event_type = (
+                        "promoted_global"
+                        if target_scope == "global"
+                        else "demoted_project"
+                    )
+                    events = self.link_layer_table_names()["time_series_scope_events"]
+                    event_id = self._insert_canonical_row(
+                        f"""
+                        INSERT INTO {events} (
+                            time_series_set_id, event_type, from_scope, to_scope,
+                            scope_revision, owner_project_id,
+                            observed_set_revision_id, observed_content_hash,
+                            actor_user_id, actor_identity_snapshot,
+                            actor_role_snapshot, reason_code, reason_text,
+                            impact_json, request_id, idempotency_key, occurred_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            int(set_id),
+                            event_type,
+                            current_set["visibility_scope"],
+                            target_scope,
+                            next_scope_revision,
+                            current_set["owner_project_id"],
+                            current_revision["id"],
+                            current_revision["content_hash"],
+                            int(actor_user["id"]),
+                            actor_user["email"],
+                            actor_user["role"],
+                            normalized_reason_code,
+                            normalized_reason_text,
+                            json.dumps(impact, sort_keys=True),
+                            request_id,
+                            idempotency_key,
+                            occurred_at,
+                        ),
+                    )
+                    response = {
+                        "outcome": event_type,
+                        "set_id": int(set_id),
+                        "from_scope": current_set["visibility_scope"],
+                        "to_scope": target_scope,
+                        "scope_revision": next_scope_revision,
+                        "scope_event_id": event_id,
+                        "impact": impact,
+                        "catalog_generation": catalog_generation,
+                        "request_id": request_id,
+                    }
+                    self._complete_idempotency(
+                        claim_id=claim["id"], response=response, http_status=201
+                    )
+                    return response, False
+        except CanonicalRevisionError as error:
+            if error.code in {"TS_IDEMPOTENCY_KEY_CONFLICT", "TS_IDEMPOTENCY_IN_FLIGHT"}:
+                raise ScopeMutationError(
+                    "TS_IDEMPOTENCY_CONFLICT", reason=error.code
+                ) from error
+            raise
 
     # -- Atomic catalog associations (TS7-007) ----------------------------
 
