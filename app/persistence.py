@@ -12,6 +12,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from collections import defaultdict
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -170,6 +171,30 @@ from app.time_series_bindings import (
     issue_binding_prevalidation_token,
     normalize_binding_request,
     verify_binding_prevalidation_token,
+)
+from app.time_series_migration import (
+    C0_COPY_FILENAME,
+    C0_COPY_VERSION,
+    C0_INVENTORY_TABLES,
+    C0_MANIFEST_VERSION,
+    C0_RESTORE_NOT_PROVEN,
+    C0_RESTORE_TABLES,
+    C0_STOPPED,
+    MAPPING_CONFLICT,
+    MIGRATION_CONTROL_VERSION,
+    RECOVERY_POINT_REQUIRED,
+    MigrationControlError,
+    MigrationPhaseStopped,
+    canonical_digest,
+    manifest_signature_matches,
+    migration_actor,
+    migration_control_schema_statements,
+    migration_control_table_names,
+    restored_value,
+    rows_digest,
+    sign_manifest,
+    structural_finding,
+    transport_value,
 )
 from app.time_series_links import (
     link_history_guard_script,
@@ -353,6 +378,14 @@ class AnalystStore:
         # cursor is refused as a mismatch rather than silently trusted.
         self._catalog_cursor_secret = (
             os.environ.get("TS_CATALOG_CURSOR_SECRET", "").encode("utf-8")
+            or secrets.token_bytes(32)
+        )
+        # A C0 manifest is signed so a later phase can prove which deployment
+        # produced the recovery point it reconciles against. Set the secret to
+        # keep a manifest verifiable across restarts and workers; otherwise the
+        # signature is only checkable inside the process that took it.
+        self._migration_manifest_secret = (
+            os.environ.get("TS_MIGRATION_MANIFEST_SECRET", "").encode("utf-8")
             or secrets.token_bytes(32)
         )
         self.database_backend, self.database_path, self.connection = connect_database(self.database_url)
@@ -1416,6 +1449,7 @@ class AnalystStore:
         self._ensure_link_layer()
         self._ensure_catalog_projection()
         self._ensure_object_series_tables()
+        self._ensure_migration_control_surface()
         self._ensure_external_user_role_constraint()
         self._ensure_column(
             "project_client_access", "portal_view", "INTEGER NOT NULL DEFAULT 1"
@@ -1766,6 +1800,13 @@ class AnalystStore:
             "BIGINT" if self.database_backend == "postgresql" else "INTEGER",
         )
 
+    def _ensure_migration_control_surface(self) -> None:
+        # Chapter 10.3. Additive on both engines and independent of ``ts_next``:
+        # C0 inventories the legacy source, so its control rows must survive a
+        # rollback that abandons the expansion.
+        for statement in migration_control_schema_statements(self.database_backend):
+            self.connection.execute(statement)
+
     def _ensure_canonical_space_column(
         self, table: str, column: str, definition: str
     ) -> None:
@@ -1861,6 +1902,884 @@ class AnalystStore:
         """Physical name of every TS7-004 table on the configured engine."""
 
         return link_layer_table_names(self.database_backend)
+
+    def migration_control_table_names(self) -> dict[str, str]:
+        """Physical name of every TS7-015 control table on this engine."""
+
+        return migration_control_table_names(self.database_backend)
+
+    # -- C0 inventory, manifest and recovery point (TS7-015) ----------------
+    #
+    # C0 is the recovery point every later phase is measured against. It reads
+    # the legacy source only: it never writes into it, never touches ``ts_next``
+    # and produces a signed manifest plus a copy whose restore is proven by
+    # recomputing the same inventory over the restored rows.
+
+    def _migration(self, logical: str) -> str:
+        return migration_control_table_names(self.database_backend)[logical]
+
+    def _insert_migration_row(self, sql: str, parameters: tuple) -> int:
+        # The control tables are unqualified on both engines but unknown to the
+        # PostgreSQL compatibility layer's id table, so the writer spells the
+        # returning clause out instead of relying on ``lastrowid``.
+        row = self.connection.execute(
+            f"{sql.rstrip().rstrip(';')} RETURNING id", parameters
+        ).fetchone()
+        return int(row["id"])
+
+    def _c0_table_inventory(self, table: str) -> dict[str, Any]:
+        rows = [
+            dict(row)
+            for row in self.connection.execute(
+                f"SELECT * FROM {table} ORDER BY id"
+            ).fetchall()
+        ]
+        return {
+            "row_count": len(rows),
+            "maximum_primary_key": max((int(row["id"]) for row in rows), default=0),
+            "content_hash": rows_digest(rows),
+        }
+
+    def _c0_inventory(self) -> dict[str, Any]:
+        return {
+            table: self._c0_table_inventory(table) for table in C0_INVENTORY_TABLES
+        }
+
+    def _c0_duplicate_findings(self) -> list[dict[str, Any]]:
+        findings = [
+            structural_finding(
+                "duplicate_series_key",
+                kind="duplicates",
+                row_count=int(row["row_count"]),
+                evidence={
+                    "table": "time_series_signals",
+                    "time_series_set_id": int(row["time_series_set_id"]),
+                    "series_key": str(row["signal_key"]),
+                    "signal_ids": [
+                        int(value) for value in str(row["signal_ids"]).split(",")
+                    ],
+                },
+                finding_key=(
+                    f"duplicate_series_key:set={int(row['time_series_set_id'])}"
+                    f":series_key={row['signal_key']}"
+                ),
+            )
+            for row in self.connection.execute(
+                """
+                SELECT time_series_set_id,
+                       signal_key,
+                       COUNT(*) AS row_count,
+                       GROUP_CONCAT(CAST(id AS TEXT), ',') AS signal_ids
+                FROM time_series_signals
+                GROUP BY time_series_set_id, signal_key
+                HAVING COUNT(*) > 1
+                ORDER BY time_series_set_id, signal_key
+                """
+                if self.database_backend != "postgresql"
+                else """
+                SELECT time_series_set_id,
+                       signal_key,
+                       COUNT(*) AS row_count,
+                       STRING_AGG(CAST(id AS TEXT), ',' ORDER BY id) AS signal_ids
+                FROM time_series_signals
+                GROUP BY time_series_set_id, signal_key
+                HAVING COUNT(*) > 1
+                ORDER BY time_series_set_id, signal_key
+                """
+            ).fetchall()
+        ]
+        # ``entity_id`` is nullable and NULL never equals NULL in a unique key,
+        # so the legacy constraint lets the same binding target land twice.
+        findings.extend(
+            structural_finding(
+                "duplicate_binding_target",
+                kind="duplicates",
+                row_count=int(row["row_count"]),
+                evidence={
+                    "table": "case_time_series_bindings",
+                    "case_input_variant_id": int(row["case_input_variant_id"]),
+                    "signal_key": str(row["signal_key"]),
+                    "entity_type": row["entity_type"],
+                    "entity_id": row["entity_id"],
+                },
+                finding_key=(
+                    "duplicate_binding_target"
+                    f":variant={int(row['case_input_variant_id'])}"
+                    f":signal_key={row['signal_key']}"
+                    f":entity={row['entity_type'] or ''}/{row['entity_id'] or ''}"
+                ),
+            )
+            for row in self.connection.execute(
+                """
+                SELECT case_input_variant_id,
+                       signal_key,
+                       entity_type,
+                       entity_id,
+                       COUNT(*) AS row_count
+                FROM case_time_series_bindings
+                GROUP BY case_input_variant_id, signal_key,
+                         COALESCE(entity_type, ''), COALESCE(entity_id, ''),
+                         entity_type, entity_id
+                HAVING COUNT(*) > 1
+                ORDER BY case_input_variant_id, signal_key
+                """
+            ).fetchall()
+        )
+        return findings
+
+    def _c0_broken_reference_findings(self) -> list[dict[str, Any]]:
+        findings: list[dict[str, Any]] = []
+        # A binding names its series by text. Chapter 10.7 requires
+        # ``signal_key + time_series_set_id`` to resolve exactly one identity;
+        # zero is a break C0 can prove without the object register.
+        for row in self.connection.execute(
+            """
+            SELECT binding.id AS binding_id,
+                   binding.signal_key AS signal_key,
+                   binding.time_series_set_id AS time_series_set_id
+            FROM case_time_series_bindings AS binding
+            WHERE NOT EXISTS (
+                SELECT 1 FROM time_series_signals AS signal
+                WHERE signal.time_series_set_id = binding.time_series_set_id
+                  AND signal.signal_key = binding.signal_key
+            )
+            ORDER BY binding.id
+            """
+        ).fetchall():
+            findings.append(
+                structural_finding(
+                    "binding_signal_unresolved",
+                    kind="broken_references",
+                    row_count=1,
+                    evidence={
+                        "table": "case_time_series_bindings",
+                        "binding_id": int(row["binding_id"]),
+                        "signal_key": str(row["signal_key"]),
+                        "time_series_set_id": int(row["time_series_set_id"]),
+                    },
+                    finding_key=f"binding_signal_unresolved:binding={int(row['binding_id'])}",
+                )
+            )
+        for row in self.connection.execute(
+            """
+            SELECT binding.id AS binding_id,
+                   scenario.project_id AS variant_project_id,
+                   sets.project_id AS set_project_id
+            FROM case_time_series_bindings AS binding
+            JOIN case_input_variants AS variant
+              ON variant.id = binding.case_input_variant_id
+            JOIN optimization_cases AS optimization_case
+              ON optimization_case.id = variant.case_id
+            JOIN scenarios AS scenario
+              ON scenario.id = optimization_case.scenario_id
+            JOIN time_series_sets AS sets
+              ON sets.id = binding.time_series_set_id
+            WHERE scenario.project_id <> sets.project_id
+            ORDER BY binding.id
+            """
+        ).fetchall():
+            findings.append(
+                structural_finding(
+                    "binding_project_mismatch",
+                    kind="broken_references",
+                    row_count=1,
+                    evidence={
+                        "table": "case_time_series_bindings",
+                        "binding_id": int(row["binding_id"]),
+                        "variant_project_id": int(row["variant_project_id"]),
+                        "set_project_id": int(row["set_project_id"]),
+                    },
+                    finding_key=f"binding_project_mismatch:binding={int(row['binding_id'])}",
+                )
+            )
+        for row in self.connection.execute(
+            """
+            SELECT value.time_series_set_id AS time_series_set_id,
+                   COUNT(*) AS row_count
+            FROM time_series_values AS value
+            JOIN time_series_signals AS signal
+              ON signal.id = value.time_series_signal_id
+            JOIN time_series_periods AS period
+              ON period.id = value.time_series_period_id
+            WHERE signal.time_series_set_id <> value.time_series_set_id
+               OR period.time_series_set_id <> value.time_series_set_id
+            GROUP BY value.time_series_set_id
+            ORDER BY value.time_series_set_id
+            """
+        ).fetchall():
+            findings.append(
+                structural_finding(
+                    "value_set_mismatch",
+                    kind="broken_references",
+                    row_count=int(row["row_count"]),
+                    evidence={
+                        "table": "time_series_values",
+                        "time_series_set_id": int(row["time_series_set_id"]),
+                    },
+                    finding_key=f"value_set_mismatch:set={int(row['time_series_set_id'])}",
+                )
+            )
+        for row in self.connection.execute(
+            """
+            SELECT revision.id AS revision_id,
+                   revision.time_series_set_id AS time_series_set_id,
+                   revision.superseded_revision_number AS superseded_revision_number
+            FROM time_series_set_revisions AS revision
+            WHERE revision.superseded_revision_number IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM time_series_set_revisions AS previous
+                WHERE previous.time_series_set_id = revision.time_series_set_id
+                  AND previous.revision_number = revision.superseded_revision_number
+              )
+            ORDER BY revision.id
+            """
+        ).fetchall():
+            findings.append(
+                structural_finding(
+                    "revision_chain_broken",
+                    kind="broken_references",
+                    row_count=1,
+                    evidence={
+                        "table": "time_series_set_revisions",
+                        "revision_id": int(row["revision_id"]),
+                        "time_series_set_id": int(row["time_series_set_id"]),
+                        "superseded_revision_number": int(
+                            row["superseded_revision_number"]
+                        ),
+                    },
+                    finding_key=f"revision_chain_broken:revision={int(row['revision_id'])}",
+                )
+            )
+        return findings
+
+    def _c0_structural_differences(
+        self, explanations: Mapping[str, str] | None
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        given = {str(key): str(value) for key, value in (explanations or {}).items()}
+        findings = self._c0_broken_reference_findings() + self._c0_duplicate_findings()
+        for finding in findings:
+            explanation = given.get(finding["finding_key"], "").strip()
+            finding["explained"] = bool(explanation)
+            finding["explanation"] = explanation
+        by_kind = {"broken_references": [], "duplicates": []}
+        for finding in findings:
+            by_kind[finding["kind"]].append(finding)
+        document = {
+            "broken_references": sorted(
+                by_kind["broken_references"], key=lambda entry: entry["finding_key"]
+            ),
+            "duplicates": sorted(
+                by_kind["duplicates"], key=lambda entry: entry["finding_key"]
+            ),
+            "difference_count": len(findings),
+            # Only explanations that answered a real finding travel in the
+            # manifest; an explanation for a difference that is not there would
+            # make two identical sources produce two manifests.
+            "explained": {
+                finding["finding_key"]: finding["explanation"]
+                for finding in sorted(findings, key=lambda entry: entry["finding_key"])
+                if finding["explained"]
+            },
+        }
+        return document, findings
+
+    def _c0_executable_variants(self, findings) -> dict[str, Any]:
+        """Which variants a canonical run could reproduce, and their fingerprint.
+
+        A variant is executable when it carries at least one binding and no
+        structural finding touches any of them: chapter 10.7 forbids falling
+        back to the legacy reader for a binding the migration cannot resolve, so
+        a variant with one broken binding is not executable at all. The
+        fingerprint covers the content each binding would feed the optimizer,
+        which is what C5 compares to prove materialization parity.
+        """
+
+        blocked_by_binding: dict[int, list[str]] = defaultdict(list)
+        for finding in findings:
+            binding_id = finding["evidence"].get("binding_id")
+            if binding_id is not None:
+                blocked_by_binding[int(binding_id)].append(finding["finding_key"])
+
+        bindings_by_variant: dict[int, list[dict[str, Any]]] = defaultdict(list)
+        for row in self.connection.execute(
+            """
+            SELECT binding.id AS binding_id,
+                   binding.case_input_variant_id AS case_input_variant_id,
+                   binding.signal_key AS signal_key,
+                   binding.entity_type AS entity_type,
+                   binding.entity_id AS entity_id,
+                   binding.time_series_set_id AS time_series_set_id,
+                   binding.required AS required,
+                   sets.content_hash AS content_hash
+            FROM case_time_series_bindings AS binding
+            LEFT JOIN time_series_sets AS sets
+              ON sets.id = binding.time_series_set_id
+            ORDER BY binding.case_input_variant_id, binding.signal_key, binding.id
+            """
+        ).fetchall():
+            bindings_by_variant[int(row["case_input_variant_id"])].append(dict(row))
+
+        variants = []
+        for row in self.connection.execute(
+            """
+            SELECT variant.id AS case_input_variant_id,
+                   variant.variant_key AS variant_key,
+                   variant.case_id AS case_id,
+                   scenario.project_id AS project_id
+            FROM case_input_variants AS variant
+            JOIN optimization_cases AS optimization_case
+              ON optimization_case.id = variant.case_id
+            JOIN scenarios AS scenario
+              ON scenario.id = optimization_case.scenario_id
+            ORDER BY variant.id
+            """
+        ).fetchall():
+            variant_id = int(row["case_input_variant_id"])
+            bindings = bindings_by_variant.get(variant_id, [])
+            blocked: list[str] = []
+            if not bindings:
+                blocked.append("no_bindings")
+            for binding in bindings:
+                blocked.extend(blocked_by_binding.get(int(binding["binding_id"]), []))
+                if not str(binding["content_hash"] or "").strip():
+                    blocked.append(
+                        f"binding_content_missing:binding={int(binding['binding_id'])}"
+                    )
+            projection = {
+                "case_input_variant_id": variant_id,
+                "variant_key": str(row["variant_key"]),
+                "case_id": int(row["case_id"]),
+                "project_id": int(row["project_id"]),
+                "binding_count": len(bindings),
+                "executable": not blocked,
+                "blocked_by": sorted(set(blocked)),
+                "fingerprint": canonical_digest(
+                    [
+                        {
+                            "signal_key": str(binding["signal_key"]),
+                            "entity_type": binding["entity_type"],
+                            "entity_id": binding["entity_id"],
+                            "time_series_set_id": int(binding["time_series_set_id"]),
+                            "content_hash": str(binding["content_hash"] or ""),
+                            "required": int(binding["required"]),
+                        }
+                        for binding in bindings
+                    ]
+                ),
+            }
+            variants.append(projection)
+
+        executable = [variant for variant in variants if variant["executable"]]
+        return {
+            "count": len(executable),
+            "fingerprint": canonical_digest(
+                [
+                    {
+                        "case_input_variant_id": variant["case_input_variant_id"],
+                        "fingerprint": variant["fingerprint"],
+                    }
+                    for variant in executable
+                ]
+            ),
+            "variants": variants,
+        }
+
+    def _record_migration_anomalies(
+        self, *, migration_run_id: int, phase: str, findings, now: str
+    ) -> None:
+        actor = migration_actor(migration_run_id)
+        for finding in findings:
+            self.connection.execute(
+                f"""
+                INSERT INTO {self._migration('time_series_migration_anomalies')} (
+                    migration_run_id, phase, code, severity, finding_key,
+                    evidence_json, resolution, resolution_note, resolved_at,
+                    resolved_by, created_at, actor
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    migration_run_id,
+                    phase,
+                    finding["code"],
+                    finding["severity"],
+                    finding["finding_key"],
+                    json.dumps(finding["evidence"], sort_keys=True),
+                    "explained" if finding["explained"] else "open",
+                    finding["explanation"],
+                    now if finding["explained"] else None,
+                    actor if finding["explained"] else None,
+                    now,
+                    actor,
+                ),
+            )
+
+    def record_migration_mapping(
+        self,
+        *,
+        migration_run_id: int,
+        source_kind: str,
+        source_table: str,
+        source_id: str,
+        target_kind: str,
+        target_id: str,
+        source_hash: str = "",
+    ) -> dict[str, Any]:
+        """Record one legacy-to-canonical correspondence, idempotently.
+
+        The unique key is ``source_kind + source_table + source_id +
+        target_kind`` (chapter 10.3). Repeating the same correspondence
+        converges; a different target or a different observed source hash is a
+        conflict a human resolves, never a second row.
+        """
+
+        with self._lock:
+            table = self._migration("time_series_migration_mappings")
+            key = (
+                str(source_kind),
+                str(source_table),
+                str(source_id),
+                str(target_kind),
+            )
+            existing = self.connection.execute(
+                f"""
+                SELECT * FROM {table}
+                WHERE source_kind = ? AND source_table = ?
+                  AND source_id = ? AND target_kind = ?
+                """,
+                key,
+            ).fetchone()
+            if existing is not None:
+                if str(existing["target_id"]) != str(target_id):
+                    raise MigrationControlError(
+                        MAPPING_CONFLICT,
+                        reason="target_changed",
+                        source_kind=key[0],
+                        source_table=key[1],
+                        source_id=key[2],
+                        target_kind=key[3],
+                        existing_target_id=str(existing["target_id"]),
+                        incoming_target_id=str(target_id),
+                    )
+                if str(existing["source_hash"]) != str(source_hash):
+                    raise MigrationControlError(
+                        MAPPING_CONFLICT,
+                        reason="source_hash_changed",
+                        source_kind=key[0],
+                        source_table=key[1],
+                        source_id=key[2],
+                        target_kind=key[3],
+                        existing_target_id=str(existing["target_id"]),
+                        incoming_target_id=str(target_id),
+                        existing_source_hash=str(existing["source_hash"]),
+                        incoming_source_hash=str(source_hash),
+                    )
+                return {
+                    "status": "unchanged",
+                    "migration_mapping_id": int(existing["id"]),
+                }
+            mapping_id = self._insert_migration_row(
+                f"""
+                INSERT INTO {table} (
+                    migration_run_id, source_kind, source_table, source_id,
+                    target_kind, target_id, source_hash, created_at, actor
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(migration_run_id),
+                    *key,
+                    str(target_id),
+                    str(source_hash),
+                    utc_now_iso(),
+                    migration_actor(migration_run_id),
+                ),
+            )
+            self.connection.commit()
+            return {"status": "created", "migration_mapping_id": mapping_id}
+
+    def enqueue_legacy_dirty_root(
+        self, *, migration_run_id: int, root_kind: str, root_id: str
+    ) -> dict[str, Any]:
+        """Append one root touched after the watermark (chapter 10.3).
+
+        The queue is monotone, not a set: a root dirtied again after a drain
+        takes a new sequence number, because the backfill has to revisit it.
+        """
+
+        with self._lock:
+            table = self._migration("time_series_legacy_dirty_roots")
+            now = utc_now_iso()
+            actor = migration_actor(migration_run_id)
+            next_sequence = (
+                int(
+                    self.connection.execute(
+                        f"SELECT COALESCE(MAX(sequence_number), 0) AS high FROM {table}"
+                    ).fetchone()["high"]
+                )
+                + 1
+            )
+            entry_id = self._insert_migration_row(
+                f"""
+                INSERT INTO {table} (
+                    sequence_number, root_kind, root_id, watermark, created_at, actor
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (next_sequence, str(root_kind), str(root_id), now, now, actor),
+            )
+            self.connection.commit()
+            return {
+                "id": entry_id,
+                "sequence_number": next_sequence,
+                "root_kind": str(root_kind),
+                "root_id": str(root_id),
+                "actor": actor,
+            }
+
+    def read_pending_dirty_roots(self) -> list[dict[str, Any]]:
+        table = self._migration("time_series_legacy_dirty_roots")
+        return [
+            dict(row)
+            for row in self.connection.execute(
+                f"""
+                SELECT * FROM {table}
+                WHERE drained_at IS NULL
+                ORDER BY sequence_number
+                """
+            ).fetchall()
+        ]
+
+    def drain_legacy_dirty_roots(self, *, through_sequence: int) -> dict[str, Any]:
+        with self._lock:
+            table = self._migration("time_series_legacy_dirty_roots")
+            cursor = self.connection.execute(
+                f"""
+                UPDATE {table}
+                SET drained_at = ?
+                WHERE drained_at IS NULL AND sequence_number <= ?
+                """,
+                (utc_now_iso(), int(through_sequence)),
+            )
+            self.connection.commit()
+            return {
+                "drained_count": int(cursor.rowcount),
+                "pending_count": len(self.read_pending_dirty_roots()),
+            }
+
+    def open_migration_phase(self, *, phase: str, actor: str) -> dict[str, Any]:
+        """Start a phase after C0, refusing without a live recovery point.
+
+        AC-MIG-01 wants the manifest and the proven restore to exist *before*
+        the migration touches anything. The enforceable form of that rule is
+        this gate: no later phase opens unless a proven C0 exists and its
+        inventory still describes the source it would be rolled back to.
+        """
+
+        with self._lock:
+            runs = self._migration("time_series_migration_runs")
+            proven = self.connection.execute(
+                f"""
+                SELECT * FROM {runs}
+                WHERE phase = 'C0' AND status = 'proven'
+                ORDER BY id DESC
+                """
+            ).fetchone()
+            if proven is None:
+                raise MigrationControlError(
+                    RECOVERY_POINT_REQUIRED, reason="no_proven_c0", phase=str(phase)
+                )
+            recovered = json.loads(proven["manifest_json"] or "{}")
+            if recovered.get("inventory") != self._c0_inventory():
+                raise MigrationControlError(
+                    RECOVERY_POINT_REQUIRED,
+                    reason="source_moved_since_recovery_point",
+                    phase=str(phase),
+                    recovery_point_run_id=int(proven["id"]),
+                )
+            now = utc_now_iso()
+            run_id = self._insert_migration_row(
+                f"""
+                INSERT INTO {runs} (
+                    control_version, phase, status, source_engine, watermark,
+                    checkpoint_json, started_at, started_by, actor
+                )
+                VALUES (?, ?, 'running', ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    MIGRATION_CONTROL_VERSION,
+                    str(phase),
+                    self.database_backend,
+                    now,
+                    json.dumps(
+                        {"recovery_point_run_id": int(proven["id"])}, sort_keys=True
+                    ),
+                    now,
+                    actor,
+                    migration_actor(0),
+                ),
+            )
+            self.connection.execute(
+                f"UPDATE {runs} SET actor = ? WHERE id = ?",
+                (migration_actor(run_id), run_id),
+            )
+            self.connection.commit()
+            return {
+                "migration_run_id": run_id,
+                "phase": str(phase),
+                "status": "running",
+                "actor": migration_actor(run_id),
+                "recovery_point_run_id": int(proven["id"]),
+                "recovery_point_digest": str(proven["manifest_digest"]),
+            }
+
+    def read_migration_run(self, migration_run_id: int) -> dict[str, Any]:
+        row = self.connection.execute(
+            f"SELECT * FROM {self._migration('time_series_migration_runs')} WHERE id = ?",
+            (int(migration_run_id),),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"migration run {migration_run_id} not found")
+        run = dict(row)
+        run["manifest"] = json.loads(run.pop("manifest_json") or "{}")
+        run["checkpoint"] = json.loads(run.pop("checkpoint_json") or "{}")
+        return run
+
+    def read_migration_anomalies(self, migration_run_id: int) -> list[dict[str, Any]]:
+        anomalies = []
+        for row in self.connection.execute(
+            f"""
+            SELECT * FROM {self._migration('time_series_migration_anomalies')}
+            WHERE migration_run_id = ?
+            ORDER BY finding_key, id
+            """,
+            (int(migration_run_id),),
+        ).fetchall():
+            anomaly = dict(row)
+            anomaly["evidence"] = json.loads(anomaly.pop("evidence_json") or "{}")
+            anomalies.append(anomaly)
+        return anomalies
+
+    def _write_recovery_copy(self, copy_directory) -> dict[str, Any]:
+        """A consistent logical copy of the closure C0 has to be able to restore."""
+
+        directory = Path(copy_directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        document = {
+            "copy_version": C0_COPY_VERSION,
+            "source_engine": self.database_backend,
+            "tables": {
+                table: [
+                    {
+                        str(column): transport_value(row[column])
+                        for column in row.keys()
+                    }
+                    for row in self.connection.execute(
+                        f"SELECT * FROM {table} ORDER BY id"
+                    ).fetchall()
+                ]
+                for table in C0_RESTORE_TABLES
+            },
+        }
+        path = directory / C0_COPY_FILENAME
+        path.write_text(
+            json.dumps(document, sort_keys=True, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return {"path": path, "digest": canonical_digest(document), "document": document}
+
+    def prove_recovery_copy(self, copy_path, *, restore_directory=None) -> dict[str, Any]:
+        """Restore the copy and prove it reproduces the inventory of the source.
+
+        The restore always lands on SQLite: what C0 has to prove is that the
+        copy is complete and reloadable, and a scratch engine keeps the proof
+        from depending on a second production database being available.
+        """
+
+        path = Path(copy_path)
+        document = json.loads(path.read_text(encoding="utf-8"))
+        target_directory = Path(restore_directory or path.parent / "restore")
+        target_directory.mkdir(parents=True, exist_ok=True)
+        target_path = target_directory / "c0_restore.sqlite3"
+        if target_path.exists():
+            target_path.unlink()
+
+        source_inventory = self._c0_inventory()
+        restore = AnalystStore(f"sqlite:///{target_path.as_posix()}")
+        try:
+            for table in C0_RESTORE_TABLES:
+                for row in document["tables"].get(table, []):
+                    columns = sorted(row)
+                    restore.connection.execute(
+                        f"INSERT INTO {table} ({', '.join(columns)}) "
+                        f"VALUES ({', '.join('?' for _ in columns)})",
+                        tuple(restored_value(row[column]) for column in columns),
+                    )
+            restore.connection.commit()
+            restored_inventory = restore._c0_inventory()
+        except sqlite3.DatabaseError as error:
+            restore.close()
+            raise MigrationControlError(
+                C0_RESTORE_NOT_PROVEN,
+                reason="restore_failed",
+                detail=str(error),
+                divergent_tables=[],
+            ) from error
+        else:
+            restore.close()
+
+        divergent = sorted(
+            table
+            for table in C0_INVENTORY_TABLES
+            if restored_inventory[table] != source_inventory[table]
+        )
+        if divergent:
+            raise MigrationControlError(
+                C0_RESTORE_NOT_PROVEN,
+                reason="inventory_divergence",
+                divergent_tables=divergent,
+                source_inventory_digest=canonical_digest(source_inventory),
+                restored_inventory_digest=canonical_digest(restored_inventory),
+            )
+        return {
+            "proven": True,
+            "restore_engine": "sqlite",
+            "source_inventory_digest": canonical_digest(source_inventory),
+            "restored_inventory_digest": canonical_digest(restored_inventory),
+        }
+
+    def verify_c0_manifest(self, *, manifest: Mapping[str, Any], manifest_signature: str) -> bool:
+        """True when this deployment signed exactly this manifest document."""
+
+        return manifest_signature_matches(
+            canonical_digest(dict(manifest)),
+            manifest_signature,
+            secret=self._migration_manifest_secret,
+        )
+
+    def take_c0_recovery_point(
+        self,
+        *,
+        actor: str,
+        copy_directory,
+        explanations: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Inventory the legacy source, sign its manifest and prove the copy."""
+
+        with self._lock:
+            now = utc_now_iso()
+            run_id = self._insert_migration_row(
+                f"""
+                INSERT INTO {self._migration('time_series_migration_runs')} (
+                    control_version, phase, status, source_engine, watermark,
+                    started_at, started_by, actor
+                )
+                VALUES (?, 'C0', 'running', ?, ?, ?, ?, ?)
+                """,
+                (
+                    MIGRATION_CONTROL_VERSION,
+                    self.database_backend,
+                    now,
+                    now,
+                    actor,
+                    migration_actor(0),
+                ),
+            )
+            technical_actor = migration_actor(run_id)
+            self.connection.execute(
+                f"""
+                UPDATE {self._migration('time_series_migration_runs')}
+                SET actor = ?
+                WHERE id = ?
+                """,
+                (technical_actor, run_id),
+            )
+            # The watermark belongs to the run, not to the manifest: a repeated
+            # C0 over an unchanged source must reproduce the same document, and
+            # a clock reading would make every repetition differ.
+            differences, findings = self._c0_structural_differences(explanations)
+            copy = self._write_recovery_copy(copy_directory)
+            proof = self.prove_recovery_copy(
+                copy["path"], restore_directory=Path(copy_directory) / "restore"
+            )
+            manifest = {
+                "manifest_version": C0_MANIFEST_VERSION,
+                "phase": "C0",
+                "source_engine": self.database_backend,
+                "inventory": self._c0_inventory(),
+                "structural_differences": differences,
+                "executable_variants": self._c0_executable_variants(findings),
+                # The path is deliberately absent: two recovery points taken
+                # from the same source into different directories are the same
+                # manifest, and the copy is identified by its digest.
+                "recovery_point": {
+                    "copy_version": C0_COPY_VERSION,
+                    "copy_digest": copy["digest"],
+                    **proof,
+                },
+            }
+            manifest_digest = canonical_digest(manifest)
+            self._record_migration_anomalies(
+                migration_run_id=run_id, phase="C0", findings=findings, now=now
+            )
+            unexplained = [
+                finding for finding in findings if not finding["explained"]
+            ]
+            if unexplained:
+                # Chapter 10.2: the difference is recorded as evidence and the
+                # phase stops. A stopped run is never signed, so no later phase
+                # can mistake it for a recovery point.
+                self.connection.execute(
+                    f"""
+                    UPDATE {self._migration('time_series_migration_runs')}
+                    SET status = 'stopped',
+                        manifest_json = ?,
+                        manifest_digest = ?,
+                        finished_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        json.dumps(manifest, sort_keys=True),
+                        manifest_digest,
+                        utc_now_iso(),
+                        run_id,
+                    ),
+                )
+                self.connection.commit()
+                raise MigrationPhaseStopped(
+                    C0_STOPPED, migration_run_id=run_id, findings=findings
+                )
+            signature = sign_manifest(
+                manifest_digest, secret=self._migration_manifest_secret
+            )
+            self.connection.execute(
+                f"""
+                UPDATE {self._migration('time_series_migration_runs')}
+                SET status = 'proven',
+                    manifest_json = ?,
+                    manifest_digest = ?,
+                    manifest_signature = ?,
+                    finished_at = ?
+                WHERE id = ?
+                """,
+                (
+                    json.dumps(manifest, sort_keys=True),
+                    manifest_digest,
+                    signature,
+                    utc_now_iso(),
+                    run_id,
+                ),
+            )
+            self.connection.commit()
+            return {
+                "migration_run_id": run_id,
+                "status": "proven",
+                "actor": technical_actor,
+                "copy_path": str(copy["path"]),
+                "manifest": manifest,
+                "manifest_digest": manifest_digest,
+                "manifest_signature": signature,
+            }
 
     # -- Closed register of linkable objects (TS7-003) ----------------------
     #
