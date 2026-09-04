@@ -87,10 +87,31 @@ MIGRATION_ANOMALY_CODES = {
 C0_STOPPED = "TS_MIGRATION_C0_STOPPED"
 C2_STOPPED = "TS_MIGRATION_C2_STOPPED"
 C3_STOPPED = "TS_MIGRATION_C3_STOPPED"
+C4_STOPPED = "TS_MIGRATION_C4_STOPPED"
 C0_RESTORE_NOT_PROVEN = "TS_MIGRATION_RESTORE_NOT_PROVEN"
 MAPPING_CONFLICT = "TS_MIGRATION_MAPPING_CONFLICT"
 RECOVERY_POINT_REQUIRED = "TS_MIGRATION_RECOVERY_POINT_REQUIRED"
 MIGRATION_PHASE_REQUIRED = "TS_MIGRATION_PHASE_REQUIRED"
+
+
+# Chapter 10.7 deliberately resolves the legacy execution field through an
+# exact table. Similar-looking spellings are not accepted.
+LEGACY_BINDING_ROLE_ALIASES = {
+    "import_price_usd_per_mwh": "grid_import_price",
+    "export_price_usd_per_mwh": "grid_export_price",
+    "load_demand_mw": "load_demand",
+    "renewable_available_power_mw": "renewable_available_power",
+    "hydro_inflow_m3s": "hydro_inflow",
+    "natural_inflow_m3s": "natural_inflow",
+    "minimum_flow_m3s": "minimum_flow",
+}
+
+# The legacy symmetric tariff is the sole one-to-many transformation mandated
+# by the initial compatibility matrix: one energy-price signal supplies both
+# explicit grid price roles.
+LEGACY_BINDING_ROLE_EXPANSIONS = {
+    "price_usd_per_mwh": ("grid_import_price", "grid_export_price"),
+}
 
 
 class MigrationControlError(RuntimeError):

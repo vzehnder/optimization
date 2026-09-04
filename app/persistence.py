@@ -183,6 +183,9 @@ from app.time_series_migration import (
     C0_STOPPED,
     C2_STOPPED,
     C3_STOPPED,
+    C4_STOPPED,
+    LEGACY_BINDING_ROLE_ALIASES,
+    LEGACY_BINDING_ROLE_EXPANSIONS,
     MAPPING_CONFLICT,
     MIGRATION_PHASE_REQUIRED,
     MIGRATION_CONTROL_VERSION,
@@ -4042,6 +4045,1271 @@ class AnalystStore:
             "created_rows": created_rows,
             "mapping_changes": int(mapping_changes),
             "checkpoint": checkpoint,
+            "manifest": manifest,
+            "manifest_digest": canonical_digest(manifest),
+        }
+
+    # -- C4 association and binding backfill (TS7-017) -------------------
+
+    @staticmethod
+    def _c4_actor(migration_run_id: int) -> dict[str, Any]:
+        return {
+            "id": None,
+            "email": migration_actor(migration_run_id),
+            "role": "migration",
+        }
+
+    def _c4_legacy_binding_rows(self) -> list[dict[str, Any]]:
+        return [
+            dict(row)
+            for row in self.connection.execute(
+                """
+                SELECT binding.*, optimization_case.scenario_id,
+                       scenario.project_id
+                FROM case_time_series_bindings AS binding
+                JOIN case_input_variants AS variant
+                  ON variant.id = binding.case_input_variant_id
+                JOIN optimization_cases AS optimization_case
+                  ON optimization_case.id = variant.case_id
+                JOIN scenarios AS scenario
+                  ON scenario.id = optimization_case.scenario_id
+                ORDER BY binding.id
+                """
+            ).fetchall()
+        ]
+
+    def _c4_legacy_signal_rows(self) -> list[dict[str, Any]]:
+        return [
+            dict(row)
+            for row in self.connection.execute(
+                """
+                SELECT signal.*, legacy_set.project_id
+                FROM time_series_signals AS signal
+                JOIN time_series_sets AS legacy_set
+                  ON legacy_set.id = signal.time_series_set_id
+                ORDER BY signal.id
+                """
+            ).fetchall()
+        ]
+
+    def _c4_binding_role_keys(self, legacy: Mapping[str, Any]) -> tuple[str, ...]:
+        signal_key = str(legacy["signal_key"])
+        expanded = LEGACY_BINDING_ROLE_EXPANSIONS.get(signal_key)
+        if expanded is not None:
+            return expanded
+        role_key = LEGACY_BINDING_ROLE_ALIASES.get(signal_key)
+        if role_key is None:
+            raise MigrationControlError(
+                "TS_MIGRATION_BINDING_ROLE_UNRESOLVED",
+                binding_id=int(legacy["id"]),
+                signal_key=signal_key,
+                reason="exact_alias_missing",
+            )
+        return (role_key,)
+
+    def _c4_linkable_object(
+        self, *, legacy: Mapping[str, Any], binding_role_key: str
+    ) -> dict[str, Any]:
+        entity_type = str(legacy.get("entity_type") or "").strip()
+        entity_id = legacy.get("entity_id")
+        # Only the explicit system-compatible roles may turn an absent legacy
+        # entity into the project's unique global slot.
+        if not entity_type and entity_id is None and binding_role_key in {
+            "grid_import_price",
+            "grid_export_price",
+        }:
+            entity_type = "global:system"
+            entity_id = "system"
+        if not entity_type and entity_id is not None:
+            exact_candidates = [
+                item
+                for item in self.list_linkable_objects(
+                    project_id=int(legacy["project_id"])
+                )
+                if item["object_key"] == str(entity_id)
+            ]
+            if len(exact_candidates) > 1:
+                raise MigrationControlError(
+                    "TS_MIGRATION_OBJECT_AMBIGUOUS",
+                    binding_id=int(legacy["id"]),
+                    variant_id=int(legacy["case_input_variant_id"]),
+                    project_id=int(legacy["project_id"]),
+                    entity_type=legacy.get("entity_type"),
+                    entity_id=entity_id,
+                    reason="entity_type_missing_with_multiple_exact_objects",
+                    candidates=[
+                        {
+                            "linkable_object_id": int(candidate["id"]),
+                            "object_type_key": candidate["object_type_key"],
+                            "object_key": candidate["object_key"],
+                        }
+                        for candidate in exact_candidates
+                    ],
+                )
+        if not entity_type or entity_id is None:
+            raise MigrationControlError(
+                "TS_MIGRATION_OBJECT_NOT_FOUND",
+                binding_id=int(legacy["id"]),
+                entity_type=legacy.get("entity_type"),
+                entity_id=entity_id,
+                reason="legacy_reference_incomplete",
+            )
+        try:
+            return self.resolve_linkable_object_reference(
+                project_id=int(legacy["project_id"]),
+                entity_type=entity_type,
+                entity_id=entity_id,
+            )
+        except (LinkableObjectError, TypeError, ValueError) as error:
+            object_code = getattr(error, "code", "TS_OBJECT_NOT_REGISTERED")
+            code = {
+                "TS_MIGRATION_OBJECT_AMBIGUOUS": "TS_MIGRATION_OBJECT_AMBIGUOUS",
+                "TS_OBJECT_PROJECT_MISMATCH": "TS_MIGRATION_PROJECT_MISMATCH",
+                "TS_COMPAT_PROJECT_CONTEXT_MISMATCH": "TS_MIGRATION_PROJECT_MISMATCH",
+            }.get(object_code, "TS_MIGRATION_OBJECT_NOT_FOUND")
+            raise MigrationControlError(
+                code,
+                binding_id=int(legacy["id"]),
+                variant_id=int(legacy["case_input_variant_id"]),
+                project_id=int(legacy["project_id"]),
+                entity_type=entity_type,
+                entity_id=entity_id,
+                object_error=object_code,
+                candidates=getattr(error, "context", {}).get("candidates", []),
+            ) from error
+
+    def _c4_canonical_signal(self, legacy: Mapping[str, Any]) -> dict[str, Any]:
+        rows = self.connection.execute(
+            f"""
+            SELECT signal.id AS signal_id, signal.time_series_set_id,
+                   canonical_set.series_kind,
+                   canonical_set.owner_linkable_object_id,
+                   canonical_set.current_revision_id,
+                   revision.state AS revision_state,
+                   revision.content_hash
+            FROM {self._canonical('time_series_signals')} AS signal
+            JOIN {self._canonical('time_series_sets')} AS canonical_set
+              ON canonical_set.id = signal.time_series_set_id
+            LEFT JOIN {self._canonical('time_series_set_revisions')} AS revision
+              ON revision.id = canonical_set.current_revision_id
+            WHERE signal.time_series_set_id = ? AND signal.series_key = ?
+            ORDER BY signal.id
+            """,
+            (int(legacy["time_series_set_id"]), str(legacy["signal_key"])),
+        ).fetchall()
+        if len(rows) != 1:
+            raise MigrationControlError(
+                "TS_MIGRATION_BINDING_SIGNAL_UNRESOLVED",
+                binding_id=int(legacy["id"]),
+                time_series_set_id=int(legacy["time_series_set_id"]),
+                signal_key=str(legacy["signal_key"]),
+                match_count=len(rows),
+            )
+        signal = dict(rows[0])
+        if (
+            signal["current_revision_id"] is None
+            or signal["revision_state"] != "sealed"
+            or not str(signal["content_hash"] or "").strip()
+        ):
+            raise MigrationControlError(
+                "TS_MIGRATION_REVISION_UNMATERIALIZED",
+                binding_id=int(legacy["id"]),
+                time_series_set_id=int(legacy["time_series_set_id"]),
+                revision_id=signal["current_revision_id"],
+            )
+        return signal
+
+    @staticmethod
+    def _c4_compatibility_anomaly_code(errors: list[Mapping[str, Any]]) -> str:
+        codes = {str(error.get("code") or "") for error in errors}
+        if codes & {
+            "TS_COMPAT_PROJECT_CONTEXT_MISMATCH",
+            "TS_COMPAT_SCOPE_NOT_ACCESSIBLE",
+            "TS_COMPAT_OBJECT_OWNER_MISMATCH",
+        }:
+            return "TS_MIGRATION_PROJECT_MISMATCH"
+        if codes & {"TS_COMPAT_ROLE_INACTIVE", "TS_COMPAT_ROLE_USAGE_NOT_ALLOWED"}:
+            return "TS_MIGRATION_BINDING_ROLE_UNRESOLVED"
+        if "TS_COMPAT_SIGNAL_UNAVAILABLE" in codes:
+            return "TS_MIGRATION_REVISION_UNMATERIALIZED"
+        return "TS_MIGRATION_BINDING_INCOMPATIBLE"
+
+    def _c4_ensure_association(
+        self,
+        *,
+        legacy: Mapping[str, Any],
+        signal: Mapping[str, Any],
+        linkable: Mapping[str, Any],
+        binding_role_key: str,
+        migration_run_id: int,
+    ) -> tuple[int | None, bool]:
+        if signal["series_kind"] == "object_specific":
+            if int(signal["owner_linkable_object_id"] or 0) != int(linkable["id"]):
+                raise MigrationControlError(
+                    "TS_MIGRATION_PROJECT_MISMATCH",
+                    binding_id=int(legacy["id"]),
+                    reason="object_specific_owner_mismatch",
+                )
+            return None, False
+        operation = {
+            "client_operation_id": f"migration-association-{int(legacy['id'])}",
+            "action": "add",
+            "signal_id": int(signal["signal_id"]),
+            "linkable_object_id": int(linkable["id"]),
+            "binding_role_key": binding_role_key,
+            "expected_absent": True,
+            "reason_code": "legacy_binding_migrated",
+            "reason_text": "Created from an exact legacy binding reference.",
+        }
+        prevalidated, _ = self._prevalidate_catalog_association_add(
+            operation, target_project_id=int(legacy["project_id"])
+        )
+        if not prevalidated["compatibility_decision"]["allowed"]:
+            raise MigrationControlError(
+                self._c4_compatibility_anomaly_code(prevalidated["errors"]),
+                binding_id=int(legacy["id"]),
+                usage="association",
+                errors=prevalidated["errors"],
+            )
+        existing = prevalidated["observed_state"]["active_association"]
+        if existing is not None:
+            return int(existing["id"]), False
+        created = self._insert_catalog_association_add(
+            operation=operation,
+            prevalidated=prevalidated,
+            actor_user=self._c4_actor(migration_run_id),
+            request_id=f"migration-c4:{migration_run_id}",
+            batch_id=f"migration-c4:{migration_run_id}",
+            occurred_at=utc_now_iso(),
+        )
+        return int(created["association_id"]), True
+
+    def _c4_prevalidate_binding(
+        self,
+        *,
+        legacy: Mapping[str, Any],
+        signal: Mapping[str, Any],
+        linkable: Mapping[str, Any],
+        binding_role_key: str,
+        catalog_association_id: int | None,
+        existing_binding_id: int | None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        operation = {
+            "client_operation_id": f"migration-binding-{int(legacy['id'])}",
+            "action": "create",
+            "linkable_object_id": int(linkable["id"]),
+            "binding_role_key": binding_role_key,
+            "signal_id": int(signal["signal_id"]),
+            "revision": {
+                "mode": "current",
+                "revision_id": int(signal["current_revision_id"]),
+                "content_hash": str(signal["content_hash"]),
+            },
+            "catalog_association_id": catalog_association_id,
+            "reason_code": "legacy_binding_migrated",
+            "reason_text": "Reauthorized from the exact legacy reference.",
+        }
+        context = self._canonical_binding_context(
+            scenario_id=int(legacy["scenario_id"]),
+            variant_id=int(legacy["case_input_variant_id"]),
+        )
+        prevalidated, observed = self._prevalidate_case_binding_create(
+            operation, context=context
+        )
+        remaining_errors = [
+            error
+            for error in prevalidated["errors"]
+            if not (
+                error["code"] == "TS_LINK_CONFLICT"
+                and int(error["context"].get("binding_id") or 0)
+                == int(existing_binding_id or 0)
+            )
+        ]
+        if remaining_errors:
+            raise MigrationControlError(
+                self._c4_compatibility_anomaly_code(remaining_errors),
+                binding_id=int(legacy["id"]),
+                usage="execution",
+                errors=remaining_errors,
+            )
+        return operation, {**prevalidated, "observed_state": observed}
+
+    def _c4_insert_binding(
+        self,
+        *,
+        legacy: Mapping[str, Any],
+        operation: Mapping[str, Any],
+        prevalidated: Mapping[str, Any],
+        migration_run_id: int,
+        preferred_binding_id: int | None,
+    ) -> int:
+        observed = prevalidated["observed_state"]
+        signal = observed["signal"]
+        linkable = observed["object"]
+        technical_actor = migration_actor(migration_run_id)
+        validated_at = utc_now_iso()
+        metadata = {
+            "migration_actor": technical_actor,
+            "legacy_binding": {
+                key: legacy.get(key)
+                for key in (
+                    "id",
+                    "case_input_variant_id",
+                    "signal_key",
+                    "entity_type",
+                    "entity_id",
+                    "time_series_set_id",
+                    "required",
+                    "created_at",
+                    "updated_at",
+                    "created_by",
+                    "updated_by",
+                )
+            },
+        }
+        bindings = self.link_layer_table_names()["case_time_series_bindings"]
+        columns = [
+            "case_input_variant_id",
+            "linkable_object_id",
+            "binding_role_id",
+            "signal_id",
+            "time_series_set_id",
+            "set_revision_id",
+            "bound_content_hash",
+            "source_kind",
+            "source_owner_linkable_object_id",
+            "catalog_association_id",
+            "compatibility_rule_id",
+            "required",
+            "status",
+            "supersedes_binding_id",
+            "lifecycle_revision",
+            "change_reason_code",
+            "change_reason_text",
+            "validated_at",
+            "created_at",
+            "updated_at",
+            "created_by",
+            "updated_by",
+            "metadata_json",
+        ]
+        values: list[Any] = [
+            int(legacy["case_input_variant_id"]),
+            int(linkable["id"]),
+            int(observed["binding_role_id"]),
+            int(signal["signal_id"]),
+            int(signal["time_series_set_id"]),
+            int(operation["revision"]["revision_id"]),
+            str(signal["selected_content_hash"]),
+            str(signal["series_kind"]),
+            signal["owner_linkable_object_id"],
+            operation.get("catalog_association_id"),
+            int(observed["compatibility_rule_id"]),
+            int(bool(legacy["required"])),
+            "active",
+            None,
+            1,
+            "legacy_binding_migrated",
+            operation["reason_text"],
+            validated_at,
+            str(legacy["created_at"]),
+            str(legacy["updated_at"]),
+            str(legacy["created_by"]),
+            str(legacy["updated_by"]),
+            json.dumps(metadata, sort_keys=True),
+        ]
+        if preferred_binding_id is not None:
+            columns.insert(0, "id")
+            values.insert(0, int(preferred_binding_id))
+        placeholders = ", ".join("?" for _ in values)
+        binding_id = self._insert_canonical_row(
+            f"INSERT INTO {bindings} ({', '.join(columns)}) VALUES ({placeholders})",
+            tuple(values),
+        )
+        compatibility_fingerprint, object_scope_fingerprint = (
+            self._case_binding_fingerprints(
+                observed=observed,
+                binding_role_key=str(operation["binding_role_key"]),
+                contract_version=int(
+                    prevalidated["compatibility_decision"]["contract_version"]
+                ),
+            )
+        )
+        self.connection.execute(
+            f"""
+            INSERT INTO {self.link_layer_table_names()['time_series_link_validations']} (
+                binding_id, subject_lifecycle_revision, validation_mode,
+                validated_set_revision_id, observed_current_revision_id,
+                compatibility_rule_id, compatibility_fingerprint,
+                object_scope_fingerprint, variant_dependency_fingerprint,
+                validated_at, validated_by, reason_code, reason_text
+            ) VALUES (?, 1, 'binding_current', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                binding_id,
+                int(operation["revision"]["revision_id"]),
+                int(signal["current_revision_id"]),
+                int(observed["compatibility_rule_id"]),
+                compatibility_fingerprint,
+                object_scope_fingerprint,
+                observed["variant"]["variant_dependency_fingerprint"],
+                validated_at,
+                technical_actor,
+                "legacy_binding_migrated",
+                operation["reason_text"],
+            ),
+        )
+        after = {
+            "binding_id": binding_id,
+            "case_input_variant_id": int(legacy["case_input_variant_id"]),
+            "linkable_object_id": int(linkable["id"]),
+            "binding_role_key": str(operation["binding_role_key"]),
+            "signal_id": int(signal["signal_id"]),
+            "set_revision_id": int(operation["revision"]["revision_id"]),
+            "bound_content_hash": str(signal["selected_content_hash"]),
+            "status": "active",
+        }
+        self.connection.execute(
+            f"""
+            INSERT INTO {self.link_layer_table_names()['time_series_link_events']} (
+                batch_id, binding_id, event_type, actor_user_id,
+                actor_identity_snapshot, actor_role_snapshot, reason_code,
+                reason_text, before_json, after_json, request_id, occurred_at
+            ) VALUES (?, ?, 'migrated', NULL, ?, 'migration', ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                f"migration-c4:{migration_run_id}",
+                binding_id,
+                technical_actor,
+                "legacy_binding_migrated",
+                operation["reason_text"],
+                json.dumps(metadata["legacy_binding"], sort_keys=True),
+                json.dumps(after, sort_keys=True),
+                f"migration-c4:{migration_run_id}",
+                validated_at,
+            ),
+        )
+        self._sync_canonical_identity_sequences(("case_time_series_bindings",))
+        return binding_id
+
+    def _c4_binding_mapping_target_kind(
+        self, *, legacy: Mapping[str, Any], binding_role_key: str
+    ) -> str:
+        if len(self._c4_binding_role_keys(legacy)) == 1:
+            return "canonical_binding"
+        return f"canonical_binding:{binding_role_key}"
+
+    def _c4_mapped_binding_id(
+        self, *, legacy: Mapping[str, Any], binding_role_key: str
+    ) -> int | None:
+        mapping = self.connection.execute(
+            f"""
+            SELECT target_id
+            FROM {self._migration('time_series_migration_mappings')}
+            WHERE source_kind = 'legacy_time_series'
+              AND source_table = 'case_time_series_bindings'
+              AND source_id = ? AND target_kind = ?
+            """,
+            (
+                str(legacy["id"]),
+                self._c4_binding_mapping_target_kind(
+                    legacy=legacy, binding_role_key=binding_role_key
+                ),
+            ),
+        ).fetchone()
+        return None if mapping is None else int(mapping["target_id"])
+
+    def _c4_existing_expanded_binding(
+        self,
+        *,
+        legacy: Mapping[str, Any],
+        linkable_object_id: int,
+        binding_role_key: str,
+    ):
+        return self.connection.execute(
+            f"""
+            SELECT binding.*
+            FROM {self.link_layer_table_names()['case_time_series_bindings']} AS binding
+            JOIN time_series_binding_roles AS role
+              ON role.id = binding.binding_role_id
+            WHERE binding.case_input_variant_id = ?
+              AND binding.linkable_object_id = ?
+              AND role.role_key = ? AND binding.status = 'active'
+            """,
+            (
+                int(legacy["case_input_variant_id"]),
+                int(linkable_object_id),
+                str(binding_role_key),
+            ),
+        ).fetchone()
+
+    def _c4_migrate_binding_role(
+        self,
+        *,
+        legacy: Mapping[str, Any],
+        binding_role_key: str,
+        preferred_binding_id: int | None,
+        migration_run_id: int,
+    ) -> dict[str, Any]:
+        linkable = self._c4_linkable_object(
+            legacy=legacy, binding_role_key=binding_role_key
+        )
+        signal = self._c4_canonical_signal(legacy)
+        association_id, association_created = self._c4_ensure_association(
+            legacy=legacy,
+            signal=signal,
+            linkable=linkable,
+            binding_role_key=binding_role_key,
+            migration_run_id=migration_run_id,
+        )
+        mapped_binding_id = self._c4_mapped_binding_id(
+            legacy=legacy, binding_role_key=binding_role_key
+        )
+        lookup_binding_id = mapped_binding_id or preferred_binding_id
+        existing = None
+        if lookup_binding_id is not None:
+            existing = self.connection.execute(
+                f"""
+                SELECT *
+                FROM {self.link_layer_table_names()['case_time_series_bindings']}
+                WHERE id = ?
+                """,
+                (int(lookup_binding_id),),
+            ).fetchone()
+        if existing is None and preferred_binding_id is None:
+            existing = self._c4_existing_expanded_binding(
+                legacy=legacy,
+                linkable_object_id=int(linkable["id"]),
+                binding_role_key=binding_role_key,
+            )
+        existing_binding_id = None if existing is None else int(existing["id"])
+        operation, prevalidated = self._c4_prevalidate_binding(
+            legacy=legacy,
+            signal=signal,
+            linkable=linkable,
+            binding_role_key=binding_role_key,
+            catalog_association_id=association_id,
+            existing_binding_id=existing_binding_id,
+        )
+        binding_created = existing is None
+        if binding_created:
+            binding_id = self._c4_insert_binding(
+                legacy=legacy,
+                operation=operation,
+                prevalidated=prevalidated,
+                migration_run_id=migration_run_id,
+                preferred_binding_id=preferred_binding_id,
+            )
+        else:
+            binding_id = int(existing["id"])
+            expected = {
+                "case_input_variant_id": int(legacy["case_input_variant_id"]),
+                "linkable_object_id": int(linkable["id"]),
+                "binding_role_id": int(
+                    prevalidated["observed_state"]["binding_role_id"]
+                ),
+                "signal_id": int(signal["signal_id"]),
+                "time_series_set_id": int(signal["time_series_set_id"]),
+                "set_revision_id": int(signal["current_revision_id"]),
+                "bound_content_hash": str(signal["content_hash"]),
+                "source_kind": str(signal["series_kind"]),
+                "source_owner_linkable_object_id": signal[
+                    "owner_linkable_object_id"
+                ],
+                "catalog_association_id": association_id,
+                "compatibility_rule_id": int(
+                    prevalidated["observed_state"]["compatibility_rule_id"]
+                ),
+                "required": int(bool(legacy["required"])),
+                "status": "active",
+            }
+            mismatches = {
+                key: {"expected": value, "actual": existing[key]}
+                for key, value in expected.items()
+                if existing[key] != value
+            }
+            if mismatches:
+                raise MigrationControlError(
+                    MAPPING_CONFLICT,
+                    binding_id=binding_id,
+                    legacy_binding_id=int(legacy["id"]),
+                    reason="canonical_binding_id_already_assigned",
+                    mismatches=mismatches,
+                )
+        return {
+            "binding_id": binding_id,
+            "legacy_binding_id": int(legacy["id"]),
+            "signal_id": int(signal["signal_id"]),
+            "linkable_object_id": int(linkable["id"]),
+            "binding_role_key": binding_role_key,
+            "set_revision_id": int(signal["current_revision_id"]),
+            "catalog_association_id": association_id,
+            "association_created": association_created,
+            "binding_created": binding_created,
+            "mapping_target_kind": self._c4_binding_mapping_target_kind(
+                legacy=legacy, binding_role_key=binding_role_key
+            ),
+        }
+
+    def _c4_migrate_binding(
+        self, *, legacy: Mapping[str, Any], migration_run_id: int
+    ) -> list[dict[str, Any]]:
+        results = []
+        for ordinal, role_key in enumerate(self._c4_binding_role_keys(legacy)):
+            results.append(
+                self._c4_migrate_binding_role(
+                    legacy=legacy,
+                    binding_role_key=role_key,
+                    preferred_binding_id=(
+                        int(legacy["id"]) if ordinal == 0 else None
+                    ),
+                    migration_run_id=migration_run_id,
+                )
+            )
+        return results
+
+    def _c4_migrate_signal_associations(
+        self, *, legacy_signal: Mapping[str, Any], migration_run_id: int
+    ) -> list[dict[str, Any]]:
+        try:
+            role_keys = self._c4_binding_role_keys(legacy_signal)
+        except MigrationControlError:
+            return []
+        entity_type = str(legacy_signal.get("entity_type") or "").strip()
+        entity_key = legacy_signal.get("entity_key")
+        results = []
+        for role_key in role_keys:
+            global_role = role_key in {"grid_import_price", "grid_export_price"}
+            if not global_role and (not entity_type or entity_key is None):
+                continue
+            evidence = {
+                "id": int(legacy_signal["id"]),
+                "case_input_variant_id": 0,
+                "project_id": int(legacy_signal["project_id"]),
+                "signal_key": str(legacy_signal["signal_key"]),
+                "time_series_set_id": int(legacy_signal["time_series_set_id"]),
+                "entity_type": entity_type or None,
+                "entity_id": entity_key,
+            }
+            linkable = self._c4_linkable_object(
+                legacy=evidence, binding_role_key=role_key
+            )
+            signal = self._c4_canonical_signal(evidence)
+            association_id, created = self._c4_ensure_association(
+                legacy=evidence,
+                signal=signal,
+                linkable=linkable,
+                binding_role_key=role_key,
+                migration_run_id=migration_run_id,
+            )
+            results.append(
+                {
+                    "association_id": association_id,
+                    "signal_id": int(signal["signal_id"]),
+                    "linkable_object_id": int(linkable["id"]),
+                    "binding_role_key": role_key,
+                    "created": created,
+                }
+            )
+        return results
+
+    def _record_c4_association_mapping(
+        self, *, result: Mapping[str, Any], migration_run_id: int
+    ) -> bool:
+        if result["association_id"] is None:
+            return False
+        source_id = json.dumps(
+            [
+                result["signal_id"],
+                result["linkable_object_id"],
+                result["binding_role_key"],
+            ],
+            separators=(",", ":"),
+        )
+        mapping = self.record_migration_mapping(
+            migration_run_id=migration_run_id,
+            source_kind="legacy_time_series",
+            source_table="time_series_signals",
+            source_id=source_id,
+            target_kind="catalog_association",
+            target_id=str(result["association_id"]),
+            source_hash=canonical_digest(
+                {
+                    "signal_id": result["signal_id"],
+                    "linkable_object_id": result["linkable_object_id"],
+                    "binding_role_key": result["binding_role_key"],
+                }
+            ),
+        )
+        return mapping["status"] == "created"
+
+    def _c4_binding_disposition(self, binding_id: int):
+        return self.connection.execute(
+            f"""
+            SELECT * FROM {self._migration('time_series_migration_mappings')}
+            WHERE source_kind = 'legacy_time_series'
+              AND source_table = 'case_time_series_bindings'
+              AND source_id = ? AND target_kind = 'binding_disposition'
+            """,
+            (str(binding_id),),
+        ).fetchone()
+
+    def _resolve_previous_c4_binding_anomalies(
+        self, *, binding_id: int, actor: str, note: str
+    ) -> None:
+        table = self._migration("time_series_migration_anomalies")
+        for row in self.connection.execute(
+            f"""
+            SELECT id, evidence_json FROM {table}
+            WHERE phase = 'C4' AND resolution <> 'resolved'
+            ORDER BY id
+            """
+        ).fetchall():
+            evidence = json.loads(row["evidence_json"] or "{}")
+            if int(evidence.get("binding_id") or 0) != int(binding_id):
+                continue
+            self.connection.execute(
+                f"""
+                UPDATE {table}
+                SET resolution = 'resolved', resolution_note = ?,
+                    resolved_at = ?, resolved_by = ?
+                WHERE id = ? AND resolution <> 'resolved'
+                """,
+                (str(note), utc_now_iso(), str(actor), int(row["id"])),
+            )
+
+    def _record_c4_migration_anomalies(
+        self, *, migration_run_id: int, findings: list[Mapping[str, Any]]
+    ) -> None:
+        """Keep one open C4 finding per stable subject and evidence."""
+
+        table = self._migration("time_series_migration_anomalies")
+        now = utc_now_iso()
+        for finding in findings:
+            evidence_json = json.dumps(finding["evidence"], sort_keys=True)
+            existing = self.connection.execute(
+                f"""
+                SELECT id FROM {table}
+                WHERE phase = 'C4' AND code = ? AND finding_key = ?
+                  AND evidence_json = ? AND resolution <> 'resolved'
+                LIMIT 1
+                """,
+                (
+                    str(finding["code"]),
+                    str(finding["finding_key"]),
+                    evidence_json,
+                ),
+            ).fetchone()
+            if existing is None:
+                self._record_migration_anomalies(
+                    migration_run_id=migration_run_id,
+                    phase="C4",
+                    findings=[finding],
+                    now=now,
+                )
+
+    def read_time_series_migration_binding_history(
+        self, binding_id: int
+    ) -> dict[str, Any]:
+        legacy = next(
+            (
+                row
+                for row in self._c4_legacy_binding_rows()
+                if int(row["id"]) == int(binding_id)
+            ),
+            None,
+        )
+        if legacy is None:
+            raise KeyError(f"legacy binding {binding_id} not found")
+        disposition = self._c4_binding_disposition(int(binding_id))
+        if disposition is None or disposition["target_id"] != "retired":
+            return {
+                "binding_id": int(binding_id),
+                "status": "active",
+                "reason": None,
+                "retired_at": None,
+                "retired_by": None,
+                "legacy_binding": normalize_source_row(legacy),
+            }
+        resolved = None
+        for row in self.connection.execute(
+            f"""
+            SELECT * FROM {self._migration('time_series_migration_anomalies')}
+            WHERE phase = 'C4' AND resolution = 'resolved'
+            ORDER BY resolved_at DESC, id DESC
+            """
+        ).fetchall():
+            evidence = json.loads(row["evidence_json"] or "{}")
+            if int(evidence.get("binding_id") or 0) == int(binding_id):
+                resolved = row
+                break
+        if resolved is None:
+            raise MigrationControlError(
+                MAPPING_CONFLICT,
+                binding_id=int(binding_id),
+                reason="retirement_has_no_resolved_anomaly",
+            )
+        return {
+            "binding_id": int(binding_id),
+            "status": "retired",
+            "reason": str(resolved["resolution_note"]),
+            "retired_at": str(resolved["resolved_at"]),
+            "retired_by": str(resolved["resolved_by"]),
+            "legacy_binding": normalize_source_row(legacy),
+        }
+
+    def _retire_c4_canonical_bindings(
+        self, *, legacy_binding_id: int, actor: str, reason: str, occurred_at: str
+    ) -> None:
+        mappings = self._migration("time_series_migration_mappings")
+        bindings = self.link_layer_table_names()["case_time_series_bindings"]
+        events = self.link_layer_table_names()["time_series_link_events"]
+        rows = self.connection.execute(
+            f"""
+            SELECT DISTINCT target_id FROM {mappings}
+            WHERE source_kind = 'legacy_time_series'
+              AND source_table = 'case_time_series_bindings'
+              AND source_id = ?
+              AND (target_kind = 'canonical_binding'
+                   OR target_kind LIKE 'canonical_binding:%')
+            ORDER BY target_id
+            """,
+            (str(legacy_binding_id),),
+        ).fetchall()
+        for mapping in rows:
+            binding = self.connection.execute(
+                f"SELECT * FROM {bindings} WHERE id = ?",
+                (int(mapping["target_id"]),),
+            ).fetchone()
+            if binding is None or binding["status"] != "active":
+                continue
+            next_revision = int(binding["lifecycle_revision"]) + 1
+            self.connection.execute(
+                f"""
+                UPDATE {bindings}
+                SET status = 'removed', lifecycle_revision = ?,
+                    change_reason_code = 'legacy_binding_retired',
+                    change_reason_text = ?, removed_at = ?, removed_by = ?,
+                    updated_at = ?, updated_by = ?
+                WHERE id = ? AND status = 'active'
+                """,
+                (
+                    next_revision,
+                    reason,
+                    occurred_at,
+                    actor,
+                    occurred_at,
+                    actor,
+                    int(binding["id"]),
+                ),
+            )
+            before = {
+                "binding_id": int(binding["id"]),
+                "legacy_binding_id": int(legacy_binding_id),
+                "status": "active",
+                "lifecycle_revision": int(binding["lifecycle_revision"]),
+            }
+            after = {
+                **before,
+                "status": "removed",
+                "lifecycle_revision": next_revision,
+            }
+            self.connection.execute(
+                f"""
+                INSERT INTO {events} (
+                    batch_id, binding_id, event_type, actor_user_id,
+                    actor_identity_snapshot, actor_role_snapshot, reason_code,
+                    reason_text, before_json, after_json, request_id, occurred_at
+                ) VALUES (?, ?, 'removed', NULL, ?, 'migration_admin', ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"migration-c4-retirement:{legacy_binding_id}",
+                    int(binding["id"]),
+                    actor,
+                    "legacy_binding_retired",
+                    reason,
+                    json.dumps(before, sort_keys=True),
+                    json.dumps(after, sort_keys=True),
+                    f"migration-c4-retirement:{legacy_binding_id}",
+                    occurred_at,
+                ),
+            )
+
+    def retire_time_series_migration_binding(
+        self, *, anomaly_id: int, actor: str, reason: str
+    ) -> dict[str, Any]:
+        """Explicitly retire one unresolved legacy binding without erasing it."""
+
+        clean_actor = str(actor).strip()
+        clean_reason = str(reason).strip()
+        if not clean_actor or not clean_reason:
+            raise ValueError("actor and retirement reason are required")
+        anomalies = self._migration("time_series_migration_anomalies")
+        anomaly = self.connection.execute(
+            f"SELECT * FROM {anomalies} WHERE id = ?", (int(anomaly_id),)
+        ).fetchone()
+        if anomaly is None or anomaly["phase"] != "C4" or anomaly["severity"] != "blocking":
+            raise MigrationControlError(
+                "TS_MIGRATION_BINDING_ANOMALY_REQUIRED", anomaly_id=int(anomaly_id)
+            )
+        evidence = json.loads(anomaly["evidence_json"] or "{}")
+        binding_id = int(evidence.get("binding_id") or 0)
+        legacy = next(
+            (
+                row
+                for row in self._c4_legacy_binding_rows()
+                if int(row["id"]) == binding_id
+            ),
+            None,
+        )
+        if legacy is None:
+            raise MigrationControlError(
+                "TS_MIGRATION_BINDING_ANOMALY_REQUIRED",
+                anomaly_id=int(anomaly_id),
+                reason="legacy_binding_missing",
+            )
+        existing = self._c4_binding_disposition(binding_id)
+        if existing is not None:
+            if existing["target_id"] != "retired":
+                raise MigrationControlError(
+                    MAPPING_CONFLICT,
+                    binding_id=binding_id,
+                    reason="binding_disposition_changed",
+                )
+            with self._lock:
+                with self._database_transaction():
+                    self._retire_c4_canonical_bindings(
+                        legacy_binding_id=binding_id,
+                        actor=clean_actor,
+                        reason=clean_reason,
+                        occurred_at=utc_now_iso(),
+                    )
+            return self.read_time_series_migration_binding_history(binding_id)
+
+        mapping_table = self._migration("time_series_migration_mappings")
+        now = utc_now_iso()
+        with self._lock:
+            with self._database_transaction():
+                self._retire_c4_canonical_bindings(
+                    legacy_binding_id=binding_id,
+                    actor=clean_actor,
+                    reason=clean_reason,
+                    occurred_at=now,
+                )
+                self._insert_migration_row(
+                    f"""
+                    INSERT INTO {mapping_table} (
+                        migration_run_id, source_kind, source_table, source_id,
+                        target_kind, target_id, source_hash, created_at, actor
+                    ) VALUES (?, 'legacy_time_series',
+                              'case_time_series_bindings', ?,
+                              'binding_disposition', 'retired', ?, ?, ?)
+                    """,
+                    (
+                        int(anomaly["migration_run_id"]),
+                        str(binding_id),
+                        canonical_digest(legacy),
+                        now,
+                        clean_actor,
+                    ),
+                )
+                self.connection.execute(
+                    f"""
+                    UPDATE {anomalies}
+                    SET resolution = 'resolved', resolution_note = ?,
+                        resolved_at = ?, resolved_by = ?
+                    WHERE id = ?
+                    """,
+                    (clean_reason, now, clean_actor, int(anomaly_id)),
+                )
+        return self.read_time_series_migration_binding_history(binding_id)
+
+    def read_time_series_c4_cutover_gate(self) -> dict[str, Any]:
+        """Account for every legacy binding before C6 may be considered."""
+
+        legacy_bindings = {
+            int(row["id"]): row for row in self._c4_legacy_binding_rows()
+        }
+        legacy_ids = set(legacy_bindings)
+        mappings = self._migration("time_series_migration_mappings")
+        canonical_roles: dict[int, set[str]] = {}
+        retired_ids: set[int] = set()
+        for row in self.connection.execute(
+            f"""
+            SELECT source_id, target_kind, target_id FROM {mappings}
+            WHERE source_kind = 'legacy_time_series'
+              AND source_table = 'case_time_series_bindings'
+              AND (target_kind = 'canonical_binding'
+                   OR target_kind LIKE 'canonical_binding:%'
+                   OR target_kind = 'binding_disposition')
+            ORDER BY source_id, target_kind
+            """
+        ).fetchall():
+            source_id = int(row["source_id"])
+            legacy = legacy_bindings.get(source_id)
+            if legacy is None:
+                continue
+            if row["target_kind"] == "binding_disposition":
+                if row["target_id"] == "retired":
+                    retired_ids.add(source_id)
+                continue
+            try:
+                binding = self.read_case_binding(
+                    scenario_id=int(legacy["scenario_id"]),
+                    variant_id=int(legacy["case_input_variant_id"]),
+                    binding_id=int(row["target_id"]),
+                )
+            except (KeyError, BindingMutationError, LinkableObjectError):
+                continue
+            if binding["status"] == "active" and binding["state"] in {
+                "valid_current",
+                "valid_pinned",
+            }:
+                canonical_roles.setdefault(source_id, set()).add(
+                    str(binding["binding_role"]["key"])
+                )
+        canonical_ids: set[int] = set()
+        for binding_id, legacy in legacy_bindings.items():
+            try:
+                expected_roles = set(self._c4_binding_role_keys(legacy))
+            except MigrationControlError:
+                continue
+            if expected_roles <= canonical_roles.get(binding_id, set()):
+                canonical_ids.add(binding_id)
+        resolved_retirements = set()
+        for row in self.connection.execute(
+            f"""
+            SELECT evidence_json, resolution_note, resolved_by
+            FROM {self._migration('time_series_migration_anomalies')}
+            WHERE phase = 'C4' AND severity = 'blocking'
+              AND resolution = 'resolved'
+            """
+        ).fetchall():
+            evidence = json.loads(row["evidence_json"] or "{}")
+            binding_id = int(evidence.get("binding_id") or 0)
+            if (
+                binding_id in legacy_ids
+                and str(row["resolution_note"] or "").strip()
+                and str(row["resolved_by"] or "").strip()
+            ):
+                resolved_retirements.add(binding_id)
+        retired_ids &= resolved_retirements
+        open_blocking = int(
+            self.connection.execute(
+                f"""
+                SELECT COUNT(*) AS row_count
+                FROM {self._migration('time_series_migration_anomalies')}
+                WHERE phase = 'C4' AND severity = 'blocking'
+                  AND resolution <> 'resolved'
+                """
+            ).fetchone()["row_count"]
+        )
+        accounted = canonical_ids | retired_ids
+        unaccounted = sorted(legacy_ids - accounted)
+        return {
+            "active_bindings": len(legacy_ids),
+            "revalidated_bindings": len(canonical_ids),
+            "retired_bindings": len(retired_ids),
+            "unaccounted_binding_ids": unaccounted,
+            "open_blocking_anomalies": open_blocking,
+            "cutover_ready": not unaccounted and open_blocking == 0,
+        }
+
+    def backfill_time_series_c4(self, *, actor: str) -> dict[str, Any]:
+        """Resolve and reauthorize every current legacy binding."""
+
+        self._require_proven_migration_phase("C3")
+        opened = self.open_migration_phase(phase="C4", actor=actor)
+        run_id = int(opened["migration_run_id"])
+        output_tables = tuple(self.link_layer_table_names().values())
+        before = self._migration_table_evidence(output_tables)
+        results = []
+        association_results = []
+        retired = []
+        findings = []
+        mapping_changes = 0
+        legacy_bindings = self._c4_legacy_binding_rows()
+        with self._lock:
+            for legacy_signal in self._c4_legacy_signal_rows():
+                try:
+                    with self._database_transaction():
+                        associations = self._c4_migrate_signal_associations(
+                            legacy_signal=legacy_signal,
+                            migration_run_id=run_id,
+                        )
+                except MigrationControlError as error:
+                    # A consumed signal is reported with the complete binding
+                    # context below.  Unused bad evidence is informational.
+                    consumed = self.connection.execute(
+                        """
+                        SELECT 1 FROM case_time_series_bindings
+                        WHERE time_series_set_id = ? AND signal_key = ? LIMIT 1
+                        """,
+                        (
+                            int(legacy_signal["time_series_set_id"]),
+                            str(legacy_signal["signal_key"]),
+                        ),
+                    ).fetchone()
+                    if consumed is None:
+                        findings.append(
+                            {
+                                "code": error.code,
+                                "severity": "informational",
+                                "finding_key": (
+                                    f"{error.code}:signal={int(legacy_signal['id'])}"
+                                ),
+                                "evidence": {
+                                    "signal_id": int(legacy_signal["id"]),
+                                    "project_id": int(legacy_signal["project_id"]),
+                                    **dict(error.context),
+                                },
+                                "explained": False,
+                                "explanation": "",
+                            }
+                        )
+                    continue
+                for association in associations:
+                    association_results.append(association)
+                    mapping_changes += self._record_c4_association_mapping(
+                        result=association, migration_run_id=run_id
+                    )
+            for legacy in legacy_bindings:
+                disposition = self._c4_binding_disposition(int(legacy["id"]))
+                if disposition is not None and disposition["target_id"] == "retired":
+                    retired.append(
+                        self.read_time_series_migration_binding_history(
+                            int(legacy["id"])
+                        )
+                    )
+                    continue
+                try:
+                    with self._database_transaction():
+                        binding_results = self._c4_migrate_binding(
+                            legacy=legacy, migration_run_id=run_id
+                        )
+                except MigrationControlError as error:
+                    evidence = {
+                        "binding_id": int(legacy["id"]),
+                        "variant_id": int(legacy["case_input_variant_id"]),
+                        "project_id": int(legacy["project_id"]),
+                        "legacy_binding": normalize_source_row(legacy),
+                        **dict(error.context),
+                    }
+                    findings.append(
+                        {
+                            "code": error.code,
+                            "severity": "blocking",
+                            "finding_key": (
+                                f"{error.code}:binding={int(legacy['id'])}"
+                            ),
+                            "evidence": evidence,
+                            "explained": False,
+                            "explanation": "",
+                        }
+                    )
+                    continue
+                results.extend(binding_results)
+                for result in binding_results:
+                    if result["catalog_association_id"] is not None:
+                        mapping_changes += self._record_c4_association_mapping(
+                            result={
+                                **result,
+                                "association_id": result["catalog_association_id"],
+                            },
+                            migration_run_id=run_id,
+                        )
+                    mapping = self.record_migration_mapping(
+                        migration_run_id=run_id,
+                        source_kind="legacy_time_series",
+                        source_table="case_time_series_bindings",
+                        source_id=str(legacy["id"]),
+                        target_kind=result["mapping_target_kind"],
+                        target_id=str(result["binding_id"]),
+                        source_hash=canonical_digest(legacy),
+                    )
+                    mapping_changes += mapping["status"] == "created"
+                self._resolve_previous_c4_binding_anomalies(
+                    binding_id=int(legacy["id"]),
+                    actor=migration_actor(run_id),
+                    note=f"Revalidated by C4 migration run {run_id}.",
+                )
+
+        after = self._migration_table_evidence(output_tables)
+        created_rows = sum(
+            after[table]["row_count"] - before[table]["row_count"]
+            for table in output_tables
+        )
+        if findings:
+            self._record_c4_migration_anomalies(
+                migration_run_id=run_id, findings=findings
+            )
+        gate = self.read_time_series_c4_cutover_gate()
+        manifest = {
+            "manifest_version": 1,
+            "phase": "C4",
+            "source_engine": self.database_backend,
+            "bindings": [
+                {
+                    key: result[key]
+                    for key in (
+                        "binding_id",
+                        "signal_id",
+                        "linkable_object_id",
+                        "binding_role_key",
+                        "set_revision_id",
+                        "catalog_association_id",
+                    )
+                }
+                for result in results
+            ],
+            "associations": [
+                {
+                    key: result[key]
+                    for key in (
+                        "association_id",
+                        "signal_id",
+                        "linkable_object_id",
+                        "binding_role_key",
+                    )
+                }
+                for result in association_results
+            ],
+            "outputs": after,
+            "anomalies": [
+                {
+                    "code": finding["code"],
+                    "severity": finding["severity"],
+                    "finding_key": finding["finding_key"],
+                    "evidence": finding["evidence"],
+                }
+                for finding in findings
+            ],
+            "blocking_anomalies": gate["open_blocking_anomalies"],
+            "active_bindings": len(legacy_bindings),
+            "revalidated_bindings": gate["revalidated_bindings"],
+            "retired_bindings": gate["retired_bindings"],
+            "cutover_ready": gate["cutover_ready"],
+        }
+        self._finish_migration_run(
+            migration_run_id=run_id,
+            status="proven" if gate["cutover_ready"] else "stopped",
+            manifest=manifest,
+        )
+        blocking_findings = [
+            finding for finding in findings if finding["severity"] == "blocking"
+        ]
+        if blocking_findings:
+            raise MigrationPhaseStopped(
+                C4_STOPPED,
+                migration_run_id=run_id,
+                findings=blocking_findings,
+                migrated_binding_ids=[result["binding_id"] for result in results],
+            )
+        return {
+            **opened,
+            "status": "proven",
+            "created_rows": created_rows,
+            "mapping_changes": int(mapping_changes),
             "manifest": manifest,
             "manifest_digest": canonical_digest(manifest),
         }
@@ -10883,10 +12151,36 @@ class AnalystStore:
             if item["status"] == "active"
             and item["state"] not in {"valid_current", "valid_pinned"}
         ]
+        blocked.extend(self._open_c4_variant_anomalies(variant_id=int(variant_id)))
         if blocked:
             raise BindingMutationError(
                 "TS_BINDING_EXECUTION_BLOCKED", details=blocked
             )
+
+    def _open_c4_variant_anomalies(self, *, variant_id: int) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            f"""
+            SELECT id, code, evidence_json
+            FROM {self._migration('time_series_migration_anomalies')}
+            WHERE phase = 'C4' AND severity = 'blocking'
+              AND resolution <> 'resolved'
+            ORDER BY id
+            """
+        ).fetchall()
+        blocked = []
+        for row in rows:
+            evidence = json.loads(row["evidence_json"] or "{}")
+            if int(evidence.get("variant_id") or 0) != int(variant_id):
+                continue
+            blocked.append(
+                {
+                    "binding_id": int(evidence["binding_id"]),
+                    "state": "migration_blocked",
+                    "anomaly_id": int(row["id"]),
+                    "anomaly_code": str(row["code"]),
+                }
+            )
+        return blocked
 
     @contextlib.contextmanager
     def _run_materialization_transaction(self):
@@ -11016,6 +12310,14 @@ class AnalystStore:
                     (int(variant_id),),
                 ).fetchall()
                 if not binding_rows:
+                    migration_blocks = self._open_c4_variant_anomalies(
+                        variant_id=int(variant_id)
+                    )
+                    if migration_blocks:
+                        raise BindingMutationError(
+                            "TS_BINDING_EXECUTION_BLOCKED",
+                            details=migration_blocks,
+                        )
                     return None
                 if (
                     expected_bindings_revision is not None
