@@ -7,6 +7,11 @@
             "title": "Landing Path",
             "type": "string"
           },
+          "ts_next_canonical_read": {
+            "default": false,
+            "title": "Ts Next Canonical Read",
+            "type": "boolean"
+          },
           "user": {
             "$ref": "#/components/schemas/CurrentUser"
           }
@@ -1268,6 +1273,11 @@
               }
             ],
             "title": "Landing Path"
+          },
+          "ts_next_canonical_read": {
+            "default": false,
+            "title": "Ts Next Canonical Read",
+            "type": "boolean"
           },
           "user": {
             "anyOf": [

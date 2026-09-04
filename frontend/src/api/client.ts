@@ -1476,6 +1476,7 @@ export interface HydraulicDiagramValidation extends CaseHierarchyProvenance {
 interface StructuredErrorBody {
   error?: {
     category?: string;
+    code?: string;
     message?: string;
     details?: unknown;
   };
@@ -1484,6 +1485,7 @@ interface StructuredErrorBody {
   phase?: string;
   message?: string;
   detail?: unknown;
+  request_id?: string;
 }
 
 export interface GeneratedSystemCaseValidationResponse {
@@ -1503,6 +1505,10 @@ export class ApiError extends Error {
     readonly status: number,
     readonly category: string,
     readonly details?: unknown,
+    // The TS-7 catalog refuses with a stable code and a correlation id; a
+    // surface that only had the prose could not name either of them.
+    readonly code?: string,
+    readonly requestId?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -1541,6 +1547,8 @@ async function errorFromResponse(response: Response): Promise<ApiError> {
       body.category ||
       `http_${response.status}`,
     structured?.details ?? body.detail ?? body,
+    structured?.code,
+    body.request_id,
   );
 }
 
@@ -1604,7 +1612,11 @@ export async function getCurrentUser(
     return await requestJson<CurrentUserResponse>("/api/auth/me", { signal });
   } catch (error) {
     if (error instanceof ApiError && error.status === 401)
-      return { user: null, bootstrap_required: false };
+      return {
+        user: null,
+        bootstrap_required: false,
+        ts_next_canonical_read: false,
+      };
     throw error;
   }
 }
@@ -3239,4 +3251,252 @@ export async function replaceTimeSeriesSetSource(
     },
   );
   return response.time_series_set;
+}
+
+// TS-7 layered catalog. Reading is direct and this surface never mutates, so
+// every call below is a GET and none of them carries a CSRF token.
+
+export interface CatalogPageEnvelope<TItem> {
+  items: TItem[];
+  page: { limit: number; has_more: boolean; next_cursor: string | null };
+  summary: { total_count: number } | null;
+  facets: unknown;
+  meta: { section: string; catalog_generation: number; request_id?: string };
+}
+
+export interface CatalogCoverageSummary {
+  start: string | null;
+  end: string | null;
+  period_count: number;
+  nominal_resolution_seconds: number;
+  minimum_resolution_seconds: number;
+  maximum_resolution_seconds: number;
+  regularity: string;
+  source_timezone: string | null;
+}
+
+export interface CatalogLinkSummary {
+  association_count: number;
+  binding_count: number;
+}
+
+export interface CatalogInputRow {
+  entry_kind: "input";
+  signal_id: number;
+  identity: {
+    series_key: string;
+    display_name: string;
+    description: string | null;
+    status: string;
+  };
+  owner: { project_id: number; project_name: string };
+  set: {
+    id: number;
+    name: string;
+    version_number: number;
+    version_label: string | null;
+    description: string | null;
+    status: string;
+    visibility_scope: string;
+  };
+  classification: {
+    semantic_type_key: string;
+    data_class_key: string;
+    unit_key: string;
+  };
+  current_revision: {
+    id: number;
+    number: number;
+    sealed: boolean;
+    created_at: string;
+  };
+  coverage_summary: CatalogCoverageSummary;
+  origin_summary: { source_kind: string };
+  link_summary: CatalogLinkSummary;
+  resource_version: number;
+}
+
+export interface CatalogInputDetail {
+  signal_id: number;
+  identity: CatalogInputRow["identity"];
+  owner: CatalogInputRow["owner"];
+  set: CatalogInputRow["set"] & { scope_revision: number };
+  contract: {
+    semantic_type: {
+      key: string;
+      display_name: string;
+      description: string | null;
+      status: string;
+      dimension_key: string;
+      value_kind: string;
+      default_aggregation: string;
+    };
+    data_class: { key: string; display_name: string; status: string };
+    unit: {
+      key: string;
+      symbol: string;
+      dimension_key: string;
+      status: string;
+    };
+    signal_role: string;
+    aggregation: string;
+  };
+  current_revision: {
+    id: number;
+    number: number;
+    state: string;
+    content_hash: string;
+    timezone: string | null;
+    timestamp_convention: string | null;
+    created_at: string;
+    created_by: string | null;
+  };
+  coverage_summary: CatalogCoverageSummary;
+  origin_summary: { source_kind: string };
+  link_summary: CatalogLinkSummary;
+  provenance: {
+    kind: string;
+    source_key: string | null;
+    filename: string | null;
+    media_type: string | null;
+    checksum: string | null;
+  };
+  validation_summary: { status: string | null; error_count: number };
+}
+
+export interface CatalogRevisionRow {
+  id: number;
+  number: number;
+  state: string;
+  content_hash: string | null;
+  created_at: string;
+  created_by: string | null;
+  change_summary: string | null;
+  source_kind: string;
+}
+
+export interface CatalogDescriptor {
+  id: number;
+  key: string;
+  display_name: string;
+  status: string;
+}
+
+export interface CatalogPreviewPoint {
+  timestamp_start: string;
+  timestamp_end: string;
+  value: number;
+  quality_flag: string | null;
+}
+
+export interface CatalogPreview {
+  signal_id: number;
+  revision: { id: number; content_hash: string };
+  requested_range: { from: string; to: string };
+  effective_range: { from: string; to: string } | null;
+  sampling: string;
+  max_points: number;
+  source_point_count: number;
+  returned_point_count: number;
+  unit: { key: string; symbol: string };
+  points: CatalogPreviewPoint[];
+}
+
+export interface CatalogInputQuery {
+  q?: string;
+  semantic_type_key?: string;
+  data_class_key?: string;
+  unit_key?: string;
+  visibility_scope?: string;
+  signal_status?: string;
+  order?: string;
+  limit?: number;
+  cursor?: string | null;
+}
+
+export function catalogInputSearchParams(
+  query: CatalogInputQuery,
+): URLSearchParams {
+  const params = new URLSearchParams();
+  const append = (key: string, value: string | undefined) => {
+    if (value && value.trim()) params.set(key, value.trim());
+  };
+  append("q", query.q);
+  append("semantic_type_key", query.semantic_type_key);
+  append("data_class_key", query.data_class_key);
+  append("unit_key", query.unit_key);
+  append("visibility_scope", query.visibility_scope);
+  append("signal_status", query.signal_status);
+  append("order", query.order);
+  if (query.limit) params.set("limit", String(query.limit));
+  if (query.cursor) params.set("cursor", query.cursor);
+  return params;
+}
+
+export async function listCatalogInputs(
+  query: CatalogInputQuery,
+  signal?: AbortSignal,
+): Promise<CatalogPageEnvelope<CatalogInputRow>> {
+  const params = catalogInputSearchParams(query);
+  const search = params.toString();
+  return requestJson<CatalogPageEnvelope<CatalogInputRow>>(
+    `/api/time-series/catalog/inputs${search ? `?${search}` : ""}`,
+    { signal },
+  );
+}
+
+export async function getCatalogInputDetail(
+  signalId: number,
+  signal?: AbortSignal,
+): Promise<CatalogInputDetail> {
+  return requestJson<CatalogInputDetail>(
+    `/api/time-series/catalog/inputs/${signalId}`,
+    { signal },
+  );
+}
+
+export async function listCatalogInputRevisions(
+  signalId: number,
+  signal?: AbortSignal,
+): Promise<CatalogPageEnvelope<CatalogRevisionRow>> {
+  return requestJson<CatalogPageEnvelope<CatalogRevisionRow>>(
+    `/api/time-series/catalog/inputs/${signalId}/revisions`,
+    { signal },
+  );
+}
+
+export async function listCatalogDescriptors(
+  kind: string,
+  signal?: AbortSignal,
+): Promise<CatalogPageEnvelope<CatalogDescriptor>> {
+  return requestJson<CatalogPageEnvelope<CatalogDescriptor>>(
+    `/api/time-series/catalog/descriptors?kind=${encodeURIComponent(kind)}&limit=200`,
+    { signal },
+  );
+}
+
+export interface CatalogPreviewQuery {
+  revisionId: number;
+  from: string;
+  to: string;
+  sampling: string;
+  maxPoints: number;
+}
+
+export async function getCatalogInputPreview(
+  signalId: number,
+  query: CatalogPreviewQuery,
+  signal?: AbortSignal,
+): Promise<CatalogPreview> {
+  const params = new URLSearchParams({
+    revision_id: String(query.revisionId),
+    from: query.from,
+    to: query.to,
+    sampling: query.sampling,
+    max_points: String(query.maxPoints),
+  });
+  return requestJson<CatalogPreview>(
+    `/api/time-series/catalog/inputs/${signalId}/preview?${params.toString()}`,
+    { signal },
+  );
 }

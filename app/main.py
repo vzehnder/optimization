@@ -364,11 +364,14 @@ class CurrentUserResponse(BaseModel):
     user: CurrentUser | None
     bootstrap_required: bool = False
     landing_path: str | None = None
+    # Pre-cutover reach of the canonical catalog read surface (chapter 11.1).
+    ts_next_canonical_read: bool = False
 
 
 class AuthSessionResponse(BaseModel):
     user: CurrentUser
     landing_path: str
+    ts_next_canonical_read: bool = False
 
 
 class CsrfTokenResponse(BaseModel):
@@ -1265,6 +1268,7 @@ def create_app(
             {
                 "user": public_current_user(user),
                 "landing_path": landing_path,
+                "ts_next_canonical_read": may_read_canonical_catalog(user),
             },
             status_code=status_code,
         )
@@ -1776,11 +1780,13 @@ def create_app(
                 "user": None,
                 "bootstrap_required": auth_required and analyst_store.count_users() == 0,
                 "landing_path": None,
+                "ts_next_canonical_read": False,
             }
         return {
             "user": public_current_user(user),
             "bootstrap_required": False,
             "landing_path": react_authenticated_landing_path(user),
+            "ts_next_canonical_read": may_read_canonical_catalog(user),
         }
 
     @app.get("/api/admin/users")
@@ -6572,6 +6578,36 @@ def cookie_secure_from_env(default: bool) -> bool:
     if raw_value is None:
         return default
     return raw_value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def canonical_read_verification_accounts() -> set[str]:
+    """The identities allowed into the canonical read surface before C6.
+
+    Chapter 11.1 opens `ts_next_canonical_read` first only for the verification
+    accounts, because a catalog that can be read and not mutated teaches a model
+    that does not yet exist. `TS_NEXT_CANONICAL_READ_ACCOUNTS` names them
+    explicitly; without it the single verification credential of `.env` is the
+    only one, so the surface never opens by omission.
+    """
+
+    configured = os.environ.get("TS_NEXT_CANONICAL_READ_ACCOUNTS")
+    if configured is None:
+        configured = os.environ.get("MAIL_USUARIO_TEST", "")
+    return {
+        entry.strip().lower()
+        for entry in configured.split(",")
+        if entry.strip()
+    }
+
+
+def may_read_canonical_catalog(user: dict[str, Any]) -> bool:
+    """TS7-022 replaces this allowlist with the role check; nothing else."""
+
+    if user.get("role") not in INTERNAL_USER_ROLES:
+        return False
+    return str(user.get("email", "")).strip().lower() in (
+        canonical_read_verification_accounts()
+    )
 
 
 def safe_internal_next_path(next_path: str) -> str:

@@ -1,6 +1,6 @@
 # TS7-019: Build The Layered Read Catalog For Verification Accounts
 
-Status: Todo
+Status: In Review
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter7/spec_ts7_catalogo_global_y_series_especificas.md` (8.1, 8.2, 11.1)
@@ -27,14 +27,14 @@ accepted experience describes.
 
 ## Acceptance criteria
 
-- [ ] The table shows one row per signal with owner, scope, type, class, unit, coverage and resolution (AC-CAT-01 frontend half).
-- [ ] Filters and pagination are server-side; the client never loads all points and never pages in memory.
-- [ ] The inspector shows contract, provenance, current revision with hash, coverage, resolution and consumers without downloading points (AC-DET-01 frontend half).
-- [ ] A bounded preview renders and an over-limit preview surfaces `TS_PREVIEW_TOO_LARGE` as a readable state, not a silent truncation.
-- [ ] The surface offers no mutation affordance of any kind.
-- [ ] Only verification accounts reach the surface; a regular internal user gets the pre-cutover behaviour and an `external` user gets a 404.
-- [ ] `tsc`, `eslint`, `vitest` and the production build pass.
-- [ ] A Chrome pass with the real `.env` credentials walks search, filter, inspect and preview with no console warnings or errors.
+- [x] The table shows one row per signal with owner, scope, type, class, unit, coverage and resolution (AC-CAT-01 frontend half).
+- [x] Filters and pagination are server-side; the client never loads all points and never pages in memory.
+- [x] The inspector shows contract, provenance, current revision with hash, coverage, resolution and consumers without downloading points (AC-DET-01 frontend half).
+- [x] A bounded preview renders and an over-limit preview surfaces `TS_PREVIEW_TOO_LARGE` as a readable state, not a silent truncation.
+- [x] The surface offers no mutation affordance of any kind.
+- [x] Only verification accounts reach the surface; a regular internal user gets the pre-cutover behaviour and an `external` user gets a 404.
+- [x] `tsc`, `eslint`, `vitest` and the production build pass.
+- [x] A Chrome pass with the real `.env` credentials walks search, filter, inspect and preview with no console warnings or errors.
 
 ## Blocked by
 

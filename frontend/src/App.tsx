@@ -35,6 +35,7 @@ import {
 } from "./ClientPortal";
 import { ScenarioDraftEditorView } from "./DraftEditor";
 import { ErrorBoundary } from "./ErrorBoundary";
+import { GlobalCatalogView } from "./GlobalCatalog";
 import {
   ConsoleListView,
   ConsoleRootPlanIdentity,
@@ -86,6 +87,7 @@ function useAcceptAuthSession() {
     queryClient.setQueryData<CurrentUserResponse>(identityQueryKey, {
       user: session.user,
       bootstrap_required: false,
+      ts_next_canonical_read: session.ts_next_canonical_read,
     });
     navigate(reactRouteFromServerPath(session.landing_path), {
       replace: true,
@@ -219,6 +221,7 @@ function SystemStatus() {
 interface RootProps {
   user: CurrentUser;
   landingPath: string;
+  canonicalCatalogRead?: boolean;
 }
 
 function LogoutButton() {
@@ -231,6 +234,7 @@ function LogoutButton() {
         user: null,
         bootstrap_required: false,
         landing_path: null,
+        ts_next_canonical_read: false,
       });
       navigate("/", { replace: true });
     },
@@ -281,7 +285,7 @@ function DeniedRoot({ user, landingPath }: RootProps) {
   );
 }
 
-function AnalystRoot({ user, landingPath }: RootProps) {
+function AnalystRoot({ user, landingPath, canonicalCatalogRead }: RootProps) {
   if (isExternalIdentity(user))
     return <DeniedRoot user={user} landingPath={landingPath} />;
 
@@ -298,6 +302,9 @@ function AnalystRoot({ user, landingPath }: RootProps) {
       </header>
       <nav className="primary-nav" aria-label="Navegacion principal">
         <Link to="/projects">Analista</Link>
+        {canonicalCatalogRead ? (
+          <Link to="/time-series/catalog">Catalogo</Link>
+        ) : null}
         {user.role === "admin" ? <Link to="/admin/users">Admin</Link> : null}
         <Link to="/system">Sistema</Link>
       </nav>
@@ -354,14 +361,24 @@ function LandingRedirect({ landingPath }: { landingPath: string }) {
 function AuthenticatedRoutes({
   user,
   landingPath,
+  canonicalCatalogRead,
 }: {
   user: CurrentUser;
   landingPath: string;
+  canonicalCatalogRead: boolean;
 }) {
   return (
     <Routes>
       <Route index element={<LandingRedirect landingPath={landingPath} />} />
-      <Route element={<AnalystRoot user={user} landingPath={landingPath} />}>
+      <Route
+        element={
+          <AnalystRoot
+            user={user}
+            landingPath={landingPath}
+            canonicalCatalogRead={canonicalCatalogRead}
+          />
+        }
+      >
         <Route path="projects" element={<ProjectListView />} />
         <Route
           path="projects/:projectId"
@@ -412,6 +429,15 @@ function AuthenticatedRoutes({
         <Route
           path="publications/:publicationId/preview"
           element={<PublicationPreviewView />}
+        />
+        <Route
+          path="time-series/catalog"
+          element={
+            // Chapter 11.1: before the C6 cutover the canonical read surface
+            // exists only for the verification accounts. Everyone else keeps
+            // the pre-cutover behaviour, which is that the route is not there.
+            canonicalCatalogRead ? <GlobalCatalogView /> : <NotFoundView />
+          }
         />
         <Route path="system" element={<SystemStatus />} />
         <Route
@@ -475,6 +501,7 @@ function Shell() {
     <AuthenticatedRoutes
       user={identity.data.user}
       landingPath={identity.data.landing_path || "/react"}
+      canonicalCatalogRead={identity.data.ts_next_canonical_read}
     />
   );
 }

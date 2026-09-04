@@ -2521,6 +2521,11 @@ export interface components {
         AuthSessionResponse: {
             /** Landing Path */
             landing_path: string;
+            /**
+             * Ts Next Canonical Read
+             * @default false
+             */
+            ts_next_canonical_read: boolean;
             user: components["schemas"]["CurrentUser"];
         };
         /** Body_prepare_object_series_file_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions_files_post */
@@ -2924,6 +2929,11 @@ export interface components {
             bootstrap_required: boolean;
             /** Landing Path */
             landing_path?: string | null;
+            /**
+             * Ts Next Canonical Read
+             * @default false
+             */
+            ts_next_canonical_read: boolean;
             user: components["schemas"]["CurrentUser"] | null;
         };
         /** CustomSemanticTypeCreateRequest */

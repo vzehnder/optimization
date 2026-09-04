@@ -8030,6 +8030,26 @@ class AnalystStore:
                 "created_at": item["revision_created_at"],
                 "created_by": item["revision_created_by"],
             },
+            # Chapter 6.5 adds to the row projection instead of replacing it, so
+            # the inspector answers coverage, resolution and consumers from the
+            # same projection columns the list read and never from the values.
+            "coverage_summary": {
+                "start": item["coverage_start"],
+                "end": item["coverage_end"],
+                "period_count": int(item["period_count"]),
+                "nominal_resolution_seconds": float(
+                    item["nominal_resolution_seconds"]
+                ),
+                "minimum_resolution_seconds": float(item["min_resolution_seconds"]),
+                "maximum_resolution_seconds": float(item["max_resolution_seconds"]),
+                "regularity": item["regularity"],
+                "source_timezone": item["source_timezone"],
+            },
+            "origin_summary": {"source_kind": item["source_kind"]},
+            "link_summary": {
+                "association_count": int(item["association_count"]),
+                "binding_count": int(item["binding_count"]),
+            },
             "provenance": {
                 "kind": item["provenance_kind"] or item["source_kind"],
                 "source_key": item["provenance_source_key"],
