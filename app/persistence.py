@@ -184,11 +184,17 @@ from app.time_series_migration import (
     C2_STOPPED,
     C3_STOPPED,
     C4_STOPPED,
+    C5_ANOMALY_CODES,
+    C5_SAMPLE_VERSION,
+    C5_SHADOW_DIMENSIONS,
+    C5_STOPPED,
     LEGACY_BINDING_ROLE_ALIASES,
     LEGACY_BINDING_ROLE_EXPANSIONS,
     MAPPING_CONFLICT,
+    MIGRATION_ANOMALY_CODES,
     MIGRATION_PHASE_REQUIRED,
     MIGRATION_CONTROL_VERSION,
+    MUTATION_PAUSED,
     RECOVERY_POINT_REQUIRED,
     MigrationControlError,
     MigrationPhaseStopped,
@@ -396,6 +402,11 @@ class AnalystStore:
             os.environ.get("TS_MIGRATION_MANIFEST_SECRET", "").encode("utf-8")
             or secrets.token_bytes(32)
         )
+        # The short mutation pause C5 takes while it settles the source. It is
+        # deliberately process state and not a table: it must be impossible to
+        # leave behind in the database after a crash, and every legacy
+        # time-series writer goes through this one process.
+        self._legacy_mutation_pause: dict[str, Any] | None = None
         self.database_backend, self.database_path, self.connection = connect_database(self.database_url)
         try:
             self._initialize_schema()
@@ -2474,6 +2485,62 @@ class AnalystStore:
                 "drained_count": int(cursor.rowcount),
                 "pending_count": len(self.read_pending_dirty_roots()),
             }
+
+    def begin_legacy_mutation_pause(
+        self, *, actor: str, reason: str
+    ) -> dict[str, Any]:
+        """Hold legacy time-series writes so a phase can read a settled source.
+
+        Chapter 10.2 gives C5 a *short* pause, not a maintenance window: it is
+        taken around the drain and the comparison and released with the phase,
+        so a crash cannot leave the legacy writer disabled.
+        """
+
+        resolved_reason = str(reason).strip()
+        if not resolved_reason:
+            raise ValueError("reason must not be blank")
+        with self._lock:
+            if self._legacy_mutation_pause is not None:
+                raise MigrationControlError(
+                    MUTATION_PAUSED,
+                    reason="already_paused",
+                    paused_by=str(self._legacy_mutation_pause["actor"]),
+                )
+            self._legacy_mutation_pause = {
+                "actor": str(actor),
+                "reason": resolved_reason,
+                "paused_at": utc_now_iso(),
+            }
+            return dict(self._legacy_mutation_pause)
+
+    def release_legacy_mutation_pause(self, *, actor: str) -> dict[str, Any]:
+        with self._lock:
+            pause = self._legacy_mutation_pause
+            if pause is None:
+                return {"released": False, "reason": "not_paused"}
+            self._legacy_mutation_pause = None
+            return {
+                "released": True,
+                "actor": str(actor),
+                "paused_by": str(pause["actor"]),
+                "paused_at": str(pause["paused_at"]),
+            }
+
+    def read_legacy_mutation_pause(self) -> dict[str, Any] | None:
+        pause = self._legacy_mutation_pause
+        return None if pause is None else dict(pause)
+
+    def _require_no_legacy_mutation_pause(self, operation: str) -> None:
+        pause = self._legacy_mutation_pause
+        if pause is None:
+            return
+        raise MigrationControlError(
+            MUTATION_PAUSED,
+            operation=str(operation),
+            paused_by=str(pause["actor"]),
+            paused_at=str(pause["paused_at"]),
+            pause_reason=str(pause["reason"]),
+        )
 
     def open_migration_phase(self, *, phase: str, actor: str) -> dict[str, Any]:
         """Start a phase after C0, refusing without a live recovery point.
@@ -4636,6 +4703,7 @@ class AnalystStore:
                     reason="canonical_binding_id_already_assigned",
                     mismatches=mismatches,
                 )
+        self._refresh_catalog_link_counts([int(signal["signal_id"])])
         return {
             "binding_id": binding_id,
             "legacy_binding_id": int(legacy["id"]),
@@ -4650,6 +4718,42 @@ class AnalystStore:
                 legacy=legacy, binding_role_key=binding_role_key
             ),
         }
+
+    def _refresh_catalog_link_counts(self, signal_ids) -> None:
+        """Move the projection's link counts with the transaction that changed them.
+
+        Chapter 9.3 requires the read model to be updated synchronously by the
+        same service and the same transaction that changes the source. The
+        canonical association and binding batches already do this; the migrator
+        writes the same link tables directly and owes the projection the same
+        update, or C5 finds a divergence the migrator itself created.
+        """
+
+        ids = sorted({int(signal_id) for signal_id in signal_ids})
+        if not ids:
+            return
+        entries = self._projection("time_series_catalog_entries")
+        associations = self.link_layer_table_names()[
+            "time_series_catalog_associations"
+        ]
+        bindings = self.link_layer_table_names()["case_time_series_bindings"]
+        placeholders = ", ".join("?" for _ in ids)
+        self.connection.execute(
+            f"""
+            UPDATE {entries}
+            SET association_count = (
+                    SELECT COUNT(*) FROM {associations}
+                    WHERE signal_id = {entries}.signal_id AND status = 'active'
+                ),
+                binding_count = (
+                    SELECT COUNT(*) FROM {bindings}
+                    WHERE signal_id = {entries}.signal_id AND status = 'active'
+                ),
+                projection_revision = projection_revision + 1
+            WHERE signal_id IN ({placeholders})
+            """,
+            tuple(ids),
+        )
 
     def _c4_migrate_binding(
         self, *, legacy: Mapping[str, Any], migration_run_id: int
@@ -4711,6 +4815,9 @@ class AnalystStore:
                     "created": created,
                 }
             )
+        self._refresh_catalog_link_counts(
+            result["signal_id"] for result in results
+        )
         return results
 
     def _record_c4_association_mapping(
@@ -4876,6 +4983,7 @@ class AnalystStore:
             """,
             (str(legacy_binding_id),),
         ).fetchall()
+        touched_signal_ids = []
         for mapping in rows:
             binding = self.connection.execute(
                 f"SELECT * FROM {bindings} WHERE id = ?",
@@ -4883,6 +4991,7 @@ class AnalystStore:
             ).fetchone()
             if binding is None or binding["status"] != "active":
                 continue
+            touched_signal_ids.append(int(binding["signal_id"]))
             next_revision = int(binding["lifecycle_revision"]) + 1
             self.connection.execute(
                 f"""
@@ -4934,6 +5043,7 @@ class AnalystStore:
                     occurred_at,
                 ),
             )
+        self._refresh_catalog_link_counts(touched_signal_ids)
 
     def retire_time_series_migration_binding(
         self, *, anomaly_id: int, actor: str, reason: str
@@ -5310,6 +5420,725 @@ class AnalystStore:
             "status": "proven",
             "created_rows": created_rows,
             "mapping_changes": int(mapping_changes),
+            "manifest": manifest,
+            "manifest_digest": canonical_digest(manifest),
+        }
+
+    # -- C5 shadow reads, settled source and convergence (TS7-018) --------
+    #
+    # C5 proves the canonical reads are right before they serve traffic, and
+    # proves the migrator has stopped moving.  It compares and it records; it
+    # never repairs.  Chapter 9.10 gives reconciliation the job of detecting
+    # divergence, and chapter 10.2 makes a single difference a rollback
+    # trigger rather than a finding to triage later.
+
+    def _c5_unit_symbols(self) -> dict[str, str]:
+        return {
+            str(row["unit_key"]): str(row["symbol"])
+            for row in self.connection.execute(
+                "SELECT unit_key, symbol FROM measurement_units"
+            ).fetchall()
+        }
+
+    def _c5_legacy_current_revision(self, set_id: int):
+        return self.connection.execute(
+            """
+            SELECT id, revision_number, content_hash
+            FROM time_series_set_revisions
+            WHERE time_series_set_id = ?
+            ORDER BY revision_number DESC, id DESC
+            LIMIT 1
+            """,
+            (int(set_id),),
+        ).fetchone()
+
+    def _c5_mapped_target(
+        self, *, source_table: str, source_id: str, target_kind: str
+    ) -> str | None:
+        row = self.connection.execute(
+            f"""
+            SELECT target_id
+            FROM {self._migration('time_series_migration_mappings')}
+            WHERE source_kind = 'legacy_time_series' AND source_table = ?
+              AND source_id = ? AND target_kind = ?
+            """,
+            (str(source_table), str(source_id), str(target_kind)),
+        ).fetchone()
+        return None if row is None else str(row["target_id"])
+
+    def _c5_legacy_set_view(self, *, project_id: int, set_id: int) -> dict[str, Any]:
+        """The legacy read of one set, reduced to what parity compares."""
+
+        legacy = self.get_time_series_set(int(project_id), int(set_id))
+        revision = self._c5_legacy_current_revision(set_id)
+        values: dict[str, dict[int, float]] = {}
+        for row in legacy["values"]:
+            values.setdefault(str(row["signal_key"]), {})[
+                int(row["period_index"])
+            ] = float(row["value_numeric"])
+        return {
+            "semantics": {
+                "series_keys": sorted(
+                    str(signal["signal_key"]) for signal in legacy["signals"]
+                ),
+                "units": {
+                    str(signal["signal_key"]): str(signal["unit"])
+                    for signal in legacy["signals"]
+                },
+                "data_kind": str(legacy["data_kind"]),
+                "timezone": str(legacy["timezone"]),
+            },
+            "counts": {
+                "signal_count": int(legacy["signal_count"]),
+                "period_count": int(legacy["period_count"]),
+                "value_count": len(legacy["values"]),
+            },
+            "values": values,
+            "hashes": {"content_hash": str(legacy["content_hash"])},
+            "authorization": {
+                "project_id": int(legacy["project_id"]),
+                "status": str(legacy["status"]),
+                "name": str(legacy["name"]),
+                "version_number": int(legacy["version_number"]),
+                "version_label": str(legacy["version_label"]),
+            },
+            "lineage": {
+                "set_id": str(int(set_id)),
+                "revision_id": None if revision is None else str(revision["id"]),
+                "revision_number": (
+                    None if revision is None else int(revision["revision_number"])
+                ),
+            },
+        }
+
+    def _c5_canonical_set_view(self, set_id: int) -> dict[str, Any]:
+        """The canonical read of the same set, in the same reduced shape."""
+
+        canonical = self.read_canonical_set(int(set_id))
+        current = canonical["current_revision"]
+        if current is None:
+            raise MigrationControlError(
+                MIGRATION_ANOMALY_CODES["revision_unmaterialized"],
+                set_id=int(set_id),
+                reason="no_current_revision",
+            )
+        revision = self.read_canonical_revision(int(current["id"]))
+        symbols = self._c5_unit_symbols()
+        period_indexes = [
+            int(period["period_index"]) for period in revision["periods"]
+        ]
+        values = {
+            str(series_key): {
+                period_indexes[position]: float(value)
+                for position, value in enumerate(column)
+            }
+            for series_key, column in revision["values"].items()
+        }
+        legacy_revision = self._c5_legacy_current_revision(set_id)
+        return {
+            "semantics": {
+                "series_keys": sorted(
+                    str(signal["series_key"]) for signal in revision["signals"]
+                ),
+                "units": {
+                    str(signal["series_key"]): symbols.get(
+                        str(signal["unit_key"]), str(signal["unit_key"])
+                    )
+                    for signal in revision["signals"]
+                },
+                "data_kind": str(revision["data_class_key"]),
+                "timezone": str(revision["timezone"]),
+            },
+            "counts": {
+                "signal_count": int(revision["signal_count"]),
+                "period_count": int(revision["period_count"]),
+                "value_count": int(revision["value_count"]),
+            },
+            "values": values,
+            "hashes": {"content_hash": str(revision["legacy_content_hash"])},
+            "authorization": {
+                "project_id": int(canonical["owner_project_id"]),
+                "status": str(canonical["status"]),
+                "name": str(canonical["name"]),
+                "version_number": int(canonical["version_number"]),
+                "version_label": str(canonical["version_label"]),
+            },
+            "lineage": {
+                "set_id": self._c5_mapped_target(
+                    source_table="time_series_sets",
+                    source_id=str(int(set_id)),
+                    target_kind="canonical_set",
+                ),
+                "revision_id": (
+                    None
+                    if legacy_revision is None
+                    else self._c5_mapped_target(
+                        source_table="time_series_set_revisions",
+                        source_id=str(legacy_revision["id"]),
+                        target_kind="canonical_revision",
+                    )
+                ),
+                "revision_number": int(revision["revision_number"]),
+            },
+        }
+
+    def _c5_shadow_difference(
+        self, *, subject: str, dimension: str, legacy: Any, canonical: Any
+    ) -> dict[str, Any]:
+        code = C5_ANOMALY_CODES["shadow_difference"]
+        return {
+            "code": code,
+            "severity": "blocking",
+            "finding_key": f"{code}:{subject}:{dimension}",
+            "evidence": {
+                "subject": subject,
+                "dimension": dimension,
+                "legacy": legacy,
+                "canonical": canonical,
+            },
+            "explained": False,
+            "explanation": "",
+        }
+
+    def _c5_compare_migrated_set(self, *, set_id: int, project_id: int):
+        """Compare one migrated set on all six dimensions of chapter 10.2."""
+
+        subject = f"set:{int(set_id)}"
+        try:
+            legacy_view = self._c5_legacy_set_view(
+                project_id=project_id, set_id=set_id
+            )
+        except KeyError as error:
+            return [
+                self._c5_shadow_difference(
+                    subject=subject,
+                    dimension="lineage",
+                    legacy={"readable": False, "reason": str(error)},
+                    canonical={"readable": True, "set_id": int(set_id)},
+                )
+            ]
+        try:
+            canonical_view = self._c5_canonical_set_view(set_id)
+        except MigrationControlError as error:
+            return [
+                self._c5_shadow_difference(
+                    subject=subject,
+                    dimension="counts",
+                    legacy=legacy_view["counts"],
+                    canonical={"error": error.code, **dict(error.context)},
+                )
+            ]
+        differences = []
+        for dimension in C5_SHADOW_DIMENSIONS:
+            legacy_side = legacy_view[dimension]
+            canonical_side = canonical_view[dimension]
+            if legacy_side != canonical_side:
+                differences.append(
+                    self._c5_shadow_difference(
+                        subject=subject,
+                        dimension=dimension,
+                        legacy=legacy_side,
+                        canonical=canonical_side,
+                    )
+                )
+        return differences
+
+    def _c5_set_object_families(self) -> dict[int, set[str]]:
+        register = self._linkable("linkable_objects")
+        signals = self._canonical("time_series_signals")
+        families: dict[int, set[str]] = {}
+        for link_table in (
+            self.link_layer_table_names()["time_series_catalog_associations"],
+            self.link_layer_table_names()["case_time_series_bindings"],
+        ):
+            for row in self.connection.execute(
+                f"""
+                SELECT DISTINCT signal.time_series_set_id AS set_id,
+                       registered.object_kind AS object_kind
+                FROM {link_table} AS link
+                JOIN {signals} AS signal ON signal.id = link.signal_id
+                JOIN {register} AS registered
+                  ON registered.id = link.linkable_object_id
+                WHERE link.status = 'active'
+                """
+            ).fetchall():
+                families.setdefault(int(row["set_id"]), set()).add(
+                    str(row["object_kind"])
+                )
+        return families
+
+    def _c5_sample(self, *, set_ids=None) -> dict[str, Any]:
+        """The recorded, stratified selection the shadow read compares.
+
+        Every canonical set is stratified by ``series_kind``, its state and the
+        family of the objects it is linked to, so the manifest shows which
+        strata the source has and which of them the sample reached. A narrower
+        explicit selection is allowed and is then checked against that map.
+        """
+
+        families = self._c5_set_object_families()
+        source_sets = []
+        for row in self.connection.execute(
+            f"""
+            SELECT the_set.id AS id,
+                   the_set.owner_project_id AS owner_project_id,
+                   the_set.series_kind AS series_kind,
+                   the_set.status AS status,
+                   COALESCE(revision.state, 'unmaterialized') AS revision_state
+            FROM {self._canonical('time_series_sets')} AS the_set
+            LEFT JOIN {self._canonical('time_series_set_revisions')} AS revision
+              ON revision.id = the_set.current_revision_id
+            ORDER BY the_set.id
+            """
+        ).fetchall():
+            set_id = int(row["id"])
+            source_sets.append(
+                {
+                    "set_id": set_id,
+                    "project_id": int(row["owner_project_id"]),
+                    "series_kind": str(row["series_kind"]),
+                    "set_state": f"{row['status']}/{row['revision_state']}",
+                    "object_families": sorted(families.get(set_id) or {"unlinked"}),
+                    "migrated": self._c5_mapped_target(
+                        source_table="time_series_sets",
+                        source_id=str(set_id),
+                        target_kind="canonical_set",
+                    )
+                    is not None,
+                }
+            )
+        if set_ids is None:
+            selection_mode = "all"
+            selected = {entry["set_id"] for entry in source_sets}
+        else:
+            selection_mode = "explicit"
+            selected = {int(set_id) for set_id in set_ids}
+        strata: dict[str, list[int]] = {}
+        for entry in source_sets:
+            for family in entry["object_families"]:
+                key = f"{entry['series_kind']}|{entry['set_state']}|{family}"
+                strata.setdefault(key, []).append(entry["set_id"])
+        sampled = [entry for entry in source_sets if entry["set_id"] in selected]
+        binding_ids = [
+            int(row["id"])
+            for row in self.connection.execute(
+                """
+                SELECT id, time_series_set_id FROM case_time_series_bindings
+                ORDER BY id
+                """
+            ).fetchall()
+            if int(row["time_series_set_id"]) in selected
+        ]
+        return {
+            "sample_version": C5_SAMPLE_VERSION,
+            "selection_mode": selection_mode,
+            "set_ids": [entry["set_id"] for entry in sampled],
+            "binding_ids": binding_ids,
+            "sets": sampled,
+            "strata": {
+                key: {
+                    "source_set_ids": source_ids,
+                    "sampled_set_ids": [
+                        set_id for set_id in source_ids if set_id in selected
+                    ],
+                }
+                for key, source_ids in sorted(strata.items())
+            },
+            "series_kinds": sorted({entry["series_kind"] for entry in sampled}),
+            "set_states": sorted({entry["set_state"] for entry in sampled}),
+            "object_families": sorted(
+                {
+                    family
+                    for entry in sampled
+                    for family in entry["object_families"]
+                }
+            ),
+        }
+
+    def _migration_mapping_count(self) -> int:
+        return int(
+            self.connection.execute(
+                "SELECT COUNT(*) AS total FROM "
+                + self._migration("time_series_migration_mappings")
+            ).fetchone()["total"]
+        )
+
+    def _c5_canonical_binding_ids(self, legacy_binding_id: int) -> list[int]:
+        return [
+            int(row["target_id"])
+            for row in self.connection.execute(
+                f"""
+                SELECT DISTINCT target_id
+                FROM {self._migration('time_series_migration_mappings')}
+                WHERE source_kind = 'legacy_time_series'
+                  AND source_table = 'case_time_series_bindings'
+                  AND source_id = ?
+                  AND (target_kind = 'canonical_binding'
+                       OR target_kind LIKE 'canonical_binding:%')
+                ORDER BY target_id
+                """,
+                (str(int(legacy_binding_id)),),
+            ).fetchall()
+        ]
+
+    def _c5_binding_comparison(self, sample: Mapping[str, Any]) -> dict[str, Any]:
+        """Every sampled legacy binding, against what the canonical read serves.
+
+        The C4 receipt already decides which legacy bindings are backed by an
+        active canonical row plus validation and which were retired on the
+        record; C5 re-reads it here rather than re-deriving it, and then checks
+        the one thing the receipt cannot: that each canonical binding still
+        points at the legacy set the reference named.
+        """
+
+        gate = self.read_time_series_c4_cutover_gate()
+        legacy_rows = {
+            int(row["id"]): row for row in self._c4_legacy_binding_rows()
+        }
+        unaccounted = set(gate["unaccounted_binding_ids"])
+        findings = []
+        compared = 0
+        sampled_unaccounted = []
+        for binding_id in sample["binding_ids"]:
+            legacy = legacy_rows.get(int(binding_id))
+            if legacy is None:
+                continue
+            subject = f"binding:{int(binding_id)}"
+            if int(binding_id) in unaccounted:
+                sampled_unaccounted.append(int(binding_id))
+                findings.append(
+                    self._c5_shadow_difference(
+                        subject=subject,
+                        dimension="lineage",
+                        legacy={"accounted": True, "legacy_binding_id": int(binding_id)},
+                        canonical={"accounted": False, "canonical_binding_ids": []},
+                    )
+                )
+                continue
+            compared += 1
+            for canonical_id in self._c5_canonical_binding_ids(int(binding_id)):
+                try:
+                    binding = self.read_case_binding(
+                        scenario_id=int(legacy["scenario_id"]),
+                        variant_id=int(legacy["case_input_variant_id"]),
+                        binding_id=int(canonical_id),
+                    )
+                except (KeyError, BindingMutationError, LinkableObjectError):
+                    continue
+                if binding["status"] != "active":
+                    continue
+                if int(binding["time_series_set_id"]) != int(
+                    legacy["time_series_set_id"]
+                ):
+                    findings.append(
+                        self._c5_shadow_difference(
+                            subject=subject,
+                            dimension="values",
+                            legacy={
+                                "time_series_set_id": int(
+                                    legacy["time_series_set_id"]
+                                )
+                            },
+                            canonical={
+                                "canonical_binding_id": int(canonical_id),
+                                "time_series_set_id": int(
+                                    binding["time_series_set_id"]
+                                ),
+                            },
+                        )
+                    )
+        if gate["open_blocking_anomalies"]:
+            findings.append(
+                self._c5_shadow_difference(
+                    subject="bindings",
+                    dimension="lineage",
+                    legacy={"open_blocking_anomalies": 0},
+                    canonical={
+                        "open_blocking_anomalies": int(
+                            gate["open_blocking_anomalies"]
+                        )
+                    },
+                )
+            )
+        return {
+            "state": {
+                "compared": compared,
+                "unaccounted_binding_ids": sorted(sampled_unaccounted),
+                "open_blocking_anomalies": int(gate["open_blocking_anomalies"]),
+                "retired_bindings": int(gate["retired_bindings"]),
+            },
+            "findings": findings,
+        }
+
+    def _c5_sample_coverage_findings(self, sample: Mapping[str, Any]):
+        """A stratum the source has and the sample does not reach is a gap.
+
+        The wide sample of chapter 10.2 is what makes "no difference" mean
+        anything, so an explicit narrower selection has to prove it still
+        reaches every set state, object family and ``series_kind`` the source
+        actually carries.
+        """
+
+        code = C5_ANOMALY_CODES["sample_incomplete"]
+        findings = []
+        for stratum, coverage in sample["strata"].items():
+            if coverage["source_set_ids"] and not coverage["sampled_set_ids"]:
+                findings.append(
+                    {
+                        "code": code,
+                        "severity": "blocking",
+                        "finding_key": f"{code}:{stratum}",
+                        "evidence": {
+                            "stratum": stratum,
+                            "selection_mode": sample["selection_mode"],
+                            "source_set_ids": coverage["source_set_ids"],
+                        },
+                        "explained": False,
+                        "explanation": "",
+                    }
+                )
+        return findings
+
+    def _c5_registry_comparison(self) -> dict[str, Any]:
+        """Compare the persisted projection against the Python signal registry.
+
+        Chapter 10.4 makes this the last check before the database becomes
+        authoritative: while ``TIME_SERIES_SIGNAL_CATALOG`` is still the seed
+        contract, a projection that shows a different unit for a registered key
+        is a divergence that blocks the phase, never a value to reconcile.
+        """
+
+        symbols = self._c5_unit_symbols()
+        entries = self._projection("time_series_catalog_entries")
+        code = C5_ANOMALY_CODES["registry_divergence"]
+        findings = []
+        compared = 0
+        unregistered = set()
+        for row in self.connection.execute(
+            f"""
+            SELECT signal_id, series_key, unit_key FROM {entries}
+            ORDER BY signal_id
+            """
+        ).fetchall():
+            series_key = str(row["series_key"])
+            definition = TIME_SERIES_SIGNAL_CATALOG.get(series_key)
+            if definition is None:
+                unregistered.add(series_key)
+                continue
+            compared += 1
+            projected_unit = symbols.get(
+                str(row["unit_key"]), str(row["unit_key"])
+            )
+            if projected_unit != definition.unit:
+                findings.append(
+                    {
+                        "code": code,
+                        "severity": "blocking",
+                        "finding_key": f"{code}:signal={int(row['signal_id'])}",
+                        "evidence": {
+                            "signal_id": int(row["signal_id"]),
+                            "series_key": series_key,
+                            "registry_unit": definition.unit,
+                            "projected_unit": projected_unit,
+                        },
+                        "explained": False,
+                        "explanation": "",
+                    }
+                )
+        return {
+            "state": {
+                "contract_entries": len(TIME_SERIES_SIGNAL_CATALOG),
+                "compared_entries": compared,
+                "unregistered_series_keys": sorted(unregistered),
+            },
+            "findings": findings,
+        }
+
+    def _c5_projection_comparison(self) -> dict[str, Any]:
+        """Reconcile the persisted projection against the canonical model.
+
+        A stale or missing row is a canonical read that no longer answers what
+        the source says, so it is a shadow difference on counts. A leaked
+        ``object_specific`` row is reported on its own dimension: the global
+        list must never be able to see one (chapter 10.10).
+        """
+
+        divergence = self.catalog_projection_divergence()
+        findings = []
+        if divergence["object_specific"]:
+            findings.append(
+                self._c5_shadow_difference(
+                    subject="projection:inputs",
+                    dimension="authorization",
+                    legacy={"object_specific": []},
+                    canonical={"object_specific": divergence["object_specific"]},
+                )
+            )
+        drifted = {
+            key: divergence[key] for key in ("missing", "unexpected", "stale")
+        }
+        if any(drifted.values()):
+            findings.append(
+                self._c5_shadow_difference(
+                    subject="projection:inputs",
+                    dimension="counts",
+                    legacy={key: [] for key in drifted},
+                    canonical={**drifted, "converged": False},
+                )
+            )
+        return {
+            "state": {
+                "section": divergence["section"],
+                "converged": bool(divergence["converged"]),
+                "content_hash": self._catalog_projection_content_hash(
+                    self._projection("time_series_catalog_entries")
+                ),
+            },
+            "findings": findings,
+        }
+
+    def _c5_settle_source(self) -> dict[str, Any]:
+        """Drain the dirty-roots journal so the comparison sees a settled source.
+
+        Only the resulting state reaches the manifest: how many roots this run
+        happened to drain is run-local, and a convergent repeat must reproduce
+        the same document.
+        """
+
+        pending = self.read_pending_dirty_roots()
+        drained = {"drained_count": 0}
+        if pending:
+            drained = self.drain_legacy_dirty_roots(
+                through_sequence=max(
+                    int(entry["sequence_number"]) for entry in pending
+                )
+            )
+        remaining = self.read_pending_dirty_roots()
+        findings = []
+        if remaining:
+            code = C5_ANOMALY_CODES["dirty_roots_pending"]
+            findings.append(
+                {
+                    "code": code,
+                    "severity": "blocking",
+                    "finding_key": f"{code}:journal",
+                    "evidence": {
+                        "pending_dirty_roots": len(remaining),
+                        "sequence_numbers": [
+                            int(entry["sequence_number"]) for entry in remaining
+                        ],
+                    },
+                    "explained": False,
+                    "explanation": "",
+                }
+            )
+        return {
+            "drained_count": int(drained["drained_count"]),
+            "state": {
+                "pending_dirty_roots": len(remaining),
+                "mutation_pause": "taken",
+            },
+            "findings": findings,
+        }
+
+    def verify_time_series_c5_shadow(
+        self, *, actor: str, set_ids=None
+    ) -> dict[str, Any]:
+        """Compare canonical and legacy reads in shadow, and prove convergence."""
+
+        self._require_proven_migration_phase("C4")
+        opened = self.open_migration_phase(phase="C5", actor=actor)
+        run_id = int(opened["migration_run_id"])
+        output_tables = (
+            tuple(self.canonical_table_names().values())
+            + tuple(self.link_layer_table_names().values())
+            + tuple(self.catalog_projection_table_names().values())
+        )
+        before = self._migration_table_evidence(output_tables)
+        mappings_before = self._migration_mapping_count()
+        findings = []
+        # The comparison is only worth taking against a source that has stopped
+        # moving, so the pause, the drain and every read happen together.
+        self.begin_legacy_mutation_pause(
+            actor=actor, reason=f"C5 shadow comparison (migration run {run_id})"
+        )
+        try:
+            settled = self._c5_settle_source()
+            findings.extend(settled["findings"])
+            registry = self._c5_registry_comparison()
+            findings.extend(registry["findings"])
+            projection = self._c5_projection_comparison()
+            findings.extend(projection["findings"])
+            sample = self._c5_sample(set_ids=set_ids)
+            findings.extend(self._c5_sample_coverage_findings(sample))
+            compared_sets = 0
+            for entry in sample["sets"]:
+                if not entry["migrated"]:
+                    continue
+                compared_sets += 1
+                findings.extend(
+                    self._c5_compare_migrated_set(
+                        set_id=entry["set_id"], project_id=entry["project_id"]
+                    )
+                )
+            bindings = self._c5_binding_comparison(sample)
+            findings.extend(bindings["findings"])
+        finally:
+            self.release_legacy_mutation_pause(actor=actor)
+
+        after = self._migration_table_evidence(output_tables)
+        created_rows = sum(
+            after[table]["row_count"] - before[table]["row_count"]
+            for table in output_tables
+        )
+        manifest = {
+            "manifest_version": 1,
+            "phase": "C5",
+            "source_engine": self.database_backend,
+            "sample": sample,
+            "shadow_read": {
+                "dimensions": list(C5_SHADOW_DIMENSIONS),
+                "compared_sets": compared_sets,
+            },
+            "settled_source": settled["state"],
+            "registry": registry["state"],
+            "projection": projection["state"],
+            "bindings": bindings["state"],
+            "differences": [
+                {
+                    "code": finding["code"],
+                    "finding_key": finding["finding_key"],
+                    "evidence": finding["evidence"],
+                }
+                for finding in findings
+            ],
+            "outputs": after,
+        }
+        if findings:
+            self._record_migration_anomalies(
+                migration_run_id=run_id,
+                phase="C5",
+                findings=findings,
+                now=utc_now_iso(),
+            )
+        self._finish_migration_run(
+            migration_run_id=run_id,
+            status="stopped" if findings else "proven",
+            manifest=manifest,
+        )
+        if findings:
+            raise MigrationPhaseStopped(
+                C5_STOPPED,
+                migration_run_id=run_id,
+                findings=findings,
+                rollback_trigger=True,
+            )
+        return {
+            **opened,
+            "status": "proven",
+            "created_rows": created_rows,
+            "mapping_changes": self._migration_mapping_count() - mappings_before,
+            "drained_dirty_roots": settled["drained_count"],
             "manifest": manifest,
             "manifest_digest": canonical_digest(manifest),
         }
@@ -21314,6 +22143,7 @@ class AnalystStore:
         prepared_import: PreparedTimeSeriesCatalogImport,
         created_by: str = "internal_analyst",
     ) -> dict[str, Any]:
+        self._require_no_legacy_mutation_pause("import_time_series_catalog_set")
         with self._lock:
             scenario = self.get_scenario(scenario_id)
             project_id = int(scenario["project_id"])
@@ -22489,6 +23319,7 @@ class AnalystStore:
         change_summary: str | None = None,
         extra_revision_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        self._require_no_legacy_mutation_pause("replace_time_series_set_source")
         with self._lock:
             self.get_project(project_id)
             set_row = self.connection.execute(
@@ -23127,6 +23958,7 @@ class AnalystStore:
         (``hydraulic_time_series_set_migrations``) makes re-running the same
         migration a stable no-op even before that content-hash check runs.
         """
+        self._require_no_legacy_mutation_pause("migrate_hydraulic_time_series_set")
         with self._lock:
             self.get_project(project_id)
             legacy_row = self.connection.execute(
@@ -28800,6 +29632,7 @@ class AnalystStore:
         time_series_set_id: int,
         created_by: str = "internal_analyst",
     ) -> dict[str, Any]:
+        self._require_no_legacy_mutation_pause("upsert_case_time_series_binding")
         now = utc_now_iso()
         normalized_entity_type = normalize_optional_text(entity_type)
         normalized_entity_id = normalize_optional_text(entity_id)

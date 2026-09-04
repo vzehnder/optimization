@@ -19,6 +19,7 @@ from typing import Any, Iterable, Mapping
 
 MIGRATION_CONTROL_VERSION = 1
 C0_MANIFEST_VERSION = 1
+C5_SAMPLE_VERSION = 1
 
 MIGRATION_CONTROL_TABLES = (
     "time_series_migration_runs",
@@ -84,14 +85,37 @@ MIGRATION_ANOMALY_CODES = {
     "object_specific_review": "TS_MIGRATION_OBJECT_SPECIFIC_REVIEW_REQUIRED",
 }
 
+# C5 compares the canonical read against the legacy one on the six dimensions
+# chapter 10.2 names, and settles the source before it does. None of these four
+# conditions has an entry in the 10.7 table and none weakens a treatment it
+# already decides: they name what a *verification* phase can prove.
+C5_ANOMALY_CODES = {
+    "shadow_difference": "TS_MIGRATION_SHADOW_DIFFERENCE",
+    "registry_divergence": "TS_MIGRATION_REGISTRY_DIVERGENCE",
+    "dirty_roots_pending": "TS_MIGRATION_DIRTY_ROOTS_PENDING",
+    "sample_incomplete": "TS_MIGRATION_SAMPLE_INCOMPLETE",
+}
+
+C5_SHADOW_DIMENSIONS = (
+    "semantics",
+    "counts",
+    "values",
+    "hashes",
+    "authorization",
+    "lineage",
+)
+
+
 C0_STOPPED = "TS_MIGRATION_C0_STOPPED"
 C2_STOPPED = "TS_MIGRATION_C2_STOPPED"
 C3_STOPPED = "TS_MIGRATION_C3_STOPPED"
 C4_STOPPED = "TS_MIGRATION_C4_STOPPED"
+C5_STOPPED = "TS_MIGRATION_C5_STOPPED"
 C0_RESTORE_NOT_PROVEN = "TS_MIGRATION_RESTORE_NOT_PROVEN"
 MAPPING_CONFLICT = "TS_MIGRATION_MAPPING_CONFLICT"
 RECOVERY_POINT_REQUIRED = "TS_MIGRATION_RECOVERY_POINT_REQUIRED"
 MIGRATION_PHASE_REQUIRED = "TS_MIGRATION_PHASE_REQUIRED"
+MUTATION_PAUSED = "TS_MIGRATION_MUTATION_PAUSED"
 
 
 # Chapter 10.7 deliberately resolves the legacy execution field through an
