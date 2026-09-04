@@ -14973,8 +14973,88 @@ class AnalystStore:
                 "section": "object_context",
                 "project_id": int(linkable["project_id"]),
                 "linkable_object_id": int(linkable["id"]),
+                "object": {
+                    "id": int(linkable["id"]),
+                    "display_name": linkable["display_name"],
+                    "object_kind": linkable["object_kind"],
+                    "object_type_key": linkable["object_type_key"],
+                },
                 "catalog_generation": generation,
             },
+        }
+
+    def _object_context_binding_summary(
+        self, *, signal_id: int, linkable_object_id: int
+    ) -> dict[str, Any]:
+        """Project a bounded set of executable uses for one contextual row."""
+
+        bindings = self.link_layer_table_names()["case_time_series_bindings"]
+        revisions = self._canonical("time_series_set_revisions")
+        rows = self.connection.execute(
+            f"""
+            SELECT binding.id AS binding_id,
+                   variant.id AS variant_id,
+                   variant.display_name AS variant_name,
+                   scenario.id AS scenario_id,
+                   scenario.name AS scenario_name,
+                   role.role_key AS binding_role_key,
+                   revision.revision_number AS revision_number
+            FROM {bindings} AS binding
+            JOIN case_input_variants AS variant
+              ON variant.id = binding.case_input_variant_id
+            JOIN optimization_cases AS optimization_case
+              ON optimization_case.id = variant.case_id
+            JOIN scenarios AS scenario
+              ON scenario.id = optimization_case.scenario_id
+            JOIN time_series_binding_roles AS role
+              ON role.id = binding.binding_role_id
+            JOIN {revisions} AS revision
+              ON revision.id = binding.set_revision_id
+            WHERE binding.signal_id = ?
+              AND binding.linkable_object_id = ?
+              AND binding.status = 'active'
+            ORDER BY binding.id
+            LIMIT 21
+            """,
+            (int(signal_id), int(linkable_object_id)),
+        ).fetchall()
+        visible = rows[:20]
+        items = []
+        for row in visible:
+            effective = self.read_case_binding(
+                scenario_id=int(row["scenario_id"]),
+                variant_id=int(row["variant_id"]),
+                binding_id=int(row["binding_id"]),
+            )
+            items.append(
+                {
+                    "binding_id": int(row["binding_id"]),
+                    "scenario_id": int(row["scenario_id"]),
+                    "scenario_name": row["scenario_name"],
+                    "variant_id": int(row["variant_id"]),
+                    "variant_name": row["variant_name"],
+                    "binding_role_key": row["binding_role_key"],
+                    "revision_id": int(effective["set_revision_id"]),
+                    "revision_number": int(row["revision_number"]),
+                    "content_hash": effective["bound_content_hash"],
+                    "state": effective["state"],
+                    "execution_blocked": effective["state"]
+                    not in {"valid_current", "valid_pinned"},
+                }
+            )
+        total = self.connection.execute(
+            f"""
+            SELECT COUNT(*) AS total
+            FROM {bindings}
+            WHERE signal_id = ? AND linkable_object_id = ? AND status = 'active'
+            """,
+            (int(signal_id), int(linkable_object_id)),
+        ).fetchone()
+        total_count = int(total["total"])
+        return {
+            "total_count": total_count,
+            "truncated": total_count > len(items),
+            "items": items,
         }
 
     def _object_context_item(
@@ -14985,14 +15065,9 @@ class AnalystStore:
         signal_id = int(row["signal_id"])
         if row["source"] == "object_specific":
             series = self._read_object_series(linkable=linkable, signal_id=signal_id)
-            bindings = self.connection.execute(
-                f"""
-                SELECT COUNT(*) AS total
-                FROM {self.link_layer_table_names()['case_time_series_bindings']}
-                WHERE signal_id = ? AND linkable_object_id = ? AND status = 'active'
-                """,
-                (signal_id, object_id),
-            ).fetchone()
+            binding_summary = self._object_context_binding_summary(
+                signal_id=signal_id, linkable_object_id=object_id
+            )
             return {
                 "source_kind": "object_specific",
                 "signal_id": signal_id,
@@ -15006,10 +15081,19 @@ class AnalystStore:
                 "current_revision": series["current_revision"],
                 "temporal_contract": series["temporal_contract"],
                 "compatible_role_keys": series["compatible_role_keys"],
+                "need": {
+                    "binding_role_key": series["classification"][
+                        "intended_binding_role_key"
+                    ],
+                    "source": "object_specific_intention",
+                },
                 # A local series has no catalog association behind it; its
                 # executable link goes directly back to this owner.
                 "association": None,
-                "binding_state": "bound" if int(bindings["total"]) else "unbound",
+                "binding_state": (
+                    "bound" if binding_summary["total_count"] else "unbound"
+                ),
+                "binding_summary": binding_summary,
                 "capabilities": {
                     "edit_definition": series["availability"]
                     not in {"archived", "owner_archived"},
@@ -15048,14 +15132,14 @@ class AnalystStore:
             """,
             (int(row["association_id"]),),
         ).fetchone()
-        bindings = self.connection.execute(
-            f"""
-            SELECT COUNT(*) AS total
-            FROM {self.link_layer_table_names()['case_time_series_bindings']}
-            WHERE signal_id = ? AND linkable_object_id = ? AND status = 'active'
-            """,
-            (signal_id, object_id),
-        ).fetchone()
+        binding_summary = self._object_context_binding_summary(
+            signal_id=signal_id, linkable_object_id=object_id
+        )
+        association_detail = (
+            None
+            if association is None
+            else self.read_catalog_association(int(association["association_id"]))
+        )
         return {
             "source_kind": "catalog",
             "signal_id": signal_id,
@@ -15090,6 +15174,10 @@ class AnalystStore:
                 unit_id=int(entry["unit_id"]),
                 object_type_id=int(linkable["object_type_id"]),
             ),
+            "need": {
+                "binding_role_key": association["role_key"],
+                "source": "catalog_association",
+            },
             "association": (
                 None
                 if association is None
@@ -15097,9 +15185,13 @@ class AnalystStore:
                     "association_id": int(association["association_id"]),
                     "binding_role_key": association["role_key"],
                     "status": association["status"],
+                    "state": association_detail["state"],
                 }
             ),
-            "binding_state": "bound" if int(bindings["total"]) else "unbound",
+            "binding_state": (
+                "bound" if binding_summary["total_count"] else "unbound"
+            ),
+            "binding_summary": binding_summary,
             "capabilities": {
                 "edit_definition": False,
                 "ingest_points": False,

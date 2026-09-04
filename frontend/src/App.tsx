@@ -36,6 +36,7 @@ import {
 import { ScenarioDraftEditorView } from "./DraftEditor";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { GlobalCatalogView } from "./GlobalCatalog";
+import { ObjectTimeSeriesSummaryView } from "./ObjectTimeSeriesSummary";
 import {
   ConsoleListView,
   ConsoleRootPlanIdentity,
@@ -437,6 +438,16 @@ function AuthenticatedRoutes({
             // exists only for the verification accounts. Everyone else keeps
             // the pre-cutover behaviour, which is that the route is not there.
             canonicalCatalogRead ? <GlobalCatalogView /> : <NotFoundView />
+          }
+        />
+        <Route
+          path="projects/:projectId/linkable-objects/:linkableObjectId/time-series"
+          element={
+            canonicalCatalogRead ? (
+              <ObjectTimeSeriesSummaryView />
+            ) : (
+              <NotFoundView />
+            )
           }
         />
         <Route path="system" element={<SystemStatus />} />

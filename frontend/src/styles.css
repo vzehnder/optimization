@@ -1775,3 +1775,46 @@ button:focus-visible {
   margin: 0.5rem 0;
   font-weight: 600;
 }
+
+.object-summary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.object-summary-actions small {
+  flex-basis: 100%;
+  color: #55606d;
+}
+
+.object-summary-kind,
+.object-summary-local,
+.object-summary-secondary,
+.object-summary-stale,
+.object-summary-blocked {
+  display: block;
+  margin-top: 0.25rem;
+}
+
+.object-summary-kind,
+.object-summary-secondary {
+  color: #55606d;
+  font-size: 0.85rem;
+}
+
+.object-summary-local {
+  color: #245f48;
+}
+
+.object-summary-stale,
+.object-summary-blocked {
+  color: #922b21;
+}
+
+.object-summary-usages {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding-left: 1.1rem;
+}

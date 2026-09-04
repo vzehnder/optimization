@@ -3500,3 +3500,104 @@ export async function getCatalogInputPreview(
     { signal },
   );
 }
+
+export interface ObjectTimeSeriesBindingUsage {
+  binding_id: number;
+  scenario_id: number;
+  scenario_name: string;
+  variant_id: number;
+  variant_name: string;
+  binding_role_key: string;
+  revision_id: number;
+  revision_number: number;
+  content_hash: string;
+  state: string;
+  execution_blocked: boolean;
+}
+
+export interface ObjectTimeSeriesContextRow {
+  source_kind: "catalog" | "object_specific";
+  signal_id: number;
+  set_id: number;
+  series_key: string;
+  display_name: string;
+  semantic_type_key: string;
+  unit_key: string;
+  data_class_key: string;
+  availability: string;
+  current_revision: {
+    revision_id: number;
+    revision_number: number;
+    content_hash?: string;
+    coverage_start: string | null;
+    coverage_end: string | null;
+    period_count: number;
+    value_count: number;
+  } | null;
+  temporal_contract: {
+    regularity: string;
+    nominal_resolution_seconds: number;
+    timestamp_convention: string;
+    timezone: string | null;
+  };
+  compatible_role_keys: string[];
+  need: {
+    binding_role_key: string;
+    source: "catalog_association" | "object_specific_intention";
+  };
+  association: {
+    association_id: number;
+    binding_role_key: string;
+    status: string;
+    state: string;
+  } | null;
+  binding_state: "bound" | "unbound";
+  binding_summary: {
+    total_count: number;
+    truncated: boolean;
+    items: ObjectTimeSeriesBindingUsage[];
+  };
+  updated_at: string;
+}
+
+export interface ObjectTimeSeriesContextPage {
+  items: ObjectTimeSeriesContextRow[];
+  page: { limit: number; has_more: boolean; next_cursor: string | null };
+  summary: { total_count: number };
+  meta: {
+    section: "object_context";
+    project_id: number;
+    linkable_object_id: number;
+    object: {
+      id: number;
+      display_name: string;
+      object_kind: string;
+      object_type_key: string;
+    };
+    catalog_generation: number;
+    request_id?: string;
+  };
+}
+
+export interface ObjectTimeSeriesContextQuery {
+  q?: string;
+  kind?: "all" | "catalog" | "object_specific";
+  cursor?: string | null;
+}
+
+export async function getObjectTimeSeriesContext(
+  projectId: number,
+  linkableObjectId: number,
+  query: ObjectTimeSeriesContextQuery,
+  signal?: AbortSignal,
+): Promise<ObjectTimeSeriesContextPage> {
+  const params = new URLSearchParams();
+  if (query.q?.trim()) params.set("q", query.q.trim());
+  if (query.kind && query.kind !== "all") params.set("kind", query.kind);
+  if (query.cursor) params.set("cursor", query.cursor);
+  const search = params.toString();
+  return requestJson<ObjectTimeSeriesContextPage>(
+    `/api/projects/${projectId}/linkable-objects/${linkableObjectId}/time-series${search ? `?${search}` : ""}`,
+    { signal },
+  );
+}

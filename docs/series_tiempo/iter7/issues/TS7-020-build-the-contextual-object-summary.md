@@ -1,6 +1,6 @@
 # TS7-020: Build The Contextual Object Summary
 
-Status: Todo
+Status: In Review
 Type: AFK
 Triage: ready-for-agent
 Source: `docs/series_tiempo/iter7/spec_ts7_catalogo_global_y_series_especificas.md` (8.1, 8.2, 8.4, 8.5, 7.3)
@@ -27,14 +27,15 @@ journey delivered in TS7-021.
 
 ## Acceptance criteria
 
-- [ ] The summary lists generic associations and object-specific series in one view with a visible discriminator per row.
-- [ ] `Solo este objeto` accompanies every object-specific row and every step that acts on one.
-- [ ] `asociada al objeto` and `usada en <variante> con <revision/hash>` are shown as two separate states, never collapsed into one.
-- [ ] The visible language uses `Asociar fuente al objeto` and `Usar revision en una variante`; `binding` appears only in secondary help.
-- [ ] A stale binding is visibly stale from the object summary, with its blocked execution stated.
-- [ ] The list pages server-side and never loads points.
-- [ ] Only verification accounts reach the surface before the cutover.
-- [ ] `tsc`, `eslint`, `vitest` and the production build pass, and a Chrome pass with the real `.env` credentials shows an object with both kinds of series and no console errors.
+- [x] The summary lists generic associations and object-specific series in one view with a visible discriminator per row.
+- [x] `Solo este objeto` accompanies every object-specific row and every step that acts on one.
+- [x] `asociada al objeto` and `usada en <variante> con <revision/hash>` are shown as two separate states, never collapsed into one.
+- [x] The visible language uses `Asociar fuente al objeto` and `Usar revision en una variante`; `binding` appears only in secondary help.
+- [x] A stale binding is visibly stale from the object summary, with its blocked execution stated.
+- [x] The list pages server-side and never loads points.
+- [x] Only verification accounts reach the surface before the cutover.
+- [x] `tsc`, `eslint`, `vitest` and the production build pass.
+- [ ] A Chrome pass with the real `.env` credentials shows an object with both kinds of series and no console errors. The 2026-09-04 attempt could not start because the Chrome native-host registration was unavailable; no browser result is claimed.
 
 ## Blocked by
 
