@@ -3501,6 +3501,557 @@ export async function getCatalogInputPreview(
   );
 }
 
+// TS-7 protected mutation journey. Chapter 6.7: the inverse flow, opened from
+// an object, reads the same catalog with a candidate context so the compatible
+// and the refused rows come back from the one evaluator.
+
+export interface CatalogCompatibilityError {
+  code: string;
+  message_key: string;
+  message: string;
+  field: string | null;
+  context: Record<string, unknown>;
+}
+
+export interface CatalogCompatibilityDecision {
+  allowed: boolean;
+  compatibility_rule_id: number | null;
+  rule_version: number | null;
+  contract_version: number;
+  errors: CatalogCompatibilityError[];
+  primary_error: CatalogCompatibilityError | null;
+}
+
+export interface CatalogCandidateRow extends CatalogInputRow {
+  compatibility_decision: CatalogCompatibilityDecision;
+}
+
+export interface ObjectCandidateRow {
+  object: {
+    id: number;
+    project_id: number;
+    object_kind: string;
+    object_type_key: string;
+    object_key: string;
+    display_name: string;
+    status: string;
+  };
+  compatibility_decision: CatalogCompatibilityDecision;
+  selectable: boolean;
+}
+
+export interface SignalObjectCandidateQuery {
+  targetProjectId: number;
+  bindingRoleKey: string;
+  usage: "association" | "execution";
+  scenarioId?: number | null;
+  variantId?: number | null;
+  q?: string;
+  cursor?: string | null;
+}
+
+export async function listObjectCandidatesForSignal(
+  signalId: number,
+  query: SignalObjectCandidateQuery,
+  signal?: AbortSignal,
+): Promise<CatalogPageEnvelope<ObjectCandidateRow>> {
+  const params = new URLSearchParams({
+    target_project_id: String(query.targetProjectId),
+    binding_role_key: query.bindingRoleKey,
+    usage: query.usage,
+    // Chapter 8.7: the refused rows are explained, so the surface asks for
+    // them on purpose instead of showing a shorter list.
+    include_denied: "true",
+  });
+  if (query.usage === "execution") {
+    params.set("context_scenario_id", String(query.scenarioId ?? ""));
+    params.set("context_variant_id", String(query.variantId ?? ""));
+  }
+  if (query.q?.trim()) params.set("q", query.q.trim());
+  if (query.cursor) params.set("cursor", query.cursor);
+  return requestJson<CatalogPageEnvelope<ObjectCandidateRow>>(
+    `/api/time-series/catalog/inputs/${signalId}/object-candidates?${params.toString()}`,
+    { signal },
+  );
+}
+
+export interface ObjectSourceCandidateQuery {
+  linkableObjectId: number;
+  bindingRoleKey: string;
+  usage: "association" | "execution";
+  scenarioId?: number | null;
+  variantId?: number | null;
+  q?: string;
+  limit?: number;
+  cursor?: string | null;
+}
+
+export async function listCatalogSourcesForObject(
+  query: ObjectSourceCandidateQuery,
+  signal?: AbortSignal,
+): Promise<CatalogPageEnvelope<CatalogCandidateRow>> {
+  const params = new URLSearchParams({
+    context_linkable_object_id: String(query.linkableObjectId),
+    context_binding_role_key: query.bindingRoleKey,
+    context_usage: query.usage,
+    // Chapter 8.7: an incompatible candidate is explained, never hidden, so
+    // the surface asks for the refused rows on purpose.
+    compatibility: "all",
+  });
+  if (query.usage === "execution") {
+    params.set("context_scenario_id", String(query.scenarioId ?? ""));
+    params.set("context_variant_id", String(query.variantId ?? ""));
+  }
+  if (query.q?.trim()) params.set("q", query.q.trim());
+  if (query.limit) params.set("limit", String(query.limit));
+  if (query.cursor) params.set("cursor", query.cursor);
+  return requestJson<CatalogPageEnvelope<CatalogCandidateRow>>(
+    `/api/time-series/catalog/inputs?${params.toString()}`,
+    { signal },
+  );
+}
+
+// Chapter 6.8: every mutation is a two-phase batch, even with a single row,
+// and the commit never travels without its token, ETag and idempotency key.
+
+export interface MutationCommitGuards {
+  prevalidationToken: string;
+  commitEtag: string;
+  idempotencyKey: string;
+}
+
+export interface AssociationOperationRequest {
+  client_operation_id: string;
+  action: "add" | "replace" | "archive" | "revalidate";
+  signal_id?: number;
+  linkable_object_id?: number;
+  binding_role_key?: string;
+  expected_absent?: boolean;
+  association_id?: number;
+  expected_lifecycle_revision?: number;
+  reason_code: string;
+  reason_text?: string;
+}
+
+export interface AssociationBatchRequest {
+  target_project_id: number;
+  operations: AssociationOperationRequest[];
+}
+
+export interface BatchOperationVerdict {
+  client_operation_id: string;
+  action: string;
+  verdict: "accepted" | "rejected" | "confirmation_required";
+  compatibility_decision?: CatalogCompatibilityDecision;
+  errors: CatalogCompatibilityError[];
+  comparison: { before: unknown; after: unknown };
+}
+
+export interface BatchPrevalidation {
+  normalized_request: unknown;
+  request_hash: string;
+  operations: BatchOperationVerdict[];
+  can_commit: boolean;
+  requires_confirmation: boolean;
+  expires_at: string;
+  prevalidation_token: string;
+  commit_etag: string;
+  request_id?: string;
+}
+
+export interface BatchCommitResult {
+  outcome: string;
+  batch_id: string;
+  operations: Record<string, unknown>[];
+  request_id?: string;
+}
+
+async function postJsonWithGuards<T>(
+  path: string,
+  body: unknown,
+  guards: MutationCommitGuards,
+): Promise<T> {
+  const csrfToken = await getCsrfToken();
+  return requestJson<T>(path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrfToken,
+      "If-Match": guards.commitEtag,
+      "Idempotency-Key": guards.idempotencyKey,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function prevalidateCatalogAssociations(
+  request: AssociationBatchRequest,
+): Promise<BatchPrevalidation> {
+  return postJsonWithCsrf<BatchPrevalidation>(
+    "/api/time-series/catalog/association-prevalidations",
+    request,
+  );
+}
+
+export async function commitCatalogAssociations(
+  request: AssociationBatchRequest,
+  guards: MutationCommitGuards,
+): Promise<BatchCommitResult> {
+  return postJsonWithGuards<BatchCommitResult>(
+    "/api/time-series/catalog/association-batches",
+    {
+      ...request,
+      prevalidation_token: guards.prevalidationToken,
+      confirmed: true,
+    },
+    guards,
+  );
+}
+
+// Chapter 7.9 / 8.6: a shared generic source seen from one object. The whole
+// impact is answered before the caller decides, and the two outcomes come back
+// already ordered by the declared intent.
+
+export interface SharedSourceImpact {
+  source: {
+    set_id: number;
+    set_name: string | null;
+    visibility_scope: string | null;
+    owner_project_id: number | null;
+    owner_project_name: string | null;
+    current_revision_id: number | null;
+    current_revision_number: number | null;
+    current_content_hash: string | null;
+    signal_count: number;
+  };
+  associations: { total: number; other_objects: number };
+  bindings: {
+    total_active: number;
+    current: number;
+    pinned: number;
+    projects_affected: number;
+    variants_affected: number;
+  };
+  effect: {
+    bindings_will_become_stale: number;
+    associations_will_require_revalidation: number;
+  };
+  listed_consumers: {
+    linkable_object_id: number;
+    project_id: number;
+    relation: string;
+  }[];
+  consumers_truncated: boolean;
+}
+
+export interface SharedSourceAlternative {
+  kind: "derive_object_specific" | "publish_shared";
+  label_key: string;
+  available: boolean;
+  requires_admin: boolean;
+  unavailable_code: string | null;
+  href: string;
+}
+
+export interface ObjectCatalogAssociationView {
+  association: {
+    association_id: number;
+    signal_id: number;
+    set_id: number;
+    series_key: string;
+    display_name: string;
+    binding_role_key: string;
+    status: string;
+    linkable_object_id: number;
+    project_id: number;
+  };
+  impact: SharedSourceImpact;
+  impact_fingerprint: string;
+  recommendation: string;
+  requires_confirmation: boolean;
+  derivation_required: boolean;
+  derivation_required_codes: string[];
+  alternatives: SharedSourceAlternative[];
+  set_signals: {
+    signal_id: number;
+    series_key: string;
+    display_name: string;
+    semantic_type_key: string;
+    unit_key: string;
+  }[];
+  links: Record<string, string>;
+  capabilities: {
+    publish_shared: boolean;
+    derive_object_specific: boolean;
+    preview_source: boolean;
+  };
+  request_id?: string;
+}
+
+export interface SharedSourceTarget {
+  projectId: number;
+  linkableObjectId: number;
+  associationId: number;
+}
+
+function associationRoot(target: SharedSourceTarget): string {
+  return (
+    `/api/projects/${target.projectId}/linkable-objects/` +
+    `${target.linkableObjectId}/time-series/catalog-associations/` +
+    `${target.associationId}`
+  );
+}
+
+export async function getObjectCatalogAssociation(
+  target: SharedSourceTarget,
+  intent: "local" | "shared",
+  signal?: AbortSignal,
+): Promise<ObjectCatalogAssociationView> {
+  return requestJson<ObjectCatalogAssociationView>(
+    `${associationRoot(target)}?intent=${intent}`,
+    { signal },
+  );
+}
+
+export interface IngestionPoint {
+  timestamp_start: string;
+  duration_seconds: number;
+  values: Record<string, { value: number }>;
+}
+
+export interface SharedSeriesIngestionRequest {
+  mode: "replace_full" | "append_tail";
+  expected_base: { revision_id: number; content_hash: string };
+  revision_contract?: Record<string, unknown>;
+  source?: { kind: string; display_name: string };
+  points: IngestionPoint[];
+}
+
+export interface IngestionReceipt {
+  ingestion_id: string;
+  channel: string;
+  state: string;
+  mode: string;
+  normalized: {
+    point_count?: number;
+    coverage_start: string | null;
+    coverage_end: string | null;
+    content_hash: string | null;
+    [key: string]: unknown;
+  };
+  validation: {
+    valid: boolean;
+    error_count: number;
+    errors: { code: string; message?: string }[];
+    errors_truncated: boolean;
+  };
+  impact: Record<string, unknown>;
+  requires_confirmation: boolean;
+  validation_token: string | null;
+  capabilities: Record<string, boolean>;
+  expires_at: string;
+  impact_fingerprint?: string;
+  derivation_required?: boolean;
+  derivation_required_codes?: string[];
+  alternatives?: SharedSourceAlternative[];
+  etag?: string;
+}
+
+export async function prepareSharedSeriesIngestion(
+  target: SharedSourceTarget,
+  request: SharedSeriesIngestionRequest,
+): Promise<IngestionReceipt> {
+  const response = await postJsonWithCsrf<{ ingestion: IngestionReceipt }>(
+    `${associationRoot(target)}/shared-series/revision-ingestions/points`,
+    request,
+  );
+  return response.ingestion;
+}
+
+export interface SharedSeriesPublicationRequest {
+  validation_token: string;
+  impact_fingerprint: string;
+  confirm: boolean;
+  comprehension_acknowledged: boolean;
+  reason_code: string;
+  reason_text: string;
+}
+
+export async function publishSharedSeriesIngestion(
+  target: SharedSourceTarget,
+  ingestionId: string,
+  request: SharedSeriesPublicationRequest,
+  guards: MutationCommitGuards,
+): Promise<Record<string, unknown>> {
+  const response = await postJsonWithGuards<{
+    publication: Record<string, unknown>;
+  }>(
+    `${associationRoot(target)}/shared-series/revision-ingestions/` +
+      `${encodeURIComponent(ingestionId)}/publications`,
+    request,
+    guards,
+  );
+  return response.publication;
+}
+
+export interface ObjectSeriesDerivationRequest {
+  object_series_key: string;
+  display_name: string;
+  description?: string;
+  reason_code: string;
+  reason_text: string;
+}
+
+export interface ObjectSeriesDerivationPrevalidation {
+  can_commit: boolean;
+  source: { revision_id: number; content_hash: string };
+  reassignments: { associations: number; bindings: number };
+  proposed: { period_count: number; [key: string]: unknown };
+  prevalidation_token: string;
+  request_id?: string;
+}
+
+export async function prevalidateObjectSeriesDerivation(
+  target: SharedSourceTarget,
+  request: ObjectSeriesDerivationRequest,
+): Promise<ObjectSeriesDerivationPrevalidation> {
+  return postJsonWithCsrf<ObjectSeriesDerivationPrevalidation>(
+    `${associationRoot(target)}/object-series-derivation-prevalidations`,
+    request,
+  );
+}
+
+export async function commitObjectSeriesDerivation(
+  target: SharedSourceTarget,
+  request: ObjectSeriesDerivationRequest & {
+    prevalidation_token: string;
+    confirmed: boolean;
+    source_revision: { revision_id: number; content_hash: string };
+  },
+  idempotencyKey: string,
+): Promise<Record<string, unknown>> {
+  const csrfToken = await getCsrfToken();
+  const response = await requestJson<{ derivation: Record<string, unknown> }>(
+    `${associationRoot(target)}/object-series-derivations`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrfToken,
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify(request),
+    },
+  );
+  return response.derivation;
+}
+
+export interface CaseBindingRow {
+  binding_id: number;
+  scenario_id: number;
+  case_input_variant_id: number;
+  signal_id: number;
+  signal: { id: number; series_key: string; display_name: string };
+  time_series_set_id: number;
+  set_revision_id: number;
+  bound_content_hash: string;
+  revision: {
+    mode: string | null;
+    id: number;
+    content_hash: string;
+    observed_current_revision_id: number | null;
+    current_revision_id: number;
+  };
+  binding_role: { id: number; key: string; display_name: string };
+  catalog_association_id: number | null;
+  source_kind: string;
+  status: string;
+  state: string;
+  lifecycle_revision: number;
+}
+
+export interface CaseBindingPage {
+  items: CaseBindingRow[];
+  page: { limit: number; has_more: boolean; next_cursor: string | null };
+  summary: { total_count: number };
+  meta: {
+    scenario_id: number;
+    variant_id: number;
+    bindings_revision: number;
+    request_id?: string;
+  };
+}
+
+export interface BindingRevisionSelection {
+  mode: "current" | "pinned";
+  revision_id: number;
+  content_hash: string;
+}
+
+export interface BindingOperationRequest {
+  client_operation_id: string;
+  action:
+    | "create"
+    | "replace"
+    | "remove"
+    | "restore"
+    | "revalidate_current"
+    | "revalidate_pinned";
+  linkable_object_id?: number;
+  binding_role_key?: string;
+  signal_id?: number;
+  revision?: BindingRevisionSelection;
+  catalog_association_id?: number | null;
+  binding_id?: number;
+  expected_lifecycle_revision?: number;
+  reason_code: string;
+  reason_text?: string;
+}
+
+export interface BindingBatchRequest {
+  expected_bindings_revision: number;
+  operations: BindingOperationRequest[];
+}
+
+export async function listCaseTimeSeriesBindings(
+  scenarioId: number,
+  variantId: number,
+  signal?: AbortSignal,
+): Promise<CaseBindingPage> {
+  return requestJson<CaseBindingPage>(
+    `/api/scenarios/${scenarioId}/case-variants/${variantId}/time-series-bindings`,
+    { signal },
+  );
+}
+
+export async function prevalidateCaseBindings(
+  scenarioId: number,
+  variantId: number,
+  request: BindingBatchRequest,
+): Promise<BatchPrevalidation> {
+  return postJsonWithCsrf<BatchPrevalidation>(
+    `/api/scenarios/${scenarioId}/case-variants/${variantId}/time-series-binding-prevalidations`,
+    request,
+  );
+}
+
+export async function commitCaseBindings(
+  scenarioId: number,
+  variantId: number,
+  request: BindingBatchRequest,
+  guards: MutationCommitGuards,
+): Promise<BatchCommitResult> {
+  return postJsonWithGuards<BatchCommitResult>(
+    `/api/scenarios/${scenarioId}/case-variants/${variantId}/time-series-binding-batches`,
+    {
+      ...request,
+      prevalidation_token: guards.prevalidationToken,
+      confirmed: true,
+    },
+    guards,
+  );
+}
+
 export interface ObjectTimeSeriesBindingUsage {
   binding_id: number;
   scenario_id: number;

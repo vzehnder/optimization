@@ -35,7 +35,7 @@ journey delivered in TS7-021.
 - [x] The list pages server-side and never loads points.
 - [x] Only verification accounts reach the surface before the cutover.
 - [x] `tsc`, `eslint`, `vitest` and the production build pass.
-- [ ] A Chrome pass with the real `.env` credentials shows an object with both kinds of series and no console errors. The 2026-09-04 attempt could not start because the Chrome native-host registration was unavailable; no browser result is claimed.
+- [x] A Chrome pass with the real `.env` credentials shows an object with both kinds of series and no console errors. Closed on 2026-09-05 during the TS7-021 pass: object 596 of project `TS7-021 verificacion` ends with one generic row (associated, used in `Default` at revision 2) and one object-specific row carrying `Solo este objeto`, with no console messages.
 
 ## Blocked by
 

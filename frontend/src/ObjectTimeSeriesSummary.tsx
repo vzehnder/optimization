@@ -9,6 +9,7 @@ import {
   type ObjectTimeSeriesContextQuery,
   type ObjectTimeSeriesContextRow,
 } from "./api/client";
+import { objectJourneyPath } from "./journeyRoutes";
 
 function numericParam(value: string | undefined): number | null {
   if (!value || !/^\d+$/.test(value)) return null;
@@ -191,14 +192,28 @@ export function ObjectTimeSeriesSummaryView() {
             className="object-summary-actions"
             aria-label="Acciones protegidas"
           >
-            <button type="button" disabled>
+            <Link
+              className="journey-entry-link"
+              to={objectJourneyPath({
+                projectId,
+                linkableObjectId,
+                intent: "associate",
+              })}
+            >
               Asociar fuente al objeto
-            </button>
-            <button type="button" disabled>
+            </Link>
+            <Link
+              className="journey-entry-link"
+              to={objectJourneyPath({
+                projectId,
+                linkableObjectId,
+                intent: "use_revision",
+              })}
+            >
               Usar revision en una variante
-            </button>
+            </Link>
             <small>
-              Estas acciones se habilitan en el recorrido protegido. “Binding de
+              Ambas acciones abren el recorrido protegido. “Binding de
               ejecucion” es el nombre tecnico del segundo paso.
             </small>
           </div>

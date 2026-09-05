@@ -589,6 +589,43 @@ describe("layered catalog read surface", () => {
     expect(screen.queryByRole("table", { name: "Preview" })).not.toBeInTheDocument();
   });
 
+  it("hands the inspector off to the protected journey instead of mutating", async () => {
+    window.history.replaceState({}, "", "/react/time-series/catalog");
+    const fetchMock = catalogFetch({
+      "/api/time-series/catalog/inputs": () =>
+        json({
+          items: [inputRow()],
+          page: { limit: 50, has_more: false, next_cursor: null },
+          summary: { total_count: 1 },
+          facets: null,
+          meta: { section: "inputs", catalog_generation: 1842 },
+        }),
+      "/api/time-series/catalog/inputs/41": () => json(inputDetail()),
+      "/api/time-series/catalog/inputs/41/revisions": () =>
+        json(revisionPage()),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await screen.findByRole("row", { name: /Precio de energia/ });
+    await user.click(screen.getByRole("button", { name: "Inspeccionar" }));
+    await screen.findByRole("region", { name: "Inspector de senal" });
+
+    // TS7-021: the catalog is the second entry point of the one protected
+    // journey; it never carries an abbreviated mutation of its own.
+    expect(
+      screen.getByRole("link", { name: "Abrir el recorrido protegido" }),
+    ).toHaveAttribute(
+      "href",
+      "/react/time-series/journey?entry=catalog&signal_id=41&project_id=1",
+    );
+    for (const [, init] of fetchMock.mock.calls) {
+      expect((init?.method ?? "GET").toUpperCase()).toBe("GET");
+    }
+  });
+
   it("offers no mutation affordance and never leaves the read verbs", async () => {
     window.history.replaceState({}, "", "/react/time-series/catalog");
     const fetchMock = catalogFetch({
@@ -615,7 +652,16 @@ describe("layered catalog read surface", () => {
     const surface = screen.getByRole("main");
     for (const control of [
       ...within(surface).getAllByRole("button"),
-      ...within(surface).queryAllByRole("link"),
+      ...within(surface)
+        .queryAllByRole("link")
+        // The single handoff into the protected journey is navigation, not a
+        // mutation: it is allowed to exist and it writes nothing.
+        .filter(
+          (link) =>
+            link
+              .getAttribute("href")
+              ?.startsWith("/react/time-series/journey") !== true,
+        ),
     ]) {
       expect(control.textContent).not.toMatch(
         /asociar|vincular|publicar|guardar|editar|eliminar|archivar|promover/i,

@@ -1818,3 +1818,149 @@ button:focus-visible {
   margin: 0;
   padding-left: 1.1rem;
 }
+
+/* TS7-021: the single protected mutation journey. The rail is a column that
+   never scrolls out of the way, because object and scope have to stay legible
+   at every step. */
+.journey-layout {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
+  align-items: start;
+}
+
+@media (max-width: 60rem) {
+  .journey-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.journey-rail {
+  position: sticky;
+  top: 1rem;
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid #d8dee6;
+  border-radius: 0.5rem;
+  background: #f7f9fb;
+}
+
+.journey-context {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.25rem 0.75rem;
+  margin: 0;
+}
+
+.journey-context dt {
+  color: #55606d;
+  font-size: 0.85rem;
+}
+
+.journey-context dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.journey-steps {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: journey-step;
+}
+
+.journey-steps li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  color: #55606d;
+}
+
+.journey-steps li[aria-current="step"] {
+  color: #14304f;
+  font-weight: 700;
+}
+
+.journey-step-number {
+  display: inline-flex;
+  width: 1.5rem;
+  height: 1.5rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #e2e8f0;
+  font-size: 0.8rem;
+}
+
+.journey-steps li[aria-current="step"] .journey-step-number {
+  background: #14304f;
+  color: #ffffff;
+}
+
+.journey-step-panel {
+  display: grid;
+  gap: 1.25rem;
+  min-width: 0;
+}
+
+.journey-origin-choice {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid #d8dee6;
+  border-radius: 0.5rem;
+}
+
+.journey-origin-choice label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.journey-navigation {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-start;
+}
+
+.journey-denied {
+  display: block;
+  color: #922b21;
+}
+
+.journey-denial {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.journey-denial code {
+  display: block;
+  color: #55606d;
+}
+
+.journey-comprehension {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  max-width: 48rem;
+}
+
+.journey-committed {
+  font-weight: 600;
+  color: #245f48;
+}
+
+.catalog-journey-handoff {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.catalog-journey-handoff small {
+  color: #55606d;
+}

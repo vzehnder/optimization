@@ -12828,7 +12828,7 @@ class AnalystStore:
     def read_case_bindings(
         self, *, scenario_id: int, variant_id: int
     ) -> dict[str, Any]:
-        self._canonical_binding_context(
+        context = self._canonical_binding_context(
             scenario_id=scenario_id, variant_id=variant_id
         )
         rows = self.connection.execute(
@@ -12854,6 +12854,10 @@ class AnalystStore:
             "meta": {
                 "scenario_id": int(scenario_id),
                 "variant_id": int(variant_id),
+                # Chapter 6.8 makes `expected_bindings_revision` mandatory on
+                # every batch, so the collection that opens the protected
+                # journey states the number the next batch has to send.
+                "bindings_revision": int(context["bindings_revision"]),
             },
         }
 

@@ -37,6 +37,7 @@ import { ScenarioDraftEditorView } from "./DraftEditor";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { GlobalCatalogView } from "./GlobalCatalog";
 import { ObjectTimeSeriesSummaryView } from "./ObjectTimeSeriesSummary";
+import { ProtectedMutationJourneyView } from "./ProtectedMutationJourney";
 import {
   ConsoleListView,
   ConsoleRootPlanIdentity,
@@ -438,6 +439,19 @@ function AuthenticatedRoutes({
             // exists only for the verification accounts. Everyone else keeps
             // the pre-cutover behaviour, which is that the route is not there.
             canonicalCatalogRead ? <GlobalCatalogView /> : <NotFoundView />
+          }
+        />
+        <Route
+          path="time-series/journey"
+          element={
+            // Chapter 8.1: the one protected pattern that mutates. Both entry
+            // points land here, so it is a single route and not a branch of
+            // either read surface.
+            canonicalCatalogRead ? (
+              <ProtectedMutationJourneyView />
+            ) : (
+              <NotFoundView />
+            )
           }
         />
         <Route

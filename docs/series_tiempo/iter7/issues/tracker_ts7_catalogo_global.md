@@ -79,7 +79,7 @@ matrix names the levels that prove it.
 | TS7-018 | Compare Canonical Reads In Shadow And Prove Convergence (C5) | AFK | ready-for-agent | In Review | TS7-017 | [TS7-018-compare-canonical-reads-in-shadow-and-prove-convergence.md](TS7-018-compare-canonical-reads-in-shadow-and-prove-convergence.md) |
 | TS7-019 | Build The Layered Read Catalog For Verification Accounts | AFK | ready-for-agent | In Review | TS7-006 | [TS7-019-build-the-layered-read-catalog-for-verification-accounts.md](TS7-019-build-the-layered-read-catalog-for-verification-accounts.md) |
 | TS7-020 | Build The Contextual Object Summary | AFK | ready-for-agent | In Review | TS7-012, TS7-019 | [TS7-020-build-the-contextual-object-summary.md](TS7-020-build-the-contextual-object-summary.md) |
-| TS7-021 | Build The Single Protected Mutation Journey | AFK | ready-for-agent | Todo | TS7-013, TS7-014, TS7-020 | [TS7-021-build-the-single-protected-mutation-journey.md](TS7-021-build-the-single-protected-mutation-journey.md) |
+| TS7-021 | Build The Single Protected Mutation Journey | AFK | ready-for-agent | In Review | TS7-013, TS7-014, TS7-020 | [TS7-021-build-the-single-protected-mutation-journey.md](TS7-021-build-the-single-protected-mutation-journey.md) |
 | TS7-022 | Cut Over To The Single Canonical Writer (C6) | AFK | ready-for-agent | Todo | TS7-009, TS7-018, TS7-021 | [TS7-022-cut-over-to-the-single-canonical-writer.md](TS7-022-cut-over-to-the-single-canonical-writer.md) |
 | TS7-023 | Prove TS-7 End To End | AFK | ready-for-agent | Todo | TS7-022 | [TS7-023-prove-ts7-end-to-end.md](TS7-023-prove-ts7-end-to-end.md) |
 

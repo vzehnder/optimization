@@ -208,12 +208,20 @@ describe("contextual object time-series summary", () => {
       within(local).getByText("Aun no usada en una variante"),
     ).toBeVisible();
 
+    // TS7-021: the summary never mutates; both named actions hand off to the
+    // one protected journey.
     expect(
-      screen.getByRole("button", { name: "Asociar fuente al objeto" }),
-    ).toBeDisabled();
+      screen.getByRole("link", { name: "Asociar fuente al objeto" }),
+    ).toHaveAttribute(
+      "href",
+      "/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=associate",
+    );
     expect(
-      screen.getByRole("button", { name: "Usar revision en una variante" }),
-    ).toBeDisabled();
+      screen.getByRole("link", { name: "Usar revision en una variante" }),
+    ).toHaveAttribute(
+      "href",
+      "/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=use_revision",
+    );
     for (const [, init] of fetchMock.mock.calls) {
       expect((init?.method ?? "GET").toUpperCase()).toBe("GET");
     }

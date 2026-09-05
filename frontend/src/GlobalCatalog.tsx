@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { FormEvent, useState } from "react";
+import { Link } from "react-router-dom";
 
 import {
   ApiError,
@@ -14,6 +15,7 @@ import {
   type CatalogPreviewQuery,
   type CatalogRevisionRow,
 } from "./api/client";
+import { catalogJourneyPath } from "./journeyRoutes";
 
 const SCOPE_OPTIONS = [
   { value: "", label: "Todos" },
@@ -457,6 +459,25 @@ function SignalInspector({ signalId }: { signalId: number }) {
               </dd>
             </dl>
           </section>
+
+          {/* Chapter 8.1: exploring is direct, but the moment intent to change
+              state appears the surface hands off to the one protected journey.
+              The catalog never abbreviates a mutation of its own. */}
+          <p className="catalog-journey-handoff">
+            <Link
+              className="journey-entry-link"
+              to={catalogJourneyPath({
+                signalId,
+                projectId: detail.data.owner.project_id,
+              })}
+            >
+              Abrir el recorrido protegido
+            </Link>
+            <small>
+              Desde alli se declara la necesidad, se eligen los objetos
+              compatibles y se confirma con prevalidacion.
+            </small>
+          </p>
 
           <section aria-label="Consumidores">
             <h3>Consumidores</h3>
