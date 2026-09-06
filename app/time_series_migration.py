@@ -111,11 +111,85 @@ C2_STOPPED = "TS_MIGRATION_C2_STOPPED"
 C3_STOPPED = "TS_MIGRATION_C3_STOPPED"
 C4_STOPPED = "TS_MIGRATION_C4_STOPPED"
 C5_STOPPED = "TS_MIGRATION_C5_STOPPED"
+C6_STOPPED = "TS_MIGRATION_C6_STOPPED"
 C0_RESTORE_NOT_PROVEN = "TS_MIGRATION_RESTORE_NOT_PROVEN"
 MAPPING_CONFLICT = "TS_MIGRATION_MAPPING_CONFLICT"
 RECOVERY_POINT_REQUIRED = "TS_MIGRATION_RECOVERY_POINT_REQUIRED"
 MIGRATION_PHASE_REQUIRED = "TS_MIGRATION_PHASE_REQUIRED"
 MUTATION_PAUSED = "TS_MIGRATION_MUTATION_PAUSED"
+LEGACY_WRITE_FORBIDDEN = "TS_LEGACY_WRITE_FORBIDDEN"
+
+# The first three are the explicit AC-MIG-06 boundary. The remaining legacy
+# content tables close indirect ways of mutating those rows after C6. Hydraulic
+# source rows are protected too: the adapter may still read and migrate them,
+# but chapter 10.9 stops creating new hydraulic legacy series at cutover.
+LEGACY_WRITE_REQUIRED_TABLES = (
+    "time_series_values",
+    "time_series_signals",
+    "case_time_series_bindings",
+)
+LEGACY_WRITE_PROTECTED_TABLES = (
+    "time_series_sources",
+    "time_series_sets",
+    "time_series_set_revisions",
+    "time_series_signals",
+    "time_series_periods",
+    "time_series_values",
+    "case_time_series_bindings",
+    "hydraulic_time_series_sets",
+    "hydraulic_time_series_points",
+    "case_hydraulic_time_series_bindings",
+)
+
+
+def legacy_write_guard_name(table_name: str) -> str:
+    return f"ts_c6_legacy_write_{table_name}"
+
+
+def legacy_write_protection_script(backend: str) -> str:
+    """Database-level C6 denial for every physical legacy content table."""
+
+    if backend == "postgresql":
+        statements = [
+            """
+            CREATE OR REPLACE FUNCTION reject_legacy_time_series_write()
+            RETURNS trigger AS $$
+            BEGIN
+                RAISE EXCEPTION 'TS_LEGACY_WRITE_FORBIDDEN';
+            END;
+            $$ LANGUAGE plpgsql;
+            """
+        ]
+        for table_name in LEGACY_WRITE_PROTECTED_TABLES:
+            trigger_name = legacy_write_guard_name(table_name)
+            statements.append(
+                f"""
+                DROP TRIGGER IF EXISTS {trigger_name} ON {table_name};
+                CREATE TRIGGER {trigger_name}
+                BEFORE INSERT OR UPDATE OR DELETE ON {table_name}
+                FOR EACH ROW EXECUTE FUNCTION reject_legacy_time_series_write();
+                REVOKE INSERT, UPDATE, DELETE ON TABLE {table_name} FROM PUBLIC;
+                """
+            )
+        return "\n".join(statements)
+
+    statements = []
+    for table_name in LEGACY_WRITE_PROTECTED_TABLES:
+        base_name = legacy_write_guard_name(table_name)
+        for operation in ("INSERT", "UPDATE", "DELETE"):
+            trigger_name = f"{base_name}_{operation.lower()}"
+            statements.append(
+                f"""
+                DROP TRIGGER IF EXISTS {trigger_name};
+                CREATE TRIGGER {trigger_name}
+                BEFORE {operation} ON {table_name}
+                FOR EACH ROW
+                BEGIN
+                    SELECT RAISE(ABORT, '{LEGACY_WRITE_FORBIDDEN}');
+                END;
+                """
+            )
+    return "\n".join(statements)
 
 
 # Chapter 10.7 deliberately resolves the legacy execution field through an
@@ -287,7 +361,12 @@ def migration_control_schema_statements(backend: str) -> list[str]:
     )
     reference = "BIGINT" if postgres else "INTEGER"
 
-    return [
+    canonical_hydraulic_migrations = (
+        "ts_next.hydraulic_time_series_set_migrations"
+        if postgres
+        else "hydraulic_time_series_set_migrations_next"
+    )
+    statements = [
         f"""
         CREATE TABLE IF NOT EXISTS {table['time_series_migration_runs']} (
             id {identity},
@@ -367,3 +446,16 @@ def migration_control_schema_statements(backend: str) -> list[str]:
             (migration_run_id, severity, resolution)
         """,
     ]
+    statements.append(
+        f"""
+        CREATE TABLE IF NOT EXISTS {canonical_hydraulic_migrations} (
+            hydraulic_time_series_set_id {reference} PRIMARY KEY
+                REFERENCES hydraulic_time_series_sets(id),
+            canonical_time_series_set_id {reference} NOT NULL,
+            content_hash TEXT NOT NULL,
+            migrated_at TEXT NOT NULL,
+            migrated_by TEXT NOT NULL
+        )
+        """
+    )
+    return statements

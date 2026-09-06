@@ -5,6 +5,8 @@ import json
 import os
 import secrets
 from contextlib import asynccontextmanager
+from datetime import datetime
+from email.utils import format_datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -106,6 +108,7 @@ from app.time_series_catalog import (
     prepare_time_series_catalog_import,
 )
 from app.time_series_catalog_projection import CatalogQueryError
+from app.time_series_migration import MigrationControlError
 from app.time_series_catalog_read import (
     catalog_detail_etag,
     catalog_error_payload,
@@ -1142,6 +1145,27 @@ def create_app(
     def not_found_response() -> Response:
         return JSONResponse({"detail": "not found"}, status_code=404)
 
+    def legacy_time_series_alias_headers(successor_path: str) -> dict[str, str]:
+        state = analyst_store.read_time_series_c6_state()
+        if not state["cutover_active"] or not state["ts_legacy_aliases"]:
+            return {}
+        sunset = datetime.fromisoformat(state["aliases_sunset_at"])
+        return {
+            "Deprecation": "true",
+            "Sunset": format_datetime(sunset, usegmt=True),
+            "Link": f'<{successor_path}>; rel="successor-version"',
+            "X-Time-Series-Model": "canonical",
+            "X-Time-Series-Alias-Sunset": state["aliases_sunset_at"],
+        }
+
+    def legacy_time_series_alias_response(
+        content: dict[str, Any], *, successor_path: str
+    ) -> JSONResponse:
+        return JSONResponse(
+            content,
+            headers=legacy_time_series_alias_headers(successor_path),
+        )
+
     def external_may_reach_path(path: str) -> bool:
         """The console and portal roots, and nothing else."""
 
@@ -1268,7 +1292,12 @@ def create_app(
             {
                 "user": public_current_user(user),
                 "landing_path": landing_path,
-                "ts_next_canonical_read": may_read_canonical_catalog(user),
+                "ts_next_canonical_read": may_read_canonical_catalog(
+                    user,
+                    cutover_active=analyst_store.read_time_series_c6_state()[
+                        "cutover_active"
+                    ],
+                ),
             },
             status_code=status_code,
         )
@@ -1786,7 +1815,12 @@ def create_app(
             "user": public_current_user(user),
             "bootstrap_required": False,
             "landing_path": react_authenticated_landing_path(user),
-            "ts_next_canonical_read": may_read_canonical_catalog(user),
+            "ts_next_canonical_read": may_read_canonical_catalog(
+                user,
+                cutover_active=analyst_store.read_time_series_c6_state()[
+                    "cutover_active"
+                ],
+            ),
         }
 
     @app.get("/api/admin/users")
@@ -1926,7 +1960,10 @@ def create_app(
     async def get_signal_catalog():
         """Expose the DB-backed legacy signal adapter to internal surfaces."""
 
-        return {"signals": analyst_store.signal_catalog_entries()}
+        return legacy_time_series_alias_response(
+            {"signals": analyst_store.signal_catalog_entries()},
+            successor_path="/api/time-series/catalog/descriptors?kind=semantic_type",
+        )
 
     @app.get("/api/time-series/catalog/inputs")
     async def get_global_time_series_catalog_inputs(
@@ -4408,7 +4445,10 @@ def create_app(
             time_series_sets = analyst_store.list_time_series_sets(project_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        return {"time_series_sets": time_series_sets}
+        return legacy_time_series_alias_response(
+            {"time_series_sets": time_series_sets},
+            successor_path="/api/time-series/catalog/inputs",
+        )
 
     @app.post(
         "/api/projects/{project_id}/time-series-sets/connector-ingest",
@@ -4575,7 +4615,18 @@ def create_app(
             )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        return {"time_series_set": time_series_set}
+        response = legacy_time_series_alias_response(
+            {"time_series_set": time_series_set},
+            successor_path=(
+                "/api/time-series/catalog/inputs"
+                f"?time_series_set_id={time_series_set_id}"
+            ),
+        )
+        if analyst_store.read_time_series_c6_state()["cutover_active"]:
+            response.headers["ETag"] = analyst_store.canonical_legacy_alias_etag(
+                project_id=project_id, time_series_set_id=time_series_set_id
+            )
+        return response
 
     @app.post(
         "/api/projects/{project_id}/time-series-sets/{time_series_set_id}/regenerate"
@@ -4613,7 +4664,13 @@ def create_app(
             )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        return {"time_series_set_revisions": revisions}
+        return legacy_time_series_alias_response(
+            {"time_series_set_revisions": revisions},
+            successor_path=(
+                "/api/time-series/catalog/inputs"
+                f"?time_series_set_id={time_series_set_id}"
+            ),
+        )
 
     @app.post(
         "/api/projects/{project_id}/time-series-sets/{time_series_set_id}/transformations",
@@ -4681,6 +4738,8 @@ def create_app(
         time_series_set_id: int,
         payload: TimeSeriesSetValuesEditRequest,
         request: Request,
+        if_match: str | None = Header(default=None, alias="If-Match"),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ):
         try:
             updated_set = analyst_store.edit_time_series_set_values(
@@ -4696,6 +4755,8 @@ def create_app(
                 ],
                 change_summary=payload.change_summary,
                 created_by=current_user_email(request),
+                if_match=if_match,
+                idempotency_key=idempotency_key,
             )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
@@ -4706,7 +4767,29 @@ def create_app(
                 ),
                 status_code=400,
             )
-        return {"time_series_set": updated_set}
+        except MigrationControlError as error:
+            status_by_code = {
+                "TS_PRECONDITION_REQUIRED": 428,
+                "TS_PRECONDITION_CHANGED": 412,
+                "TS_IDEMPOTENCY_CONFLICT": 409,
+            }
+            return JSONResponse(
+                {
+                    "code": error.code,
+                    "message": "La escritura legacy se delega al escritor canonico.",
+                    "context": error.context,
+                },
+                status_code=status_by_code.get(error.code, 409),
+                media_type="application/problem+json",
+                headers={"Cache-Control": "private, no-store"},
+            )
+        return legacy_time_series_alias_response(
+            {"time_series_set": updated_set},
+            successor_path=(
+                "/api/time-series/catalog/inputs"
+                f"?time_series_set_id={time_series_set_id}"
+            ),
+        )
 
     @app.post(
         "/api/projects/{project_id}/time-series-sets/{time_series_set_id}/replace/upload",
@@ -4743,6 +4826,8 @@ def create_app(
         time_series_set_id: int,
         payload: TimeSeriesSetReplaceRequest,
         request: Request,
+        if_match: str | None = Header(default=None, alias="If-Match"),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ):
         try:
             existing_set = analyst_store.get_time_series_set(project_id, time_series_set_id)
@@ -4777,6 +4862,8 @@ def create_app(
                 prepared_import=prepared_import,
                 created_by=current_user_email(request),
                 change_summary=payload.change_summary,
+                if_match=if_match,
+                idempotency_key=idempotency_key,
             )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
@@ -4791,7 +4878,30 @@ def create_app(
                 ),
                 status_code=400,
             )
-        return {"time_series_set": updated_set}
+        except MigrationControlError as error:
+            status_by_code = {
+                "TS_PRECONDITION_REQUIRED": 428,
+                "TS_PRECONDITION_CHANGED": 412,
+                "TS_IDEMPOTENCY_CONFLICT": 409,
+                "TS_LINK_CONFIRMATION_REQUIRED": 409,
+            }
+            return JSONResponse(
+                {
+                    "code": error.code,
+                    "message": "La escritura legacy se delega al escritor canonico.",
+                    "context": error.context,
+                },
+                status_code=status_by_code.get(error.code, 409),
+                media_type="application/problem+json",
+                headers={"Cache-Control": "private, no-store"},
+            )
+        return legacy_time_series_alias_response(
+            {"time_series_set": updated_set},
+            successor_path=(
+                "/api/time-series/catalog/inputs"
+                f"?time_series_set_id={time_series_set_id}"
+            ),
+        )
 
     @app.put("/api/scenarios/{scenario_id}/draft")
     async def update_scenario_draft(scenario_id: int, payload: ScenarioDraftWriteRequest):
@@ -4911,16 +5021,41 @@ def create_app(
     ):
         try:
             case, _ = get_case_and_variant_for_scenario(scenario_id, variant_id)
-            binding = analyst_store.upsert_case_time_series_binding(
-                case_input_variant_id=variant_id,
-                signal_key=payload.signal_key,
-                entity_type=payload.entity_type,
-                entity_id=payload.entity_id,
-                time_series_set_id=payload.time_series_set_id,
-                created_by=current_user_email(request),
-            )
+            if analyst_store.read_time_series_c6_state()["cutover_active"]:
+                user = request.state.current_user or {
+                    "id": None,
+                    "email": "internal_analyst",
+                    "role": "analyst",
+                }
+                binding = analyst_store.bind_case_time_series_from_legacy_alias(
+                    scenario_id=scenario_id,
+                    case_input_variant_id=variant_id,
+                    signal_key=payload.signal_key,
+                    entity_type=payload.entity_type,
+                    entity_id=payload.entity_id,
+                    time_series_set_id=payload.time_series_set_id,
+                    actor_user=user,
+                    request_id=(
+                        request.headers.get("x-request-id")
+                        or f"req_{secrets.token_hex(8)}"
+                    ),
+                )
+            else:
+                binding = analyst_store.upsert_case_time_series_binding(
+                    case_input_variant_id=variant_id,
+                    signal_key=payload.signal_key,
+                    entity_type=payload.entity_type,
+                    entity_id=payload.entity_id,
+                    time_series_set_id=payload.time_series_set_id,
+                    created_by=current_user_email(request),
+                )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
+        except MigrationControlError as error:
+            return JSONResponse(
+                {"detail": {"code": error.code, "context": error.context}},
+                status_code=409,
+            )
         return binding
 
     @app.post("/api/scenarios/{scenario_id}/case/variants/{variant_id}/validate")
@@ -6600,11 +6735,15 @@ def canonical_read_verification_accounts() -> set[str]:
     }
 
 
-def may_read_canonical_catalog(user: dict[str, Any]) -> bool:
-    """TS7-022 replaces this allowlist with the role check; nothing else."""
+def may_read_canonical_catalog(
+    user: dict[str, Any], *, cutover_active: bool = False
+) -> bool:
+    """Verification allowlist before C6; every internal identity after it."""
 
     if user.get("role") not in INTERNAL_USER_ROLES:
         return False
+    if cutover_active:
+        return True
     return str(user.get("email", "")).strip().lower() in (
         canonical_read_verification_accounts()
     )

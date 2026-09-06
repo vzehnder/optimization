@@ -6747,7 +6747,10 @@ export interface operations {
     replace_project_time_series_set_api_projects__project_id__time_series_sets__time_series_set_id__replace_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "If-Match"?: string | null;
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 project_id: number;
                 time_series_set_id: number;
@@ -6887,7 +6890,10 @@ export interface operations {
     edit_project_time_series_set_values_api_projects__project_id__time_series_sets__time_series_set_id__values_put: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "If-Match"?: string | null;
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 project_id: number;
                 time_series_set_id: number;

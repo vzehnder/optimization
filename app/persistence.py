@@ -188,12 +188,16 @@ from app.time_series_migration import (
     C5_SAMPLE_VERSION,
     C5_SHADOW_DIMENSIONS,
     C5_STOPPED,
+    C6_STOPPED,
     LEGACY_BINDING_ROLE_ALIASES,
     LEGACY_BINDING_ROLE_EXPANSIONS,
     MAPPING_CONFLICT,
     MIGRATION_ANOMALY_CODES,
     MIGRATION_PHASE_REQUIRED,
     MIGRATION_CONTROL_VERSION,
+    LEGACY_WRITE_FORBIDDEN,
+    LEGACY_WRITE_PROTECTED_TABLES,
+    LEGACY_WRITE_REQUIRED_TABLES,
     MUTATION_PAUSED,
     RECOVERY_POINT_REQUIRED,
     MigrationControlError,
@@ -201,6 +205,8 @@ from app.time_series_migration import (
     canonical_digest,
     manifest_signature_matches,
     migration_actor,
+    legacy_write_guard_name,
+    legacy_write_protection_script,
     migration_control_schema_statements,
     migration_control_table_names,
     normalize_source_row,
@@ -2531,6 +2537,12 @@ class AnalystStore:
         return None if pause is None else dict(pause)
 
     def _require_no_legacy_mutation_pause(self, operation: str) -> None:
+        if self.read_time_series_c6_state()["cutover_active"]:
+            raise MigrationControlError(
+                LEGACY_WRITE_FORBIDDEN,
+                operation=str(operation),
+                canonical_writer="ts_next",
+            )
         pause = self._legacy_mutation_pause
         if pause is None:
             return
@@ -6143,6 +6155,472 @@ class AnalystStore:
             "manifest_digest": canonical_digest(manifest),
         }
 
+    def read_time_series_c6_state(self) -> dict[str, Any]:
+        """Return the durable single-writer state, never an environment guess."""
+
+        row = self.connection.execute(
+            f"""
+            SELECT * FROM {self._migration('time_series_migration_runs')}
+            WHERE phase = 'C6' AND status = 'proven'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        if row is None:
+            return {
+                "cutover_active": False,
+                "ts_next_canonical_read": False,
+                "ts_next_canonical_write": False,
+                "ts_legacy_aliases": False,
+                "phase": None,
+                "status": "not_started",
+                "migration_run_id": None,
+            }
+        manifest = json.loads(row["manifest_json"] or "{}")
+        open_triggers = [
+            dict(trigger)
+            for trigger in self.connection.execute(
+                f"""
+                SELECT code, finding_key, evidence_json, created_at
+                FROM {self._migration('time_series_migration_anomalies')}
+                WHERE migration_run_id = ? AND phase = 'C6'
+                  AND severity = 'blocking' AND resolution = 'open'
+                ORDER BY id
+                """,
+                (int(row["id"]),),
+            ).fetchall()
+        ]
+        for trigger in open_triggers:
+            trigger["evidence"] = json.loads(trigger.pop("evidence_json") or "{}")
+        return {
+            "cutover_active": True,
+            "ts_next_canonical_read": bool(
+                manifest.get("flags", {}).get("ts_next_canonical_read")
+            ),
+            "ts_next_canonical_write": bool(
+                manifest.get("flags", {}).get("ts_next_canonical_write")
+            ),
+            "ts_legacy_aliases": bool(
+                manifest.get("flags", {}).get("ts_legacy_aliases")
+            ),
+            "phase": "C6",
+            "status": "proven",
+            "migration_run_id": int(row["id"]),
+            "actor": str(row["actor"]),
+            "activated_at": str(manifest["activated_at"]),
+            "observation_ends_at": str(manifest["observation_ends_at"]),
+            "compatibility_reconciliation_ends_at": str(
+                manifest["compatibility_reconciliation_ends_at"]
+            ),
+            "aliases_sunset_at": str(manifest["aliases_sunset_at"]),
+            "manifest": manifest,
+            "manifest_digest": str(row["manifest_digest"]),
+            "canonical_mutations_paused": bool(open_triggers),
+            "open_rollback_triggers": open_triggers,
+        }
+
+    def _require_canonical_mutations_available(self, operation: str) -> None:
+        state = self.read_time_series_c6_state()
+        if state["cutover_active"] and state["canonical_mutations_paused"]:
+            raise MigrationControlError(
+                "TS_CUTOVER_MUTATIONS_PAUSED",
+                operation=str(operation),
+                rollback_policy="roll_forward",
+                open_trigger_codes=sorted(
+                    {item["code"] for item in state["open_rollback_triggers"]}
+                ),
+            )
+
+    def observe_time_series_c6_health(
+        self, *, actor: str, observation: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Evaluate the executable zero-tolerance and measured C6 triggers."""
+
+        state = self.read_time_series_c6_state()
+        if not state["cutover_active"]:
+            raise MigrationControlError(MIGRATION_PHASE_REQUIRED, required_phase="C6")
+        triggers: list[dict[str, Any]] = []
+
+        def add(code: str, evidence: Mapping[str, Any]) -> None:
+            triggers.append(
+                {
+                    "code": code,
+                    "severity": "blocking",
+                    "finding_key": f"{code}:{canonical_digest(dict(evidence))}",
+                    "evidence": dict(evidence),
+                    "explained": False,
+                    "explanation": "",
+                }
+            )
+
+        zero_tolerance_metrics = {
+            "open_blocking_anomalies": "TS_CUTOVER_BLOCKING_ANOMALY_OPEN",
+            "shadow_read_differences": "TS_CUTOVER_SHADOW_DIFFERENCE_OBSERVED",
+            "object_scoped_catalog_rows": "TS_CUTOVER_OBJECT_SCOPE_LEAK_OBSERVED",
+            "cross_project_references": "TS_CUTOVER_CROSS_PROJECT_REFERENCE_OBSERVED",
+            "active_unsealed_bindings": "TS_CUTOVER_UNSEALED_BINDING_OBSERVED",
+            "visible_partial_revisions": "TS_CUTOVER_PARTIAL_REVISION_VISIBLE",
+        }
+        for metric, code in zero_tolerance_metrics.items():
+            occurrence_count = int(observation.get(metric) or 0)
+            if occurrence_count > 0:
+                add(code, {metric: occurrence_count})
+
+        legacy_writes = int(observation.get("legacy_writes") or 0)
+        if legacy_writes > 0:
+            add(
+                "TS_CUTOVER_LEGACY_WRITE_OBSERVED",
+                {"legacy_writes": legacy_writes},
+            )
+        latency = observation.get("blocking_operation_latency") or {}
+        if (
+            float(latency.get("p95_ms") or 0)
+            > 1.5 * float(latency.get("budget_ms") or 0)
+            and int(latency.get("sustained_minutes") or 0) >= 15
+        ):
+            add("TS_CUTOVER_LATENCY_THRESHOLD_EXCEEDED", latency)
+        errors = observation.get("http_5xx") or {}
+        requests = int(errors.get("request_count") or 0)
+        if (
+            requests > 0
+            and int(errors.get("window_minutes") or 0) >= 30
+            and int(errors.get("error_count") or 0) / requests > 0.005
+        ):
+            add("TS_CUTOVER_5XX_THRESHOLD_EXCEEDED", errors)
+        publications = observation.get("failed_publications") or {}
+        batch_size = int(publications.get("batch_size") or 0)
+        if (
+            batch_size > 0
+            and int(publications.get("failed_after_retries") or 0) / batch_size
+            > 0.01
+        ):
+            add(
+                "TS_CUTOVER_PUBLICATION_FAILURE_THRESHOLD_EXCEEDED",
+                publications,
+            )
+        if triggers:
+            self._record_migration_anomalies(
+                migration_run_id=int(state["migration_run_id"]),
+                phase="C6",
+                findings=triggers,
+                now=utc_now_iso(),
+            )
+            self.connection.commit()
+        return {
+            "status": "mutations_paused" if triggers else "healthy",
+            "canonical_reads_active": True,
+            "canonical_mutations_paused": bool(triggers),
+            "rollback_policy": "roll_forward",
+            "triggers": [
+                {key: value for key, value in trigger.items() if key in {"code", "evidence"}}
+                for trigger in triggers
+            ],
+        }
+
+    def reconcile_time_series_c6_daily(
+        self, *, actor: str, force: bool = False, observed_at: str | None = None
+    ) -> dict[str, Any]:
+        """Record one compatibility-window reconciliation and fail on one row."""
+
+        state = self.read_time_series_c6_state()
+        if not state["cutover_active"]:
+            raise MigrationControlError(MIGRATION_PHASE_REQUIRED, required_phase="C6")
+        observed = datetime.fromisoformat(observed_at or utc_now_iso())
+        day = observed.date().isoformat()
+        table = self._migration("time_series_migration_anomalies")
+        finding_key = f"TS_CUTOVER_DAILY_RECONCILIATION:{day}"
+        if not force:
+            previous = self.connection.execute(
+                f"""
+                SELECT evidence_json FROM {table}
+                WHERE migration_run_id = ? AND finding_key = ?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (int(state["migration_run_id"]), finding_key),
+            ).fetchone()
+            if previous is not None:
+                evidence = json.loads(previous["evidence_json"] or "{}")
+                return {
+                    "status": "reconciled",
+                    "day": day,
+                    "divergent_rows": evidence.get("divergent_rows", []),
+                    "already_recorded": True,
+                }
+        divergence = self.catalog_projection_divergence()
+        divergent_rows = [
+            {"kind": kind, "id": int(identifier)}
+            for kind in ("missing", "unexpected", "stale", "object_specific")
+            for identifier in divergence[kind]
+        ]
+        evidence = {
+            "day": day,
+            "catalog_projection": divergence,
+            "divergent_rows": divergent_rows,
+            "compatibility_reconciliation_ends_at": state[
+                "compatibility_reconciliation_ends_at"
+            ],
+        }
+        finding = {
+            "code": (
+                "TS_CUTOVER_DAILY_RECONCILIATION_DIVERGENCE"
+                if divergent_rows
+                else "TS_CUTOVER_DAILY_RECONCILIATION_OK"
+            ),
+            "severity": "blocking" if divergent_rows else "informational",
+            "finding_key": finding_key,
+            "evidence": evidence,
+            "explained": not divergent_rows,
+            "explanation": "canonical aliases and projection reconcile",
+        }
+        self._record_migration_anomalies(
+            migration_run_id=int(state["migration_run_id"]),
+            phase="C6",
+            findings=[finding],
+            now=observed.isoformat(timespec="seconds"),
+        )
+        self.connection.commit()
+        if divergent_rows:
+            raise MigrationControlError(
+                "TS_CUTOVER_DAILY_RECONCILIATION_DIVERGENCE",
+                day=day,
+                divergent_rows=divergent_rows,
+                rollback_policy="pause_mutations_and_roll_forward",
+            )
+        return {
+            "status": "reconciled",
+            "day": day,
+            "divergent_rows": [],
+            "already_recorded": False,
+            "next_due_at": (observed + timedelta(days=1)).isoformat(
+                timespec="seconds"
+            ),
+        }
+
+    def read_legacy_write_protection(self) -> dict[str, Any]:
+        """Describe the independent application and database C6 barriers."""
+
+        state = self.read_time_series_c6_state()
+        expected_names = []
+        if self.database_backend == "postgresql":
+            expected_names = [
+                legacy_write_guard_name(table_name)
+                for table_name in LEGACY_WRITE_PROTECTED_TABLES
+            ]
+            rows = self.connection.execute(
+                """
+                SELECT tgname AS name
+                FROM pg_trigger
+                WHERE NOT tgisinternal AND tgname = ANY(?)
+                """,
+                (expected_names,),
+            ).fetchall()
+        else:
+            expected_names = [
+                f"{legacy_write_guard_name(table_name)}_{operation}"
+                for table_name in LEGACY_WRITE_PROTECTED_TABLES
+                for operation in ("insert", "update", "delete")
+            ]
+            placeholders = ", ".join("?" for _ in expected_names)
+            rows = self.connection.execute(
+                f"SELECT name FROM sqlite_master WHERE type = 'trigger' "
+                f"AND name IN ({placeholders})",
+                tuple(expected_names),
+            ).fetchall()
+        installed = {str(row["name"]) for row in rows}
+        return {
+            "code_guard_enabled": bool(state["cutover_active"]),
+            "database_guard_enabled": set(expected_names) == installed,
+            "required_tables": list(LEGACY_WRITE_REQUIRED_TABLES),
+            "protected_tables": list(LEGACY_WRITE_PROTECTED_TABLES),
+            "installed_guards": sorted(installed),
+            "postgres_public_mutation_grants_revoked": (
+                self.database_backend == "postgresql" and bool(state["cutover_active"])
+            ),
+        }
+
+    def _time_series_c6_live_gate(self) -> dict[str, Any]:
+        projection = self.catalog_projection_divergence()
+        c4 = self.read_time_series_c4_cutover_gate()
+        first_pending = self.read_pending_dirty_roots()
+        # This second read is intentional evidence: C6 takes the pause before
+        # both checks, so a non-empty or moving journal can never slip through.
+        second_pending = self.read_pending_dirty_roots()
+        invalid_sets = [
+            int(row["set_id"])
+            for row in self.connection.execute(
+                f"""
+                SELECT the_set.id AS set_id
+                FROM {self._canonical('time_series_sets')} AS the_set
+                LEFT JOIN {self._canonical('time_series_set_revisions')} AS revision
+                  ON revision.id = the_set.current_revision_id
+                WHERE the_set.status = 'validated'
+                  AND (the_set.current_revision_id IS NULL
+                       OR revision.state <> 'sealed'
+                       OR revision.content_hash IS NULL)
+                ORDER BY the_set.id
+                """
+            ).fetchall()
+        ]
+        anomaly_rows = self.connection.execute(
+            f"""
+            SELECT anomaly.id, anomaly.code
+            FROM {self._migration('time_series_migration_anomalies')} AS anomaly
+            WHERE anomaly.severity = 'blocking' AND anomaly.resolution = 'open'
+              AND anomaly.migration_run_id IN (
+                  SELECT MAX(id)
+                  FROM {self._migration('time_series_migration_runs')}
+                  WHERE phase IN ('C0', 'C2', 'C3', 'C4', 'C5')
+                  GROUP BY phase
+              )
+            ORDER BY anomaly.id
+            """
+        ).fetchall()
+        findings = []
+        if not projection["converged"]:
+            findings.append(
+                {
+                    "code": "TS_CUTOVER_PROJECTION_DIVERGENCE",
+                    "evidence": projection,
+                }
+            )
+        if not c4["cutover_ready"]:
+            findings.append(
+                {"code": "TS_CUTOVER_BINDINGS_INCOMPLETE", "evidence": c4}
+            )
+        if first_pending or second_pending:
+            findings.append(
+                {
+                    "code": "TS_CUTOVER_DIRTY_ROOTS_PENDING",
+                    "evidence": {
+                        "first_check": [dict(row) for row in first_pending],
+                        "second_check": [dict(row) for row in second_pending],
+                    },
+                }
+            )
+        if invalid_sets:
+            findings.append(
+                {
+                    "code": "TS_CUTOVER_REVISION_NOT_SEALED",
+                    "evidence": {"set_ids": invalid_sets},
+                }
+            )
+        if anomaly_rows:
+            findings.append(
+                {
+                    "code": "TS_CUTOVER_BLOCKING_ANOMALY_OPEN",
+                    "evidence": {
+                        "anomalies": [
+                            {"id": int(row["id"]), "code": str(row["code"])}
+                            for row in anomaly_rows
+                        ]
+                    },
+                }
+            )
+        return {
+            "ready": not findings,
+            "findings": findings,
+            "projection": projection,
+            "bindings": c4,
+            "invalid_active_set_ids": invalid_sets,
+            "open_blocking_anomaly_ids": [
+                int(row["id"]) for row in anomaly_rows
+            ],
+            "pending_dirty_roots": len(second_pending),
+            "final_journal_checks": 2,
+        }
+
+    def cut_over_time_series_c6(self, *, actor: str) -> dict[str, Any]:
+        """Make the canonical time-series model the irreversible writer."""
+
+        self._require_proven_migration_phase("C5")
+        existing = self.read_time_series_c6_state()
+        if existing["cutover_active"]:
+            return existing
+
+        with self._lock:
+            opened = self.open_migration_phase(phase="C6", actor=actor)
+            self.begin_legacy_mutation_pause(
+                actor=actor,
+                reason=f"C6 final gate (migration run {opened['migration_run_id']})",
+            )
+            try:
+                gate = self._time_series_c6_live_gate()
+                if not gate["ready"]:
+                    manifest = {
+                        "manifest_version": 1,
+                        "phase": "C6",
+                        "source_engine": self.database_backend,
+                        "gate": gate,
+                    }
+                    self._finish_migration_run(
+                        migration_run_id=int(opened["migration_run_id"]),
+                        status="stopped",
+                        manifest=manifest,
+                    )
+                    raise MigrationPhaseStopped(
+                        C6_STOPPED,
+                        migration_run_id=int(opened["migration_run_id"]),
+                        findings=[
+                            {
+                                **finding,
+                                "severity": "blocking",
+                                "finding_key": (
+                                    f"{finding['code']}:"
+                                    f"{canonical_digest(finding['evidence'])}"
+                                ),
+                                "explained": False,
+                                "explanation": "",
+                            }
+                            for finding in gate["findings"]
+                        ],
+                        rollback_trigger=True,
+                    )
+
+                activated = datetime.fromisoformat(utc_now_iso())
+                self.connection.executescript(
+                    legacy_write_protection_script(self.database_backend)
+                )
+                manifest = {
+                    "manifest_version": 1,
+                    "phase": "C6",
+                    "source_engine": self.database_backend,
+                    "activated_at": activated.isoformat(timespec="seconds"),
+                    "observation_ends_at": (
+                        activated + timedelta(hours=72)
+                    ).isoformat(timespec="seconds"),
+                    "compatibility_reconciliation_ends_at": (
+                        activated + timedelta(days=30)
+                    ).isoformat(timespec="seconds"),
+                    "aliases_sunset_at": (
+                        activated + timedelta(days=90)
+                    ).isoformat(timespec="seconds"),
+                    "flags": {
+                        "ts_next_shadow_read": True,
+                        "ts_next_canonical_read": True,
+                        "ts_next_canonical_write": True,
+                        "ts_legacy_aliases": True,
+                    },
+                    "rollback_policy": "pause_canonical_mutations_and_roll_forward",
+                    "gate": gate,
+                    "legacy_write_protection": {
+                        "code_guard": True,
+                        "database_guard": True,
+                        "protected_tables": list(LEGACY_WRITE_PROTECTED_TABLES),
+                        "postgres_public_mutation_grants_revoked": (
+                            self.database_backend == "postgresql"
+                        ),
+                    },
+                }
+                self._finish_migration_run(
+                    migration_run_id=int(opened["migration_run_id"]),
+                    status="proven",
+                    manifest=manifest,
+                )
+            finally:
+                # C5/C6 pauses are process-local and never survive either exit.
+                self.release_legacy_mutation_pause(actor=actor)
+        return self.read_time_series_c6_state()
+
     def _write_recovery_copy(self, copy_directory) -> dict[str, Any]:
         """A consistent logical copy of the closure C0 has to be able to restore."""
 
@@ -7173,6 +7651,9 @@ class AnalystStore:
         publication that never happened.
         """
 
+        self._require_canonical_mutations_available(
+            "publish_canonical_set_revision"
+        )
         normalized_signals = normalize_canonical_signals(signals)
         normalized_periods = normalize_canonical_periods(periods)
         with self._lock:
@@ -23383,10 +23864,20 @@ class AnalystStore:
         Non-derived sets have no recorded dependencies and are never stale.
         """
         self.get_project(project_id)
-        set_row = self.connection.execute(
-            "SELECT id FROM time_series_sets WHERE project_id = ? AND id = ?",
-            (project_id, time_series_set_id),
-        ).fetchone()
+        canonical_read = self.read_time_series_c6_state()["cutover_active"]
+        if canonical_read:
+            set_row = self.connection.execute(
+                f"""
+                SELECT id FROM {self._canonical('time_series_sets')}
+                WHERE owner_project_id = ? AND id = ? AND series_kind = 'catalog'
+                """,
+                (project_id, time_series_set_id),
+            ).fetchone()
+        else:
+            set_row = self.connection.execute(
+                "SELECT id FROM time_series_sets WHERE project_id = ? AND id = ?",
+                (project_id, time_series_set_id),
+            ).fetchone()
         if set_row is None:
             raise KeyError(f"time-series set {time_series_set_id} not found")
 
@@ -23396,7 +23887,23 @@ class AnalystStore:
             dependency_type = dependency["dependency_type"]
             dependency_id = dependency["dependency_id"]
             if dependency_type == "time_series_set":
-                current_hash = self._latest_time_series_set_content_hash(int(dependency_id))
+                if canonical_read:
+                    row = self.connection.execute(
+                        f"""
+                        SELECT COALESCE(revision.legacy_content_hash,
+                                        revision.content_hash) AS content_hash
+                        FROM {self._canonical('time_series_sets')} AS the_set
+                        JOIN {self._canonical('time_series_set_revisions')} AS revision
+                          ON revision.id = the_set.current_revision_id
+                        WHERE the_set.id = ? AND the_set.series_kind = 'catalog'
+                        """,
+                        (int(dependency_id),),
+                    ).fetchone()
+                    current_hash = None if row is None else row["content_hash"]
+                else:
+                    current_hash = self._latest_time_series_set_content_hash(
+                        int(dependency_id)
+                    )
                 if current_hash is not None:
                     current.append(
                         {
@@ -23434,7 +23941,21 @@ class AnalystStore:
         created_by: str = "internal_analyst",
         change_summary: str | None = None,
         extra_revision_metadata: dict[str, Any] | None = None,
+        if_match: str | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
+        if self.read_time_series_c6_state()["cutover_active"]:
+            return self._replace_canonical_source_from_legacy_alias(
+                project_id=project_id,
+                time_series_set_id=time_series_set_id,
+                source=source,
+                prepared_import=prepared_import,
+                created_by=created_by,
+                change_summary=change_summary,
+                extra_revision_metadata=extra_revision_metadata,
+                if_match=if_match,
+                idempotency_key=idempotency_key,
+            )
         self._require_no_legacy_mutation_pause("replace_time_series_set_source")
         with self._lock:
             self.get_project(project_id)
@@ -23873,6 +24394,8 @@ class AnalystStore:
         return time_series_set_id
 
     def list_time_series_sets(self, project_id: int) -> list[dict[str, Any]]:
+        if self.read_time_series_c6_state()["cutover_active"]:
+            return self._list_canonical_sets_for_legacy_alias(project_id)
         self.get_project(project_id)
         rows = self.connection.execute(
             """
@@ -23937,6 +24460,604 @@ class AnalystStore:
             }
             for row in rows
         ]
+
+    def _canonical_source_for_legacy_alias(
+        self, time_series_source_id: int | None
+    ) -> dict[str, Any] | None:
+        if time_series_source_id is None:
+            return None
+        row = self.connection.execute(
+            f"""
+            SELECT source_key, kind, original_filename, media_type, checksum,
+                   selected_sheet, created_at, metadata_json
+            FROM {self._canonical('time_series_sources')}
+            WHERE id = ?
+            """,
+            (int(time_series_source_id),),
+        ).fetchone()
+        public = self._time_series_source_public_dict(row)
+        if public is None:
+            return None
+        metadata = dict(public["metadata"])
+        legacy_kind = metadata.pop("legacy_source_kind", None)
+        metadata.pop("migration_actor", None)
+        if legacy_kind is not None:
+            public["kind"] = str(legacy_kind)
+        public["metadata"] = metadata
+        return public
+
+    def _canonical_set_for_legacy_alias(
+        self, project_id: int, time_series_set_id: int
+    ) -> dict[str, Any]:
+        """Project one canonical catalog set into the frozen TS-2 shape."""
+
+        self.get_project(project_id)
+        sets = self._canonical("time_series_sets")
+        revisions = self._canonical("time_series_set_revisions")
+        revision_signals = self._canonical("time_series_revision_signals")
+        signals = self._canonical("time_series_signals")
+        periods = self._canonical("time_series_periods")
+        values = self._canonical("time_series_values")
+        row = self.connection.execute(
+            f"""
+            SELECT the_set.*, revision.id AS revision_id,
+                   revision.revision_number, revision.time_series_source_id,
+                   revision.content_hash AS revision_content_hash,
+                   revision.legacy_content_hash, revision.change_summary,
+                   revision.metadata_json AS revision_metadata_json,
+                   revision.created_at AS revision_created_at,
+                   revision.created_by AS revision_created_by
+            FROM {sets} AS the_set
+            JOIN {revisions} AS revision
+              ON revision.id = the_set.current_revision_id
+            WHERE the_set.owner_project_id = ? AND the_set.id = ?
+              AND the_set.series_kind = 'catalog'
+            """,
+            (int(project_id), int(time_series_set_id)),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"time-series set {time_series_set_id} not found")
+
+        signal_rows = self.connection.execute(
+            f"""
+            SELECT signal.series_key, unit.symbol AS unit,
+                   revision_signal.metadata_json
+            FROM {revision_signals} AS revision_signal
+            JOIN {signals} AS signal ON signal.id = revision_signal.signal_id
+            JOIN measurement_units AS unit ON unit.id = revision_signal.unit_id
+            WHERE revision_signal.set_revision_id = ?
+            ORDER BY revision_signal.ordinal
+            """,
+            (int(row["revision_id"]),),
+        ).fetchall()
+        period_rows = self.connection.execute(
+            f"""
+            SELECT id, period_index, timestamp_start, timestamp_end,
+                   duration_hours
+            FROM {periods}
+            WHERE set_revision_id = ?
+            ORDER BY period_index
+            """,
+            (int(row["revision_id"]),),
+        ).fetchall()
+        value_rows = self.connection.execute(
+            f"""
+            SELECT period.period_index, signal.series_key,
+                   value.value_numeric
+            FROM {values} AS value
+            JOIN {periods} AS period
+              ON period.id = value.time_series_period_id
+             AND period.set_revision_id = value.set_revision_id
+            JOIN {signals} AS signal ON signal.id = value.signal_id
+            WHERE value.set_revision_id = ?
+            ORDER BY period.period_index, signal.series_key
+            """,
+            (int(row["revision_id"]),),
+        ).fetchall()
+        revision_metadata = json.loads(row["revision_metadata_json"] or "{}")
+        source = self._canonical_source_for_legacy_alias(
+            row["time_series_source_id"]
+        )
+        public_signals = []
+        for signal in signal_rows:
+            metadata = json.loads(signal["metadata_json"] or "{}")
+            public_signals.append(
+                {
+                    "signal_key": str(signal["series_key"]),
+                    "unit": str(signal["unit"]),
+                    "source_column": metadata.get("legacy_source_column", ""),
+                    "source_unit": metadata.get("legacy_source_unit", ""),
+                    "entity_type": metadata.get("legacy_entity_type"),
+                    "entity_key": metadata.get("legacy_entity_key"),
+                }
+            )
+        public_periods = [
+            {
+                "period_index": int(period["period_index"]),
+                "timestamp_start": str(period["timestamp_start"]),
+                "timestamp_end": str(period["timestamp_end"]),
+                "duration_hours": float(period["duration_hours"]),
+            }
+            for period in period_rows
+        ]
+        return {
+            "id": int(row["id"]),
+            "project_id": int(row["owner_project_id"]),
+            "name": str(row["name"]),
+            "version_number": int(row["version_number"]),
+            "version_label": str(row["version_label"]),
+            "revision_number": int(row["revision_number"]),
+            "data_kind": str(row["data_kind"]),
+            "timezone": str(row["timezone"]),
+            "status": str(row["status"]),
+            "content_hash": str(
+                row["legacy_content_hash"] or row["revision_content_hash"]
+            ),
+            "source_checksum": source["checksum"] if source else None,
+            "signal_count": len(public_signals),
+            "period_count": len(public_periods),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "source": source,
+            "horizon": {
+                "period_count": len(public_periods),
+                "start": public_periods[0]["timestamp_start"] if public_periods else None,
+                "end": public_periods[-1]["timestamp_end"] if public_periods else None,
+            },
+            "revision_metadata": revision_metadata,
+            "signals": public_signals,
+            "periods": public_periods,
+            "values": [
+                {
+                    "period_index": int(value["period_index"]),
+                    "signal_key": str(value["series_key"]),
+                    "value_numeric": float(value["value_numeric"]),
+                }
+                for value in value_rows
+            ],
+        }
+
+    def _list_canonical_sets_for_legacy_alias(
+        self, project_id: int
+    ) -> list[dict[str, Any]]:
+        self.get_project(project_id)
+        rows = self.connection.execute(
+            f"""
+            SELECT id FROM {self._canonical('time_series_sets')}
+            WHERE owner_project_id = ? AND series_kind = 'catalog'
+              AND current_revision_id IS NOT NULL
+            ORDER BY name, version_number
+            """,
+            (int(project_id),),
+        ).fetchall()
+        results = []
+        for row in rows:
+            detail = self._canonical_set_for_legacy_alias(project_id, int(row["id"]))
+            results.append(
+                {
+                    key: detail[key]
+                    for key in (
+                        "id",
+                        "project_id",
+                        "name",
+                        "version_number",
+                        "version_label",
+                        "data_kind",
+                        "timezone",
+                        "status",
+                        "revision_number",
+                        "content_hash",
+                        "signal_count",
+                        "period_count",
+                        "created_at",
+                        "updated_at",
+                    )
+                }
+                | {
+                    "stale": False,
+                    "program": _parse_program_from_metadata_json(
+                        json.dumps(detail["revision_metadata"], sort_keys=True)
+                    ),
+                }
+            )
+        return results
+
+    def canonical_legacy_alias_etag(
+        self, *, project_id: int, time_series_set_id: int
+    ) -> str:
+        row = self.connection.execute(
+            f"""
+            SELECT revision.id AS revision_id, revision.content_hash
+            FROM {self._canonical('time_series_sets')} AS the_set
+            JOIN {self._canonical('time_series_set_revisions')} AS revision
+              ON revision.id = the_set.current_revision_id
+            WHERE the_set.owner_project_id = ? AND the_set.id = ?
+              AND the_set.series_kind = 'catalog'
+            """,
+            (int(project_id), int(time_series_set_id)),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"time-series set {time_series_set_id} not found")
+        return (
+            f'"ts-canonical-set-{int(time_series_set_id)}-'
+            f'r{int(row["revision_id"])}-{str(row["content_hash"])}"'
+        )
+
+    def _canonical_publication_payload(self, set_id: int) -> dict[str, Any]:
+        canonical_set = self.read_canonical_set(set_id)
+        revision_id = canonical_set["current_revision_id"]
+        if revision_id is None:
+            raise KeyError(f"time-series set {set_id} has no current revision")
+        revision = self.read_canonical_revision(int(revision_id))
+        signal_metadata = {
+            int(row["signal_id"]): json.loads(row["metadata_json"] or "{}")
+            for row in self.connection.execute(
+                f"""
+                SELECT signal_id, metadata_json
+                FROM {self._canonical('time_series_revision_signals')}
+                WHERE set_revision_id = ?
+                """,
+                (int(revision_id),),
+            ).fetchall()
+        }
+        source_row = None
+        if revision["time_series_source_id"] is not None:
+            source_row = self.connection.execute(
+                f"SELECT * FROM {self._canonical('time_series_sources')} WHERE id = ?",
+                (int(revision["time_series_source_id"]),),
+            ).fetchone()
+        source = None
+        if source_row is not None:
+            source = {
+                "source_key": str(source_row["source_key"]),
+                "kind": str(source_row["kind"]),
+                "original_filename": str(source_row["original_filename"]),
+                "media_type": str(source_row["media_type"]),
+                "checksum": str(source_row["checksum"]),
+                "stored_path": str(source_row["stored_path"]),
+                "selected_sheet": source_row["selected_sheet"],
+                "metadata": json.loads(source_row["metadata_json"] or "{}"),
+            }
+        return {
+            "set": canonical_set,
+            "revision": revision,
+            "signals": [
+                {
+                    "series_key": str(signal["series_key"]),
+                    "display_name": str(signal["display_name"]),
+                    "semantic_type_key": str(signal["semantic_type_key"]),
+                    "unit_key": str(signal["unit_key"]),
+                    "data_class_key": str(signal["data_class_key"]),
+                    "signal_role": str(signal["signal_role"]),
+                    "aggregation": str(signal["aggregation"]),
+                    "metadata": signal_metadata.get(int(signal["signal_id"]), {}),
+                }
+                for signal in revision["signals"]
+            ],
+            "periods": revision["periods"],
+            "values": {
+                key: list(column) for key, column in revision["values"].items()
+            },
+            "source": source,
+        }
+
+    def _replace_canonical_source_from_legacy_alias(
+        self,
+        *,
+        project_id: int,
+        time_series_set_id: int,
+        source: dict[str, Any],
+        prepared_import: PreparedTimeSeriesCatalogImport,
+        created_by: str,
+        change_summary: str | None,
+        extra_revision_metadata: dict[str, Any] | None,
+        if_match: str | None,
+        idempotency_key: str | None,
+    ) -> dict[str, Any]:
+        """Publish a TS-2 replacement through the sole canonical writer."""
+
+        if not str(if_match or "").strip():
+            raise MigrationControlError(
+                "TS_PRECONDITION_REQUIRED", field="If-Match"
+            )
+        if not str(idempotency_key or "").strip():
+            raise MigrationControlError(
+                "TS_PRECONDITION_REQUIRED", field="Idempotency-Key"
+            )
+        the_set = self.read_canonical_set(time_series_set_id)
+        if (
+            int(the_set["owner_project_id"]) != int(project_id)
+            or str(the_set["series_kind"]) != "catalog"
+        ):
+            raise KeyError(f"time-series set {time_series_set_id} not found")
+        if str(the_set["visibility_scope"]) == "global":
+            raise MigrationControlError(
+                "TS_LINK_CONFIRMATION_REQUIRED",
+                set_id=int(time_series_set_id),
+                visibility_scope="global",
+                reason="legacy_alias_has_no_impact_confirmation_contract",
+            )
+
+        signals = self._legacy_canonical_signals(
+            {
+                "set": {"id": int(time_series_set_id), "data_kind": prepared_import.data_kind},
+                "signals": [
+                    {
+                        "id": position + 1,
+                        "signal_key": signal.signal_key,
+                        "unit": signal.unit,
+                        "source_column": signal.source_column,
+                        "source_unit": signal.source_unit,
+                        "entity_type": signal.entity_type,
+                        "entity_key": signal.entity_key,
+                        "signal_role": "input",
+                        "aggregation": "period_average",
+                    }
+                    for position, signal in enumerate(prepared_import.signals)
+                ],
+            }
+        )
+        periods = [
+            {
+                "period_index": int(period.period_index),
+                "timestamp_start": str(period.timestamp_start),
+                "timestamp_end": str(period.timestamp_end),
+                "duration_hours": float(period.duration_hours),
+            }
+            for period in prepared_import.periods
+        ]
+        values = [
+            {
+                "series_key": str(value.signal_key),
+                "period_index": int(value.period_index),
+                "value": float(value.value_numeric),
+                "source_row_number": value.source_row_number,
+            }
+            for value in prepared_import.values
+        ]
+        canonical_source = {
+            "source_key": str(source.get("id") or source.get("source_key") or source["checksum"]),
+            "kind": str(source.get("kind") or "api"),
+            "original_filename": str(source.get("original_filename") or ""),
+            "media_type": str(source.get("media_type") or ""),
+            "checksum": str(source.get("checksum") or ""),
+            "stored_path": str(source.get("stored_path") or ""),
+            "selected_sheet": source.get("selected_sheet"),
+            "metadata": (
+                dict(source.get("metadata"))
+                if isinstance(source.get("metadata"), dict)
+                else {}
+            ),
+        }
+        request_fingerprint = canonical_digest(
+            {
+                "if_match": str(if_match).strip(),
+                "prepared_content_hash": str(prepared_import.content_hash),
+                "source": canonical_source,
+                "change_summary": change_summary or "Replaced via new file upload",
+                "metadata": extra_revision_metadata or {},
+            }
+        )
+        request_hash = idempotency_request_hash(
+            publish_request_payload(
+                project_id=project_id,
+                set_id=time_series_set_id,
+                name=str(the_set["name"]),
+                data_class_key=str(prepared_import.data_kind),
+                timezone_name=str(prepared_import.timezone),
+                timestamp_convention="period_start",
+                signals=normalize_canonical_signals(signals),
+                periods=normalize_canonical_periods(periods),
+                request_fingerprint=request_fingerprint,
+            )
+        )
+        completed = self.connection.execute(
+            f"""
+            SELECT request_hash, state
+            FROM {self._projection('time_series_operation_idempotency')}
+            WHERE actor_id = ? AND operation_kind = ? AND scope_key = ?
+              AND idempotency_key = ?
+            """,
+            (
+                str(created_by),
+                PUBLISH_OPERATION_KIND,
+                publish_scope_key(
+                    project_id=project_id,
+                    set_id=time_series_set_id,
+                    name=str(the_set["name"]),
+                ),
+                str(idempotency_key).strip(),
+            ),
+        ).fetchone()
+        if completed is not None and completed["state"] == "completed":
+            if str(completed["request_hash"]) != request_hash:
+                raise MigrationControlError(
+                    "TS_IDEMPOTENCY_CONFLICT",
+                    idempotency_key=str(idempotency_key).strip(),
+                )
+            return self._canonical_set_for_legacy_alias(
+                project_id, time_series_set_id
+            )
+
+        expected_etag = self.canonical_legacy_alias_etag(
+            project_id=project_id, time_series_set_id=time_series_set_id
+        )
+        if str(if_match).strip() != expected_etag:
+            raise MigrationControlError(
+                "TS_PRECONDITION_CHANGED",
+                expected_etag=expected_etag,
+                provided_etag=str(if_match).strip(),
+            )
+        self.publish_canonical_set_revision(
+            project_id=int(project_id),
+            set_id=int(time_series_set_id),
+            name=str(the_set["name"]),
+            version_label=str(the_set["version_label"]),
+            description=str(the_set["description"]),
+            data_class_key=str(prepared_import.data_kind),
+            timezone=str(prepared_import.timezone),
+            timestamp_convention="period_start",
+            signals=signals,
+            periods=periods,
+            values=values,
+            source=canonical_source,
+            change_summary=change_summary or "Replaced via new file upload",
+            metadata={
+                "mapping": prepared_import.mapping_summary,
+                "source_key": source.get("id") or source.get("source_key"),
+                **(extra_revision_metadata or {}),
+            },
+            actor=str(created_by),
+            idempotency_key=str(idempotency_key).strip(),
+            request_fingerprint=request_fingerprint,
+        )
+        return self._canonical_set_for_legacy_alias(project_id, time_series_set_id)
+
+    def _edit_canonical_values_from_legacy_alias(
+        self,
+        *,
+        project_id: int,
+        time_series_set_id: int,
+        edits: list[CatalogValueEdit],
+        created_by: str,
+        change_summary: str | None,
+        if_match: str | None,
+        idempotency_key: str | None,
+    ) -> dict[str, Any]:
+        if not str(if_match or "").strip():
+            raise MigrationControlError(
+                "TS_PRECONDITION_REQUIRED", field="If-Match"
+            )
+        if not str(idempotency_key or "").strip():
+            raise MigrationControlError(
+                "TS_PRECONDITION_REQUIRED", field="Idempotency-Key"
+            )
+        payload = self._canonical_publication_payload(time_series_set_id)
+        revision = payload["revision"]
+        the_set = payload["set"]
+        request_fingerprint = canonical_digest(
+            {
+                "if_match": str(if_match).strip(),
+                "edits": [
+                    {
+                        "period_index": int(edit.period_index),
+                        "signal_key": str(edit.signal_key),
+                        "value": str(edit.value_text),
+                    }
+                    for edit in edits
+                ],
+                "change_summary": change_summary or "Manual value correction",
+            }
+        )
+        request_hash = idempotency_request_hash(
+            publish_request_payload(
+                project_id=project_id,
+                set_id=time_series_set_id,
+                name=str(the_set["name"]),
+                data_class_key=str(revision["data_class_key"]),
+                timezone_name=str(revision["timezone"]),
+                timestamp_convention=str(revision["timestamp_convention"]),
+                signals=normalize_canonical_signals(payload["signals"]),
+                periods=normalize_canonical_periods(payload["periods"]),
+                request_fingerprint=request_fingerprint,
+            )
+        )
+        completed = self.connection.execute(
+            f"""
+            SELECT request_hash, state
+            FROM {self._projection('time_series_operation_idempotency')}
+            WHERE actor_id = ? AND operation_kind = ? AND scope_key = ?
+              AND idempotency_key = ?
+            """,
+            (
+                str(created_by),
+                PUBLISH_OPERATION_KIND,
+                publish_scope_key(
+                    project_id=project_id,
+                    set_id=time_series_set_id,
+                    name=str(the_set["name"]),
+                ),
+                str(idempotency_key).strip(),
+            ),
+        ).fetchone()
+        if completed is not None and completed["state"] == "completed":
+            if str(completed["request_hash"]) != request_hash:
+                raise MigrationControlError(
+                    "TS_IDEMPOTENCY_CONFLICT",
+                    idempotency_key=str(idempotency_key).strip(),
+                )
+            return self._canonical_set_for_legacy_alias(
+                project_id, time_series_set_id
+            )
+        expected_etag = self.canonical_legacy_alias_etag(
+            project_id=project_id, time_series_set_id=time_series_set_id
+        )
+        if str(if_match).strip() != expected_etag:
+            raise MigrationControlError(
+                "TS_PRECONDITION_CHANGED",
+                expected_etag=expected_etag,
+                provided_etag=str(if_match).strip(),
+            )
+        definitions = {
+            signal["series_key"]: TIME_SERIES_SIGNAL_CATALOG[signal["series_key"]]
+            for signal in payload["signals"]
+            if signal["series_key"] in TIME_SERIES_SIGNAL_CATALOG
+        }
+        period_indexes = {
+            int(period["period_index"]) for period in payload["periods"]
+        }
+        prepared = validate_catalog_value_edits(
+            edits=edits,
+            signal_definitions=definitions,
+            known_period_indexes=period_indexes,
+        )
+        values = payload["values"]
+        differences = []
+        for edit in prepared:
+            series_key = str(edit.signal_key)
+            if series_key not in values:
+                raise TimeSeriesCatalogError(
+                    f"signal_key {series_key!r} is not part of this time-series set"
+                )
+            positions = {
+                int(period["period_index"]): position
+                for position, period in enumerate(payload["periods"])
+            }
+            position = positions.get(int(edit.period_index))
+            if position is None:
+                raise TimeSeriesCatalogError(
+                    f"period_index {edit.period_index} is not part of this time-series set"
+                )
+            previous = float(values[series_key][position])
+            values[series_key][position] = float(edit.value_numeric)
+            differences.append(
+                {
+                    "period_index": int(edit.period_index),
+                    "signal_key": series_key,
+                    "previous_value": previous,
+                    "new_value": float(edit.value_numeric),
+                }
+            )
+        self.publish_canonical_set_revision(
+            project_id=int(project_id),
+            set_id=int(time_series_set_id),
+            name=str(the_set["name"]),
+            version_label=str(the_set["version_label"]),
+            description=str(the_set["description"]),
+            data_class_key=str(revision["data_class_key"]),
+            timezone=str(revision["timezone"]),
+            timestamp_convention=str(revision["timestamp_convention"]),
+            signals=payload["signals"],
+            periods=payload["periods"],
+            values=values,
+            source=payload["source"],
+            change_summary=change_summary or "Manual value correction",
+            metadata={"edits": differences},
+            actor=str(created_by),
+            idempotency_key=str(idempotency_key).strip(),
+            request_fingerprint=request_fingerprint,
+        )
+        return self._canonical_set_for_legacy_alias(project_id, time_series_set_id)
 
     def _derived_staleness_flags(
         self, current_hash_by_set_id: dict[int, str]
@@ -24022,6 +25143,38 @@ class AnalystStore:
           ON migrated_time_series_set.id = hydraulic_time_series_set_migrations.time_series_set_id
     """
 
+    def _canonical_hydraulic_migration_table(self) -> str:
+        return (
+            "ts_next.hydraulic_time_series_set_migrations"
+            if self.database_backend == "postgresql"
+            else "hydraulic_time_series_set_migrations_next"
+        )
+
+    def _canonical_hydraulic_migration_status(
+        self, hydraulic_time_series_set_id: int
+    ) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            f"""
+            SELECT migration.canonical_time_series_set_id,
+                   migration.migrated_by, migration.migrated_at,
+                   the_set.name, the_set.version_label
+            FROM {self._canonical_hydraulic_migration_table()} AS migration
+            JOIN {self._canonical('time_series_sets')} AS the_set
+              ON the_set.id = migration.canonical_time_series_set_id
+            WHERE migration.hydraulic_time_series_set_id = ?
+            """,
+            (int(hydraulic_time_series_set_id),),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "time_series_set_id": int(row["canonical_time_series_set_id"]),
+            "time_series_set_name": str(row["name"]),
+            "version_label": str(row["version_label"]),
+            "migrated_by": str(row["migrated_by"]),
+            "migrated_at": str(row["migrated_at"]),
+        }
+
     def list_hydraulic_time_series_sets(self, project_id: int) -> list[dict[str, Any]]:
         self.get_project(project_id)
         rows = self.connection.execute(
@@ -24034,10 +25187,16 @@ class AnalystStore:
             """,
             (project_id,),
         ).fetchall()
-        return [
+        results = [
             build_hydraulic_catalog_summary(row_to_dict(row))
             for row in rows
         ]
+        if self.read_time_series_c6_state()["cutover_active"]:
+            for result in results:
+                canonical = self._canonical_hydraulic_migration_status(result["id"])
+                if canonical is not None:
+                    result["migration"] = canonical
+        return results
 
     def get_hydraulic_time_series_set(
         self, project_id: int, hydraulic_time_series_set_id: int
@@ -24055,7 +25214,14 @@ class AnalystStore:
         if row is None:
             raise KeyError(f"hydraulic time-series set {hydraulic_time_series_set_id} not found")
         points = self._load_inflow_series_points(hydraulic_time_series_set_id)
-        return build_hydraulic_catalog_detail(row_to_dict(row), points)
+        detail = build_hydraulic_catalog_detail(row_to_dict(row), points)
+        if self.read_time_series_c6_state()["cutover_active"]:
+            canonical = self._canonical_hydraulic_migration_status(
+                hydraulic_time_series_set_id
+            )
+            if canonical is not None:
+                detail["migration"] = canonical
+        return detail
 
     def migrate_hydraulic_time_series_set(
         self,
@@ -24074,6 +25240,12 @@ class AnalystStore:
         (``hydraulic_time_series_set_migrations``) makes re-running the same
         migration a stable no-op even before that content-hash check runs.
         """
+        if self.read_time_series_c6_state()["cutover_active"]:
+            return self._migrate_hydraulic_time_series_set_canonically(
+                project_id=project_id,
+                hydraulic_time_series_set_id=hydraulic_time_series_set_id,
+                migrated_by=migrated_by,
+            )
         self._require_no_legacy_mutation_pause("migrate_hydraulic_time_series_set")
         with self._lock:
             self.get_project(project_id)
@@ -24169,6 +25341,167 @@ class AnalystStore:
                 "already_migrated": False,
             }
 
+    def _migrate_hydraulic_time_series_set_canonically(
+        self,
+        *,
+        project_id: int,
+        hydraulic_time_series_set_id: int,
+        migrated_by: str,
+    ) -> dict[str, Any]:
+        """TS-5 adapter after C6: legacy is input, never the write target."""
+
+        self._require_canonical_mutations_available(
+            "migrate_hydraulic_time_series_set"
+        )
+        with self._lock:
+            self.get_project(project_id)
+            legacy = self.connection.execute(
+                """
+                SELECT id, entity_type, entity_id, signal_key, version_number,
+                       version_label, content_hash
+                FROM hydraulic_time_series_sets
+                WHERE project_id = ? AND id = ?
+                """,
+                (int(project_id), int(hydraulic_time_series_set_id)),
+            ).fetchone()
+            if legacy is None:
+                raise KeyError(
+                    f"hydraulic time-series set {hydraulic_time_series_set_id} not found"
+                )
+            existing = self.connection.execute(
+                f"""
+                SELECT canonical_time_series_set_id
+                FROM {self._canonical_hydraulic_migration_table()}
+                WHERE hydraulic_time_series_set_id = ?
+                """,
+                (int(hydraulic_time_series_set_id),),
+            ).fetchone()
+            if existing is not None:
+                return {
+                    "time_series_set": self.get_time_series_set(
+                        project_id, int(existing["canonical_time_series_set_id"])
+                    ),
+                    "hydraulic_time_series_set_id": int(
+                        hydraulic_time_series_set_id
+                    ),
+                    "already_migrated": True,
+                }
+            points = self._load_inflow_series_points(hydraulic_time_series_set_id)
+            if not points:
+                raise ValueError(
+                    f"hydraulic time-series set {hydraulic_time_series_set_id} has no "
+                    "points to migrate"
+                )
+            signal_key = str(legacy["signal_key"])
+            definition = TIME_SERIES_SIGNAL_CATALOG[signal_key]
+            semantic_type_key = SIGNAL_SEMANTIC_TYPE_KEYS[signal_key]
+            unit = self.connection.execute(
+                """
+                SELECT unit_key FROM measurement_units
+                WHERE symbol = ? AND status = 'active'
+                """,
+                (definition.unit,),
+            ).fetchone()
+            if unit is None:
+                raise ValueError(f"canonical unit not found for {definition.unit}")
+            entity_type = str(legacy["entity_type"])
+            entity_id = int(legacy["entity_id"])
+            name = _generic_hydraulic_series_name(
+                entity_type, entity_id, signal_key
+            )
+            now = utc_now_iso()
+            metadata = {
+                "origin": {
+                    "kind": "hydraulic_legacy_migration",
+                    "hydraulic_time_series_set_id": int(
+                        hydraulic_time_series_set_id
+                    ),
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "signal_key": signal_key,
+                    "legacy_version_number": int(legacy["version_number"]),
+                    "legacy_version_label": str(legacy["version_label"]),
+                    "legacy_content_hash": legacy["content_hash"],
+                    "migrated_by": migrated_by,
+                    "migrated_at": now,
+                }
+            }
+            periods = []
+            for index, point in enumerate(points):
+                start = datetime.fromisoformat(str(point["timestamp"]))
+                duration = float(point["duration_hours"])
+                periods.append(
+                    {
+                        "period_index": index,
+                        "timestamp_start": start.isoformat(),
+                        "timestamp_end": (
+                            start + timedelta(hours=duration)
+                        ).isoformat(),
+                        "duration_hours": duration,
+                    }
+                )
+            receipt = self.publish_canonical_set_revision(
+                project_id=project_id,
+                name=name,
+                version_label=f"migrated-{legacy['version_label']}",
+                data_class_key=HYDRAULIC_GENERIC_SERIES_DATA_KIND,
+                timezone="UTC",
+                signals=[
+                    {
+                        "series_key": signal_key,
+                        "display_name": signal_key,
+                        "semantic_type_key": semantic_type_key,
+                        "unit_key": str(unit["unit_key"]),
+                        "data_class_key": HYDRAULIC_GENERIC_SERIES_DATA_KIND,
+                        "signal_role": "input",
+                        "aggregation": "mean",
+                        "metadata": {
+                            "legacy_entity_type": entity_type,
+                            "legacy_entity_key": str(entity_id),
+                            "legacy_source_column": "value_m3s",
+                            "legacy_source_unit": definition.unit,
+                        },
+                    }
+                ],
+                periods=periods,
+                values={
+                    signal_key: [float(point["value_m3s"]) for point in points]
+                },
+                source={
+                    "source_key": f"hydraulic-legacy:{hydraulic_time_series_set_id}",
+                    "kind": "migration",
+                    "checksum": hydraulic_inflow_series_content_hash(points),
+                    "metadata": metadata["origin"],
+                },
+                change_summary="Migrated from legacy hydraulic series set",
+                metadata=metadata,
+                actor=migrated_by,
+                idempotency_key=f"hydraulic-legacy:{hydraulic_time_series_set_id}",
+            )
+            self.connection.execute(
+                f"""
+                INSERT INTO {self._canonical_hydraulic_migration_table()} (
+                    hydraulic_time_series_set_id, canonical_time_series_set_id, content_hash,
+                    migrated_at, migrated_by
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    int(hydraulic_time_series_set_id),
+                    int(receipt["set_id"]),
+                    hydraulic_inflow_series_content_hash(points),
+                    now,
+                    migrated_by,
+                ),
+            )
+            self.connection.commit()
+            return {
+                "time_series_set": self.get_time_series_set(
+                    project_id, int(receipt["set_id"])
+                ),
+                "hydraulic_time_series_set_id": int(hydraulic_time_series_set_id),
+                "already_migrated": False,
+            }
+
     def migrate_all_hydraulic_time_series_sets(
         self,
         *,
@@ -24210,6 +25543,10 @@ class AnalystStore:
         return {"migrated": migrated, "skipped": skipped, "failed": failed}
 
     def get_time_series_set(self, project_id: int, time_series_set_id: int) -> dict[str, Any]:
+        if self.read_time_series_c6_state()["cutover_active"]:
+            return self._canonical_set_for_legacy_alias(
+                project_id, time_series_set_id
+            )
         self.get_project(project_id)
         row = self.connection.execute(
             """
@@ -24368,6 +25705,56 @@ class AnalystStore:
     def list_time_series_set_revisions(
         self, project_id: int, time_series_set_id: int
     ) -> list[dict[str, Any]]:
+        if self.read_time_series_c6_state()["cutover_active"]:
+            self.get_project(project_id)
+            set_row = self.connection.execute(
+                f"""
+                SELECT id FROM {self._canonical('time_series_sets')}
+                WHERE owner_project_id = ? AND id = ? AND series_kind = 'catalog'
+                """,
+                (int(project_id), int(time_series_set_id)),
+            ).fetchone()
+            if set_row is None:
+                raise KeyError(f"time-series set {time_series_set_id} not found")
+            rows = self.connection.execute(
+                f"""
+                SELECT revision.revision_number,
+                       previous.revision_number AS superseded_revision_number,
+                       revision.time_series_source_id, revision.content_hash,
+                       revision.legacy_content_hash, revision.change_summary,
+                       revision.created_at, revision.created_by,
+                       revision.metadata_json
+                FROM {self._canonical('time_series_set_revisions')} AS revision
+                LEFT JOIN {self._canonical('time_series_set_revisions')} AS previous
+                  ON previous.id = revision.supersedes_revision_id
+                WHERE revision.time_series_set_id = ?
+                ORDER BY revision.revision_number DESC
+                """,
+                (int(time_series_set_id),),
+            ).fetchall()
+            return [
+                {
+                    "revision_number": int(row["revision_number"]),
+                    "superseded_revision_number": (
+                        int(row["superseded_revision_number"])
+                        if row["superseded_revision_number"] is not None
+                        else None
+                    ),
+                    "content_hash": str(
+                        row["legacy_content_hash"] or row["content_hash"] or ""
+                    ),
+                    "change_summary": str(row["change_summary"]),
+                    "created_at": row["created_at"],
+                    "created_by": row["created_by"],
+                    "source": self._canonical_source_for_legacy_alias(
+                        row["time_series_source_id"]
+                    ),
+                    "program": _parse_program_from_metadata_json(
+                        row["metadata_json"]
+                    ),
+                }
+                for row in rows
+            ]
         self.get_project(project_id)
         set_row = self.connection.execute(
             "SELECT id FROM time_series_sets WHERE project_id = ? AND id = ?",
@@ -24424,7 +25811,19 @@ class AnalystStore:
         edits: list[CatalogValueEdit],
         created_by: str = "internal_analyst",
         change_summary: str | None = None,
+        if_match: str | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
+        if self.read_time_series_c6_state()["cutover_active"]:
+            return self._edit_canonical_values_from_legacy_alias(
+                project_id=project_id,
+                time_series_set_id=time_series_set_id,
+                edits=edits,
+                created_by=created_by,
+                change_summary=change_summary,
+                if_match=if_match,
+                idempotency_key=idempotency_key,
+            )
         with self._lock:
             self.get_project(project_id)
             set_row = self.connection.execute(
@@ -29811,6 +31210,195 @@ class AnalystStore:
         )
         self.connection.commit()
         return self._get_case_time_series_binding(int(cursor.lastrowid))
+
+    def bind_case_time_series_from_legacy_alias(
+        self,
+        *,
+        scenario_id: int,
+        case_input_variant_id: int,
+        signal_key: str,
+        entity_type: str | None,
+        entity_id: str | None,
+        time_series_set_id: int,
+        actor_user: Mapping[str, Any],
+        request_id: str,
+    ) -> dict[str, Any]:
+        """Translate the TS-2 binding route into the canonical protected writer."""
+
+        self._require_canonical_mutations_available(
+            "bind_case_time_series_from_legacy_alias"
+        )
+        context = self._canonical_binding_context(
+            scenario_id=scenario_id, variant_id=case_input_variant_id
+        )
+        now = utc_now_iso()
+        legacy = {
+            "id": 0,
+            "scenario_id": int(scenario_id),
+            "case_input_variant_id": int(case_input_variant_id),
+            "project_id": int(context["project_id"]),
+            "signal_key": str(signal_key),
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "time_series_set_id": int(time_series_set_id),
+            "required": 1,
+            "created_at": now,
+            "updated_at": now,
+            "created_by": str(actor_user["email"]),
+            "updated_by": str(actor_user["email"]),
+        }
+        actor_class = (
+            f"{actor_user.get('role', 'analyst')}:"
+            f"{actor_user.get('id', 'auth-disabled')}"
+        )
+        results = []
+        for role_key in self._c4_binding_role_keys(legacy):
+            linkable = self._c4_linkable_object(
+                legacy=legacy, binding_role_key=role_key
+            )
+            signal = self._c4_canonical_signal(legacy)
+            role = self.connection.execute(
+                "SELECT id FROM time_series_binding_roles WHERE role_key = ?",
+                (role_key,),
+            ).fetchone()
+            existing_binding = self.connection.execute(
+                f"""
+                SELECT id, signal_id, time_series_set_id
+                FROM {self.link_layer_table_names()['case_time_series_bindings']}
+                WHERE case_input_variant_id = ? AND linkable_object_id = ?
+                  AND binding_role_id = ? AND status = 'active'
+                """,
+                (
+                    int(case_input_variant_id),
+                    int(linkable["id"]),
+                    int(role["id"]),
+                ),
+            ).fetchone()
+            if existing_binding is not None:
+                if (
+                    int(existing_binding["signal_id"]) != int(signal["signal_id"])
+                    or int(existing_binding["time_series_set_id"])
+                    != int(time_series_set_id)
+                ):
+                    raise MigrationControlError(
+                        "TS_LINK_CONFLICT",
+                        binding_id=int(existing_binding["id"]),
+                    )
+                results.append(
+                    self.read_case_binding(
+                        scenario_id=scenario_id,
+                        variant_id=case_input_variant_id,
+                        binding_id=int(existing_binding["id"]),
+                    )
+                )
+                continue
+
+            association = self.connection.execute(
+                f"""
+                SELECT association.id
+                FROM {self.link_layer_table_names()['time_series_catalog_associations']}
+                     AS association
+                WHERE association.signal_id = ?
+                  AND association.linkable_object_id = ?
+                  AND association.binding_role_id = ?
+                  AND association.status = 'active'
+                """,
+                (int(signal["signal_id"]), int(linkable["id"]), int(role["id"])),
+            ).fetchone()
+            association_id = None
+            if signal["series_kind"] == "catalog":
+                if association is None:
+                    association_document = {
+                        "target_project_id": int(context["project_id"]),
+                        "operations": [
+                            {
+                                "client_operation_id": "legacy-alias-association",
+                                "action": "add",
+                                "signal_id": int(signal["signal_id"]),
+                                "linkable_object_id": int(linkable["id"]),
+                                "binding_role_key": role_key,
+                                "expected_absent": True,
+                                "reason_code": "legacy_alias_link_requested",
+                            }
+                        ],
+                    }
+                    prepared_association = self.prevalidate_catalog_association_batch(
+                        association_document, actor_class=actor_class
+                    )
+                    committed_association, _ = self.commit_catalog_association_batch(
+                        association_document,
+                        actor_user=actor_user,
+                        actor_class=actor_class,
+                        request_id=request_id,
+                        prevalidation_token=prepared_association[
+                            "prevalidation_token"
+                        ],
+                        if_match=prepared_association["commit_etag"],
+                        idempotency_key=(
+                            "legacy-alias-association:"
+                            f"{case_input_variant_id}:{signal['signal_id']}:"
+                            f"{linkable['id']}:{role_key}"
+                        ),
+                        confirmed=True,
+                    )
+                    association_id = int(
+                        committed_association["operations"][0]["association_id"]
+                    )
+                else:
+                    association_id = int(association["id"])
+
+            binding_document = {
+                "expected_bindings_revision": int(context["bindings_revision"]),
+                "operations": [
+                    {
+                        "client_operation_id": "legacy-alias-binding",
+                        "action": "create",
+                        "linkable_object_id": int(linkable["id"]),
+                        "binding_role_key": role_key,
+                        "signal_id": int(signal["signal_id"]),
+                        "revision": {
+                            "mode": "current",
+                            "revision_id": int(signal["current_revision_id"]),
+                            "content_hash": str(signal["content_hash"]),
+                        },
+                        "catalog_association_id": association_id,
+                        "reason_code": "legacy_alias_link_requested",
+                    }
+                ],
+            }
+            prepared_binding = self.prevalidate_case_binding_batch(
+                scenario_id=scenario_id,
+                variant_id=case_input_variant_id,
+                document=binding_document,
+                actor_class=actor_class,
+            )
+            committed_binding, _ = self.commit_case_binding_batch(
+                scenario_id=scenario_id,
+                variant_id=case_input_variant_id,
+                document=binding_document,
+                actor_user=actor_user,
+                actor_class=actor_class,
+                request_id=request_id,
+                prevalidation_token=prepared_binding["prevalidation_token"],
+                if_match=prepared_binding["commit_etag"],
+                idempotency_key=(
+                    f"legacy-alias-binding:{case_input_variant_id}:"
+                    f"{linkable['id']}:{role_key}:{signal['signal_id']}"
+                ),
+                confirmed=True,
+            )
+            binding_id = int(committed_binding["operations"][0]["binding_id"])
+            results.append(
+                self.read_case_binding(
+                    scenario_id=scenario_id,
+                    variant_id=case_input_variant_id,
+                    binding_id=binding_id,
+                )
+            )
+            context["bindings_revision"] = int(
+                committed_binding["bindings_revision"]
+            )
+        return results[0] if len(results) == 1 else {"bindings": results}
 
     def _get_case_time_series_binding(self, binding_id: int) -> dict[str, Any]:
         row = self.connection.execute(
