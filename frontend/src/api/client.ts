@@ -1573,6 +1573,28 @@ export async function requestJson<T>(
   return response.json() as Promise<T>;
 }
 
+// Some canonical resources hand back a strong ETag that the next mutation has
+// to send as `If-Match`, so the caller needs the headers, not only the body.
+export async function requestJsonWithHeaders<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<{ body: T; headers: Headers }> {
+  const response = await fetch(path, {
+    ...init,
+    credentials: init?.credentials ?? "same-origin",
+    headers: requestHeaders(init),
+  });
+  if (!response.ok) throw await errorFromResponse(response);
+  if (!response.headers.get("content-type")?.includes("application/json")) {
+    throw new ApiError(
+      "Expected a JSON response",
+      response.status,
+      "unexpected_content_type",
+    );
+  }
+  return { body: (await response.json()) as T, headers: response.headers };
+}
+
 export interface ApiDownload {
   blob: Blob;
   filename: string | null;
@@ -3834,6 +3856,8 @@ export interface IngestionReceipt {
   mode: string;
   normalized: {
     point_count?: number;
+    period_count?: number;
+    value_count?: number;
     coverage_start: string | null;
     coverage_end: string | null;
     content_hash: string | null;
@@ -3890,6 +3914,138 @@ export async function publishSharedSeriesIngestion(
       `${encodeURIComponent(ingestionId)}/publications`,
     request,
     guards,
+  );
+  return response.publication;
+}
+
+// -- The object-specific series, created from its own object (chapter 7.5) --
+//
+// The object root is the only authority: the owner, the project and the entity
+// pair never travel in the payload, so every call here goes through the object
+// that owns the series and nothing else.
+
+export interface ObjectSeriesTarget {
+  projectId: number;
+  linkableObjectId: number;
+}
+
+function objectSeriesRoot(target: ObjectSeriesTarget): string {
+  return (
+    `/api/projects/${target.projectId}/linkable-objects/` +
+    `${target.linkableObjectId}/time-series/object-series`
+  );
+}
+
+export interface ObjectSeriesDefinitionRequest {
+  object_series_key: string;
+  display_name: string;
+  description?: string;
+  intended_binding_role_key: string;
+  semantic_type_key: string;
+  unit_key: string;
+  data_class_key: string;
+  timezone: string;
+  temporal_contract: {
+    regularity: string;
+    nominal_resolution_seconds: number;
+    timestamp_convention: string;
+  };
+  source_expectation?: { kind: string; display_name: string };
+}
+
+export interface ObjectSeriesDefinition {
+  signal_id: number;
+  object_series_key: string;
+  display_name: string;
+  source_kind: string;
+  set_status: string;
+  availability: string;
+  binding_ready: boolean;
+  resource_version: number;
+  current_revision: Record<string, unknown> | null;
+  compatible_role_keys: string[];
+  owner: {
+    project_id: number;
+    linkable_object_id: number;
+    object_kind: string;
+    object_type_key: string;
+  };
+  [key: string]: unknown;
+}
+
+export async function createObjectSeriesDefinition(
+  target: ObjectSeriesTarget,
+  request: ObjectSeriesDefinitionRequest,
+  idempotencyKey: string,
+): Promise<{ series: ObjectSeriesDefinition; etag: string }> {
+  const csrfToken = await getCsrfToken();
+  const response = await requestJsonWithHeaders<{
+    object_series: ObjectSeriesDefinition;
+  }>(objectSeriesRoot(target), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrfToken,
+      "Idempotency-Key": idempotencyKey,
+    },
+    body: JSON.stringify(request),
+  });
+  return {
+    series: response.body.object_series,
+    etag: response.headers.get("ETag") ?? "",
+  };
+}
+
+export interface ObjectSeriesIngestionRequest {
+  mode: "replace_full" | "append_tail";
+  expected_base: { revision_id: number; content_hash: string } | null;
+  revision_contract?: Record<string, unknown>;
+  source?: { kind: string; display_name: string };
+  points: IngestionPoint[];
+}
+
+export async function prepareObjectSeriesIngestion(
+  target: ObjectSeriesTarget,
+  signalId: number,
+  request: ObjectSeriesIngestionRequest,
+): Promise<IngestionReceipt> {
+  const response = await postJsonWithCsrf<{ ingestion: IngestionReceipt }>(
+    `${objectSeriesRoot(target)}/${signalId}/revision-ingestions/points`,
+    request,
+  );
+  return response.ingestion;
+}
+
+export interface ObjectSeriesPublicationRequest {
+  validation_token: string;
+  confirm: boolean;
+  reason_code: string;
+  reason_text?: string;
+}
+
+export async function publishObjectSeriesIngestion(
+  target: ObjectSeriesTarget,
+  signalId: number,
+  ingestionId: string,
+  request: ObjectSeriesPublicationRequest,
+  guards: { commitEtag: string; idempotencyKey: string },
+): Promise<Record<string, unknown>> {
+  const csrfToken = await getCsrfToken();
+  const response = await requestJson<{
+    publication: Record<string, unknown>;
+  }>(
+    `${objectSeriesRoot(target)}/${signalId}/revision-ingestions/` +
+      `${encodeURIComponent(ingestionId)}/publications`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrfToken,
+        "If-Match": guards.commitEtag,
+        "Idempotency-Key": guards.idempotencyKey,
+      },
+      body: JSON.stringify(request),
+    },
   );
   return response.publication;
 }

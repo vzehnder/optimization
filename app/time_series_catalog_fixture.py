@@ -23,6 +23,9 @@ ASSOCIATIONS_PER_ENTRY = 10
 BINDINGS_PER_ENTRY = 10
 OBJECTS_PER_SIGNAL = ASSOCIATIONS_PER_ENTRY
 ENTRIES_PER_VARIANT = 100
+# Enough hydro components that a 200 row batch fits inside one target project
+# even at the smallest scale this script is normally run at.
+BATCH_MEASUREMENT_OBJECTS = 8
 
 SEMANTIC_CONTRACTS = (
     ("energy_price", "usd_per_mwh", "mean"),
@@ -162,6 +165,23 @@ def build_fixture(
     associations = _seed_associations(store, signal_ids, objects, actor=actor)
     announce(f"seeded {associations} associations")
 
+    # AC-PER-05 and AC-PER-06 measure one 200 row batch, and a batch belongs to
+    # exactly one target project. `_seed_associations` claims every pair it can
+    # see, so the batch needs its own objects inside the fixture project: hydro
+    # components, which the positive matrix pairs with the `hydro_inflow`
+    # signals the fixture already publishes.
+    batch_objects = [
+        int(
+            store.ensure_project_component(
+                project_id=project["id"],
+                component_key=f"batch_hydro_{index:03d}",
+                component_type="hydro",
+                display_name=f"Central de lote {index:03d}",
+            )["id"]
+        )
+        for index in range(BATCH_MEASUREMENT_OBJECTS)
+    ]
+
     variants = _seed_variants(store, project["id"], plan["variants"], actor=actor)
     bindings = _seed_bindings(
         store,
@@ -177,6 +197,16 @@ def build_fixture(
         "plan": plan,
         "project_id": project["id"],
         "objects": objects,
+        "batch_objects": batch_objects,
+        "signal_ids": signal_ids,
+        "variants": variants,
+        # The preview budgets need one exact revision and a range that is
+        # inside the synthetic coverage, so the fixture hands both back rather
+        # than making the caller reconstruct them.
+        "preview_revision_id": int(receipt["revision_id"]),
+        "preview_signal_id": int(receipt["signal_ids"][signals[0]["series_key"]]),
+        "coverage_from": periods[0]["timestamp_start"],
+        "coverage_to": periods[-1]["timestamp_end"],
         "signal_count": len(signal_ids),
         "association_count": associations,
         "binding_count": bindings,
@@ -308,6 +338,72 @@ def percentile(samples: list[float], fraction: float) -> float:
     return ordered[rank - 1]
 
 
+def _preview_samples(
+    store, *, fixture: dict, max_points: int, repetitions: int
+) -> list[float]:
+    """Time one bounded preview of an exact revision, chapter 9.2 style."""
+
+    def read():
+        return store.read_catalog_input_preview(
+            fixture["preview_signal_id"],
+            revision_id=fixture["preview_revision_id"],
+            range_from=fixture["coverage_from"],
+            range_to=fixture["coverage_to"],
+            sampling="uniform",
+            max_points=max_points,
+        )
+
+    # One discarded call, so the budget reports the steady state of the query
+    # and not the cold cache the fixture build leaves behind.
+    read()
+    samples = []
+    for _ in range(repetitions):
+        started = time.perf_counter()
+        read()
+        samples.append((time.perf_counter() - started) * 1000.0)
+    return samples
+
+
+def _free_association_operations(store, *, fixture: dict, size: int) -> list[dict]:
+    """Batch rows the fixture has not already claimed.
+
+    ``_seed_associations`` fills every ``(signal, object)`` pair of the shared
+    consumers, and those consumers deliberately live in other projects, so a
+    fresh batch uses the dedicated hydro components of the fixture project and
+    the ``hydro_inflow`` signals the positive matrix of chapter 3.2 pairs with
+    them.
+    """
+
+    entries = store.catalog_projection_table_names()["time_series_catalog_entries"]
+    inflows = [
+        int(row["signal_id"])
+        for row in store.connection.execute(
+            f"""
+            SELECT signal_id FROM {entries}
+            WHERE semantic_type_key = 'hydro_inflow'
+            ORDER BY signal_id
+            """
+        ).fetchall()
+    ]
+    operations = []
+    for signal_id in inflows:
+        for object_id in fixture["batch_objects"]:
+            operations.append(
+                {
+                    "client_operation_id": f"perf-{signal_id}-{object_id}",
+                    "action": "add",
+                    "signal_id": signal_id,
+                    "linkable_object_id": object_id,
+                    "binding_role_key": "hydro_inflow",
+                    "expected_absent": True,
+                    "reason_code": "catalog_association_requested",
+                }
+            )
+            if len(operations) == size:
+                return operations
+    return operations
+
+
 def measure_budgets(
     store, *, fixture: dict, repetitions: int = 20
 ) -> dict[str, object]:
@@ -329,30 +425,106 @@ def measure_budgets(
     publication_samples = [
         seconds * 1000.0 for seconds in fixture["publication_seconds"]
     ]
-    return {
-        "AC-PER-01": {
-            "description": "50 row catalog page without facets",
-            "budget_ms": 300,
-            "p95_ms": round(percentile(page_samples, 0.95), 3),
-            "samples": len(page_samples),
-        },
-        "AC-PER-02": {
-            "description": "contextual object list",
-            "budget_ms": 300,
-            "p95_ms": round(percentile(context_samples, 0.95), 3),
-            "samples": len(context_samples),
-        },
-        "AC-PER-07": {
-            "description": (
+
+    small_preview = _preview_samples(
+        store, fixture=fixture, max_points=500, repetitions=repetitions
+    )
+    large_preview = _preview_samples(
+        store, fixture=fixture, max_points=2000, repetitions=repetitions
+    )
+
+    # AC-PER-05 and AC-PER-06 are the two halves of one batch: the read-only
+    # prevalidation, then the commit that has to reauthorize and write it in a
+    # single transaction. They are measured on the same 200 rows, in order,
+    # because that is how the surface is used.
+    batch_size = 200
+    operations = _free_association_operations(
+        store, fixture=fixture, size=batch_size
+    )
+    prevalidation_samples: list[float] = []
+    commit_samples: list[float] = []
+    if operations:
+        document = {
+            "target_project_id": fixture["project_id"],
+            "operations": operations,
+        }
+        for _ in range(max(1, repetitions // 4)):
+            started = time.perf_counter()
+            prevalidation = store.prevalidate_catalog_association_batch(
+                document, actor_class="internal:performance"
+            )
+            prevalidation_samples.append((time.perf_counter() - started) * 1000.0)
+        started = time.perf_counter()
+        store.commit_catalog_association_batch(
+            document,
+            actor_user={"id": None, "email": "performance_fixture", "role": "admin"},
+            actor_class="internal:performance",
+            request_id="req-performance-fixture",
+            prevalidation_token=prevalidation["prevalidation_token"],
+            if_match=prevalidation["commit_etag"],
+            idempotency_key="performance-fixture-batch",
+            confirmed=True,
+        )
+        commit_samples.append((time.perf_counter() - started) * 1000.0)
+
+    def budget(identifier, description, budget_ms, samples):
+        if not samples:
+            return {
+                "description": description,
+                "budget_ms": budget_ms,
+                "p95_ms": None,
+                "samples": 0,
+                "note": "the fixture had no free rows at this scale",
+            }
+        return {
+            "description": description,
+            "budget_ms": budget_ms,
+            "p95_ms": round(percentile(samples, 0.95), 3),
+            # The spread is reported next to the percentile, so a run that only
+            # missed a budget on one outlier is legible as such in the evidence.
+            "median_ms": round(percentile(samples, 0.5), 3),
+            "min_ms": round(min(samples), 3),
+            "max_ms": round(max(samples), 3),
+            "samples": len(samples),
+        }
+
+    measured = {
+        "AC-PER-01": budget(
+            "AC-PER-01", "50 row catalog page without facets", 300, page_samples
+        ),
+        "AC-PER-02": budget(
+            "AC-PER-02", "contextual object list", 300, context_samples
+        ),
+        "AC-PER-07": budget(
+            "AC-PER-07",
+            (
                 "synchronous publication of "
                 f"{fixture['plan']['signals_per_set'] * fixture['plan']['periods']}"
                 " cells"
             ),
-            "budget_ms": 5000,
-            "p95_ms": round(percentile(publication_samples, 0.95), 3),
-            "samples": len(publication_samples),
-        },
+            5000,
+            publication_samples,
+        ),
     }
+    measured["AC-PER-03"] = budget(
+        "AC-PER-03", "preview of 500 points", 500, small_preview
+    )
+    measured["AC-PER-04"] = budget(
+        "AC-PER-04", "maximum preview of 2.000 points", 1000, large_preview
+    )
+    measured["AC-PER-05"] = budget(
+        "AC-PER-05",
+        f"prevalidation of {len(operations)} associations",
+        2000,
+        prevalidation_samples,
+    )
+    measured["AC-PER-06"] = budget(
+        "AC-PER-06",
+        f"commit of {len(operations)} associations without lock wait",
+        2000,
+        commit_samples,
+    )
+    return {key: measured[key] for key in sorted(measured)}
 
 
 def capture_reference_plans(store, *, fixture: dict) -> dict[str, object]:
@@ -372,4 +544,14 @@ def capture_reference_plans(store, *, fixture: dict) -> dict[str, object]:
             cursor_key=[last["updated_at"], last["display_name_sort"], last["signal_id"]],
             analyze=True,
         )
+    # The preview is the one budgeted query that is allowed to read values, so
+    # its plan is saved to show that it reads them through the revision key and
+    # never scans the table (chapter 9.4).
+    plans["revision_preview"] = store.explain_revision_preview(
+        signal_id=fixture["preview_signal_id"],
+        revision_id=fixture["preview_revision_id"],
+        range_from=fixture["coverage_from"],
+        range_to=fixture["coverage_to"],
+        analyze=True,
+    )
     return plans

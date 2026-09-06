@@ -289,6 +289,11 @@ DASHBOARD_TEMPLATE_FLAGS = [
 
 DEFAULT_TABLE_PREVIEW_LIMIT = 10
 
+# C4 records one mapping per migrated binding role as ``canonical_binding:<role>``.
+# The pattern is bound as a parameter rather than inlined, because the psycopg
+# driver parses a literal ``%`` in the statement text as a placeholder.
+CANONICAL_BINDING_KIND_PATTERN = "canonical_binding:%"
+
 PORTAL_CONFIGURATION_MIGRATION = "portal_configurations_from_dashboard_templates"
 
 DEFAULT_PUBLICATION_ARTIFACT_TYPES = [
@@ -3204,12 +3209,22 @@ class AnalystStore:
         return True
 
     def _sync_canonical_identity_sequences(self, logical_tables=None) -> None:
-        """Advance PostgreSQL identities past IDs preserved from legacy rows."""
+        """Advance PostgreSQL identities past IDs preserved from legacy rows.
+
+        The migrator preserves legacy IDs in the canonical content space and in
+        the link layer alike, so the sync resolves a logical name in whichever
+        of the two spaces owns it instead of assuming the content one.
+        """
 
         if self.database_backend != "postgresql":
             return
+        link_layer = link_layer_table_names(self.database_backend)
         for logical in logical_tables or CANONICAL_IDENTITY_TABLES:
-            table = self._canonical(logical)
+            table = (
+                link_layer[logical]
+                if logical in link_layer
+                else self._canonical(logical)
+            )
             self.connection.execute(
                 f"""
                 SELECT setval(
@@ -4990,10 +5005,10 @@ class AnalystStore:
               AND source_table = 'case_time_series_bindings'
               AND source_id = ?
               AND (target_kind = 'canonical_binding'
-                   OR target_kind LIKE 'canonical_binding:%')
+                   OR target_kind LIKE ?)
             ORDER BY target_id
             """,
-            (str(legacy_binding_id),),
+            (str(legacy_binding_id), CANONICAL_BINDING_KIND_PATTERN),
         ).fetchall()
         touched_signal_ids = []
         for mapping in rows:
@@ -5162,10 +5177,11 @@ class AnalystStore:
             WHERE source_kind = 'legacy_time_series'
               AND source_table = 'case_time_series_bindings'
               AND (target_kind = 'canonical_binding'
-                   OR target_kind LIKE 'canonical_binding:%'
+                   OR target_kind LIKE ?
                    OR target_kind = 'binding_disposition')
             ORDER BY source_id, target_kind
-            """
+            """,
+            (CANONICAL_BINDING_KIND_PATTERN,),
         ).fetchall():
             source_id = int(row["source_id"])
             legacy = legacy_bindings.get(source_id)
@@ -5786,10 +5802,10 @@ class AnalystStore:
                   AND source_table = 'case_time_series_bindings'
                   AND source_id = ?
                   AND (target_kind = 'canonical_binding'
-                       OR target_kind LIKE 'canonical_binding:%')
+                       OR target_kind LIKE ?)
                 ORDER BY target_id
                 """,
-                (str(int(legacy_binding_id)),),
+                (str(int(legacy_binding_id)), CANONICAL_BINDING_KIND_PATTERN),
             ).fetchall()
         ]
 
@@ -8361,6 +8377,40 @@ class AnalystStore:
             limit=resolved_limit,
         )
         return self._explain(sql, parameters, analyze=analyze)
+
+    def explain_revision_preview(
+        self,
+        *,
+        signal_id: int,
+        revision_id: int,
+        range_from: str,
+        range_to: str,
+        analyze: bool = False,
+    ) -> dict[str, Any]:
+        """Reference plan of the bounded preview (AC-PER-03, AC-PER-04).
+
+        The preview is the only budgeted query allowed to read values, so its
+        saved plan is what shows it enters them through the revision key of
+        chapter 9.5 instead of scanning the content tables.
+        """
+
+        sql = f"""
+            SELECT period.timestamp_start, period.timestamp_end,
+                   value.value_numeric, value.quality_flag,
+                   period.id AS period_id
+            FROM {self._canonical('time_series_values')} AS value
+            JOIN {self._canonical('time_series_periods')} AS period
+              ON period.id = value.time_series_period_id
+             AND period.set_revision_id = value.set_revision_id
+            WHERE value.set_revision_id = ? AND value.signal_id = ?
+              AND period.timestamp_start >= ? AND period.timestamp_end <= ?
+            ORDER BY period.timestamp_start, period.id
+        """
+        return self._explain(
+            sql,
+            (int(revision_id), int(signal_id), range_from, range_to),
+            analyze=analyze,
+        )
 
     def read_catalog_input_detail(self, signal_id: int) -> dict[str, Any]:
         """Complete metadata for one signal admitted by the list projection."""

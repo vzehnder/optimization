@@ -107,6 +107,7 @@ def main() -> int:
                 "budgets": budgets,
                 "reference_plans": plans,
                 "reads_periods_or_values": _touches_content(plans),
+                "preview_scans_values": _preview_scans_content(plans),
             }
     finally:
         store.close()
@@ -119,7 +120,24 @@ def main() -> int:
     destination.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps(report["budgets"], indent=2))
     print(f"evidence written to {destination}")
-    return 0 if not report["reads_periods_or_values"] else 1
+    failed = [
+        identifier
+        for identifier, budget in report["budgets"].items()
+        if budget["p95_ms"] is not None and budget["p95_ms"] > budget["budget_ms"]
+    ]
+    if failed:
+        print(f"budgets over their limit: {', '.join(sorted(failed))}")
+    if report["reads_periods_or_values"]:
+        print("a list or detail plan walked periods or values")
+    if report["preview_scans_values"]:
+        print("the preview plan scanned the value table")
+    return (
+        0
+        if not failed
+        and not report["reads_periods_or_values"]
+        and not report["preview_scans_values"]
+        else 1
+    )
 
 
 def _isolation(store, *, keep: bool):
@@ -137,13 +155,34 @@ def _isolation(store, *, keep: bool):
     )
 
 
+# The preview is the one budgeted query chapter 9.2 allows to read values, so
+# AC-CAT-04 is checked over the list and detail plans only.
+CONTENT_READING_PLANS = frozenset({"revision_preview"})
+
+
 def _touches_content(plans: dict) -> bool:
-    """No critical query may walk periods or values (AC-CAT-04)."""
+    """No list or detail query may walk periods or values (AC-CAT-04)."""
 
     haystack = " ".join(
-        line for plan in plans.values() for line in plan["plan"]
+        line
+        for name, plan in plans.items()
+        if name not in CONTENT_READING_PLANS
+        for line in plan["plan"]
     ).lower()
     return "time_series_periods" in haystack or "time_series_values" in haystack
+
+
+def _preview_scans_content(plans: dict) -> bool:
+    """The preview must enter values by their revision key, never by a scan."""
+
+    plan = plans.get("revision_preview")
+    if plan is None:
+        return False
+    return any(
+        "seq scan on time_series_values" in line.lower()
+        or "scan time_series_values" in line.lower()
+        for line in plan["plan"]
+    )
 
 
 if __name__ == "__main__":

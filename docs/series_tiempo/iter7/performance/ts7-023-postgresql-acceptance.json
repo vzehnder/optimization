@@ -1,0 +1,225 @@
+{
+  "captured_at": "2026-09-06T13:35:38+00:00",
+  "engine": "postgresql",
+  "committed": true,
+  "plan": {
+    "scale": 0.001,
+    "sets": 2,
+    "signals_per_set": 50,
+    "entries": 100,
+    "periods": 1000,
+    "cells": 100000,
+    "objects": 10,
+    "associations": 1000,
+    "variants": 1,
+    "active_bindings": 10,
+    "binding_history_depth": 100,
+    "bindings": 1000
+  },
+  "built": {
+    "signal_count": 100,
+    "association_count": 1000,
+    "binding_count": 1000,
+    "build_seconds": 6.358
+  },
+  "budgets": {
+    "AC-PER-01": {
+      "description": "50 row catalog page without facets",
+      "budget_ms": 300,
+      "p95_ms": 3.178,
+      "median_ms": 1.909,
+      "min_ms": 1.041,
+      "max_ms": 3.668,
+      "samples": 100
+    },
+    "AC-PER-02": {
+      "description": "contextual object list",
+      "budget_ms": 300,
+      "p95_ms": 3.563,
+      "median_ms": 1.921,
+      "min_ms": 0.956,
+      "max_ms": 5.006,
+      "samples": 100
+    },
+    "AC-PER-03": {
+      "description": "preview of 500 points",
+      "budget_ms": 500,
+      "p95_ms": 16.174,
+      "median_ms": 8.298,
+      "min_ms": 6.325,
+      "max_ms": 684.796,
+      "samples": 100
+    },
+    "AC-PER-04": {
+      "description": "maximum preview of 2.000 points",
+      "budget_ms": 1000,
+      "p95_ms": 9.958,
+      "median_ms": 7.898,
+      "min_ms": 6.247,
+      "max_ms": 17.021,
+      "samples": 100
+    },
+    "AC-PER-05": {
+      "description": "prevalidation of 200 associations",
+      "budget_ms": 2000,
+      "p95_ms": 209.519,
+      "median_ms": 186.657,
+      "min_ms": 135.036,
+      "max_ms": 219.512,
+      "samples": 25
+    },
+    "AC-PER-06": {
+      "description": "commit of 200 associations without lock wait",
+      "budget_ms": 2000,
+      "p95_ms": 569.709,
+      "median_ms": 569.709,
+      "min_ms": 569.709,
+      "max_ms": 569.709,
+      "samples": 1
+    },
+    "AC-PER-07": {
+      "description": "synchronous publication of 50000 cells",
+      "budget_ms": 5000,
+      "p95_ms": 2805.991,
+      "median_ms": 2805.991,
+      "min_ms": 2581.222,
+      "max_ms": 2805.991,
+      "samples": 2
+    }
+  },
+  "reference_plans": {
+    "catalog_page": {
+      "engine": "postgresql",
+      "sql": "SELECT entry.* FROM ts_next.time_series_catalog_entries AS entry  ORDER BY updated_at DESC, display_name_sort ASC, signal_id ASC LIMIT ?",
+      "plan": [
+        "Limit  (cost=17.20..17.33 rows=51 width=665) (actual time=0.352..0.362 rows=51.00 loops=1)",
+        "  Buffers: shared hit=12",
+        "  ->  Sort  (cost=17.20..17.50 rows=120 width=665) (actual time=0.351..0.355 rows=51.00 loops=1)",
+        "        Sort Key: updated_at DESC, display_name_sort, signal_id",
+        "        Sort Method: quicksort  Memory: 125kB",
+        "        Buffers: shared hit=12",
+        "        ->  Seq Scan on time_series_catalog_entries entry  (cost=0.00..13.20 rows=120 width=665) (actual time=0.025..0.065 rows=100.00 loops=1)",
+        "              Buffers: shared hit=12",
+        "Planning Time: 0.256 ms",
+        "Execution Time: 0.403 ms"
+      ],
+      "tables": [
+        "time_series_catalog_entries"
+      ]
+    },
+    "object_context_page": {
+      "engine": "postgresql",
+      "sql": "\n        SELECT * FROM (\n            \n        SELECT * FROM (\n            SELECT 'catalog' AS source, entry.signal_id AS signal_id,\n                   entry.series_key AS series_key,\n                   entry.display_name AS display_name,\n                   entry.time_series_set_id AS time_series_set_id,\n                   entry.semantic_type_key AS semantic_type_key,\n                   entry.unit_key AS unit_key,\n                   entry.updated_at AS updated_at,\n                   association.binding_role_id AS binding_role_id,\n                   association.id AS association_id\n            FROM ts_next.time_series_catalog_associations AS association\n            JOIN ts_next.time_series_catalog_entries AS entry\n              ON entry.signal_id = association.signal_id\n            WHERE association.linkable_object_id = ?\n              AND association.status = 'active'\n              \n              \n            ORDER BY updated_at DESC, signal_id ASC\n            LIMIT ?\n        ) AS catalog_arm\n    \n            UNION ALL\n\n        SELECT * FROM (\n            SELECT 'object_specific' AS source,\n                   signal.id AS signal_id,\n                   signal.series_key AS series_key,\n                   signal.display_name AS display_name,\n                   the_set.id AS time_series_set_id,\n                   -- Each arm is its own subquery, so an untyped NULL would\n                   -- settle on a type before the union and stop matching.\n                   CAST(NULL AS TEXT) AS semantic_type_key,\n                   CAST(NULL AS TEXT) AS unit_key,\n                   the_set.updated_at AS updated_at,\n                   CAST(NULL AS BIGINT) AS binding_role_id,\n                   CAST(NULL AS BIGINT) AS association_id\n            FROM ts_next.time_series_sets AS the_set\n            JOIN ts_next.time_series_signals AS signal\n              ON signal.id = the_set.object_specific_signal_id\n            \n            WHERE the_set.owner_linkable_object_id = ?\n              AND the_set.series_kind = 'object_specific'\n              \n              \n            ORDER BY the_set.updated_at DESC, signal.id ASC\n            LIMIT ?\n        ) AS local_arm\n    \n        ) AS object_context\n        ORDER BY updated_at DESC, signal_id ASC\n        LIMIT ?\n    ",
+      "plan": [
+        "Limit  (cost=73.75..74.39 rows=51 width=150) (actual time=0.712..0.739 rows=51.00 loops=1)",
+        "  Buffers: shared hit=40",
+        "  ->  Merge Append  (cost=73.75..74.40 rows=52 width=150) (actual time=0.711..0.730 rows=51.00 loops=1)",
+        "        Sort Key: entry.updated_at DESC, entry.signal_id",
+        "        Buffers: shared hit=40",
+        "        ->  Limit  (cost=62.19..62.32 rows=51 width=149) (actual time=0.679..0.691 rows=51.00 loops=1)",
+        "              Buffers: shared hit=36",
+        "              ->  Sort  (cost=62.19..62.51 rows=126 width=149) (actual time=0.678..0.685 rows=51.00 loops=1)",
+        "                    Sort Key: entry.updated_at DESC, entry.signal_id",
+        "                    Sort Method: quicksort  Memory: 50kB",
+        "                    Buffers: shared hit=36",
+        "                    ->  Hash Join  (cost=14.70..57.99 rows=126 width=149) (actual time=0.181..0.507 rows=100.00 loops=1)",
+        "                          Hash Cond: (association.signal_id = entry.signal_id)",
+        "                          Buffers: shared hit=36",
+        "                          ->  Seq Scan on time_series_catalog_associations association  (cost=0.00..42.95 rows=126 width=24) (actual time=0.025..0.305 rows=100.00 loops=1)",
+        "                                Filter: ((linkable_object_id = '1'::smallint) AND (status = 'active'::text))",
+        "                                Rows Removed by Filter: 1100",
+        "                                Buffers: shared hit=24",
+        "                          ->  Hash  (cost=13.20..13.20 rows=120 width=101) (actual time=0.144..0.145 rows=100.00 loops=1)",
+        "                                Buckets: 1024  Batches: 1  Memory Usage: 22kB",
+        "                                Buffers: shared hit=12",
+        "                                ->  Seq Scan on time_series_catalog_entries entry  (cost=0.00..13.20 rows=120 width=101) (actual time=0.010..0.096 rows=100.00 loops=1)",
+        "                                      Buffers: shared hit=12",
+        "        ->  Limit  (cost=11.55..11.55 rows=1 width=199) (actual time=0.031..0.032 rows=0.00 loops=1)",
+        "              Buffers: shared hit=4",
+        "              ->  Sort  (cost=11.55..11.55 rows=1 width=199) (actual time=0.030..0.031 rows=0.00 loops=1)",
+        "                    Sort Key: the_set.updated_at DESC, signal.id",
+        "                    Sort Method: quicksort  Memory: 25kB",
+        "                    Buffers: shared hit=4",
+        "                    ->  Hash Join  (cost=8.15..11.54 rows=1 width=199) (actual time=0.025..0.026 rows=0.00 loops=1)",
+        "                          Hash Cond: (signal.id = the_set.object_specific_signal_id)",
+        "                          Buffers: shared hit=4",
+        "                          ->  Seq Scan on time_series_signals signal  (cost=0.00..3.00 rows=100 width=47) (actual time=0.015..0.015 rows=1.00 loops=1)",
+        "                                Buffers: shared hit=2",
+        "                          ->  Hash  (cost=8.14..8.14 rows=1 width=48) (actual time=0.007..0.007 rows=0.00 loops=1)",
+        "                                Buckets: 1024  Batches: 1  Memory Usage: 8kB",
+        "                                Buffers: shared hit=2",
+        "                                ->  Index Scan using time_series_sets_next_object_series_key_uk on time_series_sets the_set  (cost=0.12..8.14 rows=1 width=48) (actual time=0.007..0.007 rows=0.00 loops=1)",
+        "                                      Index Cond: (owner_linkable_object_id = '1'::smallint)",
+        "                                      Index Searches: 1",
+        "                                      Buffers: shared hit=2",
+        "Planning:",
+        "  Buffers: shared hit=40",
+        "Planning Time: 1.735 ms",
+        "Execution Time: 0.846 ms"
+      ],
+      "tables": [
+        "time_series_catalog_associations",
+        "time_series_catalog_entries",
+        "time_series_sets",
+        "time_series_signals"
+      ]
+    },
+    "catalog_page_keyset": {
+      "engine": "postgresql",
+      "sql": "SELECT entry.* FROM ts_next.time_series_catalog_entries AS entry WHERE updated_at <= ? AND ((updated_at < ?) OR (updated_at = ? AND display_name_sort > ?) OR (updated_at = ? AND display_name_sort = ? AND signal_id > ?)) ORDER BY updated_at DESC, display_name_sort ASC, signal_id ASC LIMIT ?",
+      "plan": [
+        "Limit  (cost=17.45..17.57 rows=51 width=665) (actual time=0.227..0.236 rows=50.00 loops=1)",
+        "  Buffers: shared hit=12",
+        "  ->  Sort  (cost=17.45..17.62 rows=70 width=665) (actual time=0.226..0.230 rows=50.00 loops=1)",
+        "        Sort Key: updated_at DESC, display_name_sort, signal_id",
+        "        Sort Method: quicksort  Memory: 75kB",
+        "        Buffers: shared hit=12",
+        "        ->  Seq Scan on time_series_catalog_entries entry  (cost=0.00..15.30 rows=70 width=665) (actual time=0.013..0.089 rows=50.00 loops=1)",
+        "              Filter: ((updated_at <= '2026-09-06T13:35:24+00:00'::text) AND ((updated_at < '2026-09-06T13:35:24+00:00'::text) OR ((updated_at = '2026-09-06T13:35:24+00:00'::text) AND (display_name_sort > 'senal de referencia 00032'::text)) OR ((updated_at = '2026-09-06T13:35:24+00:00'::text) AND (display_name_sort = 'senal de referencia 00032'::text) AND (signal_id > '83'::smallint))))",
+        "              Rows Removed by Filter: 50",
+        "              Buffers: shared hit=12",
+        "Planning:",
+        "  Buffers: shared hit=3",
+        "Planning Time: 0.332 ms",
+        "Execution Time: 0.270 ms"
+      ],
+      "tables": [
+        "time_series_catalog_entries"
+      ]
+    },
+    "revision_preview": {
+      "engine": "postgresql",
+      "sql": "\n            SELECT period.timestamp_start, period.timestamp_end,\n                   value.value_numeric, value.quality_flag,\n                   period.id AS period_id\n            FROM ts_next.time_series_values AS value\n            JOIN ts_next.time_series_periods AS period\n              ON period.id = value.time_series_period_id\n             AND period.set_revision_id = value.set_revision_id\n            WHERE value.set_revision_id = ? AND value.signal_id = ?\n              AND period.timestamp_start >= ? AND period.timestamp_end <= ?\n            ORDER BY period.timestamp_start, period.id\n        ",
+      "plan": [
+        "Sort  (cost=812.04..813.32 rows=512 width=98) (actual time=2.688..2.772 rows=1000.00 loops=1)",
+        "  Sort Key: period.timestamp_start, period.id",
+        "  Sort Method: quicksort  Memory: 110kB",
+        "  Buffers: shared hit=44",
+        "  ->  Hash Join  (cost=74.92..789.00 rows=512 width=98) (actual time=1.618..2.195 rows=1000.00 loops=1)",
+        "        Hash Cond: (value.time_series_period_id = period.id)",
+        "        Buffers: shared hit=44",
+        "        ->  Index Scan using time_series_values_pkey on time_series_values value  (cost=0.42..713.16 rows=512 width=56) (actual time=0.025..0.224 rows=1000.00 loops=1)",
+        "              Index Cond: ((set_revision_id = '2'::smallint) AND (signal_id = '51'::smallint))",
+        "              Index Searches: 1",
+        "              Buffers: shared hit=17",
+        "        ->  Hash  (cost=62.00..62.00 rows=1000 width=66) (actual time=1.586..1.587 rows=1000.00 loops=1)",
+        "              Buckets: 1024  Batches: 1  Memory Usage: 110kB",
+        "              Buffers: shared hit=27",
+        "              ->  Seq Scan on time_series_periods period  (cost=0.00..62.00 rows=1000 width=66) (actual time=0.624..1.380 rows=1000.00 loops=1)",
+        "                    Filter: ((timestamp_start >= '2026-01-01T00:00:0000000'::text) AND (timestamp_end <= '2026-01-01T00:00:0001000'::text) AND (set_revision_id = '2'::smallint))",
+        "                    Rows Removed by Filter: 1000",
+        "                    Buffers: shared hit=27",
+        "Planning:",
+        "  Buffers: shared hit=7",
+        "Planning Time: 0.472 ms",
+        "Execution Time: 2.882 ms"
+      ],
+      "tables": [
+        "time_series_periods",
+        "time_series_values"
+      ]
+    }
+  },
+  "reads_periods_or_values": false,
+  "preview_scans_values": false
+}

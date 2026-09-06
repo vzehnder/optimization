@@ -7,6 +7,7 @@ import {
   commitCaseBindings,
   commitCatalogAssociations,
   commitObjectSeriesDerivation,
+  createObjectSeriesDefinition,
   getCatalogInputDetail,
   getObjectCatalogAssociation,
   getObjectTimeSeriesContext,
@@ -16,10 +17,12 @@ import {
   listCatalogSourcesForObject,
   listObjectCandidatesForSignal,
   listScenarios,
+  prepareObjectSeriesIngestion,
   prepareSharedSeriesIngestion,
   prevalidateCaseBindings,
   prevalidateCatalogAssociations,
   prevalidateObjectSeriesDerivation,
+  publishObjectSeriesIngestion,
   publishSharedSeriesIngestion,
   type AssociationBatchRequest,
   type BatchCommitResult,
@@ -31,6 +34,7 @@ import {
   type IngestionPoint,
   type IngestionReceipt,
   type ObjectCandidateRow,
+  type ObjectSeriesDefinition,
   type ObjectSeriesDerivationPrevalidation,
   type SharedSourceAlternative,
   type SharedSourceImpact,
@@ -701,6 +705,359 @@ function linkReviewFacts(
   ];
 }
 
+// -- The series that belongs to one object: chapter 7.5 -------------------
+//
+// Nothing here reaches the global catalog. The definition is born from the
+// object, the load is staged and previewed before it is sealed, and the sealed
+// revision is what makes the series selectable. `Solo este objeto` accompanies
+// every step, because the whole point is that this series never leaves.
+
+interface ObjectSeriesDraft {
+  objectSeriesKey: string;
+  displayName: string;
+  description: string;
+  semanticTypeKey: string;
+  unitKey: string;
+  dataClassKey: string;
+  timezone: string;
+  resolutionSeconds: number;
+  pointsText: string;
+  reasonText: string;
+}
+
+const EMPTY_OBJECT_SERIES_DRAFT: ObjectSeriesDraft = {
+  objectSeriesKey: "",
+  displayName: "",
+  description: "",
+  semanticTypeKey: "",
+  unitKey: "",
+  dataClassKey: "",
+  timezone: "UTC",
+  resolutionSeconds: 3600,
+  pointsText: "",
+  reasonText: "",
+};
+
+function DescriptorSelect({
+  id,
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  options: { key: string; display_name: string }[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="field-row">
+      <label htmlFor={id}>{label}</label>
+      <select
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        <option value="">Elegir</option>
+        {options.map((option) => (
+          <option key={option.key} value={option.key}>
+            {option.display_name} ({option.key})
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function ObjectSeriesDefinitionStep({
+  draft,
+  objectName,
+  roleKey,
+  semanticTypes,
+  units,
+  dataClasses,
+  onChange,
+}: {
+  draft: ObjectSeriesDraft;
+  objectName: string;
+  roleKey: string;
+  semanticTypes: { key: string; display_name: string }[];
+  units: { key: string; display_name: string }[];
+  dataClasses: { key: string; display_name: string }[];
+  onChange: (patch: Partial<ObjectSeriesDraft>) => void;
+}) {
+  return (
+    <section aria-label="Definicion o seleccion">
+      <h2>Definicion o seleccion</h2>
+      <p className="journey-scope-note">
+        Solo este objeto. La serie pertenece a {objectName} para la necesidad{" "}
+        {roleKey}, no entra al catalogo global y ningun otro objeto puede
+        elegirla.
+      </p>
+      <div className="field-row">
+        <label htmlFor="object-series-key">Clave local</label>
+        <input
+          id="object-series-key"
+          type="text"
+          value={draft.objectSeriesKey}
+          onChange={(event) =>
+            onChange({ objectSeriesKey: event.target.value })
+          }
+        />
+      </div>
+      <div className="field-row">
+        <label htmlFor="object-series-name">Nombre visible</label>
+        <input
+          id="object-series-name"
+          type="text"
+          value={draft.displayName}
+          onChange={(event) => onChange({ displayName: event.target.value })}
+        />
+      </div>
+      <div className="field-row">
+        <label htmlFor="object-series-description">Descripcion</label>
+        <input
+          id="object-series-description"
+          type="text"
+          value={draft.description}
+          onChange={(event) => onChange({ description: event.target.value })}
+        />
+      </div>
+      <DescriptorSelect
+        id="object-series-semantic"
+        label="Tipo semantico"
+        value={draft.semanticTypeKey}
+        options={semanticTypes}
+        onChange={(semanticTypeKey) => onChange({ semanticTypeKey })}
+      />
+      <DescriptorSelect
+        id="object-series-unit"
+        label="Unidad"
+        value={draft.unitKey}
+        options={units}
+        onChange={(unitKey) => onChange({ unitKey })}
+      />
+      <DescriptorSelect
+        id="object-series-data-class"
+        label="Clase de dato"
+        value={draft.dataClassKey}
+        options={dataClasses}
+        onChange={(dataClassKey) => onChange({ dataClassKey })}
+      />
+      <div className="field-row">
+        <label htmlFor="object-series-timezone">Zona horaria</label>
+        <input
+          id="object-series-timezone"
+          type="text"
+          value={draft.timezone}
+          onChange={(event) => onChange({ timezone: event.target.value })}
+        />
+      </div>
+      <div className="field-row">
+        <label htmlFor="object-series-resolution">Resolucion (segundos)</label>
+        <input
+          id="object-series-resolution"
+          type="number"
+          min={1}
+          value={draft.resolutionSeconds}
+          onChange={(event) =>
+            onChange({ resolutionSeconds: Number(event.target.value) })
+          }
+        />
+      </div>
+    </section>
+  );
+}
+
+function ObjectSeriesDataStep({
+  draft,
+  series,
+  ingestion,
+  parseErrors,
+  definitionError,
+  stagingError,
+  definitionPending,
+  stagingPending,
+  onChange,
+  onSaveDefinition,
+  onStage,
+}: {
+  draft: ObjectSeriesDraft;
+  series: ObjectSeriesDefinition | null;
+  ingestion: IngestionReceipt | null;
+  parseErrors: string[];
+  definitionError: unknown;
+  stagingError: unknown;
+  definitionPending: boolean;
+  stagingPending: boolean;
+  onChange: (patch: Partial<ObjectSeriesDraft>) => void;
+  onSaveDefinition: () => void;
+  onStage: () => void;
+}) {
+  return (
+    <section aria-label="Datos o revision">
+      <h2>Datos o revision ejecutable</h2>
+      <p>
+        Solo este objeto. Guardar la definicion ya es valido: la serie queda
+        creada y no seleccionable hasta que una revision quede sellada.
+      </p>
+      {series ? (
+        <dl className="catalog-definition-list">
+          <dt>Serie</dt>
+          <dd>
+            {series.display_name} ({series.object_series_key})
+          </dd>
+          <dt>Estado</dt>
+          <dd>{series.availability}</dd>
+          <dt>Seleccionable</dt>
+          <dd>{series.binding_ready ? "Si" : "No, aun sin revision sellada"}</dd>
+        </dl>
+      ) : (
+        <>
+          {definitionError ? <MutationRefusal error={definitionError} /> : null}
+          <button
+            type="button"
+            disabled={definitionPending}
+            onClick={onSaveDefinition}
+          >
+            Guardar definicion
+          </button>
+        </>
+      )}
+      {series ? (
+        <>
+          <div className="field-row">
+            <label htmlFor="object-series-points">
+              Puntos (instante ISO, duracion en segundos, valor)
+            </label>
+            <textarea
+              id="object-series-points"
+              rows={6}
+              value={draft.pointsText}
+              onChange={(event) => onChange({ pointsText: event.target.value })}
+            />
+          </div>
+          {parseErrors.length > 0 ? (
+            <ul className="journey-parse-errors">
+              {parseErrors.map((message) => (
+                <li key={message}>{message}</li>
+              ))}
+            </ul>
+          ) : null}
+          {stagingError ? <MutationRefusal error={stagingError} /> : null}
+          <button
+            type="button"
+            disabled={
+              stagingPending ||
+              parseErrors.length > 0 ||
+              draft.pointsText.trim().length === 0
+            }
+            onClick={onStage}
+          >
+            Validar datos
+          </button>
+          {ingestion ? (
+            <dl className="catalog-definition-list">
+              <dt>Estado del lote</dt>
+              <dd>{ingestion.state}</dd>
+              <dt>Periodos normalizados</dt>
+              <dd>{String(ingestion.normalized.period_count ?? 0)}</dd>
+              <dt>Cobertura</dt>
+              <dd>
+                {ingestion.normalized.coverage_start ?? "Sin inicio"} -{" "}
+                {ingestion.normalized.coverage_end ?? "Sin fin"}
+              </dd>
+              <dt>Hash de contenido</dt>
+              <dd className="catalog-hash">
+                {ingestion.normalized.content_hash ?? "Sin hash"}
+              </dd>
+            </dl>
+          ) : null}
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+function ObjectSeriesReview({
+  objectName,
+  series,
+  ingestion,
+  reasonText,
+  publication,
+  publishError,
+  publishPending,
+  onReason,
+  onPublish,
+}: {
+  objectName: string;
+  series: ObjectSeriesDefinition;
+  ingestion: IngestionReceipt;
+  reasonText: string;
+  publication: Record<string, unknown> | null;
+  publishError: unknown;
+  publishPending: boolean;
+  onReason: (value: string) => void;
+  onPublish: () => void;
+}) {
+  return (
+    <section aria-label="Impacto y confirmacion">
+      <h2>Impacto y confirmacion</h2>
+      <dl className="catalog-definition-list">
+        <dt>Alcance</dt>
+        <dd>Solo este objeto: {objectName}.</dd>
+        <dt>Consumidores actuales</dt>
+        <dd>
+          Ninguna asociacion de catalogo: una serie especifica se vincula
+          directamente a su propio objeto.
+        </dd>
+        <dt>Contenido a sellar</dt>
+        <dd>
+          {String(ingestion.normalized.period_count ?? 0)} periodos con hash{" "}
+          <span className="catalog-hash">
+            {ingestion.normalized.content_hash ?? "Sin hash"}
+          </span>
+        </dd>
+        <dt>Atomicidad</dt>
+        <dd>
+          La publicacion sella la revision entera o no aparece: nunca queda una
+          revision parcial visible.
+        </dd>
+        <dt>Historia</dt>
+        <dd>
+          La identidad {series.object_series_key} no se reasigna; cada
+          publicacion agrega una revision nueva y conserva las anteriores.
+        </dd>
+      </dl>
+      <div className="field-row">
+        <label htmlFor="object-series-reason">Motivo</label>
+        <input
+          id="object-series-reason"
+          type="text"
+          value={reasonText}
+          onChange={(event) => onReason(event.target.value)}
+        />
+      </div>
+      {publishError ? <MutationRefusal error={publishError} /> : null}
+      {publication ? (
+        <p role="status" className="journey-committed">
+          Revision sellada ({String(publication.outcome)}) con hash{" "}
+          {String(publication.content_hash)}.
+        </p>
+      ) : (
+        <button
+          type="button"
+          disabled={publishPending || reasonText.trim().length === 0}
+          onClick={onPublish}
+        >
+          Publicar revision de esta serie
+        </button>
+      )}
+    </section>
+  );
+}
+
 function LinkFlow({
   projectId,
   linkableObjectId,
@@ -720,6 +1077,26 @@ function LinkFlow({
   );
   const [commitError, setCommitError] = useState<unknown>(null);
   const [commitPending, setCommitPending] = useState(false);
+  // The object-specific branch of the same journey (chapter 7.5). It keeps its
+  // own draft and its own three server moves: define, stage, seal.
+  const [objectDraft, setObjectDraft] = useState<ObjectSeriesDraft>(
+    EMPTY_OBJECT_SERIES_DRAFT,
+  );
+  const [objectSeries, setObjectSeries] =
+    useState<ObjectSeriesDefinition | null>(null);
+  const [objectEtag, setObjectEtag] = useState("");
+  const [objectIngestion, setObjectIngestion] =
+    useState<IngestionReceipt | null>(null);
+  const [objectPublication, setObjectPublication] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
+  const [definitionError, setDefinitionError] = useState<unknown>(null);
+  const [stagingError, setStagingError] = useState<unknown>(null);
+  const [publishError, setPublishError] = useState<unknown>(null);
+  const [definitionPending, setDefinitionPending] = useState(false);
+  const [stagingPending, setStagingPending] = useState(false);
+  const [publishPending, setPublishPending] = useState(false);
 
   const objectName = useObjectName(projectId, linkableObjectId);
   const roles = useQuery({
@@ -789,6 +1166,135 @@ function LinkFlow({
     enabled: draft.signalId !== null,
     retry: false,
   });
+  const definingLocally = draft.sourceChoice === "object_specific";
+  const semanticTypes = useQuery({
+    queryKey: ["catalog-descriptors", "semantic_type"],
+    queryFn: ({ signal }) => listCatalogDescriptors("semantic_type", signal),
+    enabled: definingLocally,
+    staleTime: 5 * 60_000,
+  });
+  const units = useQuery({
+    queryKey: ["catalog-descriptors", "unit"],
+    queryFn: ({ signal }) => listCatalogDescriptors("unit", signal),
+    enabled: definingLocally,
+    staleTime: 5 * 60_000,
+  });
+  const dataClasses = useQuery({
+    queryKey: ["catalog-descriptors", "data_class"],
+    queryFn: ({ signal }) => listCatalogDescriptors("data_class", signal),
+    enabled: definingLocally,
+    staleTime: 5 * 60_000,
+  });
+
+  const parsedLocalPoints = parsePoints(
+    objectDraft.pointsText,
+    objectDraft.objectSeriesKey,
+  );
+
+  function updateObject(patch: Partial<ObjectSeriesDraft>) {
+    setObjectDraft((current) => ({ ...current, ...patch }));
+    // A changed draft can never keep a staging computed for the old one.
+    setObjectIngestion(null);
+    setObjectPublication(null);
+    setStagingError(null);
+    setPublishError(null);
+  }
+
+  async function saveObjectDefinition() {
+    if (projectId === null || linkableObjectId === null) return;
+    setDefinitionPending(true);
+    setDefinitionError(null);
+    try {
+      const created = await createObjectSeriesDefinition(
+        { projectId, linkableObjectId },
+        {
+          object_series_key: objectDraft.objectSeriesKey.trim(),
+          display_name: objectDraft.displayName.trim(),
+          description: objectDraft.description.trim(),
+          intended_binding_role_key: draft.bindingRoleKey,
+          semantic_type_key: objectDraft.semanticTypeKey,
+          unit_key: objectDraft.unitKey,
+          data_class_key: objectDraft.dataClassKey,
+          timezone: objectDraft.timezone.trim(),
+          temporal_contract: {
+            regularity: "regular",
+            nominal_resolution_seconds: objectDraft.resolutionSeconds,
+            timestamp_convention: "period_start",
+          },
+        },
+        idempotencyKey(),
+      );
+      setObjectSeries(created.series);
+      setObjectEtag(created.etag);
+    } catch (error) {
+      setDefinitionError(error);
+    } finally {
+      setDefinitionPending(false);
+    }
+  }
+
+  async function stageObjectPoints() {
+    if (projectId === null || linkableObjectId === null || !objectSeries) return;
+    setStagingPending(true);
+    setStagingError(null);
+    try {
+      setObjectIngestion(
+        await prepareObjectSeriesIngestion(
+          { projectId, linkableObjectId },
+          objectSeries.signal_id,
+          {
+            mode: "replace_full",
+            expected_base: null,
+            revision_contract: {
+              data_class_key: objectDraft.dataClassKey,
+              timezone: objectDraft.timezone.trim(),
+              regularity: "regular",
+              nominal_resolution_seconds: objectDraft.resolutionSeconds,
+            },
+            source: { kind: "api", display_name: "Recorrido protegido" },
+            points: parsedLocalPoints.points,
+          },
+        ),
+      );
+    } catch (error) {
+      setStagingError(error);
+    } finally {
+      setStagingPending(false);
+    }
+  }
+
+  async function publishObjectRevision() {
+    if (
+      projectId === null ||
+      linkableObjectId === null ||
+      !objectSeries ||
+      !objectIngestion?.validation_token
+    ) {
+      return;
+    }
+    setPublishPending(true);
+    setPublishError(null);
+    try {
+      setObjectPublication(
+        await publishObjectSeriesIngestion(
+          { projectId, linkableObjectId },
+          objectSeries.signal_id,
+          objectIngestion.ingestion_id,
+          {
+            validation_token: objectIngestion.validation_token,
+            confirm: objectIngestion.requires_confirmation,
+            reason_code: "object_series_revision_published",
+            reason_text: objectDraft.reasonText.trim(),
+          },
+          { commitEtag: objectEtag, idempotencyKey: idempotencyKey() },
+        ),
+      );
+    } catch (error) {
+      setPublishError(error);
+    } finally {
+      setPublishPending(false);
+    }
+  }
 
   // The need already covered in this variant is what turns a create into a
   // replace, so the journey reads it instead of asking the user to know it.
@@ -947,15 +1453,32 @@ function LinkFlow({
     Boolean(draft.bindingRoleKey && draft.sourceChoice) &&
     (intent === "associate" ||
       (draft.scenarioId !== null && draft.variantId !== null));
-  const canAdvance =
-    step === "origin"
-      ? originComplete
-      : step === "selection"
-        ? draft.signalId !== null
-        : step === "data"
-          ? detail.data !== undefined &&
-            (!reasonRequired || draft.reasonText.trim().length > 0)
-          : false;
+  const objectDefinitionComplete =
+    objectDraft.objectSeriesKey.trim().length > 0 &&
+    objectDraft.displayName.trim().length > 0 &&
+    Boolean(objectDraft.semanticTypeKey) &&
+    Boolean(objectDraft.unitKey) &&
+    Boolean(objectDraft.dataClassKey) &&
+    objectDraft.timezone.trim().length > 0 &&
+    objectDraft.resolutionSeconds > 0;
+  // The two branches share the origin step and the impact step; only what has
+  // to be true to leave steps 2 and 3 differs between them.
+  const readyToLeave: Record<StepId, boolean> = definingLocally
+    ? {
+        origin: originComplete,
+        selection: objectDefinitionComplete,
+        data: objectSeries !== null && Boolean(objectIngestion?.validation.valid),
+        impact: false,
+      }
+    : {
+        origin: originComplete,
+        selection: draft.signalId !== null,
+        data:
+          detail.data !== undefined &&
+          (!reasonRequired || draft.reasonText.trim().length > 0),
+        impact: false,
+      };
+  const canAdvance = readyToLeave[step];
 
   return (
     <JourneyShell
@@ -981,26 +1504,66 @@ function LinkFlow({
           onChange={update}
         />
       ) : null}
-      {step === "selection" ? (
+      {step === "selection" && definingLocally ? (
+        <ObjectSeriesDefinitionStep
+          draft={objectDraft}
+          objectName={objectName}
+          roleKey={draft.bindingRoleKey}
+          semanticTypes={semanticTypes.data?.items ?? []}
+          units={units.data?.items ?? []}
+          dataClasses={dataClasses.data?.items ?? []}
+          onChange={updateObject}
+        />
+      ) : null}
+      {step === "selection" && !definingLocally ? (
         <section aria-label="Definicion o seleccion">
           <h2>Definicion o seleccion</h2>
-          {draft.sourceChoice === "generic" ? (
-            <>
-              {candidates.isPending ? (
-                <p role="status">Buscando fuentes compatibles</p>
-              ) : null}
-              {candidates.data ? (
-                <CandidateSelection
-                  rows={candidates.data.items}
-                  selectedSignalId={draft.signalId}
-                  onSelect={(signalId) => update({ signalId })}
-                />
-              ) : null}
-            </>
+          {candidates.isPending ? (
+            <p role="status">Buscando fuentes compatibles</p>
+          ) : null}
+          {candidates.data ? (
+            <CandidateSelection
+              rows={candidates.data.items}
+              selectedSignalId={draft.signalId}
+              onSelect={(signalId) => update({ signalId })}
+            />
           ) : null}
         </section>
       ) : null}
-      {step === "data" && detail.data ? (
+      {step === "data" && definingLocally ? (
+        <ObjectSeriesDataStep
+          draft={objectDraft}
+          series={objectSeries}
+          ingestion={objectIngestion}
+          parseErrors={parsedLocalPoints.errors}
+          definitionError={definitionError}
+          stagingError={stagingError}
+          definitionPending={definitionPending}
+          stagingPending={stagingPending}
+          onChange={updateObject}
+          onSaveDefinition={saveObjectDefinition}
+          onStage={stageObjectPoints}
+        />
+      ) : null}
+      {step === "impact" &&
+      definingLocally &&
+      objectSeries &&
+      objectIngestion ? (
+        <ObjectSeriesReview
+          objectName={objectName}
+          series={objectSeries}
+          ingestion={objectIngestion}
+          reasonText={objectDraft.reasonText}
+          publication={objectPublication}
+          publishError={publishError}
+          publishPending={publishPending}
+          onReason={(reasonText) =>
+            setObjectDraft((current) => ({ ...current, reasonText }))
+          }
+          onPublish={publishObjectRevision}
+        />
+      ) : null}
+      {step === "data" && !definingLocally && detail.data ? (
         <DataStep
           detail={detail.data}
           intent={intent}
@@ -1009,7 +1572,7 @@ function LinkFlow({
           onReason={(reasonText) => update({ reasonText })}
         />
       ) : null}
-      {step === "impact" && detail.data ? (
+      {step === "impact" && !definingLocally && detail.data ? (
         <BatchReview
           facts={linkReviewFacts(detail.data, intent)}
           prevalidation={prevalidation.data}

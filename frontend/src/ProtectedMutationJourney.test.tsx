@@ -76,6 +76,69 @@ function journeyFetch(
   });
 }
 
+function descriptorPage(items: { key: string; display_name: string }[]) {
+  return {
+    items: items.map((item, index) => ({
+      id: index + 1,
+      status: "active",
+      ...item,
+    })),
+    page: { limit: 200, has_more: false, next_cursor: null },
+    summary: { total_count: items.length },
+    facets: null,
+    meta: { section: "descriptors", catalog_generation: 4 },
+  };
+}
+
+const SEMANTIC_TYPES = descriptorPage([
+  { key: "energy_price", display_name: "Energy price" },
+]);
+const UNITS = descriptorPage([{ key: "usd_per_mwh", display_name: "USD/MWh" }]);
+const DATA_CLASSES = descriptorPage([
+  { key: "forecast", display_name: "Forecast" },
+]);
+
+// The definition exists before any data does, which is the whole point of
+// chapter 7.2: it is saved, and it is not selectable yet.
+const OBJECT_SERIES = {
+  signal_id: 41,
+  object_series_key: "precio_local",
+  display_name: "Precio local",
+  source_kind: "object_specific",
+  set_status: "draft",
+  availability: "awaiting_data",
+  binding_ready: false,
+  resource_version: 1,
+  current_revision: null,
+  compatible_role_keys: ["grid_import_price"],
+  owner: {
+    project_id: 1,
+    linkable_object_id: 7,
+    object_kind: "global_signal_slot",
+    object_type_key: "global:system",
+  },
+};
+
+const OBJECT_INGESTION = {
+  ingestion_id: "ing_local_01",
+  channel: "api_points",
+  state: "ready_to_publish",
+  mode: "replace_full",
+  normalized: {
+    period_count: 1,
+    value_count: 1,
+    coverage_start: "2026-01-01T00:00:00Z",
+    coverage_end: "2026-01-01T01:00:00Z",
+    content_hash: "sha256:local-first-revision",
+  },
+  validation: { valid: true, error_count: 0, errors: [], errors_truncated: false },
+  impact: {},
+  requires_confirmation: false,
+  validation_token: "validation-local-01",
+  capabilities: { remap: false },
+  expires_at: "2026-01-01T02:00:00Z",
+};
+
 function candidateRow(overrides: Record<string, unknown> = {}) {
   return {
     entry_kind: "input",
@@ -1406,6 +1469,145 @@ describe("single protected mutation journey", () => {
     // The rail never drops the object or the scope.
     expect(within(rail).getByText("Sistema")).toBeVisible();
     expect(within(rail).getByText("Solo este objeto")).toBeVisible();
+  });
+
+  it("defines an object-specific series, stages its data and seals it in the same four steps", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=associate",
+    );
+    const seen: string[] = [];
+    const fetchMock = journeyFetch((url, init) => {
+      if (url.pathname === "/api/auth/csrf") return json({ csrf_token: "csrf" });
+      if (url.pathname === "/api/time-series/catalog/descriptors") {
+        const kind = url.searchParams.get("kind");
+        if (kind === "semantic_type") return json(SEMANTIC_TYPES);
+        if (kind === "unit") return json(UNITS);
+        if (kind === "data_class") return json(DATA_CLASSES);
+        return json(BINDING_ROLES);
+      }
+      if (
+        url.pathname ===
+        "/api/projects/1/linkable-objects/7/time-series/object-series"
+      ) {
+        seen.push("definition");
+        return new Response(JSON.stringify({ object_series: OBJECT_SERIES }), {
+          status: 201,
+          headers: {
+            "Content-Type": "application/json",
+            ETag: '"object-series-41-1"',
+          },
+        });
+      }
+      if (url.pathname.endsWith("/revision-ingestions/points")) {
+        seen.push("staging");
+        return json({ ingestion: OBJECT_INGESTION }, 201);
+      }
+      if (url.pathname.endsWith("/publications")) {
+        seen.push("publication");
+        // The seal has to travel with the definition ETag and its own key.
+        const headers = new Headers(init?.headers);
+        expect(headers.get("If-Match")).toBe('"object-series-41-1"');
+        expect(headers.get("Idempotency-Key")).toBeTruthy();
+        return json(
+          {
+            publication: {
+              outcome: "new_revision",
+              revision_id: 501,
+              content_hash: "sha256:local-first-revision",
+            },
+          },
+          201,
+        );
+      }
+      return null;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "Recorrido protegido" });
+    await screen.findByRole("option", { name: "Precio de compra a la red" });
+    await user.selectOptions(
+      screen.getByLabelText("Necesidad funcional"),
+      "grid_import_price",
+    );
+    await user.click(
+      screen.getByRole("radio", { name: "Crear especifica para este objeto" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Siguiente" }));
+
+    // Step 2 is the definition, and it says out loud that the series belongs
+    // to this object only.
+    expect(
+      await screen.findByText(/Solo este objeto\. La serie pertenece a/),
+    ).toBeVisible();
+    await user.type(
+      screen.getByLabelText("Clave local"),
+      "precio_local",
+    );
+    await user.type(
+      screen.getByLabelText("Nombre visible"),
+      "Precio local",
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Tipo semantico"),
+      "energy_price",
+    );
+    await user.selectOptions(screen.getByLabelText("Unidad"), "usd_per_mwh");
+    await user.selectOptions(
+      screen.getByLabelText("Clase de dato"),
+      "forecast",
+    );
+    await user.click(screen.getByRole("button", { name: "Siguiente" }));
+
+    // Step 3: saving only the definition is already valid, and it leaves the
+    // series explicitly not selectable.
+    await user.click(
+      await screen.findByRole("button", { name: "Guardar definicion" }),
+    );
+    expect(await screen.findByText("awaiting_data")).toBeVisible();
+    expect(
+      screen.getByText("No, aun sin revision sellada"),
+    ).toBeVisible();
+
+    await user.type(
+      screen.getByLabelText(
+        "Puntos (instante ISO, duracion en segundos, valor)",
+      ),
+      "2026-01-01T00:00:00+00:00,3600,18.4",
+    );
+    await user.click(screen.getByRole("button", { name: "Validar datos" }));
+    expect(await screen.findByText("ready_to_publish")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Siguiente" }));
+
+    // Step 4 states the scope, the absence of any catalog association and the
+    // all-or-nothing publication before it can be confirmed.
+    expect(
+      await screen.findByText("Solo este objeto: Sistema."),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/Ninguna asociacion de catalogo/),
+    ).toBeVisible();
+    const seal = screen.getByRole("button", {
+      name: "Publicar revision de esta serie",
+    });
+    expect(seal).toBeDisabled();
+
+    await user.type(
+      screen.getByLabelText("Motivo"),
+      "Primera carga de la curva local",
+    );
+    await user.click(seal);
+
+    expect(
+      await screen.findByText(/Revision sellada \(new_revision\)/),
+    ).toBeVisible();
+    // Define, stage, seal: three server moves, in that order, once each.
+    expect(seen).toEqual(["definition", "staging", "publication"]);
   });
 
   it("takes the object entry point into the four steps and keeps object and scope in the rail", async () => {

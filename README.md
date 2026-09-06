@@ -1338,3 +1338,84 @@ optimizer behavior, or artifact formats:
 ```powershell
 julia --project=. -e "import Pkg; Pkg.test()"
 ```
+
+## TS-7: Global Catalog And Object-Specific Series
+
+TS-7 (`docs/series_tiempo/iter7/`) settles the two paths a time series can take
+into a case, on one canonical model. See
+`docs/series_tiempo/iter7/acceptance_ts7.md` for the closing acceptance record;
+the summary:
+
+```text
+Path A  catalog/inputs (signal-first)  --> association (signal + object + role)
+        global or project scope             --> binding (variant, exact revision
+        owner visible, cursor paged             + hash, stale on republication)
+
+Path B  object --> object-specific series --> binding, with no catalog
+        "Solo este objeto"                    association in between; never
+        never in catalog/inputs               a candidate of another object
+
+Shared  object --> shared generic source --> derive a local copy (lineage, and
+        full impact shown first               nothing reassigned)
+                                          --> "Publicar para todos" (admin,
+                                              reason + comprehension, consumers
+                                              left visibly stale)
+```
+
+### The Canonical Model
+
+Content lives in `ts_next` on PostgreSQL and `_next` on SQLite: sources, sets,
+signals, sealed revisions, periods, values and revision lineage. Revisions are
+immutable and content-addressed; a publication seals a whole revision or leaves
+nothing visible. The link layer beside it holds catalog associations, case
+bindings and three append-only ledgers that no public route can erase.
+
+Classification is data, not code: measurement dimensions, units, data classes,
+semantic types, binding roles, object types and one positive compatibility
+matrix, all seeded and drift-checked at deployment.
+
+### The Protected Journey
+
+Every mutation — from the catalog or from the object — passes through the same
+four steps: origin and scope, definition or selection, data or revision, impact
+and confirmation. Prevalidation writes nothing, the commit reauthorizes and
+re-evaluates in one transaction, and a batch is all or nothing. An incompatible
+candidate is shown explained and blocked with a stable code, and the API refuses
+it too.
+
+### Migration And Cutover
+
+C0 takes a signed inventory manifest with a proven restore; C2 to C4 backfill
+catalogs, objects, canonical content and links, converging on repeat with the
+same manifest and zero new rows; C5 compares canonical against legacy reads in
+shadow across semantics, counts, values, hashes, authorization and lineage; C6
+flips the single canonical writer and closes every legacy write path in code and
+by database permission. There is no return to the legacy writer after the first
+canonical write — only a mutation pause and roll-forward.
+
+### TS-7 Acceptance Verification
+
+Run the focused TS-7 acceptance suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_ts7_acceptance -v
+```
+
+The PostgreSQL half of the matrix asserts over whole-database totals, so point
+it at a database with no residue rather than at a working development one:
+
+```powershell
+$env:POSTGRES_TEST_DATABASE_URL = "postgresql://<user>:<pass>@127.0.0.1:5432/energy_dispatch_ts7_acceptance"
+.\.venv\Scripts\python.exe -m unittest tests.test_ts7_acceptance -v
+```
+
+Run the performance fixture with its saved reference plans:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\ts7_catalog_performance_fixture.py --scale 0.001 --repetitions 100 --keep `
+  --database-url postgresql://<user>:<pass>@127.0.0.1:5432/energy_dispatch_ts7_performance
+```
+
+Frontend verification is the same as TS-6, from `frontend/`. The manual Chrome
+checklist is `docs/series_tiempo/iter7/pruebas_manuales_ts7.md`; it runs with
+the real `.env` credentials and never creates a test administrator.
