@@ -39,6 +39,15 @@ CANONICAL_IDENTITY_TABLES = (
     "time_series_periods",
 )
 
+# TS7-024. The guards below are the last defence of chapter 9.6, and deleting a
+# project is the one lifecycle event allowed through them. The purging
+# transaction declares itself here, the guards read it, and the row leaves
+# before the commit. It opens DELETE and nothing else: a sealed revision, a
+# ledger and a signal identity stay as unmodifiable during a purge as outside
+# one. The table is not part of the content model and so is not a canonical
+# logical table.
+PROJECT_PURGE_SCOPE_TABLE = "project_purge_scope"
+
 
 def canonical_table_names(backend: str) -> dict[str, str]:
     """Physical name of every canonical table for the given engine."""
@@ -65,6 +74,34 @@ def canonical_space_table_name(logical: str, backend: str) -> str:
     if backend == "postgresql":
         return f"{CANONICAL_SCHEMA_NAME}.{logical}"
     return f"{logical}{CANONICAL_TABLE_SUFFIX}"
+
+
+def project_purge_scope_table_name(backend: str) -> str:
+    """Physical name of the table that declares an open project purge."""
+
+    return canonical_space_table_name(PROJECT_PURGE_SCOPE_TABLE, backend)
+
+
+def project_purge_scope_statements(backend: str) -> list[str]:
+    """DDL for the purge scope. It lands before the guards that read it."""
+
+    table = project_purge_scope_table_name(backend)
+    reference = "BIGINT" if backend == "postgresql" else "INTEGER"
+    return [
+        f"""
+        CREATE TABLE IF NOT EXISTS {table} (
+            project_id {reference} PRIMARY KEY,
+            opened_at TEXT NOT NULL,
+            opened_by TEXT NOT NULL
+        )
+        """
+    ]
+
+
+def purge_is_open(backend: str) -> str:
+    """Predicate a guard uses to recognize the transaction that may delete."""
+
+    return f"EXISTS (SELECT 1 FROM {project_purge_scope_table_name(backend)})"
 
 
 def _index_name(logical: str, suffix: str) -> str:
@@ -457,12 +494,17 @@ def canonical_guard_script(backend: str) -> str:
         ("values", table["time_series_values"]),
     )
 
+    purging = purge_is_open(backend)
+
     if backend == "postgresql":
         statements = [
             f"""
             CREATE OR REPLACE FUNCTION {CANONICAL_SCHEMA_NAME}.reject_sealed_revision()
             RETURNS trigger AS $$
             BEGIN
+                IF TG_OP = 'DELETE' AND {purging} THEN
+                    RETURN OLD;
+                END IF;
                 IF OLD.state = 'sealed' THEN
                     RAISE EXCEPTION 'TS_REVISION_SEALED';
                 END IF;
@@ -478,6 +520,9 @@ def canonical_guard_script(backend: str) -> str:
                 {CANONICAL_SCHEMA_NAME}.reject_sealed_revision_child()
             RETURNS trigger AS $$
             BEGIN
+                IF TG_OP = 'DELETE' AND {purging} THEN
+                    RETURN OLD;
+                END IF;
                 IF EXISTS (
                     SELECT 1 FROM {revisions}
                     WHERE id = OLD.set_revision_id AND state = 'sealed'
@@ -528,6 +573,9 @@ def canonical_guard_script(backend: str) -> str:
                 {CANONICAL_SCHEMA_NAME}.reject_lineage_mutation()
             RETURNS trigger AS $$
             BEGIN
+                IF TG_OP = 'DELETE' AND {purging} THEN
+                    RETURN OLD;
+                END IF;
                 RAISE EXCEPTION 'TS_LEDGER_APPEND_ONLY';
             END;
             $$ LANGUAGE plpgsql;
@@ -615,7 +663,7 @@ def canonical_guard_script(backend: str) -> str:
         DROP TRIGGER IF EXISTS ts_next_revision_sealed_delete;
         CREATE TRIGGER ts_next_revision_sealed_delete
         BEFORE DELETE ON {revisions}
-        FOR EACH ROW WHEN OLD.state = 'sealed'
+        FOR EACH ROW WHEN OLD.state = 'sealed' AND NOT {purging}
         BEGIN
             SELECT RAISE(ABORT, 'TS_REVISION_SEALED');
         END;
@@ -641,7 +689,7 @@ def canonical_guard_script(backend: str) -> str:
             FOR EACH ROW WHEN EXISTS (
                 SELECT 1 FROM {revisions}
                 WHERE id = OLD.set_revision_id AND state = 'sealed'
-            )
+            ) AND NOT {purging}
             BEGIN
                 SELECT RAISE(ABORT, 'TS_REVISION_SEALED');
             END;
@@ -697,7 +745,7 @@ def canonical_guard_script(backend: str) -> str:
         DROP TRIGGER IF EXISTS ts_next_lineage_append_only_delete;
         CREATE TRIGGER ts_next_lineage_append_only_delete
         BEFORE DELETE ON {table['time_series_revision_lineage']}
-        FOR EACH ROW
+        FOR EACH ROW WHEN NOT {purging}
         BEGIN
             SELECT RAISE(ABORT, 'TS_LEDGER_APPEND_ONLY');
         END;

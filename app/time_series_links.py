@@ -6,7 +6,7 @@ TS7 canonical content model: ``ts_next`` on PostgreSQL and ``_next`` on SQLite.
 
 from __future__ import annotations
 
-from app.time_series_canonical import canonical_space_table_name
+from app.time_series_canonical import canonical_space_table_name, purge_is_open
 
 
 LINK_LEDGER_IMMUTABLE = "TS_LINK_LEDGER_IMMUTABLE"
@@ -328,6 +328,9 @@ def link_layer_guard_script(backend: str) -> str:
             CREATE OR REPLACE FUNCTION ts_next.reject_link_ledger_mutation()
             RETURNS trigger AS $$
             BEGIN
+                IF TG_OP = 'DELETE' AND {purge_is_open(backend)} THEN
+                    RETURN OLD;
+                END IF;
                 RAISE EXCEPTION '{LINK_LEDGER_IMMUTABLE}';
             END;
             $$ LANGUAGE plpgsql;
@@ -354,12 +357,19 @@ def link_layer_guard_script(backend: str) -> str:
         trigger_prefix = f"ts_next_{logical}"
         for operation in ("UPDATE", "DELETE"):
             label = operation.lower()
+            # A project purge may take a ledger row with the project it belongs
+            # to (TS7-024); nothing else ever removes or rewrites one.
+            condition = (
+                f"FOR EACH ROW WHEN NOT {purge_is_open(backend)}"
+                if operation == "DELETE"
+                else "FOR EACH ROW"
+            )
             statements.append(
                 f"""
                 DROP TRIGGER IF EXISTS {trigger_prefix}_{label};
                 CREATE TRIGGER {trigger_prefix}_{label}
                 BEFORE {operation} ON {table[logical]}
-                FOR EACH ROW
+                {condition}
                 BEGIN
                     SELECT RAISE(ABORT, '{LINK_LEDGER_IMMUTABLE}');
                 END;
@@ -463,12 +473,17 @@ def link_history_guard_script(backend: str) -> str:
     table = link_layer_table_names(backend)
     associations = table["time_series_catalog_associations"]
     bindings = table["case_time_series_bindings"]
+    # Deleting the project that owns a link is the one exception (TS7-024).
+    purging = purge_is_open(backend)
     if backend == "postgresql":
         return f"""
         CREATE OR REPLACE FUNCTION ts_next.reject_association_history_mutation()
         RETURNS trigger AS $$
         BEGIN
             IF TG_OP = 'DELETE' THEN
+                IF {purging} THEN
+                    RETURN OLD;
+                END IF;
                 RAISE EXCEPTION '{LINK_HISTORY_IMMUTABLE}';
             END IF;
             IF OLD.id IS DISTINCT FROM NEW.id
@@ -498,6 +513,9 @@ def link_history_guard_script(backend: str) -> str:
         RETURNS trigger AS $$
         BEGIN
             IF TG_OP = 'DELETE' THEN
+                IF {purging} THEN
+                    RETURN OLD;
+                END IF;
                 RAISE EXCEPTION '{LINK_HISTORY_IMMUTABLE}';
             END IF;
             IF OLD.id IS DISTINCT FROM NEW.id
@@ -554,7 +572,7 @@ def link_history_guard_script(backend: str) -> str:
     DROP TRIGGER IF EXISTS ts_next_association_delete_immutable;
     CREATE TRIGGER ts_next_association_delete_immutable
     BEFORE DELETE ON {associations}
-    FOR EACH ROW
+    FOR EACH ROW WHEN NOT {purging}
     BEGIN
         SELECT RAISE(ABORT, '{LINK_HISTORY_IMMUTABLE}');
     END;
@@ -588,7 +606,7 @@ def link_history_guard_script(backend: str) -> str:
     DROP TRIGGER IF EXISTS ts_next_binding_delete_immutable;
     CREATE TRIGGER ts_next_binding_delete_immutable
     BEFORE DELETE ON {bindings}
-    FOR EACH ROW
+    FOR EACH ROW WHEN NOT {purging}
     BEGIN
         SELECT RAISE(ABORT, '{LINK_HISTORY_IMMUTABLE}');
     END;

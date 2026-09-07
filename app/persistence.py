@@ -87,7 +87,10 @@ from app.time_series_canonical import (
     canonical_value_records,
     normalize_canonical_periods,
     normalize_canonical_signals,
+    project_purge_scope_statements,
+    project_purge_scope_table_name,
 )
+from app.time_series_purge import canonical_trail_statements
 from app.time_series_catalog_projection import (
     CATALOG_ENTRY_COLUMNS,
     CATALOG_PAGE_MAX_LIMIT,
@@ -1786,6 +1789,9 @@ class AnalystStore:
 
     def _ensure_canonical_content_model(self) -> None:
         for statement in canonical_schema_statements(self.database_backend):
+            self.connection.execute(statement)
+        # The purge scope lands before the guards, which read it (TS7-024).
+        for statement in project_purge_scope_statements(self.database_backend):
             self.connection.execute(statement)
         self.connection.executescript(canonical_guard_script(self.database_backend))
 
@@ -21971,16 +21977,58 @@ class AnalystStore:
             ).fetchone()
             scenario_count = int(scenario_row["scenario_count"])
             run_count = int(run_row["run_count"])
-            self.connection.execute(
-                "DELETE FROM projects WHERE id = ?",
-                (project_id,),
+            set_count = int(
+                self.connection.execute(
+                    f"SELECT COUNT(*) AS total FROM {self._canonical('time_series_sets')}"
+                    " WHERE owner_project_id = ?",
+                    (project_id,),
+                ).fetchone()["total"]
             )
+            transaction = (
+                self.connection.transaction()
+                if self.database_backend == "postgresql"
+                else self.connection
+            )
+            with transaction:
+                self._purge_project_trail(project_id, actor=project["created_by"])
+                self.connection.execute(
+                    "DELETE FROM projects WHERE id = ?",
+                    (project_id,),
+                )
             self.connection.commit()
             return {
                 **project,
                 "deleted_scenario_count": scenario_count,
                 "deleted_run_count": run_count,
+                "deleted_time_series_set_count": set_count,
             }
+
+    def _purge_project_trail(self, project_id: int, *, actor: str) -> None:
+        """Remove the TS-7 trail of one project inside its caller transaction.
+
+        Chapter 9.6 keeps every historical foreign key restrictive, so the trail
+        cannot leave by cascade and the immutability guards refuse to delete a
+        sealed revision or a ledger row. Deleting the project is the single
+        exception, and it declares itself in the purge scope for exactly as long
+        as it takes; the declaration leaves before the caller commits.
+        """
+
+        scope = project_purge_scope_table_name(self.database_backend)
+        self.connection.execute(
+            f"INSERT INTO {scope} (project_id, opened_at, opened_by)"
+            " VALUES (?, ?, ?)",
+            (project_id, utc_now_iso(), actor),
+        )
+        try:
+            for statement in canonical_trail_statements(self.database_backend):
+                self.connection.execute(
+                    statement, (project_id,) * statement.count("?")
+                )
+        finally:
+            self.connection.execute(
+                f"DELETE FROM {scope} WHERE project_id = ?",
+                (project_id,),
+            )
 
     def set_external_project_access(
         self,

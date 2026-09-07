@@ -1044,12 +1044,9 @@ class PostgresRegisterTests(unittest.TestCase):
 
     def tearDown(self):
         try:
-            sets_table = self.store.canonical_table_names()["time_series_sets"]
+            # TS7-024 made ``delete_project`` take the canonical trail with it,
+            # so the teardown no longer has to clear the sets by hand first.
             for project in (self.project, self.other):
-                self.store.connection.execute(
-                    f"DELETE FROM {sets_table} WHERE owner_project_id = ?",
-                    (project["id"],),
-                )
                 self.store.delete_project(project["id"])
         finally:
             self.store.close()
