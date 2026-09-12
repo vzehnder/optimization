@@ -3,7 +3,9 @@
 > Tutorial operativo extremadamente detallado para una sesión guiada con un
 > experto. Este documento describe la interfaz React vigente, sus rutas, roles,
 > campos, decisiones y mecanismos de seguridad. Última revisión contra el código
-> de la aplicación: 2026-08-30.
+> de la aplicación: 2026-09-08, incluyendo TS-7 y el borrado integral de
+> proyectos. La disponibilidad del catálogo canónico depende del estado de
+> migración de cada instalación; se explica en la sección 7.1.
 
 ## 1. Propósito de este manual
 
@@ -18,7 +20,8 @@ Al terminar el recorrido principal se debería poder:
 2. crear un proyecto y un escenario;
 3. describir un sistema one-bus con red, BESS, demanda, renovables o hidro;
 4. cargar, revisar, normalizar y versionar series de tiempo;
-5. asociar cada señal requerida con un set del catálogo;
+5. distinguir una asociación al objeto de un binding de ejecución y fijar la
+   revisión exacta de cada señal requerida;
 6. elegir un rango temporal compatible y ejecutar una optimización;
 7. verificar el snapshot, la procedencia y los resultados de la corrida;
 8. comparar dos corridas;
@@ -26,7 +29,9 @@ Al terminar el recorrido principal se debería poder:
 10. preparar una consola operacional limitada;
 11. construir, validar y promover un diagrama hidráulico v3;
 12. reconocer bloqueos, datos desactualizados y errores comunes sin forzar el
-    sistema.
+    sistema;
+13. explorar el catálogo global, crear series específicas y evaluar el impacto
+    de una nueva revisión compartida.
 
 El objetivo no es solamente aprender dónde hacer clic. La persona guiada debe
 entender qué objeto modifica cada acción, qué queda inmutable y cómo comprobar
@@ -67,8 +72,10 @@ Login
         -> Assets
         -> Fuente temporal
           -> Set del catálogo
+            -> Señal genérica
+              -> Asociación al objeto, en el recorrido TS-7
       -> Variante de entrada
-        -> Bindings
+        -> Bindings a revisiones exactas
         -> Rango
           -> Corrida
             -> Resultados
@@ -77,6 +84,8 @@ Login
 
 Después del recorrido mínimo, practicar por separado:
 
+- catálogo global, resumen del objeto y recorrido protegido (secciones 15.4 a
+  15.10 y 19.5);
 - transformaciones y combinación de series;
 - consola de operador;
 - diagrama hidráulico v3;
@@ -123,7 +132,7 @@ Proyecto
 │   ├── Draft estructurado mutable
 │   ├── Diagrama hidráulico mutable, si corresponde
 │   ├── Variante de entrada
-│   │   └── Bindings a sets del catálogo
+│   │   └── Bindings a señal, objeto, rol, revisión exacta y hash
 │   ├── Consola de operador
 │   │   └── Variante propia clonada
 │   ├── Versión inmutable
@@ -132,22 +141,37 @@ Proyecto
 │   │       ├── Artefactos auditables
 │   │       └── Publicación
 │   └── Comparación de corridas
-├── Catálogo de series de tiempo
-│   ├── Set
-│   ├── Revisión
-│   └── Set derivado con lineage
+├── Sets de series de tiempo propiedad del proyecto
+│   ├── Señales genéricas de alcance project o global
+│   ├── Revisiones selladas con hash
+│   └── Sets derivados con lineage
+├── Objetos vinculables
+│   ├── Asociaciones a señales genéricas del catálogo
+│   └── Series específicas: Solo este objeto, sin asociación de catálogo
 ├── Configuración del portal
 ├── Templates de dashboard
 └── Capacidades de usuarios externos
 ```
+
+El catálogo global reúne señales genéricas de distintos proyectos. Cambiar un
+set a alcance `global` permite compartirlo y conserva su proyecto propietario.
+Una serie específica pertenece a un objeto y queda fuera de ese catálogo.
+
+El objeto vinculable puede ser un componente eléctrico, un sistema o componente
+hidráulico, o el slot `system` para señales sin activo físico. Su
+`linkable_object_id` identifica el registro del objeto; no es el texto `load_1`
+ni el ID del escenario. El PCC/bus no es un destino vinculable en esta entrega.
 
 | Objeto       | Función                                                     | ¿Se modifica?          | Identificador que conviene registrar        |
 | ------------ | ----------------------------------------------------------- | ---------------------- | ------------------------------------------- |
 | Proyecto     | Contenedor de escenarios, datos, portal y accesos.          | Sí.                    | Project ID y nombre.                        |
 | Escenario    | Caso lógico que agrupa modelo, variantes, versiones y runs. | Sí.                    | Scenario ID y nombre.                       |
 | Draft        | Documento de trabajo del editor estructurado.               | Sí.                    | Fecha de último guardado.                   |
-| Set temporal | Horizonte y señales versionadas de un proyecto.             | Mediante revisiones.   | Set ID, versión, revisión y `content_hash`. |
-| Variante     | Selección nombrada de sets para las señales de un caso.     | Sí.                    | Variant ID y nombre.                        |
+| Set temporal | Horizonte y señales versionadas con propietario y alcance. | Mediante revisiones. | Set ID, versión, revisión y `content_hash`. |
+| Señal | Identidad, significado y unidad de una serie genérica o específica. | La identidad se conserva. | Signal ID y `series_key`. |
+| Asociación | Hace disponible una fuente genérica para una necesidad de un objeto. | Mediante operaciones auditadas. | Association ID, objeto y rol. |
+| Binding | Fija la señal y revisión que utiliza una variante para un objeto y rol. | Mediante operaciones auditadas. | Binding ID, Revision ID y hash. |
+| Variante | Selección nombrada de bindings para las señales de un caso. | Sí. | Variant ID y nombre. |
 | Versión      | Snapshot ejecutable congelado.                              | No.                    | Version ID y número.                        |
 | Corrida      | Ejecución de una versión.                                   | Solo cambia su estado. | Run ID y estado terminal.                   |
 | Publicación  | Selección controlada de resultados para el portal.          | Sí, según estado.      | Publication ID y estado.                    |
@@ -161,6 +185,13 @@ Proyecto
   archivo de ese mismo set.
 - **Versión de escenario** es un snapshot ejecutable e inmutable.
 - **Run** es una ejecución concreta de una versión de escenario.
+- **Asociar fuente al objeto** la hace disponible para una necesidad; todavía
+  no la usa ninguna variante por esa sola acción.
+- **Usar revisión en una variante** crea o reemplaza el binding de ejecución.
+- **Guardar definición** de una serie específica no carga datos ni sella una
+  revisión: inicialmente queda `awaiting_data` y no seleccionable.
+- **Publicar revisión de una serie** sella datos de entrada; **publicar un
+  reporte** entrega resultados al portal. Son operaciones distintas.
 - **Draft guardado** no significa caso validado.
 - **Caso validado** no significa versión promovida.
 - **Versión promovida** no significa corrida ejecutada.
@@ -179,6 +210,7 @@ Comprobar:
 
 - entorno virtual Python del repositorio;
 - dependencias de `requirements.txt`;
+- Node.js y npm para instalar y compilar el frontend;
 - PostgreSQL accesible, salvo que se use una base SQLite aislada;
 - Julia disponible en el PATH o indicada por `JULIA` si se ejecutarán corridas;
 - bundle React compilado en `frontend/dist`, o servidor Vite en desarrollo.
@@ -289,10 +321,9 @@ compartido.
 | `analyst`  | Workspace interno. | Proyectos, escenarios, drafts, catálogo, variantes, runs, dashboards, publicaciones y configuración de consolas. |
 | `external` | Portal o consola.  | Solo lo permitido por `portal_view` y/o `operate` para proyectos asignados.                                      |
 
-El nombre de rol vigente es `external`. `client` es una denominación legado y
-no debe seleccionarse al crear una cuenta nueva. Si la interfaz llegara a
-mostrar una opción `client`, elegir `external`; el backend actual acepta
-`admin`, `analyst` y `external`.
+El nombre de rol vigente es `external`. `client` se conserva en las rutas del
+portal y en referencias antiguas; no es un rol para cuentas nuevas. El backend
+acepta `admin`, `analyst` y `external`.
 
 ### 6.4 Capacidades de un usuario externo
 
@@ -314,6 +345,9 @@ ubicación. Es preferible navegar mediante enlaces y breadcrumbs.
 | Pantalla                   | Ruta React                                                        |
 | -------------------------- | ----------------------------------------------------------------- |
 | Inicio analista            | `/react/projects`                                                 |
+| Catálogo global por señal  | `/react/time-series/catalog`                                      |
+| Recorrido protegido       | `/react/time-series/journey` con parámetros de contexto            |
+| Series de un objeto       | `/react/projects/{projectId}/linkable-objects/{linkableObjectId}/time-series` |
 | Proyecto                   | `/react/projects/{projectId}`                                     |
 | Catálogo temporal          | `/react/projects/{projectId}/time-series-sets`                    |
 | Detalle de set             | `/react/projects/{projectId}/time-series-sets/{setId}`            |
@@ -327,14 +361,35 @@ ubicación. Es preferible navegar mediante enlaces y breadcrumbs.
 | Run                        | `/react/runs/{runId}`                                             |
 | Preview de publicación     | `/react/publications/{publicationId}/preview`                     |
 | Administración             | `/react/admin/users`                                              |
+| Estado del sistema        | `/react/system`                                                   |
 | Lista de consolas externas | `/react/console`                                                  |
 | Consola externa            | `/react/console/{consoleId}`                                      |
 | Portal externo             | `/react/client`                                                   |
 | Proyecto en portal         | `/react/client/projects/{projectId}`                              |
 | Publicación en portal      | `/react/client/projects/{projectId}/publications/{publicationId}` |
 
-La navegación interna principal muestra **Analista**, **Admin** solo para el
-administrador, y **Sistema**.
+La navegación interna principal muestra **Analista**, **Catálogo** cuando la
+cuenta tiene lectura canónica habilitada, **Admin** solo para el administrador,
+y **Sistema**.
+
+### 7.1 Disponibilidad del catálogo TS-7
+
+Antes de activar la migración C6, el catálogo canónico y las rutas de resumen
+del objeto y recorrido protegido están habilitados solo para las cuentas de
+verificación configuradas en `TS_NEXT_CANONICAL_READ_ACCOUNTS` (emails separados
+por coma). Si esa variable no está definida, se usa `MAIL_USUARIO_TEST`.
+
+Después de activar C6, se habilitan para todos los usuarios internos (`admin`
+y `analyst`). No inferir que C6 está activo solo porque el repositorio contiene
+TS-7. Una cuenta sin habilitación ve **No encontrado**, y no el enlace
+**Catálogo**. El responsable de la instalación debe comprobar su configuración
+y estado de migración; el usuario no necesita cambiar su rol para continuar
+con las pantallas del proyecto que tenga disponibles.
+
+Las cuentas `external` no acceden a estas superficies, aunque conozcan IDs
+reales. Portal, consola y workspace tienen cabeceras y navegación propias. Para
+revisar una publicación como analista, usar su preview; para probar la consola,
+usar **Probar** desde el escenario.
 
 ## 8. Definir el ejercicio antes de usar la web
 
@@ -361,16 +416,14 @@ nombres de activos o columnas no permiten asociar las series.
 1. Entrar en **Analista**.
 2. Localizar **Proyectos activos** y **Nuevo proyecto**.
 3. En **Nombre del proyecto**, usar un nombre inequívoco, por ejemplo
-   `Tutorial BESS 2026-08`.
+   `Tutorial BESS 2026-09`.
 4. En **Descripción del proyecto**, escribir propósito, propietario y carácter
    de prueba o producción.
 5. Presionar **Crear proyecto**.
 6. Abrir el proyecto desde la lista.
 
 La tarjeta del proyecto tiene un menú de acciones con **Eliminar proyecto**.
-Esa acción borra también escenarios, versiones, corridas, series y
-publicaciones, y no se puede deshacer desde la interfaz. No usarla como forma de
-"limpiar" un caso; crear otro proyecto de prueba es más seguro.
+Su confirmación y alcance se describen en la sección 9.2.
 
 ### 9.1 Qué contiene la pantalla del proyecto
 
@@ -385,6 +438,25 @@ La pantalla del proyecto reúne:
 No es necesario configurar portal y dashboards antes de modelar. Para el flujo
 principal, crear primero escenario, datos y corrida; preparar la publicación al
 final.
+
+### 9.2 Eliminar un proyecto y su historia
+
+En un proyecto desechable, abrir el menú de tres puntos de su tarjeta y elegir
+**Eliminar proyecto {nombre}**. Revisar el nombre y el alcance antes de pulsar
+**Confirmar eliminar proyecto {nombre}**. **Mantener** cancela la confirmación.
+
+El borrado incluye escenarios, versiones, corridas, series de tiempo,
+publicaciones y consolas, además del rastro canónico TS-7 que depende del
+proyecto: objetos, revisiones, asociaciones, bindings y registros de auditoría.
+La operación se realiza en una transacción: si falla, se conserva el conjunto.
+No se puede deshacer desde la web.
+
+Eliminar el proyecto termina la retención de su historia. Las revisiones
+selladas y los registros de auditoría siguen protegidos frente a edición o
+borrado ordinario; esta operación no permite reescribirlos. Un enlace de
+lineage entre dos proyectos se elimina cuando se elimina cualquiera de sus
+extremos. Comprobar los consumidores de las fuentes compartidas antes de borrar
+su proyecto propietario.
 
 ## 10. Crear un escenario
 
@@ -556,7 +628,8 @@ o frustrante. Antes del upload, revisar la estructura con el experto.
 - timestamps en orden ascendente;
 - timestamps sin duplicados;
 - zona horaria conocida y consistente;
-- duración positiva en horas;
+- duración positiva: en horas para el mapeo CSV/XLSX del draft, en segundos
+  para el formulario de puntos del recorrido protegido;
 - periodos sin solapes;
 - cobertura continua para el rango que se quiere ejecutar;
 - la semántica de rango es `[inicio, fin)`: incluye el inicio y excluye el fin.
@@ -602,6 +675,12 @@ Para XLSX:
 
 La clave exacta disponible se toma del catálogo canónico que muestra la
 interfaz. No inventar nombres parecidos.
+
+En TS-7 también se seleccionan **Tipo semántico**, **Clase de dato**, **Unidad**
+y **Necesidad funcional**. Son conceptos distintos de la clave de columna:
+por ejemplo, `energy_price` describe el tipo semántico y `grid_import_price`
+la necesidad que cubre en el objeto. Usar las opciones del selector; compartir
+una unidad no basta para que una fuente sea compatible.
 
 ### 12.4 Sets anchos frente a sets por entidad
 
@@ -663,9 +742,11 @@ a subir el archivo suele ser más seguro que editar muchas celdas manualmente.
 
 ## 14. Importar la fuente al catálogo
 
-Existen dos caminos. Para trabajo nuevo, usar **Import mapped columns to
+Para importar un archivo desde el draft, usar **Import mapped columns to
 catalog**. El camino **Column mapping** + **Extract legacy series to catalog**
-existe para compatibilidad con drafts antiguos.
+existe para compatibilidad con drafts antiguos. Ambos desembocan en el catálogo
+de sets del proyecto. Para una serie propia de un objeto, consultar el recorrido
+de la sección 15.8.
 
 ### 14.1 Camino recomendado: mapeo directo al catálogo
 
@@ -674,7 +755,7 @@ Completar:
 | Campo                        | Qué ingresar                                    |
 | ---------------------------- | ----------------------------------------------- |
 | **Catalog set name**         | Nombre estable del set.                         |
-| **Catalog version label**    | Por ejemplo `v1`, `forecast_20260830` o `base`. |
+| **Catalog version label**    | Por ejemplo `v1`, `forecast_20260908` o `base`. |
 | **Catalog data kind**        | Clase de dato ofrecida por la interfaz.         |
 | **Catalog timezone**         | Zona IANA, por ejemplo `America/Santiago`.      |
 | **Catalog timestamp column** | Columna que contiene el inicio del periodo.     |
@@ -728,7 +809,19 @@ No seguir al binding si ocurre cualquiera de estas situaciones:
 - valores no numéricos;
 - timestamps duplicados, desordenados o con huecos no intencionales.
 
-## 15. Usar el catálogo de series de tiempo
+## 15. Usar los catálogos y las series de un objeto
+
+Existen dos vistas complementarias:
+
+| Vista | Entrada | Qué permite revisar |
+| --- | --- | --- |
+| Catálogo de sets del proyecto | **Ver catálogo de series de tiempo** dentro del proyecto. | Sets completos, archivos, valores, reemplazos, transformaciones y conectores. |
+| Catálogo global por señal | **Catálogo** en la navegación principal. | Señales genéricas, propietario, alcance, contrato, consumidores y revisiones exactas. |
+
+Las secciones 15.1 a 15.3 describen la primera vista; desde 15.4 se explica la
+segunda. Tras C6, las operaciones de las pantallas anteriores se canalizan por
+el escritor canónico: conservar un formulario conocido no significa que se
+vuelva a escribir en el almacenamiento legado.
 
 Desde el proyecto, abrir **Ver catálogo de series de tiempo**. Cada set muestra:
 
@@ -766,11 +859,14 @@ compararlos con la fuente original.
 2. Escribir **Resumen del cambio**, aunque sea opcional; por ejemplo
    `Corrección medidor 2026-01-01 03:00 aprobada por XX`.
 3. Guardar los cambios.
-4. Confirmar que aumenta la revisión y cambia el hash.
+4. Confirmar la revisión y el hash devueltos; con valores distintos debe quedar
+   registrada la nueva revisión.
 5. Revisar **Historial de revisiones**.
 
 La revisión anterior permanece en el historial. Las corridas históricas no se
-re-escriben.
+reescriben. Si los valores no cambian, la operación puede reutilizar el contenido
+existente; comprobar el resultado. Una nueva revisión puede dejar consumidores
+desactualizados: revisar el impacto y los bindings antes de volver a ejecutar.
 
 ### 15.3 Reemplazar el archivo de un set
 
@@ -787,6 +883,285 @@ horizonte.
 
 El nombre y la identidad del set se conservan; el reemplazo crea una revisión,
 no un set paralelo.
+
+Tras C6, un reemplazo de una fuente `global` desde el formulario de sets se
+rechaza con `TS_LINK_CONFIRMATION_REQUIRED`: ese formulario no incluye la
+confirmación de impacto compartido. Preparar el cambio mediante **Publicar para
+todos** en el recorrido de la sección 15.9, con los permisos correspondientes.
+
+### 15.4 Explorar el catálogo global por señal
+
+1. Abrir **Catálogo** en la navegación principal. El título es **Catálogo de
+   series genéricas**.
+2. Completar **Buscar** y, si corresponde, combinar **Tipo semántico**,
+   **Clase**, **Unidad**, **Alcance** y **Estado**.
+3. Elegir **Orden**: actualización reciente, nombre, proyecto propietario,
+   fin de cobertura o asociaciones.
+4. Presionar **Filtrar**. **Limpiar** restaura los filtros iniciales.
+5. Recorrer **Anterior** y **Siguiente**. Cambiar filtros vuelve a la primera
+   página; si el catálogo cambió mientras se paginaba, volver a aplicar los
+   filtros para iniciar una lectura coherente.
+
+Cada fila representa una señal, con nombre, `series_key`, propietario, alcance,
+tipo, clase, unidad, cobertura y resolución. Un set con varias señales puede
+aparecer en varias filas. **Estado** ofrece **Activas** o **Archivadas**.
+
+El alcance tiene estas consecuencias:
+
+- `project`: la señal genérica se puede usar dentro de su proyecto propietario;
+- `global`: puede compartirse entre proyectos, conservando propietario y
+  restricciones de compatibilidad;
+- **Solo este objeto** identifica una serie específica, que se consulta desde
+  el objeto y nunca aparece en este listado de entradas genéricas.
+
+Los resultados de corridas tampoco forman parte de este catálogo de entradas.
+
+Presionar **Inspeccionar** abre, en la misma pantalla, el contrato, procedencia,
+revisión vigente, hash, cobertura, resolución, consumidores e historia de la
+señal. Revisar el origen y el número de asociaciones y bindings antes de
+proponer una modificación. Inspeccionar no carga los valores completos ni
+modifica datos.
+
+Para ver valores, usar **Preview acotado**:
+
+1. seleccionar **Revisión**;
+2. revisar **Desde** y **Hasta** con zona u offset;
+3. elegir **Muestreo** (`minmax`, que conserva extremos, o sin muestreo);
+4. ajustar **Máximo de puntos**; el formulario admite entre 1 y 2000 y propone
+   500;
+5. presionar **Previsualizar**;
+6. comprobar la revisión, hash, unidad y cantidad de puntos devueltos respecto
+   del total del rango.
+
+Una muestra sirve para inspección; no sustituye el horizonte completo que
+consumirá una corrida. Ante `TS_PREVIEW_TOO_LARGE`, acortar el rango o usar
+muestreo dentro del límite. Ante `TS_PREVIEW_REVISION_UNAVAILABLE`, esa revisión
+histórica no tiene contenido materializado para el preview. No asumir que se
+mostró otra revisión en su lugar.
+
+### 15.5 Consultar las series de un objeto
+
+Abrir el resumen contextual del objeto en:
+
+```text
+/react/projects/{projectId}/linkable-objects/{linkableObjectId}/time-series
+```
+
+Usar un ID real del registro de objetos. La pantalla de proyecto actual no
+incluye un listado navegable de estos objetos; para una sesión guiada, el
+experto debe preparar el enlace del objeto ya registrado. No sustituir ese ID
+por el del escenario ni por el nombre de un asset.
+
+El resumen identifica el objeto y permite filtrar por **Buscar** y **Origen**:
+**Todos**, **Fuentes genéricas** o **Series específicas**. Presionar **Filtrar**
+y recorrer las páginas cuando corresponda.
+
+La tabla responde cinco preguntas:
+
+| Columna | Qué comprobar |
+| --- | --- |
+| Serie | Nombre, clave e indicación de fuente genérica o serie específica. |
+| Necesidad | Rol funcional que cubre para ese objeto. |
+| Contrato | Tipo semántico, clase de dato y unidad. |
+| Asociación | **Asociada al objeto**, otro estado de asociación, o **Sin asociación de catálogo** para una específica. |
+| Uso en variantes | Variante, escenario, rol, revisión y hash exactos de cada uso. |
+
+**Aún no usada en una variante** significa que la fuente está disponible, pero
+todavía no existe un uso de ejecución mostrado para ella. **Obsoleta** o
+**Inválida**, junto con **Ejecución bloqueada**, requieren resolver el binding;
+la existencia de una asociación no elimina ese bloqueo.
+
+Las acciones visibles son **Asociar fuente al objeto** y **Usar revisión en una
+variante**. Ambas llevan al recorrido protegido. El resumen es de lectura y
+no ofrece edición de celdas ni un botón de archivo de series.
+
+### 15.6 Entender los cuatro pasos del recorrido protegido
+
+El recorrido se abre desde el inspector del catálogo o desde el objeto. Su
+franja de contexto mantiene visibles objeto, alcance, necesidad y acción.
+
+| Paso | Decisión y evidencia |
+| --- | --- |
+| **Origen y alcance** | Declarar la necesidad, el origen genérico o específico y, al crear un uso, escenario y variante. |
+| **Definición o selección** | Completar una definición o elegir candidatas compatibles. Las incompatibles muestran razón y código, y están bloqueadas. |
+| **Datos o revisión** | Ver la revisión/hash observados o preparar los datos que se van a sellar. |
+| **Impacto y confirmación** | Revisar prevalidación, consumidores, permisos, cambios de estado e historia, y confirmar la acción concreta. |
+
+Usar **Siguiente** y **Volver**. Si cambia la fuente, necesidad, variante o
+contenido, revisar otra vez los pasos afectados: una prevalidación anterior no
+autoriza una operación distinta. El servidor vuelve a comprobar permisos y
+estado al confirmar.
+
+La prevalidación de asociaciones y bindings no los modifica. El lote se guarda
+completo o no se guarda; una fila rechazada bloquea todo el lote. Registrar el
+mensaje **Guardado atómico completo**, su resultado y el ID del lote. Si venció
+la prevalidación o cambió una dependencia, obtener una nueva antes de confirmar.
+
+En la rama específica, **Guardar definición** sí persiste la identidad durante
+el paso 3; **Validar datos** prepara un lote sin publicarlo. El paso 4 sella la
+revisión. Salir después de guardar la definición puede dejar una serie
+`awaiting_data`; no equivale a cancelar todo lo ya persistido.
+
+### 15.7 Asociar una fuente genérica y luego usarla
+
+Desde el objeto:
+
+1. Presionar **Asociar fuente al objeto**.
+2. En **Necesidad funcional**, elegir la necesidad real, por ejemplo
+   **Grid Import Price** para el objeto que reciba ese precio.
+3. Elegir **Reutilizar una fuente genérica** y continuar.
+4. Revisar **Fuentes genéricas candidatas**: propietario, alcance, contrato y
+   compatibilidad. Elegir una compatible.
+5. En el paso de datos, comprobar revisión observada, hash y cobertura.
+6. En el paso final, leer la prevalidación por fila y el impacto.
+7. Confirmar **Asociar fuente al objeto** y registrar el lote `asb_...`.
+8. Volver al resumen y comprobar **Asociada al objeto**.
+
+Una candidatura bloqueada puede deberse al alcance, tipo semántico, dimensión,
+unidad o tipo de objeto. No corregirla cambiando únicamente el nombre visible;
+resolver la incompatibilidad o elegir otra fuente.
+
+Desde el catálogo se puede hacer la asociación en sentido inverso:
+
+1. Inspeccionar una señal y abrir **Abrir el recorrido protegido**.
+2. Declarar la necesidad funcional.
+3. Marcar uno o varios objetos compatibles del proyecto contextualizado por
+   el enlace; comprobar siempre ese proyecto.
+4. Revisar la misma fuente/revisión y confirmar el lote completo.
+
+El enlace del inspector toma como contexto el proyecto propietario de la
+fuente. Para asociar una fuente global a un objeto de otro proyecto, iniciar
+el recorrido desde ese objeto de destino.
+
+Para ejecutarla, falta una operación separada: **Usar revisión en una variante**
+(sección 19.5). Asociar no ejecuta, no clona datos y no mueve bindings existentes.
+
+### 15.8 Crear y cargar una serie específica
+
+Usar este camino cuando la curva pertenece únicamente a un objeto:
+
+1. Desde el resumen, abrir **Asociar fuente al objeto**.
+2. Declarar **Necesidad funcional** y elegir **Crear específica para este
+   objeto**.
+3. En **Definición o selección**, completar:
+
+| Campo | Qué ingresar |
+| --- | --- |
+| **Clave local** | Identificador estable dentro del objeto. |
+| **Nombre visible** y **Descripción** | Nombre reconocible y propósito. |
+| **Tipo semántico**, **Unidad**, **Clase de dato** | Opciones compatibles con la necesidad y el objeto. |
+| **Zona horaria** | Zona IANA de la fuente, por ejemplo `America/Santiago`. |
+| **Resolución (segundos)** | Duración nominal: `3600` para datos horarios. |
+
+4. Continuar y presionar **Guardar definición**. Comprobar `awaiting_data` y
+   **No, aún sin revisión sellada**. La identidad existe, pero no es ejecutable.
+5. Pegar los puntos en **Puntos (instante ISO, duración en segundos, valor)**.
+   Este campo admite una fila por periodo, tres columnas separadas por coma,
+   sin encabezado y con punto decimal. Por ejemplo, para una serie horaria:
+
+```text
+2026-01-01T00:00:00-03:00,3600,42.5
+2026-01-01T01:00:00-03:00,3600,44.0
+2026-01-01T02:00:00-03:00,3600,39.5
+```
+
+6. Presionar **Validar datos**. Revisar errores, periodos normalizados,
+   cobertura, hash y estado del lote `ready_to_publish`.
+7. Continuar a **Impacto y confirmación**, escribir **Motivo** y presionar
+   **Publicar revisión de esta serie**.
+8. Comprobar **Revisión sellada** y que el hash coincide con el validado.
+9. Volver al objeto: debe verse como **Serie específica**, **Solo este objeto**
+   y **Sin asociación de catálogo**.
+
+La publicación de datos no crea automáticamente un binding. El modelo admite
+vincular la revisión directamente a su propio objeto sin asociación intermedia,
+y conservar revisiones anteriores al volver a cargar datos o archivar la serie.
+Archivarla impide nuevas selecciones y conserva su historia.
+
+**Límite de la interfaz actual:** esta rama permite definir y publicar una
+serie nueva. No ofrece un selector de específicas existentes para vincularlas,
+ni controles para reabrir una definición guardada, reemplazar su archivo o
+archivarla. Esas operaciones están disponibles por la API de series del objeto
+y bindings. Para practicarlas, el experto debe preparar el flujo API
+correspondiente; no buscar la serie en el catálogo global ni crear otra identidad
+solo para intentar continuar una carga.
+
+### 15.9 Cambiar una fuente compartida desde el objeto
+
+Este flujo parte de una asociación existente y distingue si hace falta una
+copia local o una nueva revisión para los consumidores de la fuente. La ruta
+React está implementada, pero el resumen actual no muestra un enlace por fila
+para abrirla. El experto puede preparar el enlace con IDs verificados:
+
+```text
+/react/time-series/journey?entry=object&project_id={projectId}&object_id={linkableObjectId}&intent=update_shared&association_id={associationId}
+```
+
+1. En **Para quién es el cambio**, declarar **Solo este objeto necesita otra
+   curva** o **Todos los consumidores deben ver la curva nueva**.
+2. Continuar y revisar **Qué hay del otro lado de esta fuente**: propietario,
+   alcance, revisión/hash de origen, asociaciones, otros objetos/proyectos y
+   bindings afectados.
+3. Elegir una de las dos alternativas. La intención declarada determina cuál
+   se ofrece primero; las opciones no permitidas aparecen deshabilitadas.
+
+**Crear específica para este objeto**:
+
+1. Completar **Clave de la serie** y **Nombre visible**.
+2. Presionar **Prevalidar la copia local**.
+3. Revisar revisión de origen, periodos copiados y **0 asociaciones y 0
+   bindings: ninguna se mueve**.
+4. Continuar, escribir el motivo y confirmar **Crear específica para este
+   objeto**.
+5. Verificar **Operación completa** y el lineage de la copia.
+
+La derivación copia la revisión observada; todavía no cambia sus valores ni
+reemplaza usos en variantes. Cargar una curva distinta y vincularla son pasos
+posteriores con los límites de interfaz indicados en 15.8.
+
+**Publicar para todos**:
+
+1. Pegar los puntos completos de reemplazo en el formato de tres columnas con
+   duración en segundos.
+2. Presionar **Preparar y previsualizar**.
+3. Revisar cobertura, hash propuesto y validación **Sin errores**.
+4. Continuar, escribir **Motivo** y marcar la comprensión de que los
+   consumidores verán una revisión nueva y sus usos vigentes quedarán obsoletos.
+5. Presionar **Publicar para todos**.
+6. Confirmar **Operación completa (published)**.
+7. Volver a los objetos afectados y revisar **Obsoleta** y **Ejecución
+   bloqueada**. Resolver cada uso antes de correr de nuevo.
+
+Publicar sobre una fuente `global` requiere `admin`; un `analyst` recibe
+`TS_SHARED_REVISION_ADMIN_REQUIRED`. La operación siempre exige motivo y
+confirmación de comprensión. Si cambió la fuente desde el preview, preparar
+de nuevo la revisión y su impacto.
+
+La revisión compartida no entra sola a una corrida. Los bindings conservan su
+revisión y hash anteriores hasta que se confirme explícitamente cómo resolver
+el cambio. **Publicar para todos** tampoco publica un reporte en el portal.
+
+### 15.10 Cambiar el alcance de un set
+
+Promover de `project` a `global`, o devolver de `global` a `project`, es una
+operación de `admin`. Se aplica al set y conserva su identidad, propietario,
+revisiones y asociaciones. No convierte una serie específica en genérica.
+
+La web actual no incluye controles para cambiar el alcance. El flujo
+administrativo se realiza mediante la API, en dos fases:
+
+1. prevalidar el alcance de destino y revisar consumidores e impacto;
+2. confirmar contra esa prevalidación y el estado observado.
+
+Las rutas son `POST /api/time-series/catalog/sets/{setId}/scope-prevalidations`
+y `POST /api/time-series/catalog/sets/{setId}/scope-changes`. Consultar su
+contrato y la referencia TS7-014 antes de preparar una solicitud.
+
+Un analista recibe `TS_SCOPE_ADMIN_REQUIRED`. Reducir el alcance se bloquea si
+hay consumidores de otros proyectos; revisar el impacto antes de reasignarlos.
+`TS_SCOPE_ALREADY_EFFECTIVE` significa que el destino ya estaba aplicado y no
+se escribió otro cambio. Un estado o una prevalidación vencidos requieren
+repetir la revisión, no insistir con la misma confirmación.
 
 ## 16. Transformar y combinar series
 
@@ -854,8 +1229,8 @@ No vincular deliberadamente un derivado desactualizado para "ver si corre".
 
 ## 17. Ingesta mediante conector HTTP JSON
 
-En el catálogo, **Ingesta de pronóstico (conector externo)** permite incorporar
-una API JSON.
+En el catálogo de sets del proyecto, **Ingesta de pronóstico (conector externo)**
+permite incorporar una API JSON.
 
 Completar:
 
@@ -927,6 +1302,11 @@ nueva versión.
 
 La pantalla del escenario contiene **Variante de entrada: {nombre}**.
 
+El panel conserva los selectores de sets del proyecto para el flujo habitual.
+TS-7 añade el recorrido por objeto, con asociación y revisión exacta explícitas
+(sección 19.5). Usar el resumen del objeto para comprobar los usos canónicos;
+un selector del panel del escenario no muestra por sí solo toda su historia.
+
 ### 19.1 Elegir o clonar una variante
 
 - Todo caso tiene una variante default.
@@ -958,8 +1338,16 @@ Para cada selector:
 4. comprobar timezone, horizonte y resolución;
 5. no seleccionar un set solo porque su nombre parece correcto.
 
-La web muestra todos los sets del proyecto en el selector; la responsabilidad
-de verificar semántica sigue siendo del analista y del experto.
+Este panel muestra los sets del proyecto en el selector; revisar su semántica
+antes de elegir. En el recorrido protegido TS-7, las candidatas incompatibles
+se muestran bloqueadas y explicadas. Que un nombre aparezca en un selector no
+garantiza que pase la validación del servidor.
+
+Tras C6, el flujo del selector crea los enlaces mediante el escritor canónico.
+Si ya existe un binding a otra fuente, cambiar el selector puede devolver
+`TS_LINK_CONFLICT`: reemplazar el uso mediante el recorrido protegido. Elegir
+otra vez el mismo set conserva la revisión ya fijada; no acepta una revisión
+nueva silenciosamente.
 
 ### 19.3 Elegir el rango
 
@@ -989,7 +1377,7 @@ por:
 - derivado stale;
 - cambio en dependencias del caso.
 
-Procedimiento:
+Para las dependencias que muestra el panel del escenario:
 
 1. leer **Motivos de desactualización**;
 2. corregir orígenes o modelo;
@@ -998,25 +1386,74 @@ Procedimiento:
 5. presionar **Revalidar variante**;
 6. esperar que desaparezca el bloqueo.
 
-Revalidar significa aceptar conscientemente la nueva combinación. No es un
-botón para ocultar el aviso.
+Revisar también el estado de los bindings en el resumen del objeto. Un binding
+canónico **Obsoleta** o **Inválida** puede seguir bloqueando la corrida después
+de revalidar la variante. **Revalidar variante** actualiza la validación del
+caso/rango; no reemplaza la revisión exacta del binding.
+
+Si una fuente tiene una nueva revisión, usar **Usar revisión en una variante**
+para comparar y aceptar el reemplazo con motivo. Si la intención es conservar
+una revisión histórica, el contrato de bindings admite revalidarla como
+`pinned` con confirmación explícita; esa opción requiere el flujo API, ya que
+el recorrido React muestra la revisión vigente. Ninguna de las dos decisiones
+debe quedar implícita en un clic de revalidación general.
+
+### 19.5 Fijar o reemplazar una revisión desde el objeto
+
+Para una fuente genérica ya asociada:
+
+1. Abrir las series del objeto y presionar **Usar revisión en una variante**.
+2. Declarar **Necesidad funcional**, elegir **Reutilizar una fuente genérica**
+   y seleccionar **Escenario** y **Variante**.
+3. Continuar y elegir la fuente compatible.
+4. Revisar **Datos o revisión ejecutable**: fuente, revisión observada, hash,
+   cobertura, propietario y alcance.
+5. Si reemplaza un uso, leer **Reemplazo de un uso vigente**, comparar antes y
+   después y completar **Motivo del reemplazo**. Comprobar que el uso anterior
+   corresponde al objeto y necesidad que se quiere modificar.
+6. Continuar, revisar **Prevalidación por fila** y confirmar **Usar revisión en
+   una variante**.
+7. Registrar el resultado y el lote `bnb_...`.
+8. Volver al resumen del objeto y comprobar **Usada en {variante}**, revisión,
+   hash, escenario y rol. Revisar que no aparezca **Ejecución bloqueada**.
+
+La selección fija el ID y hash de la revisión observada. La corrida consume esa
+revisión; no busca automáticamente «la última». Una publicación posterior de
+la fuente obliga a revisar los usos afectados y puede dejarlos desactualizados.
+
+Los bindings válidos se distinguen como `valid_current` o `valid_pinned` en el
+contrato canónico. Estar fijado a una revisión histórica no evita los controles
+de compatibilidad, cobertura y dependencias. Para una serie específica ya
+creada, aplicar el binding directo mediante la API indicada en 15.8; no intentar
+seleccionarla entre las fuentes genéricas.
 
 ## 20. Ejecutar una corrida desde una variante
 
-Cuando todos los bindings están completos, el rango es válido y la variante no
-está stale, se habilita **Vincular y correr variante**.
+En el panel del escenario, cuando están seleccionadas todas las señales, el
+rango es válido y la variante no está stale, se habilita **Vincular y correr
+variante**. El servidor comprueba además los bindings canónicos y puede rechazar
+la ejecución aunque el botón estuviera habilitado.
 
 Al presionarlo, la aplicación:
 
-1. persiste los bindings seleccionados;
-2. materializa el rango exacto;
-3. congela topología, parámetros, variante y hashes de series;
+1. procesa los bindings seleccionados sin sustituir usos existentes a otra
+   fuente o revisión de forma implícita;
+2. comprueba los usos canónicos y materializa el rango desde sus revisiones
+   exactas cuando existen bindings TS-7;
+3. congela topología, parámetros, variante, revisiones y hashes de series;
 4. crea una versión inmutable;
 5. crea el run;
 6. lo encola;
 7. navega al detalle del run.
 
 No hacer doble clic. Esperar la navegación o el mensaje de error.
+
+Los enlaces se procesan antes de solicitar la corrida. Si falla una selección
+posterior, revisar qué bindings ya quedaron guardados antes de reintentar;
+este botón no representa un único lote de asociaciones para todo el formulario.
+En la ejecución TS-7, snapshot y run se crean juntos una vez superadas las
+validaciones. `TS_BINDING_EXECUTION_BLOCKED` requiere resolver los usos señalados
+en el objeto; no se arregla repitiendo **Vincular y correr variante**.
 
 ### 20.1 Estados del run
 
@@ -1042,8 +1479,16 @@ Revisar en este orden:
 7. **Publication Drafts**, si el run fue exitoso.
 8. **Artifacts**.
 
-El experto debe comparar al menos un hash de **Series de entrada** con el set
-del catálogo y confirmar que el rango del snapshot es el solicitado.
+El experto debe comparar al menos un hash de **Series de entrada** con la
+revisión de origen correspondiente y confirmar que el rango del snapshot es
+el solicitado.
+
+En una corrida TS-7, contrastar también el `series_bindings` congelado en la
+metadata de generación de su versión: `binding_id`, `linkable_object_id`,
+`binding_role_key`, `signal_id`, `set_revision_id`, número de revisión y
+`content_hash`. El modo de revisión y, si existe, el motivo de fijación histórica
+explican qué datos se aceptaron. Comparar esos valores con la evidencia anotada
+antes de ejecutar, no con el estado actual de una fuente que pudo cambiar.
 
 ### 20.3 Interpretar resultados
 
@@ -1656,10 +2101,11 @@ Errores típicos:
 Mover nodos solo cambia layout; cambiar parámetros o topología puede dejar la
 validación stale. Una versión ya promovida permanece inmutable.
 
-## 30. Series hidráulicas legado
+## 30. Series hidráulicas legado y transición canónica
 
-El catálogo tiene **Series hidráulicas (origen legacy)**. Son sets antiguos
-expuestos mediante adaptador, sin reescribir automáticamente sus filas.
+El catálogo de sets del proyecto tiene **Series hidráulicas (origen legacy)**.
+Son sets antiguos expuestos mediante adaptador, sin reescribir automáticamente
+sus filas.
 
 En el detalle se puede usar **Migrar al catálogo genérico**. La migración:
 
@@ -1672,6 +2118,21 @@ En el detalle se puede usar **Migrar al catálogo genérico**. La migración:
 El admin puede usar **Migrar todas las series hidráulicas legacy** y revisar
 conteos de migradas, ya migradas y fallidas. Hacer backup y probar una migración
 individual antes del bulk en un entorno importante.
+
+### 30.1 Reconocer el estado de la instalación TS-7
+
+La migración canónica C6 es distinta de **Migrar al catálogo genérico**. La
+prepara el responsable de la instalación con inventario, restauración probada,
+traspaso de contenido/enlaces y comparación de lecturas. No es un botón del
+recorrido del analista.
+
+Tras C6 hay un único escritor canónico. Las pantallas previas de sets y las
+lecturas históricas mantienen compatibilidad; no hay que recrear escenarios ni
+modificar snapshots antiguos para consultar resultados. Una pausa administrativa
+de mutaciones puede bloquear cargas o ediciones: registrar el código y pedir
+al responsable que revise el estado de migración. Después de la primera
+escritura canónica no se vuelve al escritor legado para intentar eludir el
+bloqueo.
 
 ## 31. Schedules administrados
 
@@ -1734,8 +2195,21 @@ residente dentro del proceso web.
 | Consola bloqueada                   | Variante stale, campo removido, lease o fallo.       | Usar acción específica; no activar a la fuerza.                   |
 | Pegado de consola falla             | Celdas no numéricas o fuera del rango.               | Corregir matriz y revisar errores por celda.                      |
 | Promoción hidráulica deshabilitada  | No guardado, validación fallida/stale o sin payload. | Guardar, validar y generar preview v3.                            |
-| `403` en URL interna de externo     | Límite de autorización correcto.                     | Volver a portal/consola; solicitar capacidad si procede.          |
+| **No encontrado**, `403` o `404` al entrar como externo a una URL interna | Límite de autorización; las superficies TS-7 no revelan recursos internos. | Volver a portal/consola y revisar capacidades con el administrador. |
 | `404` de publicación externa        | No publicada, revocada o proyecto no visible.        | Revisar publicación y asignación con admin.                       |
+| No aparece **Catálogo** | C6 no activo y cuenta fuera de la habilitación de lectura canónica. | Revisar con el responsable el estado de migración y las cuentas de verificación; sección 7.1. |
+| `TS_QUERY_CURSOR_EXPIRED`, `TS_QUERY_CURSOR_MISMATCH` o `TS_QUERY_SNAPSHOT_CHANGED` | El cursor venció, cambió la consulta o cambió el catálogo. | Volver a aplicar filtros desde la primera página. |
+| `TS_PREVIEW_TOO_LARGE` | El preview excede el límite admitido. | Acortar el rango o elegir muestreo; no interpretar una muestra como todos los datos. |
+| Candidata bloqueada por `TS_COMPAT_*` | Tipo semántico, dimensión, unidad, alcance u objeto incompatibles. | Leer razón y código; corregir el contrato o elegir una fuente compatible. |
+| Serie `awaiting_data` no seleccionable | Solo se guardó la definición. | Validar los puntos y publicar una revisión sellada; sección 15.8. |
+| Serie específica no aparece en **Catálogo** | Pertenece únicamente a un objeto. | Consultar el resumen de su propio objeto. |
+| `TS_LINK_PREVALIDATION_EXPIRED` o `TS_LINK_PRECONDITION_CHANGED` | La evidencia de confirmación venció o cambió el estado observado. | Reabrir los pasos afectados y revisar una nueva prevalidación. |
+| `TS_LINK_CONFLICT` al cambiar un selector del escenario | Ya hay un uso para esa necesidad que no se puede sustituir por el camino de compatibilidad. | Revisar el binding vigente y reemplazarlo en el recorrido protegido con motivo. |
+| **Obsoleta** y **Ejecución bloqueada**, o `TS_BINDING_EXECUTION_BLOCKED` | Binding canónico desactualizado, inválido o con dependencias pendientes. | Revisar el uso exacto y resolverlo; la revalidación general del escenario puede no bastar. |
+| `TS_SHARED_REVISION_CONFIRMATION_REQUIRED` | Falta confirmar el impacto de la publicación compartida. | Revisar consumidores, completar motivo y marcar comprensión. |
+| `TS_LINK_CONFIRMATION_REQUIRED` al reemplazar un set global | El formulario del proyecto no confirma el impacto sobre consumidores compartidos. | Usar el recorrido de fuente compartida y **Publicar para todos**; sección 15.9. |
+| `TS_SHARED_REVISION_ADMIN_REQUIRED` | Publicación de una fuente global con una cuenta sin rol admin. | Solicitar la publicación a un administrador o evaluar una copia local. |
+| `TS_SCOPE_ADMIN_REQUIRED` | Cambio de alcance solicitado sin rol admin. | Preparar el impacto para la operación administrativa; sección 15.10. |
 
 ## 33. Qué evidencia registrar
 
@@ -1751,7 +2225,13 @@ Para que el experto pueda auditar una sesión, guardar una tabla como esta:
 | Variante ID / nombre    |       |
 | Rango `[inicio, fin)`   |       |
 | Sets por señal          |       |
+| Signal ID / `series_key` |       |
+| Proyecto propietario / alcance |       |
+| Objeto vinculable / rol funcional |       |
+| Association ID / Binding ID |       |
+| Revision ID exacto usado por el binding |       |
 | Revisiones y hashes     |       |
+| Lote de asociación / binding |       |
 | Version ID / número     |       |
 | Run ID / status         |       |
 | Objective / KPIs clave  |       |
@@ -1760,7 +2240,10 @@ Para que el experto pueda auditar una sesión, guardar una tabla como esta:
 | Observaciones           |       |
 
 No usar una captura como única evidencia de procedencia. IDs, hashes y rangos
-permiten reconstruir qué ocurrió.
+permiten reconstruir qué ocurrió. Para una fuente compartida, registrar la
+revisión consumida por el binding además de la revisión vigente del catálogo:
+pueden ser diferentes. Para un rechazo, conservar código y `request_id` cuando
+se muestre, junto con el paso y la acción que se intentó.
 
 ## 34. Guion de una sesión guiada completa
 
@@ -1769,6 +2252,8 @@ permiten reconstruir qué ocurrió.
 - [ ] Entrar con `analyst` o `admin`.
 - [ ] Identificar cabecera, rol, Salir y navegación.
 - [ ] Explicar proyecto, escenario, draft, set, variante, versión y run.
+- [ ] Distinguir señal genérica, serie específica, asociación y binding.
+- [ ] Confirmar si la cuenta tiene las superficies TS-7 habilitadas.
 - [ ] Confirmar alcance one-bus y política fail-closed.
 
 ### Bloque B: modelo, 30-60 minutos
@@ -1789,6 +2274,8 @@ permiten reconstruir qué ocurrió.
 - [ ] Mapear timestamp, duración y señales.
 - [ ] Importar al catálogo.
 - [ ] Revisar horizonte, señales, valores, revisión y hash.
+- [ ] Explorar una señal en **Catálogo**, revisar propietario/alcance y pedir
+  un preview de revisión exacta, si TS-7 está habilitado.
 - [ ] Opcional: crear derivado y explicar lineage.
 
 ### Bloque D: ejecución, 30-60 minutos
@@ -1796,6 +2283,8 @@ permiten reconstruir qué ocurrió.
 - [ ] Volver al escenario.
 - [ ] Clonar variante si se hará sensibilidad.
 - [ ] Vincular cada señal requerida.
+- [ ] Para el recorrido TS-7, asociar la fuente al objeto y después usar la
+  revisión en la variante; registrar ambos lotes.
 - [ ] Definir rango `[inicio, fin)`.
 - [ ] Confirmar validación de rango.
 - [ ] Ejecutar.
@@ -1821,6 +2310,11 @@ permiten reconstruir qué ocurrió.
 - [ ] Programas oficiales.
 - [ ] Schedules.
 - [ ] Migración hidráulica legado.
+- [ ] Crear una serie específica y distinguir definición, validación de datos
+  y publicación de revisión.
+- [ ] Derivar una copia local sin reasignar usos; comprobar el lineage.
+- [ ] En datos de prueba, publicar una revisión compartida y resolver los
+  bindings obsoletos antes de ejecutar.
 
 ## 35. Checklist final antes de una corrida importante
 
@@ -1842,6 +2336,9 @@ permiten reconstruir qué ocurrió.
 - [ ] Señales canónicas y entidades son correctas.
 - [ ] Unidades son correctas.
 - [ ] Revisión y hash fueron registrados.
+- [ ] Propietario y alcance de cada fuente fueron comprobados.
+- [ ] Las series específicas tienen una revisión sellada y pertenecen al
+  objeto correcto.
 - [ ] Derivados no están stale.
 
 ### Variante
@@ -1849,6 +2346,8 @@ permiten reconstruir qué ocurrió.
 - [ ] Es la variante activa correcta.
 - [ ] Todas las señales requeridas están vinculadas.
 - [ ] Cada set contiene la señal y entidad esperadas.
+- [ ] Cada binding TS-7 apunta al objeto, rol, revisión y hash previstos.
+- [ ] Ningún binding canónico aparece obsoleto, inválido o bloqueado.
 - [ ] El rango es `[inicio, fin)` y tiene cobertura completa.
 - [ ] Resoluciones son compatibles.
 - [ ] La variante no está desactualizada.
@@ -1865,20 +2364,35 @@ permiten reconstruir qué ocurrió.
 
 ## 36. Glosario operativo
 
-- **Binding**: referencia de una señal requerida a un set del catálogo.
+- **Alcance**: disponibilidad de una fuente genérica dentro de su proyecto
+  (`project`) o entre proyectos (`global`).
+- **Asociación**: disponibilidad de una fuente genérica para una necesidad de
+  un objeto; no implica uso en una variante.
+- **Binding**: uso de una señal para un objeto y rol en una variante; en TS-7
+  fija una revisión exacta y su hash.
+- **Catálogo global**: vista de entradas genéricas por señal, con propietario,
+  alcance, contrato e historia.
 - **Content hash**: huella del contenido de una revisión de set.
 - **Draft**: modelo editable previo a un snapshot ejecutable.
 - **Fail-closed**: bloquear cuando no se puede demostrar validez.
 - **Granularidad**: resolución temporal mostrada/editada en consola.
 - **Lease**: permiso temporal exclusivo para editar un grupo de series.
 - **Lineage**: procedencia completa de datos, transformaciones y versiones.
+- **Objeto vinculable**: identidad registrada de un componente o slot que
+  puede recibir una señal para una necesidad funcional.
 - **PCC**: punto común de conexión eléctrica del modelo one-bus.
 - **Programa oficial**: set con emisor, fecha de emisión y vigencia explícitos.
 - **Publicación**: vista controlada de un run para usuarios externos.
+- **Publicación de revisión**: sellado del contenido de una serie de entrada;
+  es diferente de publicar resultados en el portal.
+- **Recorrido protegido**: flujo de cuatro pasos para definir, asociar, usar o
+  publicar series con revisión del contexto e impacto.
 - **Revisión**: actualización inmutable dentro de la identidad de un set.
 - **Run gate**: conjunto de condiciones que habilitan o bloquean Ejecutar.
 - **Schedule tick**: evaluación auditable de un schedule en un instante.
 - **Set**: colección versionada de una o más señales y un horizonte común.
+- **Serie específica**: serie reservada a su propio objeto, sin asociación
+  de catálogo y fuera del listado global de entradas.
 - **Snapshot**: documento congelado usado por una versión/run.
 - **Stale / desactualizado**: la evidencia validada ya no coincide con sus
   dependencias actuales.
@@ -1886,20 +2400,37 @@ permiten reconstruir qué ocurrió.
 
 ## 37. Referencias internas para profundizar
 
-- `docs/tutorials/carga_y_matcheo_series_tiempo.md`: tratamiento exhaustivo de
-  carga, diseño de sets, mappings, bindings y rangos.
-- `docs/tutorials/guia_analista.md`: introducción breve al flujo analítico.
-- `docs/final/objetivo_final.md`: visión de producto y alcance.
-- `docs/iter1/mathematical_model.md`: formulación del BESS base.
-- `docs/iter5/mathematical_model.md`: formulación hidro simple v2.
-- `docs/hydro_diagram/iter1/pruebas_manuales_iteracion1.md`: checklist del
-  diagrama hidráulico v3.
-- `docs/series_tiempo/iter6/pruebas_manuales_ts6.md`: transformaciones,
+- [Carga y matcheo de series](carga_y_matcheo_series_tiempo.md): detalle de
+  archivos, sets, mappings y rangos. Para el recorrido TS-7 y sus límites de
+  interfaz, seguir las secciones 15 y 19 de este manual.
+- [Guía del analista](guia_analista.md): introducción al flujo analítico.
+- [Objetivo final](../final/objetivo_final.md): visión de producto y alcance.
+- [Modelo BESS](../iter1/mathematical_model.md) y
+  [modelo hidro v2](../iter5/mathematical_model.md): formulación matemática.
+- [Pruebas del diagrama hidráulico](../hydro_diagram/iter1/pruebas_manuales_iteracion1.md):
+  checklist de la interfaz hidráulica v3.
+- [Pruebas TS-6](../series_tiempo/iter6/pruebas_manuales_ts6.md): transformaciones,
   conectores y schedules.
-- `docs/capa_configuracion/architecture_configuration_layer_final.md`:
-  arquitectura de portal y consola.
-- `docs/capa_configuracion/verification_configuration_layer_final.md`:
-  evidencia de verificación de la capa de configuración.
+- [Especificación TS-7](../series_tiempo/iter7/spec_ts7_catalogo_global_y_series_especificas.md):
+  catálogo global, objetos, revisiones, asociaciones y bindings.
+- [Pruebas manuales TS-7](../series_tiempo/iter7/pruebas_manuales_ts7.md) y
+  [aceptación TS-7](../series_tiempo/iter7/acceptance_ts7.md): recorridos y
+  evidencia registrada de cierre, incluyendo operaciones comprobadas por API.
+- [TS7-014: cambios de alcance](../series_tiempo/iter7/issues/TS7-014-promote-and-demote-a-set-scope-administratively.md):
+  operación administrativa de promoción y reducción de alcance.
+- [Decisión sobre borrado de proyectos](../series_tiempo/iter7/decision_record_ts7_project_purge.md):
+  retención, transacción de borrado y lineage entre proyectos.
+- [Arquitectura de portal y consola](../capa_configuracion/architecture_configuration_layer_final.md)
+  y [verificación de la capa](../capa_configuracion/verification_configuration_layer_final.md).
+
+Para comprobar etiquetas, rutas y controles disponibles en la revisión actual:
+
+- [Rutas y cabeceras React](../../frontend/src/App.tsx).
+- [Catálogo global](../../frontend/src/GlobalCatalog.tsx),
+  [resumen del objeto](../../frontend/src/ObjectTimeSeriesSummary.tsx) y
+  [recorrido protegido](../../frontend/src/ProtectedMutationJourney.tsx).
+- [Pantallas del workspace](../../frontend/src/Workspace.tsx) y
+  [contratos HTTP](../../app/main.py).
 
 ## 38. Criterio de término de la capacitación
 
@@ -1912,7 +2443,10 @@ instrucciones de clic a clic:
 4. ejecutar un caso y demostrar qué revisión/hash consumió;
 5. interpretar un resultado sin depender solo del gráfico;
 6. publicar únicamente información deliberadamente seleccionada;
-7. reconocer cuándo debe detenerse y pedir revisión experta.
+7. distinguir una asociación de catálogo de un uso de ejecución;
+8. explicar qué cambia al derivar una copia local o publicar para todos;
+9. reconocer cuándo debe detenerse y pedir revisión experta, incluyendo las
+   operaciones aún no expuestas con controles en la web.
 
 El éxito no es conseguir que el botón **Ejecutar** se habilite. Es poder
 demostrar que el caso ejecutado representa el problema que se quería resolver y
