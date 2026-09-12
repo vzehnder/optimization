@@ -1,6 +1,10 @@
 # UX-006 · Mostrar primero resultados y facilitar la comparación
 
-Estado: Todo. Prioridad: P0. Dependencias: UX-001. Tamaño: M.
+Estado: In Review. Prioridad: P0. Dependencias: UX-001. Tamaño: M.
+
+Preparación del 2026-09-12 sobre `61dc87a`: lectura del paquete y 130 regresiones
+existentes aprobadas. [Acuerdo F1/F2, ciclos y resultados](../evidencia/ux-006/README.md).
+F1/F2 confirmadas por el usuario con «confirmo» antes de la primera prueba nueva.
 
 ## Problema y resultado
 
@@ -25,7 +29,7 @@ La corrida muestra numerosas secciones de auditoría antes de KPIs/gráficos. La
 
 ## Secuencia TDD sugerida
 
-F1/F2 propuestas:
+F1/F2 confirmadas para este alcance:
 
 1. RED: abrir una corrida exitosa y consultar su KPI conocido y período desde el resumen; abrir auditoría permite acceder a su snapshot. GREEN: primera reorganización completa.
 2. RED: una corrida en curso pasa a finalizada tras polling y un fallo temporal de consulta permite recuperación, sin lanzar otra corrida. GREEN: estados/reintento.
@@ -43,3 +47,29 @@ La posición por encima del pliegue se revisa visualmente, no con un test que cu
 - El portal/console no reciben los componentes internos que imprimen JSON o logs. Se mantiene su render allowlisted existente.
 
 Entregar capturas de éxito, fallo y comparación, más regresiones aplicables. Refactorizaciones de render se valoran en revisión posterior.
+
+## Resolución
+
+- Responsable: Codex. Inicio y entrega para revisión: 2026-09-12.
+- Estado final: In Review; aceptación de producto pendiente.
+- Commit: `feat(ux): prioritize results and contextual run comparison`, sobre
+  `61dc87a`, solicitado por el usuario. Sin PR.
+- Implementación: resultado y acciones antes de auditoría; estados en español,
+  KPIs con unidades, resumen completo, diagnóstico con foco, tablas paginadas,
+  reintentos y comparación contextual con selección validada en URL.
+- Compatibilidad: API conserva autoridad sobre caso e indexación. Los rangos
+  distintos muestran advertencia y los valores ausentes no se convierten a cero.
+- Fronteras: usuario confirmó F1/F2 con «confirmo» antes de la primera prueba.
+  F3 solo regresiones existentes; F4 no aplica.
+- Evidencia: [ciclos RED → GREEN, paridad, capturas y comandos](../evidencia/ux-006/README.md).
+  273 pruebas aprobadas: 195 componentes, 15 navegador y 63 Python.
+- Revisión visual: resultado en 1280×720, 1440×900, 320×900 y ampliación CSS al
+  200 %; comparación a 1280 y 320; fallo a 1280; teclado y axe sin serious/critical
+  en las tres vistas comprobadas. Capturas locales regenerables, excluidas de Git.
+- Conservación: polling/logs, KPIs/gráficos/tablas/archivos, snapshot/linaje y
+  comparación; publicaciones y portal allowlisted cubiertos por la regresión.
+- Límites: `npm.cmd run check` falla por formato previo en 23 archivos ajenos;
+  TypeScript, ESLint y formato modificado pasan. Sin Julia real, PostgreSQL,
+  suite Python completa ni estudio de usabilidad con participantes.
+- Tutoriales actualizados; no hay cambios en APIs ni datos históricos.
+- Persona que acepta: pendiente de revisión del usuario.

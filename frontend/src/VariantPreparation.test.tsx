@@ -436,7 +436,7 @@ describe("variant preparation", () => {
       finish(Response.json(run, { status: 201 }));
     });
     expect(
-      await screen.findByRole("heading", { name: "Run 77" }),
+      await screen.findByRole("heading", { name: "Ejecución 77" }),
     ).toBeVisible();
   });
   it("explains an unavailable model and directs the analyst to correct it before reviewing", async () => {
@@ -777,7 +777,7 @@ describe("variant preparation", () => {
     ).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Ejecutar variante" }));
     expect(
-      await screen.findByRole("heading", { name: "Run 77" }),
+      await screen.findByRole("heading", { name: "Ejecución 77" }),
     ).toBeVisible();
   });
   it("identifies a missing signal and takes the analyst to its source selector while execution stays blocked", async () => {

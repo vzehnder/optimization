@@ -10,7 +10,18 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
+import {
+  formatResultValue,
+  resultLabel,
+  resultUnit,
+} from "./resultPresentation";
 import { workspaceSectionSearch } from "./workspaceNavigation";
 import { objectJourneyPath } from "./journeyRoutes";
 
@@ -4346,6 +4357,7 @@ function RunList({
 
 export function RunComparisonView() {
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const scenarioId = useNumericParam("scenarioId");
   const scenario = useQuery({
     queryKey: scenarioQueryKey(scenarioId || 0),
@@ -4376,15 +4388,24 @@ export function RunComparisonView() {
     [versions.data],
   );
 
-  const [baselineRunId, setBaselineRunId] = useState<number | null>(null);
-  const [candidateRunId, setCandidateRunId] = useState<number | null>(null);
+  const baselineRunId = Number(searchParams.get("baseline"));
+  const candidateRunId = Number(searchParams.get("candidate"));
   const [series, setSeries] = useState<string | undefined>(undefined);
 
-  const effectiveBaselineId = baselineRunId ?? succeededRuns[0]?.id ?? null;
-  const effectiveCandidateId =
-    candidateRunId ??
-    succeededRuns.find((run) => run.id !== effectiveBaselineId)?.id ??
-    null;
+  const selectedBaseline = /^[1-9]\d*$/.test(searchParams.get("baseline") || "")
+    ? succeededRuns.find((run) => run.id === baselineRunId)?.id
+    : undefined;
+  const selectedCandidate = /^[1-9]\d*$/.test(
+    searchParams.get("candidate") || "",
+  )
+    ? succeededRuns.find((run) => run.id === candidateRunId)?.id
+    : undefined;
+  const effectiveBaselineId = searchParams.has("baseline")
+    ? (selectedBaseline ?? null)
+    : (succeededRuns[0]?.id ?? null);
+  const effectiveCandidateId = searchParams.has("candidate")
+    ? (selectedCandidate ?? null)
+    : (succeededRuns.find((run) => run.id !== effectiveBaselineId)?.id ?? null);
   const canCompare =
     effectiveBaselineId !== null &&
     effectiveCandidateId !== null &&
@@ -4435,7 +4456,7 @@ export function RunComparisonView() {
       version?.generation_metadata?.kind === "case_input_variant"
         ? version.generation_metadata.input_variant?.display_name
         : undefined;
-    return `Run ${run.id}${variantDisplayName ? ` - ${variantDisplayName}` : ""} (${run.created_at})`;
+    return `Ejecución ${run.id} · ${version?.case_name || "Caso no disponible"}${variantDisplayName ? ` · ${variantDisplayName}` : ""} (${run.created_at})`;
   }
 
   return (
@@ -4453,7 +4474,10 @@ export function RunComparisonView() {
       </Breadcrumbs>
       <header className="workspace-heading">
         <h1>Comparar corridas</h1>
-        <p>Compara dos corridas exitosas de este mismo caso.</p>
+        <p>
+          {scenario.data.name} · Compara dos corridas exitosas de este mismo
+          caso.
+        </p>
       </header>
       {succeededRuns.length < 2 ? (
         <EmptyState>
@@ -4467,7 +4491,19 @@ export function RunComparisonView() {
             aria-labelledby="run-comparison-picker"
           >
             <h2 id="run-comparison-picker">Seleccionar corridas</h2>
-            <div className="inline-actions">
+            {searchParams.has("baseline") && effectiveBaselineId === null ? (
+              <p role="alert">
+                La ejecución base del enlace no está disponible para comparar.
+                Selecciona otra ejecución.
+              </p>
+            ) : null}
+            {searchParams.has("candidate") && effectiveCandidateId === null ? (
+              <p role="alert">
+                La ejecución candidata del enlace no está disponible para
+                comparar. Selecciona otra ejecución.
+              </p>
+            ) : null}
+            <div className="inline-actions comparison-picker">
               <label>
                 Corrida base{" "}
                 <select
@@ -4477,9 +4513,17 @@ export function RunComparisonView() {
                       : String(effectiveBaselineId)
                   }
                   onChange={(event) =>
-                    setBaselineRunId(Number(event.target.value))
+                    setSearchParams((previous) => {
+                      previous.set("baseline", event.target.value);
+                      if (effectiveCandidateId !== null)
+                        previous.set("candidate", String(effectiveCandidateId));
+                      return previous;
+                    })
                   }
                 >
+                  <option value="" disabled>
+                    Selecciona una ejecución
+                  </option>
                   {succeededRuns.map((run) => (
                     <option key={run.id} value={run.id}>
                       {runOptionLabel(run)}
@@ -4496,9 +4540,17 @@ export function RunComparisonView() {
                       : String(effectiveCandidateId)
                   }
                   onChange={(event) =>
-                    setCandidateRunId(Number(event.target.value))
+                    setSearchParams((previous) => {
+                      previous.set("candidate", event.target.value);
+                      if (effectiveBaselineId !== null)
+                        previous.set("baseline", String(effectiveBaselineId));
+                      return previous;
+                    })
                   }
                 >
+                  <option value="" disabled>
+                    Selecciona una ejecución
+                  </option>
                   {succeededRuns.map((run) => (
                     <option key={run.id} value={run.id}>
                       {runOptionLabel(run)}
@@ -4522,13 +4574,29 @@ export function RunComparisonView() {
             <div className="result-alert" role="alert">
               <strong>No se pudo comparar</strong>
               <p>{errorMessage(comparison.error)}</p>
+              <button
+                type="button"
+                disabled={comparison.isFetching}
+                onClick={() => void comparison.refetch()}
+              >
+                {comparison.isFetching
+                  ? "Consultando comparación"
+                  : "Reintentar comparación"}
+              </button>
             </div>
           ) : null}
-          {comparison.data ? (
+          {comparison.data && canCompare && !comparison.isError ? (
             <RunComparisonResult
               comparison={comparison.data}
-              series={series}
               onSelectSeries={setSeries}
+              baselineCaseName={
+                versionsById.get(comparison.data.baseline.scenario_version_id)
+                  ?.case_name
+              }
+              candidateCaseName={
+                versionsById.get(comparison.data.candidate.scenario_version_id)
+                  ?.case_name
+              }
             />
           ) : null}
         </div>
@@ -4540,19 +4608,31 @@ export function RunComparisonView() {
 function RunComparisonSideSummary({
   title,
   side,
+  caseName,
 }: {
   title: string;
   side: RunComparison["baseline"];
+  caseName?: string;
 }) {
+  const location = useLocation();
   return (
     <div>
       <h3>{title}</h3>
       <dl className="source-metadata version-metadata">
         <div>
-          <dt>Run</dt>
+          <dt>Ejecución</dt>
           <dd>
-            <Link to={`/runs/${side.run_id}`}>Run {side.run_id}</Link>
+            <Link
+              to={`/runs/${side.run_id}${location.search}`}
+              aria-label={`Ver ejecución ${title === "Base" ? "base" : "candidata"}`}
+            >
+              Ejecución {side.run_id}
+            </Link>
           </dd>
+        </div>
+        <div>
+          <dt>Caso</dt>
+          <dd>{caseName || "Nombre del caso no disponible"}</dd>
         </div>
         <div>
           <dt>Variante</dt>
@@ -4567,7 +4647,7 @@ function RunComparisonSideSummary({
           <dt>Rango de fechas</dt>
           <dd>
             {side.date_range
-              ? `${side.date_range.start} - ${side.date_range.end}`
+              ? `[${side.date_range.start}, ${side.date_range.end})`
               : "Sin rango"}
           </dd>
         </div>
@@ -4582,12 +4662,14 @@ function RunComparisonSideSummary({
 
 function RunComparisonResult({
   comparison,
-  series,
   onSelectSeries,
+  baselineCaseName,
+  candidateCaseName,
 }: {
   comparison: RunComparison;
-  series: string | undefined;
   onSelectSeries: (series: string) => void;
+  baselineCaseName?: string;
+  candidateCaseName?: string;
 }) {
   return (
     <>
@@ -4596,11 +4678,31 @@ function RunComparisonResult({
         aria-labelledby="run-comparison-context"
       >
         <h2 id="run-comparison-context">Contexto de las corridas</h2>
+        {!comparison.baseline.date_range || !comparison.candidate.date_range ? (
+          <p role="status">
+            No se dispone del período de ambas ejecuciones. Revisa su detalle
+            antes de interpretar los totales.
+          </p>
+        ) : comparison.baseline.date_range.start !==
+            comparison.candidate.date_range.start ||
+          comparison.baseline.date_range.end !==
+            comparison.candidate.date_range.end ? (
+          <p className="result-alert" role="status">
+            Los períodos son distintos. Los totales cubren intervalos
+            diferentes; las diferencias por período solo se calculan donde ambas
+            ejecuciones tienen datos.
+          </p>
+        ) : null}
         <div className="inline-actions">
-          <RunComparisonSideSummary title="Base" side={comparison.baseline} />
+          <RunComparisonSideSummary
+            title="Base"
+            side={comparison.baseline}
+            caseName={baselineCaseName}
+          />
           <RunComparisonSideSummary
             title="Candidata"
             side={comparison.candidate}
+            caseName={candidateCaseName}
           />
         </div>
       </section>
@@ -4620,6 +4722,7 @@ function RunComparisonResult({
               <thead>
                 <tr>
                   <th>KPI</th>
+                  <th>Unidad</th>
                   <th>Base</th>
                   <th>Candidata</th>
                   <th>Diferencia</th>
@@ -4628,10 +4731,11 @@ function RunComparisonResult({
               <tbody>
                 {comparison.kpis.map((kpi) => (
                   <tr key={kpi.key}>
-                    <td>{kpi.key}</td>
-                    <td>{displayValue(kpi.baseline, "-")}</td>
-                    <td>{displayValue(kpi.candidate, "-")}</td>
-                    <td>{kpi.delta === null ? "-" : kpi.delta}</td>
+                    <td>{resultLabel(kpi.key)}</td>
+                    <td>{resultUnit(kpi.key) || "—"}</td>
+                    <td>{formatResultValue(kpi.baseline)}</td>
+                    <td>{formatResultValue(kpi.candidate)}</td>
+                    <td>{formatResultValue(kpi.delta)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -4644,6 +4748,10 @@ function RunComparisonResult({
         aria-labelledby="run-comparison-series"
       >
         <h2 id="run-comparison-series">Diferencias por periodo</h2>
+        <p>
+          {resultUnit(comparison.selected_series || "") ||
+            "Unidad no informada"}
+        </p>
         {comparison.available_signal_keys.length === 0 ? (
           <EmptyState>
             Ninguna serie de resultado en comun para comparar.
@@ -4653,7 +4761,7 @@ function RunComparisonResult({
             <label>
               Serie{" "}
               <select
-                value={series || comparison.selected_series || ""}
+                value={comparison.selected_series || ""}
                 onChange={(event) => onSelectSeries(event.target.value)}
               >
                 {comparison.available_signal_keys.map((key) => (
@@ -4682,9 +4790,9 @@ function RunComparisonResult({
                     {comparison.series_periods.map((period) => (
                       <tr key={period.timestamp}>
                         <td>{period.timestamp}</td>
-                        <td>{displayValue(period.baseline, "-")}</td>
-                        <td>{displayValue(period.candidate, "-")}</td>
-                        <td>{period.delta === null ? "-" : period.delta}</td>
+                        <td>{formatResultValue(period.baseline)}</td>
+                        <td>{formatResultValue(period.candidate)}</td>
+                        <td>{formatResultValue(period.delta)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -9247,15 +9355,15 @@ function RunMetadata({ run }: { run: ScenarioRun }) {
         <dd>{displayDuration(run.duration_seconds)}</dd>
       </div>
       <div>
-        <dt>Exit code</dt>
+        <dt>Código de salida</dt>
         <dd>{displayValue(run.exit_code)}</dd>
       </div>
       <div>
-        <dt>Trigger</dt>
+        <dt>Tipo de inicio</dt>
         <dd>{displayValue(run.trigger_type, "manual")}</dd>
       </div>
       <div>
-        <dt>Triggered by</dt>
+        <dt>Iniciada por</dt>
         <dd>{displayValue(run.triggered_by, "internal_analyst")}</dd>
       </div>
     </dl>
@@ -9308,7 +9416,7 @@ function RunLineage({
         </dd>
       </div>
       <div>
-        <dt>Immutable version ID</dt>
+        <dt>ID de la versión inmutable</dt>
         <dd>{run.scenario_version_id}</dd>
       </div>
       {version?.generation_metadata.input_variant ? (
@@ -9416,14 +9524,10 @@ function RunFailureDetails({ run }: { run: ScenarioRun }) {
   if (run.status !== "failed") return null;
   return (
     <section className="workspace-section" aria-labelledby="run-failure">
-      <h2 id="run-failure">Failure context</h2>
-      <dl className="source-metadata version-metadata">
-        <div>
-          <dt>Error</dt>
-          <dd>{displayValue(run.error_message, "Sin mensaje")}</dd>
-        </div>
-      </dl>
-      <h3>Structured error</h3>
+      <h2 id="run-failure" tabIndex={-1}>
+        Diagnóstico de la ejecución
+      </h2>
+      <h3>Error estructurado</h3>
       <pre className="json-panel">{prettyJson(run.error_payload)}</pre>
       <h3>Stdout</h3>
       <pre className="json-panel">{displayValue(run.stdout, "Sin stdout")}</pre>
@@ -9965,6 +10069,7 @@ export function PublicationPreviewView() {
 
 export function RunDetailView() {
   const location = useLocation();
+  const auditRef = useRef<HTMLDetailsElement>(null);
   const runId = useNumericParam("runId");
   const run = useQuery({
     queryKey: runQueryKey(runId || 0),
@@ -10000,7 +10105,7 @@ export function RunDetailView() {
     return <NotFoundView>La corrida solicitada no existe.</NotFoundView>;
   }
   if (run.isPending) {
-    return <LoadingView label="Cargando run" />;
+    return <LoadingView label="Cargando ejecución" />;
   }
   if (run.isError && !run.data) {
     return (
@@ -10010,6 +10115,11 @@ export function RunDetailView() {
 
   const runData = run.data!;
   const terminal = isTerminalRun(runData);
+  const comparisonSearch = new URLSearchParams(location.search);
+  comparisonSearch.set("baseline", String(runData.id));
+  if (comparisonSearch.get("candidate") === String(runData.id)) {
+    comparisonSearch.delete("candidate");
+  }
 
   return (
     <section className="workspace-view">
@@ -10034,58 +10144,155 @@ export function RunDetailView() {
           <span>Version</span>
         )}
         <span aria-hidden="true">/</span>
-        <span>Run {runData.id}</span>
+        <span>Ejecución {runData.id}</span>
       </Breadcrumbs>
       <header className="workspace-heading">
-        <h1>Run {runData.id}</h1>
-        <p>{terminal ? "Estado terminal" : "Monitoreando ejecucion"}</p>
+        <h1>Ejecución {runData.id}</h1>
+        <p role="status">
+          {(
+            {
+              succeeded: "Finalizada",
+              failed: "Fallida",
+              queued: "En cola",
+              running: "En ejecución",
+            } as Record<string, string>
+          )[runData.status] || "Estado desconocido"}
+        </p>
       </header>
       <div className="workspace-stack">
+        <section className="run-context" aria-label="Contexto de la ejecución">
+          {version.isError || scenario.isError || project.isError ? (
+            <div role="alert">
+              <p>No se pudo consultar el contexto de esta ejecución.</p>
+              <button
+                type="button"
+                disabled={
+                  version.isFetching ||
+                  scenario.isFetching ||
+                  project.isFetching
+                }
+                onClick={() => {
+                  if (version.isError) void version.refetch();
+                  if (scenario.isError) void scenario.refetch();
+                  if (project.isError) void project.refetch();
+                }}
+              >
+                Reintentar contexto
+              </button>
+            </div>
+          ) : null}
+          <p>
+            {scenario.data?.name ||
+              (scenario.isError
+                ? "Escenario no disponible"
+                : "Consultando escenario")}{" "}
+            ·{" "}
+            {version.data?.case_name ||
+              (version.isError ? "Caso no disponible" : "Consultando caso")}
+          </p>
+          {version.data ? (
+            <>
+              <p>
+                {version.data.generation_metadata.input_variant?.display_name ||
+                  "Sin variante registrada en esta versión"}
+              </p>
+              <p>
+                {version.data.generation_metadata.date_range
+                  ? `[${version.data.generation_metadata.date_range.start}, ${version.data.generation_metadata.date_range.end})`
+                  : `Fechas no registradas en esta versión · ${version.data.period_count} períodos`}
+              </p>
+            </>
+          ) : (
+            <p>Variante y período pendientes de consulta.</p>
+          )}
+        </section>
         {!terminal && run.isFetching ? (
           <p className="source-note" aria-live="polite">
-            Actualizando estado del run.
+            Actualizando estado de la ejecución.
           </p>
         ) : null}
         {!terminal && run.failureCount > 0 ? (
           <p className="polling-recovery" aria-live="polite">
-            Reintentando actualizacion de run.
+            Reintentando consulta de la ejecución.
           </p>
         ) : null}
-        <section className="workspace-section" aria-labelledby="run-state">
-          <h2 id="run-state">Run state</h2>
-          <RunMetadata run={runData} />
-        </section>
-        <section className="workspace-section" aria-labelledby="run-lineage">
-          <h2 id="run-lineage">Lineage</h2>
-          <RunLineage
-            run={runData}
-            version={version.data}
-            scenario={scenario.data}
-            project={project.data}
-          />
-        </section>
-        <section className="workspace-section" aria-labelledby="run-provenance">
-          <h2 id="run-provenance">Procedencia</h2>
-          <RunProvenance version={version.data} />
-        </section>
-        <section
-          className="workspace-section"
-          aria-labelledby="run-series-lineage"
-        >
-          <h2 id="run-series-lineage">Series de entrada</h2>
-          <RunSeriesBindingsLineage version={version.data} />
-        </section>
-        <section
-          className="workspace-section"
-          aria-labelledby="run-technical-snapshot"
-        >
-          <h2 id="run-technical-snapshot">Snapshot tecnico</h2>
-          <RunTechnicalSnapshot version={version.data} />
-        </section>
-        <RunFailureDetails run={runData} />
-        <RunResultsSection run={runData} />
+        {runData.status === "failed" ? (
+          <section
+            className="workspace-section"
+            aria-label="La ejecución falló"
+          >
+            <h2>La ejecución no pudo completarse</h2>
+            <p>
+              {runData.error_message ||
+                "El proceso terminó con un error sin descripción. Consulta el diagnóstico."}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                if (auditRef.current) auditRef.current.open = true;
+                document.getElementById("run-failure")?.focus();
+              }}
+            >
+              Ver diagnóstico
+            </button>
+          </section>
+        ) : (
+          <RunResultsSection run={runData}>
+            {runData.status === "succeeded" && scenario.data ? (
+              <nav
+                className="inline-actions"
+                aria-label="Acciones del resultado"
+              >
+                <Link
+                  to={`/scenarios/${scenario.data.id}/runs/compare?${comparisonSearch}`}
+                >
+                  Comparar esta ejecución
+                </Link>
+                <a href="#publications">Preparar informe</a>
+              </nav>
+            ) : null}
+          </RunResultsSection>
+        )}
         <PublicationSection run={runData} projectId={project.data?.id} />
-        <RunArtifactsSection run={runData} />
+        <details ref={auditRef} className="workspace-section run-audit">
+          <summary>Detalle técnico y auditoría</summary>
+          <section className="workspace-section" aria-labelledby="run-state">
+            <h2 id="run-state">Registro de ejecución</h2>
+            <RunMetadata run={runData} />
+          </section>
+          <section className="workspace-section" aria-labelledby="run-lineage">
+            <h2 id="run-lineage">Procedencia de esta ejecución</h2>
+            <RunLineage
+              run={runData}
+              version={version.data}
+              scenario={scenario.data}
+              project={project.data}
+            />
+          </section>
+          <section
+            className="workspace-section"
+            aria-labelledby="run-provenance"
+          >
+            <h2 id="run-provenance">Procedencia</h2>
+            <RunProvenance version={version.data} />
+          </section>
+          <section
+            className="workspace-section"
+            aria-labelledby="run-series-lineage"
+          >
+            <h2 id="run-series-lineage">Series de entrada</h2>
+            <RunSeriesBindingsLineage version={version.data} />
+          </section>
+          <section
+            className="workspace-section"
+            aria-labelledby="run-technical-snapshot"
+          >
+            <h2 id="run-technical-snapshot">Snapshot tecnico</h2>
+            <RunTechnicalSnapshot version={version.data} />
+          </section>
+          <RunFailureDetails run={runData} />
+          <RunArtifactsSection run={runData} />
+        </details>
       </div>
     </section>
   );

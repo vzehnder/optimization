@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 import uvicorn
@@ -140,6 +141,29 @@ class SmokeRunQueue:
 def main() -> None:
     store = AnalystStore("sqlite:///:memory:")
     artifact_root = REPO_ROOT / ".tmp" / "react-smoke-artifacts"
+    # Deterministic, already indexed results for the browser comparison journey.
+    # Fixtures prepare the store; browser assertions use the public UI and API.
+    from tests.test_ts4_run_comparison import create_indexed_run
+
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    comparison_root = Path(tempfile.mkdtemp(prefix="ux-results-", dir=artifact_root))
+    project = store.create_project(name="UX-006 Resultados de referencia")
+    scenario = store.create_scenario(project_id=project["id"], name="Invierno de referencia")
+    base = create_indexed_run(
+        store, comparison_root, scenario_id=scenario["id"], objective_value_usd=1000,
+        input_variant={"id": 1, "display_name": "Base de invierno"},
+        date_range={"start": "2026-01-01T00:00:00-03:00", "end": "2026-01-01T02:00:00-03:00"},
+    )
+    create_indexed_run(
+        store, comparison_root, scenario_id=scenario["id"], objective_value_usd=1500,
+        input_variant={"id": 2, "display_name": "Alternativa de invierno"},
+        date_range={"start": "2026-01-01T00:00:00-03:00", "end": "2026-01-01T02:00:00-03:00"},
+    )
+    failed = store.create_run(scenario_version_id=base["scenario_version_id"])
+    store.mark_run_failed(
+        failed["id"], exit_code=1, stdout="", stderr="Diagnóstico de referencia: modelo inviable.",
+        error_payload={"message": "No existe una solución factible para el período."},
+    )
     app = create_app(
         store=store,
         auth_enabled=True,

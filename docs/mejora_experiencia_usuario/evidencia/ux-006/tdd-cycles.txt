@@ -1,0 +1,673 @@
+CYCLE 1 RED — EXCERPT FROM .tmp/ux006-cycle1-red.txt
+ FAIL  src/RunExperience.test.tsx > results experience > shows the successful result and exact period with its
+immutable snapshot available on demand
+TestingLibraryElementError: Unable to find an element with the text: Finalizada. This could be because the text is
+broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher
+more flexible.
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/RunExperience.test.tsx:55:25
+     53|     render(<App />);
+     54|
+     55|     expect(await screen.findByText("Finalizada", { exact: true })).toB…
+       |                         ^
+     56|     const context = screen.getByRole("region", { name: "Contexto de la…
+     57|     expect(within(context).getByText("Base de invierno")).toBeVisible(…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+CYCLE 1 GREEN — EXCERPT FROM .tmp/ux006-cycle1-green.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/RunExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  17:54:17
+   Duration  3.79s (transform 914ms, setup 271ms, import 1.37s, tests 593ms, environment 1.26s)
+
+
+CYCLE 2 RED — EXCERPT FROM .tmp/ux006-cycle2-red.txt
+ FAIL  src/RunExperience.test.tsx > results experience > explains a failed execution before opening its diagnostic logs
+Error: expect(element).toBeVisible()
+
+Received element is not visible:
+  <dd />
+ ❯ src/RunExperience.test.tsx:55:99
+     53|     render(<App />);
+     54|     expect(await screen.findByText("Fallida", { exact: true })).toBeVi…
+     55|     expect(screen.getByText("No existe una solución factible para el p…
+       |                                                                                                   ^
+Received element is not visible:
+  <dd />
+ ❯ src/RunExperience.test.tsx:55:99
+     53|     render(<App />);
+     54|     expect(await screen.findByText("Fallida", { exact: true })).toBeVi…
+     55|     expect(screen.getByText("No existe una solución factible para el p…
+       |                                                                                                   ^
+     56|     expect(screen.getByText("solver diagnostic marker")).not.toBeVisib…
+     57|     await user.click(screen.getByRole("button", { name: "Ver diagnósti…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 skipped (2)
+   Start at  17:56:54
+   Duration  3.91s (transform 976ms, setup 358ms, import 1.44s, tests 337ms, environment 1.47s)
+
+
+CYCLE 2 GREEN — EXCERPT FROM .tmp/ux006-cycle2-green.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/RunExperience.test.tsx src/App.test.tsx -t results experience|polls nonterminal
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  2 passed (2)
+      Tests  3 passed | 56 skipped (59)
+   Start at  17:57:23
+   Duration  8.30s (transform 2.47s, setup 718ms, import 3.53s, tests 5.05s, environment 3.13s)
+
+
+CYCLE 3 RED — EXCERPT FROM .tmp/ux006-cycle3-red.txt
+ FAIL  src/RunExperience.test.tsx > results experience > follows a running execution and retries unavailable results
+without launching another execution
+TestingLibraryElementError: Unable to find an accessible element with the role "button" and name "Reintentar
+resultados"
+
+Here are the accessible roles:
+
+  banner:
+
+  Name "":
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ Object.getElementError node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/RunExperience.test.tsx:66:29
+     64|     expect(await screen.findByText("Servicio de resultados temporalmen…
+     65|     available = true;
+     66|     await user.click(screen.getByRole("button", { name: "Reintentar re…
+       |                             ^
+     67|     expect(await screen.findByText("1.250,5 USD")).toBeVisible();
+     68|     expect(writes).toBe(0);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+CYCLE 3 GREEN — EXCERPT FROM .tmp/ux006-cycle3-green.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/RunExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  17:58:41
+   Duration  5.07s (transform 954ms, setup 339ms, import 1.39s, tests 1.72s, environment 1.33s)
+
+
+CYCLE 4 RED — EXCERPT FROM .tmp/ux006-cycle4-red.txt
+ FAIL  src/RunExperience.test.tsx > results experience > keeps an accepted result visible when a background refresh
+fails
+TestingLibraryElementError: Unable to find an element with the text: 1.250,5 USD. This could be because the text is
+broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher
+more flexible.
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/RunExperience.test.tsx:61:19
+     59|     await act(async () => { window.dispatchEvent(new Event("visibility…
+     60|     expect(await screen.findByText("Consulta interrumpida")).toBeVisib…
+     61|     expect(screen.getByText("1.250,5 USD")).toBeVisible();
+       |                   ^
+     62|     unavailable = false;
+     63|     await user.click(screen.getByRole("button", { name: "Reintentar re…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 skipped (4)
+   Start at  17:59:51
+   Duration  3.71s (transform 972ms, setup 297ms, import 1.40s, tests 399ms, environment 1.31s)
+
+
+CYCLE 4 GREEN — EXCERPT FROM .tmp/ux006-cycle4-green.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/RunExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  18:00:19
+   Duration  5.30s (transform 920ms, setup 297ms, import 1.35s, tests 2.09s, environment 1.28s)
+
+
+CYCLE 5 RED — EXCERPT FROM .tmp/ux006-cycle5-red.txt
+ FAIL  src/RunExperience.test.tsx > results experience > starts comparison from the chosen execution with known
+differences, units and return links
+TestingLibraryElementError: Unable to find role="link" and name "Comparar esta ejecución"
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+    >
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/RunExperience.test.tsx:71:35
+     69|     const user = userEvent.setup();
+     70|     render(<App />);
+     71|     await user.click(await screen.findByRole("link", { name: "Comparar…
+       |                                   ^
+     72|     expect(await screen.findByLabelText("Corrida base")).toHaveValue("…
+     73|     expect(screen.getByLabelText("Corrida candidata")).toHaveValue("98…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+CYCLE 5 GREEN — EXCERPT FROM .tmp/ux006-cycle5-green.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/RunExperience.test.tsx -t starts comparison
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 4 skipped (5)
+   Start at  18:02:57
+   Duration  4.02s (transform 949ms, setup 291ms, import 1.38s, tests 773ms, environment 1.29s)
+
+
+CYCLE 6 RED — EXCERPT FROM .tmp/ux006-cycle6-red.txt
+ FAIL  src/RunExperience.test.tsx > results experience > distinguishes missing legacy results from zero and preserves
+available hydro results and downloads
+TestingLibraryElementError: Unable to find a label with the text of: Indicadores principales
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+    >
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/RunExperience.test.tsx:66:31
+     64|     const user = userEvent.setup();
+     65|     render(<App />);
+     66|     const kpis = await screen.findByLabelText("Indicadores principales…
+       |                               ^
+     67|     expect(within(kpis).getByText("No disponible")).toBeVisible();
+     68|     expect(within(kpis).getByText("0 USD")).toBeVisible();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+CYCLE 6 GREEN — EXCERPT FROM .tmp/ux006-cycle6-green.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/RunExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  18:04:54
+   Duration  5.95s (transform 951ms, setup 290ms, import 1.39s, tests 2.62s, environment 1.36s)
+
+
+CYCLE 7 RED — EXCERPT FROM .tmp/ux006-cycle7-red.txt
+ FAIL  src/RunExperience.test.tsx > results experience > lets the analyst consult table rows beyond the first page and
+preserves the page when closing details
+TestingLibraryElementError: Unable to find an element with the text: Ver tablas de resultados. This could be because
+the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make
+your matcher more flexible.
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/RunExperience.test.tsx:68:35
+     66|     const user = userEvent.setup();
+     67|     render(<App />);
+     68|     await user.click(await screen.findByText("Ver tablas de resultados…
+       |                                   ^
+     69|     const table = screen.getByRole("region", { name: "Despacho del sis…
+     70|     expect(within(table).queryByText("Último período")).not.toBeInTheD…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+CYCLE 7 GREEN — EXCERPT FROM .tmp/ux006-cycle7-green.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/RunExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  7 passed (7)
+   Start at  18:06:14
+   Duration  6.19s (transform 915ms, setup 285ms, import 1.34s, tests 3.01s, environment 1.26s)
+
+
+CYCLE 8 RED — EXCERPT FROM .tmp/ux006-cycle8-red.txt
+ FAIL  src/RunExperience.test.tsx > results experience > warns about different comparison periods and leaves
+nonoverlapping values unavailable
+TestingLibraryElementError: Unable to find an element with the text: /Los períodos son distintos/. This could be
+because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to
+make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/RunExperience.test.tsx:69:25
+     67|     });
+     68|     render(<App />);
+     69|     expect(await screen.findByText(/Los períodos son distintos/)).toBe…
+       |                         ^
+     70|     expect(screen.getByText("[2026-01-01T01:00:00-03:00, 2026-01-01T03…
+     71|     const series = screen.getByRole("region", { name: "Diferencias por…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+CYCLE 8 GREEN — EXCERPT FROM .tmp/ux006-cycle8-green.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/RunExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  18:07:51
+   Duration  6.58s (transform 999ms, setup 295ms, import 1.45s, tests 3.21s, environment 1.33s)
+
+
+CYCLE 9 RED — EXCERPT FROM .tmp/ux006-cycle9-red.txt
+ FAIL  src/RunExperience.test.tsx > results experience > requires a new selection when a linked baseline is
+unavailable instead of comparing another run silently
+TestingLibraryElementError: Unable to find an element with the text: La ejecución base del enlace no está disponible
+para comparar. Selecciona otra ejecución.. This could be because the text is broken up by multiple elements. In this
+case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/RunExperience.test.tsx:67:25
+     65|     const user = userEvent.setup();
+     66|     render(<App />);
+     67|     expect(await screen.findByText("La ejecución base del enlace no es…
+       |                         ^
+     68|     expect(screen.queryByRole("region", { name: "Diferencias en KPIs" …
+     69|     await user.selectOptions(screen.getByLabelText("Corrida base"), "9…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 skipped (9)
+   Start at  18:08:39
+   Duration  4.33s (transform 946ms, setup 297ms, import 1.37s, tests 1.07s, environment 1.31s)
+
+
+CYCLE 9 GREEN — EXCERPT FROM .tmp/ux006-cycle9-green.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/RunExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  18:09:15
+   Duration  6.64s (transform 970ms, setup 283ms, import 1.40s, tests 3.34s, environment 1.33s)
+
+
+CYCLE 10 RED — EXCERPT FROM .tmp/ux006-cycle10-red.txt
+ FAIL  src/RunExperience.test.tsx > results experience > explains an API comparison rejection and retries without
+losing the selected executions
+TestingLibraryElementError: Unable to find an accessible element with the role "button" and name "Reintentar
+comparación"
+
+Here are the accessible roles:
+
+  banner:
+
+  Name "":
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/RunExperience.test.tsx:71:29
+     69|     expect(screen.queryByRole("region", { name: "Diferencias en KPIs" …
+     70|     indexed = true;
+     71|     await user.click(screen.getByRole("button", { name: "Reintentar co…
+       |                             ^
+     72|     expect(await screen.findByRole("region", { name: "Diferencias en K…
+     73|     expect(screen.getByLabelText("Corrida base")).toHaveValue("99");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 9 skipped (10)
+   Start at  18:09:56
+   Duration  3.70s (transform 972ms, setup 303ms, import 1.40s, tests 408ms, environment 1.30s)
+
+
+CYCLE 10 GREEN — EXCERPT FROM .tmp/ux006-cycle10-green.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/RunExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  10 passed (10)
+   Start at  18:10:17
+   Duration  6.68s (transform 943ms, setup 287ms, import 1.38s, tests 3.44s, environment 1.29s)
+
+
+CYCLE 11 RED — EXCERPT FROM .tmp/ux006-cycle11-red.txt
+ FAIL  src/RunExperience.test.tsx > results experience > keeps the result while recovering its unavailable version
+context without inventing a manual origin
+TestingLibraryElementError: Unable to find an element with the text: No se pudo consultar el contexto de esta
+ejecución.. This could be because the text is broken up by multiple elements. In this case, you can provide a function
+for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/RunExperience.test.tsx:66:25
+     64|     render(<App />);
+     65|     expect(await screen.findByText("1.250,5 USD")).toBeVisible();
+     66|     expect(await screen.findByText("No se pudo consultar el contexto d…
+       |                         ^
+     67|     expect(screen.queryByText("Ejecución manual sin variante")).not.to…
+     68|     available = true;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+CYCLE 11 GREEN — EXCERPT FROM .tmp/ux006-cycle11-green.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/RunExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  11 passed (11)
+   Start at  18:11:33
+   Duration  6.96s (transform 955ms, setup 291ms, import 1.40s, tests 3.70s, environment 1.28s)
+
+
+CYCLE 12 RED — EXCERPT FROM .tmp/ux006-cycle12-red.txt
+ FAIL  src/RunExperience.test.tsx > results experience > recovers artifact downloads from audit without losing the
+result
+TestingLibraryElementError: Unable to find an accessible element with the role "button" and name "Reintentar archivos"
+
+Here are the accessible roles:
+
+  banner:
+
+  Name "":
+  <header
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/RunExperience.test.tsx:68:29
+     66|     await user.click(screen.getByText("Detalle técnico y auditoría"));
+     67|     available = true;
+     68|     await user.click(screen.getByRole("button", { name: "Reintentar ar…
+       |                             ^
+     69|     expect(await screen.findByRole("link", { name: "summary.json" })).…
+     70|     expect(screen.getByText("1.250,5 USD")).toBeVisible();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 11 skipped (12)
+   Start at  18:12:54
+   Duration  3.94s (transform 949ms, setup 285ms, import 1.38s, tests 655ms, environment 1.32s)
+
+
+CYCLE 12 GREEN — EXCERPT FROM .tmp/ux006-cycle12-green.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/RunExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  12 passed (12)
+   Start at  18:13:19
+   Duration  7.20s (transform 946ms, setup 296ms, import 1.38s, tests 3.93s, environment 1.31s)
+
+
+CYCLE 13 RED — EXCERPT FROM .tmp/ux006-cycle13-red.txt
+ FAIL  src/RunExperience.test.tsx > results experience > removes a previously visible result when the server rejects
+further access
+Error: expect(element).not.toBeInTheDocument()
+
+expected document not to contain element, found <dd>
+  1.250,5
+   USD
+</dd> instead
+ ❯ src/RunExperience.test.tsx:69:51
+     67|     await act(async () => { window.dispatchEvent(new Event("visibility…
+   USD
+</dd> instead
+ ❯ src/RunExperience.test.tsx:69:51
+     67|     await act(async () => { window.dispatchEvent(new Event("visibility…
+     68|     expect(await screen.findByText("Acceso revocado")).toBeVisible();
+     69|     expect(screen.queryByText("1.250,5 USD")).not.toBeInTheDocument();
+       |                                                   ^
+     70|     expect(screen.queryByText("Ver resumen completo")).not.toBeInTheDo…
+     71|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 12 skipped (13)
+   Start at  18:15:02
+   Duration  4.00s (transform 1.04s, setup 290ms, import 1.50s, tests 584ms, environment 1.32s)
+
+
+CYCLE 13 GREEN — EXCERPT FROM .tmp/ux006-cycle13-green.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/RunExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  13 passed (13)
+   Start at  18:15:30
+   Duration  7.93s (transform 1.02s, setup 292ms, import 1.48s, tests 4.55s, environment 1.33s)
+
+
+CYCLE 14 RED — EXCERPT FROM .tmp/ux006-cycle14-red.txt
+ FAIL  src/RunExperience.test.tsx > results experience > starts a fresh comparison after returning from a candidate
+without selecting that execution twice
+Error: expect(element).toHaveValue(98)
+
+Expected the element to have value:
+  98
+Received:
+  99
+ ❯ src/RunExperience.test.tsx:69:56
+     67|     await user.click(await screen.findByRole("link", { name: "Comparar…
+Received:
+  99
+ ❯ src/RunExperience.test.tsx:69:56
+     67|     await user.click(await screen.findByRole("link", { name: "Comparar…
+     68|     expect(await screen.findByLabelText("Corrida base")).toHaveValue("…
+     69|     expect(screen.getByLabelText("Corrida candidata")).toHaveValue("98…
+       |                                                        ^
+     70|     expect(await screen.findByRole("region", { name: "Diferencias en K…
+     71|     expect(new URLSearchParams(window.location.search).get("origin")).…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 13 passed (14)
+   Start at  18:24:49
+   Duration  7.99s (transform 1.08s, setup 281ms, import 1.54s, tests 4.52s, environment 1.36s)
+
+
+CYCLE 14 GREEN — EXCERPT FROM .tmp/ux006-cycle14-green.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run --run src/RunExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  14 passed (14)
+   Start at  18:25:17
+   Duration  7.99s (transform 1.04s, setup 275ms, import 1.51s, tests 4.60s, environment 1.32s)
+
+
+CYCLE 16 RED — EXCERPT FROM .tmp/ux006-cycle16-red.txt
+ FAIL  src/RunExperience.test.tsx > results experience > keeps comparison and artifact access when a successful
+execution has no result sections
+TestingLibraryElementError: Unable to find role="link" and name "Comparar esta ejecución"
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+    >
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/RunExperience.test.tsx:63:25
+     61|     const user = userEvent.setup();
+     62|     render(<App />);
+     63|     expect(await screen.findByRole("link", { name: "Comparar esta ejec…
+       |                         ^
+     64|     expect(screen.getByText("No hay secciones de resultados disponible…
+     65|     await user.click(screen.getByText("Detalle técnico y auditoría"));
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 15 passed (16)
+   Start at  18:29:32
+   Duration  9.11s (transform 1.06s, setup 288ms, import 1.52s, tests 5.68s, environment 1.35s)
+
+
+CYCLE 16 GREEN — EXCERPT FROM .tmp/ux006-cycle16-green.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run --run src/RunExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  16 passed (16)
+   Start at  18:30:02
+   Duration  8.56s (transform 1.05s, setup 277ms, import 1.49s, tests 5.21s, environment 1.30s)

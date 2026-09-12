@@ -1,0 +1,66 @@
+
+> bess-react-ui@0.1.0 test:browser
+> npm run build && playwright test --grep UX-006
+
+
+> bess-react-ui@0.1.0 build
+> tsc -b && vite build
+
+vite v8.0.16 building client environment for production...
+
+transforming...✓ 93 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.47 kB │ gzip:   0.30 kB
+dist/assets/index-HGxSIVkk.css   26.65 kB │ gzip:   6.05 kB
+dist/assets/index-CyJxCoO-.js   993.73 kB │ gzip: 285.17 kB
+
+✓ built in 886ms
+npm.cmd : [plugin builtin:vite-reporter]
+En línea: 2 Carácter: 41
++ ... /:memory:'; npm.cmd run test:browser -- --grep UX-006 *> ../.tmp/ux00 ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([plugin builtin:vite-reporter] :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking:
+https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+
+Running 1 test using 1 worker
+
+
+(node:25636) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1/1] e2e\react-foundation.spec.ts:2144:1 › UX-006 reads results, audits the snapshot and compares the chosen execution through the real API
+  1) e2e\react-foundation.spec.ts:2144:1 › UX-006 reads results, audits the snapshot and compares the chosen execution through the real API
+
+    Error: expect(received).toBeTruthy()
+
+    Received: false
+
+      2178 |   await page.setViewportSize({ width: 320, height: 900 });
+      2179 |   await page.screenshot({ path: testInfo.outputPath("comparacion-320.png"), fullPage: true });
+    > 2180 |   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+           |                                                                                                ^
+      2181 |   await page.setViewportSize({ width: 1280, height: 720 });
+      2182 |   const violations = (await new AxeBuilder({ page }).analyze()).violations.filter((item) => item.impact === "serious" || item.impact === "critical");
+      2183 |   expect(violations).toEqual([]);
+        at C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\frontend\e2e\react-foundation.spec.ts:2180:96
+
+    Error Context: test-results\react-foundation-UX-006-re-f4897-cution-through-the-real-API\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\react-foundation-UX-006-re-f4897-cution-through-the-real-API\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\react-foundation-UX-006-re-f4897-cution-through-the-real-API\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+  1 failed
+    e2e\react-foundation.spec.ts:2144:1 › UX-006 reads results, audits the snapshot and compares the chosen execution through the real API

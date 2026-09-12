@@ -235,7 +235,7 @@ test("representative React pages pass automated accessibility and keyboard smoke
   // Results page.
   await page.goto(`/react/runs/${run.id}`);
   await expect(
-    page.getByRole("heading", { name: `Run ${run.id}` }),
+    page.getByRole("heading", { name: `Ejecución ${run.id}` }),
   ).toBeVisible();
   await expectNoSeriousAccessibilityViolations(page, "results");
   await expectKeyboardReachesInteractiveControls(page, "results");

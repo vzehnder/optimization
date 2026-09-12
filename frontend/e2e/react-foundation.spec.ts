@@ -656,7 +656,7 @@ test("React client portal reviews published results, downloads allowlisted artif
 
   await page.goto(`/react/runs/${run.id}`);
   await expect(
-    page.getByRole("heading", { name: `Run ${run.id}` }),
+    page.getByRole("heading", { name: `Ejecución ${run.id}` }),
   ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Publication Drafts" }),
@@ -1505,16 +1505,17 @@ test("React manual run lifecycle launches, polls success, and exposes failure lo
   });
   await expect(page).toHaveURL(new RegExp(`/react/runs/${successRun.id}$`));
   await expect(
-    page.getByRole("heading", { name: `Run ${successRun.id}` }),
+    page.getByRole("heading", { name: `Ejecución ${successRun.id}` }),
   ).toBeVisible();
-  await expect(page.getByText("succeeded", { exact: true })).toBeVisible({
+  await expect(page.getByText("Finalizada", { exact: true })).toBeVisible({
     timeout: 5000,
   });
+  await page.getByText("Detalle técnico y auditoría", { exact: true }).click();
   await expect(page.getByText("2026-06-23T12:15:01Z")).toBeVisible();
   await expect(page.getByText("2026-06-23T12:15:03Z")).toBeVisible();
   await expect(page.getByText("2.00 s")).toBeVisible();
   await expect(
-    page.getByLabel("Run state").getByText("0", { exact: true }),
+    page.getByLabel("Registro de ejecución").getByText("0", { exact: true }),
   ).toBeVisible();
   await expect(
     page
@@ -1591,14 +1592,15 @@ test("React manual run lifecycle launches, polls success, and exposes failure lo
   });
   await expect(page).toHaveURL(new RegExp(`/react/runs/${failureRun.id}$`));
   await expect(
-    page.getByText("Reintentando actualizacion de run."),
+    page.getByText("Reintentando consulta de la ejecución."),
   ).toBeVisible({ timeout: 5000 });
-  await expect(page.getByText("failed", { exact: true })).toBeVisible({
+  await expect(page.getByText("Fallida", { exact: true })).toBeVisible({
     timeout: 6000,
   });
   await expect(
     page.getByText("optimization failed before solve").first(),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Ver diagnóstico" }).click();
   await expect(page.getByText(/solver stdout/)).toBeVisible();
   await expect(page.getByText(/second line/)).toBeVisible();
   await expect(page.getByText(/"status":"error"/)).toBeVisible();
@@ -1831,8 +1833,9 @@ test("React run results renders Plotly charts, tables, missing legacy columns, a
 
   await page.goto(`/react/runs/${run.id}`);
   await expect(
-    page.getByRole("heading", { name: `Run ${run.id}` }),
+    page.getByRole("heading", { name: `Ejecución ${run.id}` }),
   ).toBeVisible();
+  await page.getByText("Ver resumen completo", { exact: true }).click();
   await expect(page.getByText("hydro_system")).toBeVisible();
   await expect(page.getByText("total_hydro_generation_mwh")).toBeVisible();
   await expect(
@@ -1847,14 +1850,16 @@ test("React run results renders Plotly charts, tables, missing legacy columns, a
   await expect(page.locator(".js-plotly-plot").first()).toBeVisible({
     timeout: 10_000,
   });
+  await page.getByText("Ver tablas de resultados", { exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "System Dispatch" }),
+    page.getByRole("heading", { name: "Despacho del sistema" }),
   ).toBeVisible();
   await expect(page.getByText("total_hydro_power_mw")).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Asset Dispatch" }),
+    page.getByRole("heading", { name: "Despacho por componente" }),
   ).toBeVisible();
   await expect(page.getByText("hydro_1")).toBeVisible();
+  await page.getByText("Detalle técnico y auditoría", { exact: true }).click();
   await expect(page.getByText("application/json")).toBeVisible();
 
   const downloadPromise = page.waitForEvent("download");
@@ -1923,12 +1928,14 @@ test("React run results renders Plotly charts, tables, missing legacy columns, a
   });
 
   await page.goto(`/react/runs/${legacyRun.id}`);
+  await page.getByText("Ver resumen completo", { exact: true }).click();
   await expect(page.getByText("legacy_system")).toBeVisible();
-  await expect(page.getByText("Unavailable charts")).toBeVisible();
+  await expect(page.getByText("Gráficos no disponibles")).toBeVisible();
   await expect(
     page.getByText("Missing columns: total_hydro_power_mw"),
   ).toBeVisible();
   await page.reload();
+  await page.getByText("Ver resumen completo", { exact: true }).click();
   await expect(page.getByText("legacy_system")).toBeVisible();
   await expect(
     page.getByText("Missing columns: total_hydro_power_mw"),
@@ -2015,7 +2022,7 @@ test("React dashboard templates and publications cover draft preview publish and
   ).toBeVisible();
 
   await page.goto(`/react/runs/${run.id}`);
-  await expect(page.getByText("succeeded", { exact: true })).toBeVisible();
+  await expect(page.getByText("Finalizada", { exact: true })).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Publication Drafts" }),
   ).toBeVisible();
@@ -2133,3 +2140,160 @@ function chart(
     message: "",
   };
 }
+
+test("UX-006 reads results, audits the snapshot and compares the chosen execution through the real API", async ({
+  page,
+}, testInfo) => {
+  await ensureAdminSession(page);
+  const api = page.context().request;
+  const projects = (await (await api.get("/api/projects")).json())
+    .projects as Array<{ id: number; name: string }>;
+  const project = projects.find(
+    (item) => item.name === "UX-006 Resultados de referencia",
+  )!;
+  const scenario = (
+    await (await api.get(`/api/projects/${project.id}/scenarios`)).json()
+  ).scenarios[0] as { id: number };
+  const runs = (
+    await (await api.get(`/api/scenarios/${scenario.id}/runs`)).json()
+  ).runs as Array<{ id: number; status: string }>;
+  const succeeded = runs
+    .filter((item) => item.status === "succeeded")
+    .sort((left, right) => left.id - right.id);
+  const baseline = succeeded[0];
+  const candidate = succeeded[1];
+  const failed = runs.find((item) => item.status === "failed")!;
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto(`/react/runs/${baseline.id}?origin=ux006&section=runs`);
+  await expect(page.getByText("Finalizada", { exact: true })).toBeVisible();
+  await expect(page.getByText("1.000 USD", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Contexto de la ejecución" }),
+  ).toContainText("[2026-01-01T00:00:00-03:00, 2026-01-01T02:00:00-03:00)");
+  await page.screenshot({ path: testInfo.outputPath("resultado-1280.png") });
+  await page.getByText("Detalle técnico y auditoría", { exact: true }).click();
+  await page.getByText("Ver snapshot tecnico", { exact: true }).click();
+  await expect(
+    page.getByRole("region", { name: "Snapshot tecnico" }),
+  ).toContainText('"case_name": "hybrid_system"');
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("link", { name: "summary.json", exact: true }).click();
+  const download = await downloadPromise;
+  expect(
+    JSON.parse(readFileSync((await download.path())!, "utf8"))
+      .objective_value_usd,
+  ).toBe(1000);
+  await page.getByText("Detalle técnico y auditoría", { exact: true }).click();
+  await page.getByRole("link", { name: "Comparar esta ejecución" }).click();
+  await expect(page.getByLabel("Corrida base")).toHaveValue(
+    String(baseline.id),
+  );
+  await expect(page.getByLabel("Corrida candidata")).toHaveValue(
+    String(candidate.id),
+  );
+  await expect(
+    page.getByRole("row", {
+      name: "Valor objetivo USD 1.000 1.500 500",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Contexto de las corridas" }),
+  ).toContainText("Alternativa de invierno");
+  await page.reload();
+  await expect(page.getByLabel("Corrida base")).toHaveValue(
+    String(baseline.id),
+  );
+  await expect(
+    page.getByRole("row", {
+      name: "Valor objetivo USD 1.000 1.500 500",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("comparacion-1280.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.screenshot({
+    path: testInfo.outputPath("comparacion-320.png"),
+    fullPage: true,
+  });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBeTruthy();
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const violations = (
+    await new AxeBuilder({ page }).analyze()
+  ).violations.filter(
+    (item) => item.impact === "serious" || item.impact === "critical",
+  );
+  expect(violations).toEqual([]);
+  await page.getByRole("link", { name: "Ver ejecución candidata" }).click();
+  await expect(page.getByText("1.500 USD", { exact: true })).toBeVisible();
+  await page.goBack();
+  await page.getByRole("link", { name: "Ver ejecución base" }).click();
+  await expect(page.getByText("1.000 USD", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/origin=ux006/);
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 320, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.screenshot({
+      path: testInfo.outputPath(`resultado-${viewport.width}.png`),
+      fullPage: true,
+    });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBeTruthy();
+  }
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.evaluate(() => {
+    document.body.style.zoom = "200%";
+  });
+  await page.screenshot({
+    path: testInfo.outputPath("resultado-zoom200.png"),
+    fullPage: true,
+  });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBeTruthy();
+  expect(
+    (await new AxeBuilder({ page }).analyze()).violations.filter(
+      (item) => item.impact === "serious" || item.impact === "critical",
+    ),
+  ).toEqual([]);
+  await page.evaluate(() => {
+    document.body.style.zoom = "";
+  });
+  await page.goto(`/react/runs/${failed.id}`);
+  await expect(page.getByText("Fallida", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("No existe una solución factible para el período.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("fallo-1280.png") });
+  await page.getByRole("button", { name: "Ver diagnóstico" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    page.getByRole("heading", { name: "Diagnóstico de la ejecución" }),
+  ).toBeFocused();
+  await expect(
+    page.getByText("Diagnóstico de referencia: modelo inviable.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect(
+    (await new AxeBuilder({ page }).analyze()).violations.filter(
+      (item) => item.impact === "serious" || item.impact === "critical",
+    ),
+  ).toEqual([]);
+});

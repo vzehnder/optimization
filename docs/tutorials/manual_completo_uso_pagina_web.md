@@ -1476,12 +1476,12 @@ en el objeto; no se arregla repitiendo **Ejecutar variante**.
 
 ### 20.1 Estados del run
 
-| Estado backend | Significado                                          |
-| -------------- | ---------------------------------------------------- |
-| `queued`       | Creado y esperando worker.                           |
-| `running`      | Julia está ejecutándose.                             |
-| `succeeded`    | Finalizó correctamente y se registraron resultados.  |
-| `failed`       | Falló validación, ejecución o persistencia asociada. |
+| Estado visible | Estado backend | Significado |
+| --- | --- | --- |
+| En cola | `queued` | Creado y esperando worker. |
+| En ejecución | `running` | Julia está ejecutándose. |
+| Finalizada | `succeeded` | Finalizó correctamente y se registraron resultados. |
+| Fallida | `failed` | Falló validación, ejecución o persistencia asociada. |
 
 La vista refresca automáticamente mientras no hay estado terminal.
 
@@ -1489,14 +1489,19 @@ La vista refresca automáticamente mientras no hay estado terminal.
 
 Revisar en este orden:
 
-1. **Run state**: estado, timestamps, exit code y trigger.
-2. **Lineage**: proyecto, escenario y versión.
-3. **Procedencia**: hashes o información de generación.
-4. **Series de entrada**: set, versión, revisión y hash por señal.
-5. **Snapshot técnico**: contrato congelado.
-6. **Run Results**: summary, tablas y charts.
-7. **Publication Drafts**, si el run fue exitoso.
-8. **Artifacts**.
+1. Identidad, estado, caso, variante y período de la versión inmutable.
+2. **Resumen de resultados**, con KPIs y unidades, o explicación de fallo.
+3. **Comparar esta ejecución** y **Preparar informe**, si fue exitosa.
+4. **Ver resumen completo**, gráficos y **Ver tablas de resultados**.
+5. **Detalle técnico y auditoría**: **Registro de ejecución** con estado
+   técnico, tiempos y origen; **Procedencia de esta ejecución** con proyecto,
+   escenario y versión; **Procedencia** con hashes; **Series de entrada**;
+   **Snapshot tecnico**, diagnóstico y **Archivos de la ejecución**.
+
+El período se conserva como `[inicio, fin)`, incluyendo el offset registrado.
+Si la versión histórica carece de fechas, la pantalla lo indica y muestra su
+cantidad de períodos. **Reintentar contexto** permite recuperar una consulta
+fallida de identidad sin ocultar el resultado.
 
 El experto debe comparar al menos un hash de **Series de entrada** con la
 revisión de origen correspondiente y confirmar que el rango del snapshot es
@@ -1527,6 +1532,17 @@ Los gráficos no disponibles aparecen como tales cuando faltan columnas. Eso no
 convierte automáticamente el run en fallido; puede ser un caso legado o un
 dashboard que pide una señal no producida.
 
+**Ver resumen completo** conserva los campos originales y los resultados
+anidados. Los KPIs muestran unidades y formato numérico local; **No disponible**
+no equivale a `0`. En **Ver tablas de resultados**, las páginas de 25 filas
+se recorren con **Página anterior** y **Página siguiente**, sin perder la página
+al cerrar y abrir el panel. Las tablas anchas tienen desplazamiento propio.
+
+**Reintentar resultados** repite una consulta fallida sin lanzar una corrida.
+Un fallo temporal al actualizar mantiene el último resultado consultado con un
+aviso; un rechazo de acceso lo retira. La ausencia de un archivo, un resultado
+ilegible y un fallo del proceso tienen mensajes distintos.
+
 Validaciones mínimas del experto:
 
 - `solver_status` y `termination_status` esperados;
@@ -1549,13 +1565,16 @@ Según el caso pueden aparecer:
 - input snapshot;
 - stdout y stderr.
 
-Descargar desde los enlaces registrados. No construir rutas de archivo
+Abrir **Detalle técnico y auditoría** → **Archivos de la ejecución** y
+descargar desde los enlaces registrados. **Reintentar archivos** recupera su
+inventario si falló la consulta. No construir rutas de archivo
 manualmente. Guardar junto con la evidencia de la sesión el Run ID y los hashes,
 no solo un CSV suelto.
 
 ### 20.5 Diagnosticar un run fallido
 
-La sección de fallo puede mostrar:
+La explicación del fallo aparece al inicio. **Ver diagnóstico** abre la
+auditoría y lleva el foco al diagnóstico, que puede mostrar:
 
 - error estructurado;
 - stdout;
@@ -1607,7 +1626,8 @@ para auditoría.
 
 ## 22. Comparar corridas
 
-Desde el escenario, presionar **Comparar corridas**.
+Desde el escenario, abrir **Ejecuciones** → **Comparar corridas**, o usar
+**Comparar esta ejecución** junto al resumen para dejarla elegida como base.
 
 1. Elegir **Corrida base**.
 2. Elegir **Corrida candidata**.
@@ -1616,6 +1636,18 @@ Desde el escenario, presionar **Comparar corridas**.
 5. Revisar **Diferencias en KPIs**.
 6. En **Diferencias por periodo**, elegir una **Serie**.
 7. Revisar base, candidata y diferencia periodo a periodo.
+
+La selección se conserva en la URL y se valida al abrir o recargar el enlace.
+Si una ejecución dejó de estar disponible, elegir otra explícitamente. La API
+decide si las corridas pertenecen al mismo caso y tienen resultados indexados.
+**Reintentar comparación** conserva la selección cuando falla la consulta.
+
+El contexto muestra nombres, variantes y rangos; los KPIs y la serie indican
+sus unidades. Si los períodos difieren, aparece una advertencia: los totales
+cubren intervalos distintos y las diferencias por período solo existen donde
+ambas corridas tienen datos. **No disponible** fuera del solapamiento no es
+cero. Los enlaces **Ejecución** de ambos lados abren sus resultados y auditoría;
+volver atrás recupera la comparación.
 
 Interpretar una diferencia en tres capas:
 

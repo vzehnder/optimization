@@ -252,21 +252,23 @@ describe("application shell", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "Run Results" }),
+      await screen.findByRole("heading", { name: "Resumen de resultados" }),
     ).toBeVisible();
+    await user.click(screen.getByText("Ver resumen completo"));
     expect(await screen.findByText("hybrid_system")).toBeVisible();
     expect(screen.getByText("Nombre del caso")).toBeVisible();
     expect(screen.queryByText("Case Name")).not.toBeInTheDocument();
     expect(screen.getByText("1250.5")).toBeVisible();
     expect(screen.getByText("total_market_value_usd")).toBeVisible();
     expect(screen.getByText("total_hydro_generation_mwh")).toBeVisible();
+    await user.click(screen.getByText("Ver tablas de resultados"));
     expect(
-      screen.getByRole("heading", { name: "System Dispatch" }),
+      screen.getByRole("heading", { name: "Despacho del sistema" }),
     ).toBeVisible();
     expect(screen.getAllByText("grid_import_mw").length).toBeGreaterThan(0);
     expect(screen.getAllByText("2.5").length).toBeGreaterThan(0);
     expect(
-      screen.getByRole("heading", { name: "Asset Dispatch" }),
+      screen.getByRole("heading", { name: "Despacho por componente" }),
     ).toBeVisible();
     expect(screen.getByText("grid_1")).toBeVisible();
     expect(screen.getByRole("heading", { name: "Energy Price" })).toBeVisible();
@@ -275,6 +277,7 @@ describe("application shell", () => {
     expect(
       screen.getByText("Missing columns: total_hydro_power_mw"),
     ).toBeVisible();
+    await user.click(screen.getByText("Detalle técnico y auditoría"));
     const artifactLink = screen.getByRole("link", { name: "summary.json" });
     expect(artifactLink).toHaveAttribute(
       "href",
@@ -421,11 +424,12 @@ describe("application shell", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: "Run 99" }),
+      await screen.findByRole("heading", { name: "Ejecución 99" }),
     ).toBeVisible();
     expect(window.location.pathname).toBe("/react/runs/99");
-    expect(screen.getByText("queued")).toBeVisible();
+    expect(screen.getByText("En cola")).toBeVisible();
     expect(screen.getAllByText("Version 3").length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByText("Detalle técnico y auditoría"));
     expect(screen.getByText("Creado")).toBeVisible();
     expect(screen.getByText("2026-06-23T12:15:00Z")).toBeVisible();
   });
@@ -665,18 +669,23 @@ describe("application shell", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("queued")).toBeVisible();
+    expect(await screen.findByText("En cola")).toBeVisible();
     expect(
-      await screen.findByText("Reintentando actualizacion de run.", undefined, {
-        timeout: 2500,
-      }),
+      await screen.findByText(
+        "Reintentando consulta de la ejecución.",
+        undefined,
+        {
+          timeout: 2500,
+        },
+      ),
     ).toBeVisible();
     expect(
-      await screen.findByText("running", undefined, { timeout: 4000 }),
+      await screen.findByText("En ejecución", undefined, { timeout: 4000 }),
     ).toBeVisible();
     expect(
-      await screen.findByText("failed", undefined, { timeout: 4000 }),
+      await screen.findByText("Fallida", undefined, { timeout: 4000 }),
     ).toBeVisible();
+    await userEvent.click(screen.getByText("Detalle técnico y auditoría"));
     expect(
       screen.getAllByText("optimization failed before solve").length,
     ).toBeGreaterThan(0);
@@ -1165,7 +1174,7 @@ describe("application shell", () => {
     await waitFor(() => expect(bindCalls).toBe(1));
     await waitFor(() => expect(runCalls).toBe(1));
     expect(
-      await screen.findByRole("heading", { name: "Run 77" }),
+      await screen.findByRole("heading", { name: "Ejecución 77" }),
     ).toBeVisible();
   });
 
@@ -1302,11 +1311,19 @@ describe("application shell", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "Run 99" }),
+      await screen.findByRole("heading", { name: "Ejecución 99" }),
     ).toBeVisible();
-    expect(await screen.findByText("Stress prices")).toBeVisible();
-    expect(screen.getByText(/2026-01-01T00:00:00-03:00/)).toBeVisible();
-    expect(screen.getByText(/2026-01-02T00:00:00-03:00/)).toBeVisible();
+    const context = screen.getByRole("region", {
+      name: "Contexto de la ejecución",
+    });
+    expect(await within(context).findByText("Stress prices")).toBeVisible();
+    expect(
+      within(context).getByText(/2026-01-01T00:00:00-03:00/),
+    ).toBeVisible();
+    expect(
+      within(context).getByText(/2026-01-02T00:00:00-03:00/),
+    ).toBeVisible();
+    await userEvent.click(screen.getByText("Detalle técnico y auditoría"));
     expect(screen.getByText(/Rolling API schedule/)).toBeVisible();
     expect(screen.getByText(/schedule 31 \| tick 99/)).toBeVisible();
   });
@@ -1318,8 +1335,9 @@ describe("application shell", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "Run 99" }),
+      await screen.findByRole("heading", { name: "Ejecución 99" }),
     ).toBeVisible();
+    await userEvent.click(screen.getByText("Detalle técnico y auditoría"));
     expect(await screen.findByText(/import_price_usd_per_mwh/)).toBeVisible();
     expect(screen.getByText(/revision 3/)).toBeVisible();
     expect(screen.getByText(/sha256:abcde/)).toBeVisible();
@@ -1333,8 +1351,9 @@ describe("application shell", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "Run 99" }),
+      await screen.findByRole("heading", { name: "Ejecución 99" }),
     ).toBeVisible();
+    await user.click(screen.getByText("Detalle técnico y auditoría"));
     await screen.findByText("Ver snapshot tecnico");
     expect(screen.queryByText(/HiGHS-TS3-007-MARKER/)).not.toBeInTheDocument();
 
@@ -1683,7 +1702,7 @@ describe("application shell", () => {
       },
     ]);
     expect(
-      await screen.findByRole("heading", { name: "Run 78" }),
+      await screen.findByRole("heading", { name: "Ejecución 78" }),
     ).toBeVisible();
   });
 
@@ -2067,7 +2086,7 @@ describe("application shell", () => {
     await waitFor(() => expect(bindCalls).toBe(1));
     await waitFor(() => expect(runCalls).toBe(1));
     expect(
-      await screen.findByRole("heading", { name: "Run 88" }),
+      await screen.findByRole("heading", { name: "Ejecución 88" }),
     ).toBeVisible();
 
     firstRender.unmount();
@@ -7432,8 +7451,9 @@ describe("application shell", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "Run 99" }),
+      await screen.findByRole("heading", { name: "Ejecución 99" }),
     ).toBeVisible();
+    await userEvent.click(screen.getByText("Detalle técnico y auditoría"));
     expect(await screen.findByText("Diagrama hidraulico v3")).toBeVisible();
     expect(screen.getByText("1111aaaa2222")).toBeVisible();
     expect(screen.getByText("4444dddd5555")).toBeVisible();

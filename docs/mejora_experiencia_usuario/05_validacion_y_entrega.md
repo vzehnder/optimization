@@ -16,6 +16,25 @@ La [implementación sobre `e4eec65`](evidencia/ux-005/README.md) queda In Review
 
 Resultado: **250 pruebas funcionales aprobadas** (179 componentes, 14 navegador y 57 Python). Se omiten 13 pruebas PostgreSQL por falta de configuración dedicada. TypeScript, ESLint, build, contrato OpenAPI, formato del código frontend modificado y `git diff --check` pasan. `npm.cmd run check` falla en Prettier por 24 archivos previos no modificados; lista y salida en la evidencia. La comprobación visual incluye 1440, 1280 y 320 píxeles, ampliación CSS al 200 %, teclado y axe sin serious/critical en la vista comprobada. No se ejecutó Julia real porque no cambian generación, materialización ni lógica matemática; se usan sus validadores existentes para revisar cobertura. No es una prueba con participantes ni una auditoría completa de accesibilidad.
 
+## Evidencia posterior: UX-006
+
+La [implementación sobre `61dc87a`](evidencia/ux-006/README.md) queda In Review:
+resultados antes de auditoría, diagnóstico accesible, tablas paginadas,
+recuperación de consultas y comparación con base en el enlace, unidades y
+advertencia de períodos diferentes. F1/F2 se confirmaron antes de las pruebas.
+
+Resultado: **273 pruebas funcionales aprobadas** (195 componentes, 15 navegador,
+63 Python), sin duplicar la línea base ni las repeticiones focalizadas.
+TypeScript, ESLint, build y formato del frontend modificado pasan. El chequeo
+global falla en Prettier por 23 archivos previos no modificados. Las capturas
+locales regenerables comprueban resultado, fallo y comparación; resultado a
+1280×720, 1440×900, 320×900 y ampliación CSS al 200 %, comparación a 1280 y 320.
+Axe no detecta serious/critical en resultado, comparación ni diagnóstico; el
+teclado abre y enfoca el diagnóstico. La suite conserva Plotly, descargas,
+publicaciones y revocación del portal. No se cambian contratos de producción
+ni se ejecuta Julia real, PostgreSQL o toda la suite Python. Las ejecuciones
+indexadas del servidor smoke son sintéticas; no validan resultados matemáticos.
+
 ## Evidencia histórica de la revisión del plan
 
 El 2026-09-12 se ejecutó desde `frontend/`:

@@ -2078,3 +2078,38 @@ button:focus-visible {
     width: 100%;
   }
 }
+.run-context p {
+  margin: 0 0 0.5rem;
+  overflow-wrap: anywhere;
+}
+
+.result-kpis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 2rem;
+  margin: 1rem 0;
+}
+
+.result-kpis dd {
+  margin: 0.25rem 0 0;
+  font-size: 1.7rem;
+  font-weight: 700;
+}
+
+.run-audit > summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.comparison-picker label {
+  display: grid;
+  gap: 0.4rem;
+  flex: 1 1 20rem;
+  min-width: 0;
+}
+
+.comparison-picker select {
+  width: 100%;
+  min-width: 0;
+  padding: 0.5rem;
+}

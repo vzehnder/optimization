@@ -1,0 +1,39 @@
+
+> bess-react-ui@0.1.0 test:browser
+> npm run build && playwright test --grep UX-006
+
+
+> bess-react-ui@0.1.0 build
+> tsc -b && vite build
+
+vite v8.0.16 building client environment for production...
+
+transforming...✓ 93 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.47 kB │ gzip:   0.30 kB
+dist/assets/index-bW-eixwm.css   26.79 kB │ gzip:   6.08 kB
+dist/assets/index-BXgBRy7D.js   993.75 kB │ gzip: 285.17 kB
+
+✓ built in 796ms
+npm.cmd : [plugin builtin:vite-reporter]
+En línea: 2 Carácter: 41
++ ... /:memory:'; npm.cmd run test:browser -- --grep UX-006 *> ../.tmp/ux00 ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([plugin builtin:vite-reporter] :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking:
+https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+
+Running 1 test using 1 worker
+
+
+(node:16420) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1/1] e2e\react-foundation.spec.ts:2144:1 › UX-006 reads results, audits the snapshot and compares the chosen execution through the real API
+  1 passed (17.5s)

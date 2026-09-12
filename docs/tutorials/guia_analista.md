@@ -461,20 +461,26 @@ protegido; la revision general no reemplaza una revision fijada silenciosamente.
 
 ### Estados y detalle de la corrida
 
-Una corrida pasa por `queued` -> `running` -> `succeeded` | `failed`. El
-detalle del run muestra:
+Una corrida pasa por **En cola** → **En ejecución** → **Finalizada** o
+**Fallida**. El detalle empieza por el caso, la variante y el período del
+snapshot, seguido del resumen de resultados con unidades. **Ver resumen
+completo** conserva los indicadores técnicos y resultados por activo/hidro.
+**Ver tablas de resultados** abre el despacho del sistema y por componente;
+**Página anterior** y **Página siguiente** recorren sus filas de 25 en 25.
 
-- **Run state**: estado, tiempos, quien/que la disparo (manual, schedule o
-  consola de operador).
-- **Lineage** y **Procedencia**: proyecto/escenario/version, hashes de
-  topologia y parametros.
-- **Series de entrada**: por cada senal, el set/version/revision/hash exacto
-  consumido.
-- **Snapshot tecnico**: el `system_case_json` congelado.
-- Si fallo: error estructurado, stdout y stderr del solver.
-- Si termino bien: **resultados** (tablas y graficos indexados en BBDD),
-  seccion de **publicacion** y **artefactos** descargables (`dispatch.csv`,
-  `asset_dispatch.csv`, `summary.json`, `model_metadata.json`).
+Si falla la ejecución, su explicación aparece arriba. **Ver diagnóstico**
+abre y enfoca los logs dentro de **Detalle técnico y auditoría**. Este panel
+también contiene el estado técnico original (`queued`, `running`, `succeeded`,
+`failed`), tiempos, origen manual/programado/consola, procedencia, hashes,
+series consumidas, **Snapshot tecnico** y **Archivos de la ejecución**.
+Desde los archivos se descargan los artefactos registrados, como `dispatch.csv`,
+`asset_dispatch.csv`, `summary.json` y `model_metadata.json`.
+
+Un fallo de consulta es distinto de una ejecución fallida. **Reintentar
+resultados**, **Reintentar contexto** o **Reintentar archivos** vuelven a
+consultar sin lanzar otra corrida. Ante un fallo temporal de actualización se
+conserva el último resultado consultado; si el servidor rechaza su acceso,
+se retira. **No disponible** indica ausencia y no equivale a cero.
 
 ### Camino experto (opcional)
 
@@ -491,11 +497,17 @@ correr desde la variante.
 - **Plantillas de dashboard**: en **Informes** del proyecto puedes guardar
   configuraciones de graficos como plantillas reutilizables y aplicarlas a
   corridas nuevas.
-- **Comparar corridas**: desde **Ejecuciones** del escenario, **Comparar corridas** abre una
-  vista que enfrenta dos runs del mismo caso: contexto de cada una (variante,
-  rango, hashes), KPIs lado a lado y series superpuestas. Como cada run
-  guarda su lineage completo, la comparacion te dice tambien *por que*
-  difieren (datos distintos, parametros distintos, o ambos).
+- **Comparar esta ejecución** abre la comparación con la corrida actual como
+  base. También puedes entrar por **Comparar corridas** en **Ejecuciones** del
+  escenario y elegir dos corridas exitosas. La selección queda en el enlace y
+  se valida al abrirlo; la API comprueba compatibilidad e indexación.
+- Revisa caso, variante, rangos y unidades antes de los KPIs y diferencias por
+  período. Si los rangos difieren, la pantalla lo advierte: los totales cubren
+  intervalos diferentes y solo hay diferencias donde ambas tienen datos.
+  **No disponible** fuera del solapamiento no significa cero. Los enlaces de
+  ambas ejecuciones permiten consultar hashes y entradas en su auditoría.
+- **Preparar informe**, junto al resumen, lleva a las publicaciones de esa
+  corrida. Crear un borrador y publicarlo siguen siendo acciones explícitas.
 
 ## 10. Entregar Resultados A Usuarios Externos
 

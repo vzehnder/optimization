@@ -1,0 +1,12 @@
+
+> bess-react-ui@0.1.0 test
+> vitest run --run src/RunExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  16 passed (16)
+   Start at  18:30:02
+   Duration  8.56s (transform 1.05s, setup 277ms, import 1.49s, tests 5.21s, environment 1.30s)

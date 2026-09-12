@@ -3,7 +3,7 @@
 Fecha de creación: 2026-09-12. Última actualización: 2026-09-12.
 Referencia: [plan y orden recomendado](../README.md).
 
-Este archivo registra el avance de los diez tickets del plan UX. Los tickets contienen los pasos y criterios de aceptación; el tracker centraliza estado, responsables, dependencias y evidencia de resolución. UX-000 está aceptado tras confirmar las fronteras; UX-001 y UX-005 tienen implementación y evidencia para revisión.
+Este archivo registra el avance de los diez tickets del plan UX. Los tickets contienen los pasos y criterios de aceptación; el tracker centraliza estado, responsables, dependencias y evidencia de resolución. UX-000 está aceptado tras confirmar las fronteras; UX-001, UX-005 y UX-006 tienen implementación y evidencia para revisión.
 
 ## Estados
 
@@ -27,18 +27,20 @@ Un ticket pendiente de su orden de ejecución puede permanecer en `Todo`; no hac
 | UX-003 | [Importación guiada de series de tiempo](UX-003-importacion-guiada.md) | P1 | Todo | Sin asignar | UX-002 | — | — |
 | UX-004 | [Encontrar y usar datos desde la necesidad del modelo](UX-004-catalogo-contextual.md) | P1 | Todo | Sin asignar | UX-001 | — | — |
 | UX-005 | [Revisar la preparación y ejecutar con contexto](UX-005-revisar-y-ejecutar.md) | P0 | In Review | Codex | UX-001 | `feat(ux): guide variant preparation and execution`, sobre `e4eec65`; [evidencia](../evidencia/ux-005/README.md) | Pendiente de aceptación del resultado |
-| UX-006 | [Mostrar primero resultados y facilitar la comparación](UX-006-resultados-y-comparacion.md) | P0 | Todo | Sin asignar | UX-001 | — | — |
+| UX-006 | [Mostrar primero resultados y facilitar la comparación](UX-006-resultados-y-comparacion.md) | P0 | In Review | Codex | UX-001 | `feat(ux): prioritize results and contextual run comparison`, sobre `61dc87a`; [implementación, TDD y evidencia](../evidencia/ux-006/README.md) | Pendiente de aceptación del resultado |
 | UX-007 | [Configurar y publicar informes con claridad](UX-007-configurar-y-publicar-informes.md) | P1 | Todo | Sin asignar | UX-006 | — | — |
 | UX-008 | [Simplificar configuración y preparación de la consola](UX-008-consola-de-operador.md) | P1 | Todo | Sin asignar | UX-001 | — | — |
 | UX-009 | [Administración y acciones sensibles comprensibles](UX-009-administracion-comprensible.md) | P2 | Todo | Sin asignar | UX-001 | — | — |
 
 ## Próximos tickets disponibles
 
-UX-000 está cerrado. UX-001 está integrado en `e4eec65` y UX-005 tiene implementación local completa para revisión. La aceptación de producto de ambos sigue pendiente. Actualizar esta sección al cerrar o reabrir un ticket:
+UX-000 está cerrado. UX-001 está integrado en `e4eec65` y UX-005 en `61dc87a`.
+UX-006 tiene implementación completa y commit solicitado. La aceptación de producto de los
+tres sigue pendiente. Actualizar esta sección al cerrar o reabrir un ticket:
 
-1. Revisar y aceptar [UX-001](../evidencia/ux-001/README.md) y [UX-005](../evidencia/ux-005/README.md). El fallo de formato previo restante de 24 archivos no se cuenta como chequeo aprobado.
-2. Priorizar UX-006, siguiente ticket recomendado para completar la primera entrega útil.
-3. Continuar con UX-002 → UX-003, UX-004, UX-007 y UX-008 según la prioridad de producto y sus dependencias.
+1. Revisar y aceptar [UX-001](../evidencia/ux-001/README.md), [UX-005](../evidencia/ux-005/README.md) y [UX-006](../evidencia/ux-006/README.md). El formato previo pendiente en 23 archivos no se cuenta como chequeo aprobado.
+2. Priorizar UX-002, siguiente ticket del orden recomendado.
+3. Continuar con UX-003, UX-004, UX-007 y UX-008 según la prioridad de producto y sus dependencias.
 4. Completar UX-009 y verificar la integración de los tickets incluidos en cada entrega.
 
 Cuando se integren UX-003/004 con UX-005, volver a comprobar el recorrido desde datos hasta ejecución. La aceptación de cada ticket no reemplaza esta comprobación de integración.
@@ -113,12 +115,15 @@ No hay bloqueos registrados al crear el tracker. Añadir una fila cuando exista 
 | 2026-09-12 | UX-005 | Todo → In Progress | Lectura del paquete sobre `e4eec65`; F1/F2/F3 confirmadas con «confirmo» antes de las pruebas nuevas. Primer ciclo: necesidad faltante, enlace de corrección y ejecución bloqueada. |
 | 2026-09-12 | UX-005 | In Progress → In Review | [Preparación, fuentes, período y ejecución separados; ciclos TDD y 250 pruebas funcionales aprobadas](../evidencia/ux-005/README.md). 13 pruebas PostgreSQL omitidas; formato global pendiente en 24 archivos previos. Sin commit/PR nuevo. |
 | 2026-09-12 | UX-005 | In Review → In Review | Commit solicitado por el usuario: `feat(ux): guide variant preparation and execution`. Capturas excluidas de Git, conservadas localmente y regenerables por Playwright. |
+| 2026-09-12 | UX-006 | Todo → In Progress | Lectura del paquete sobre `61dc87a`, 130 regresiones de base y F1/F2 confirmadas con «confirmo» antes de las pruebas nuevas. |
+| 2026-09-12 | UX-006 | In Progress → In Review | [Resultado primero, diagnóstico, reintentos, tablas paginadas y comparación contextual](../evidencia/ux-006/README.md). 273 pruebas aprobadas; formato previo pendiente en 23 archivos. Capturas locales excluidas de Git. Sin commit/PR nuevo. |
+| 2026-09-12 | UX-006 | In Review → In Review | Commit solicitado por el usuario: `feat(ux): prioritize results and contextual run comparison`. Incluye implementación, pruebas, tutoriales y evidencia; capturas regenerables excluidas de Git. |
 
 ## Control de entregas
 
 | Entrega | Tickets previstos | Estado | Evidencia de integración |
 | --- | --- | --- | --- |
-| Primera mejora del flujo principal | UX-000, UX-001, UX-005, UX-006 | UX-000 Done; UX-001/005 In Review; UX-006 pendiente | [Línea base](../evidencia/ux-000/README.md), [UX-001](../evidencia/ux-001/README.md) y [UX-005](../evidencia/ux-005/README.md); integración de la entrega aún pendiente. |
+| Primera mejora del flujo principal | UX-000, UX-001, UX-005, UX-006 | UX-000 Done; UX-001/005/006 In Review | [Línea base](../evidencia/ux-000/README.md), [UX-001](../evidencia/ux-001/README.md), [UX-005](../evidencia/ux-005/README.md) y [UX-006](../evidencia/ux-006/README.md); regresión conjunta del frontend y navegador aprobada, aceptación pendiente. |
 | Modelo y datos | UX-002, UX-003, UX-004 | Pendiente | — |
 | Informes y consola | UX-007, UX-008 | Pendiente | — |
 | Administración | UX-009 | Pendiente | — |

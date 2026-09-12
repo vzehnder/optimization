@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   ApiError,
@@ -14,6 +14,11 @@ import {
   type ScenarioRun,
 } from "./api/client";
 import { loadPlotly, type PlotlyTrace } from "./plotly";
+import {
+  formatResultValue,
+  resultLabel,
+  resultUnit,
+} from "./resultPresentation";
 
 const runResultsQueryKey = (runId: number) => ["run-results", runId] as const;
 const runArtifactsQueryKey = (runId: number) =>
@@ -26,7 +31,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function displayValue(value: unknown): string {
-  if (value === null || value === undefined || value === "") return "Pendiente";
+  if (value === null || value === undefined || value === "")
+    return "No disponible";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }
@@ -82,11 +88,11 @@ function resultCharts(
 
 function errorTitle(error: unknown): string {
   if (!(error instanceof ApiError)) return "No se pudieron cargar resultados";
-  if (error.status === 409) return "Run incompleto";
+  if (error.status === 409) return "Ejecución incompleta";
   if (error.status === 404 && /artifact/i.test(error.message)) {
-    return "Artifact faltante";
+    return "Archivo de resultados faltante";
   }
-  if (error.status === 422) return "Error de parseo";
+  if (error.status === 422) return "No se pudo leer el resultado";
   return "No se pudieron cargar resultados";
 }
 
@@ -106,25 +112,63 @@ function SummarySection({ summary }: { summary: Record<string, unknown> }) {
   const nestedEntries = Object.entries(summary).filter(([, value]) =>
     isRecord(value),
   );
+  const metrics = [
+    ...scalarEntries.filter(([key]) => resultUnit(key)),
+    ...nestedEntries.flatMap(([group, value]) =>
+      group.endsWith("_totals") && isRecord(value)
+        ? Object.entries(value).filter(([key]) => resultUnit(key))
+        : [],
+    ),
+  ];
 
   return (
     <section className="workspace-section" aria-labelledby="run-results">
-      <h2 id="run-results">Run Results</h2>
-      {scalarEntries.length ? (
-        <dl className="source-metadata version-metadata">
-          {scalarEntries.map(([key, value]) => (
-            <div key={key}>
-              <dt>{summaryLabel(key)}</dt>
-              <dd>{displayValue(value)}</dd>
+      <h2 id="run-results">Resumen de resultados</h2>
+      {metrics.length ? (
+        <dl className="result-kpis" aria-label="Indicadores principales">
+          {metrics.map(([key, value], index) => (
+            <div key={`${key}-${index}`}>
+              <dt>{resultLabel(key)}</dt>
+              <dd>
+                {formatResultValue(value)}
+                {value !== null && value !== undefined && value !== ""
+                  ? ` ${resultUnit(key)}`
+                  : ""}
+              </dd>
             </div>
           ))}
         </dl>
       ) : (
-        <p className="empty-state">Summary vacio.</p>
+        <p className="empty-state">
+          No hay indicadores disponibles en este resultado.
+        </p>
       )}
-      {nestedEntries.map(([key, value]) => (
-        <NestedKpiBlock key={key} title={key} value={value} />
-      ))}
+      <details>
+        <summary>Ver resumen completo</summary>
+        {scalarEntries.length ? (
+          <dl className="source-metadata version-metadata">
+            {scalarEntries.map(([key, value]) => (
+              <div key={key}>
+                <dt>{summaryLabel(key)}</dt>
+                <dd>{displayValue(value)}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : (
+          <p className="empty-state">Resumen vacío.</p>
+        )}
+        {nestedEntries.map(([key, value]) => (
+          <NestedKpiBlock key={key} title={key} value={value} />
+        ))}
+        {Object.entries(summary)
+          .filter(([, value]) => Array.isArray(value))
+          .map(([key, value]) => (
+            <div key={key}>
+              <h3>{key}</h3>
+              <pre className="json-panel">{JSON.stringify(value, null, 2)}</pre>
+            </div>
+          ))}
+      </details>
     </section>
   );
 }
@@ -132,13 +176,13 @@ function SummarySection({ summary }: { summary: Record<string, unknown> }) {
 function summaryLabel(key: string): string {
   const labels: Record<string, string> = {
     case_name: "Nombre del caso",
-    run_timestamp: "Run Timestamp",
+    run_timestamp: "Fecha de ejecución",
     solver_name: "Solver",
-    solver_status: "Solver Status",
-    termination_status: "Termination Status",
-    objective_value_usd: "Objective Value",
-    model_version: "Model Version",
-    schema_version: "Schema Version",
+    solver_status: "Estado del solver",
+    termination_status: "Motivo de finalización",
+    objective_value_usd: "Valor objetivo (USD)",
+    model_version: "Versión del modelo",
+    schema_version: "Versión del esquema",
   };
   return labels[key] || key;
 }
@@ -169,7 +213,7 @@ function NestedKpiBlock({ title, value }: { title: string; value: unknown }) {
             <thead>
               <tr>
                 <th>kpi</th>
-                <th>value</th>
+                <th>Valor</th>
               </tr>
             </thead>
             <tbody>
@@ -191,9 +235,9 @@ function NestedKpiBlock({ title, value }: { title: string; value: unknown }) {
           <table>
             <thead>
               <tr>
-                <th>asset_id</th>
+                <th>Componente</th>
                 <th>kpi</th>
-                <th>value</th>
+                <th>Valor</th>
               </tr>
             </thead>
             <tbody>
@@ -219,7 +263,11 @@ function ResultTableView({
   title: string;
   table: ResultTable;
 }) {
-  const rows = table.rows.slice(0, tableRowLimit);
+  const [page, setPage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(table.rows.length / tableRowLimit));
+  const currentPage = Math.min(page, pageCount - 1);
+  const offset = currentPage * tableRowLimit;
+  const rows = table.rows.slice(offset, offset + tableRowLimit);
   const titleId = `${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-table`;
 
   return (
@@ -227,7 +275,7 @@ function ResultTableView({
       <h2 id={titleId}>{title}</h2>
       {table.rows.length ? (
         <p className="source-note">
-          Mostrando {rows.length} de {table.rows.length} filas.
+          Filas {offset + 1}–{offset + rows.length} de {table.rows.length}.
         </p>
       ) : (
         <p className="empty-state">No hay filas para mostrar.</p>
@@ -267,12 +315,38 @@ function ResultTableView({
           </tbody>
         </table>
       </div>
+      {pageCount > 1 ? (
+        <nav className="inline-actions" aria-label={`Páginas de ${title}`}>
+          <button
+            type="button"
+            disabled={currentPage === 0}
+            onClick={() => setPage(currentPage - 1)}
+          >
+            Página anterior
+          </button>
+          <span role="status">
+            Página {currentPage + 1} de {pageCount}
+          </span>
+          <button
+            type="button"
+            disabled={currentPage === pageCount - 1}
+            onClick={() => setPage(currentPage + 1)}
+          >
+            Página siguiente
+          </button>
+        </nav>
+      ) : null}
     </section>
   );
 }
 
+function mayRetainResult(error: unknown): boolean {
+  return !(error instanceof ApiError && [401, 403, 404].includes(error.status));
+}
+
 function displayCell(value: ResultCell | undefined): string {
-  if (value === null || value === undefined || value === "") return "";
+  if (value === null || value === undefined || value === "")
+    return "No disponible";
   return String(value);
 }
 
@@ -382,7 +456,7 @@ function ChartsSection({
 
   return (
     <section className="workspace-section" aria-labelledby="result-charts">
-      <h2 id="result-charts">Result Charts</h2>
+      <h2 id="result-charts">Gráficos de resultados</h2>
       {availableCharts.length ? (
         <div className="result-chart-grid">
           {availableCharts.map((chart) => (
@@ -394,7 +468,7 @@ function ChartsSection({
       )}
       {unavailableCharts.length ? (
         <div className="unavailable-charts">
-          <h3>Unavailable charts</h3>
+          <h3>Gráficos no disponibles</h3>
           <ul>
             {unavailableCharts.map((chart) => (
               <li key={chart.id}>
@@ -412,9 +486,11 @@ function ChartsSection({
 export function DashboardResultsContent({
   results,
   resultsError = "",
+  actions,
 }: {
   results: DashboardResults | null;
   resultsError?: string;
+  actions?: ReactNode;
 }) {
   if (resultsError) {
     return (
@@ -437,12 +513,18 @@ export function DashboardResultsContent({
     results.asset_dispatch_table !== null;
   if (!hasAnySection) {
     return (
-      <section className="workspace-section" aria-labelledby="dashboard-empty">
-        <h2 id="dashboard-empty">Dashboard</h2>
-        <p className="empty-state">
-          No hay secciones habilitadas para esta publicacion.
-        </p>
-      </section>
+      <>
+        <section
+          className="workspace-section"
+          aria-labelledby="dashboard-empty"
+        >
+          <h2 id="dashboard-empty">Resultados</h2>
+          <p className="empty-state">
+            No hay secciones de resultados disponibles para esta ejecución.
+          </p>
+        </section>
+        {actions}
+      </>
     );
   }
 
@@ -451,24 +533,37 @@ export function DashboardResultsContent({
       {results.summary !== null ? (
         <SummarySection summary={results.summary} />
       ) : null}
+      {actions}
       {hasCharts ? <ChartsSection results={results} /> : null}
-      {results.dispatch_table !== null ? (
-        <ResultTableView
-          title="System Dispatch"
-          table={results.dispatch_table}
-        />
-      ) : null}
-      {results.asset_dispatch_table !== null ? (
-        <ResultTableView
-          title="Asset Dispatch"
-          table={results.asset_dispatch_table}
-        />
+      {results.dispatch_table !== null ||
+      results.asset_dispatch_table !== null ? (
+        <details className="workspace-section">
+          <summary>Ver tablas de resultados</summary>
+          {results.dispatch_table !== null ? (
+            <ResultTableView
+              title="Despacho del sistema"
+              table={results.dispatch_table}
+            />
+          ) : null}
+          {results.asset_dispatch_table !== null ? (
+            <ResultTableView
+              title="Despacho por componente"
+              table={results.asset_dispatch_table}
+            />
+          ) : null}
+        </details>
       ) : null}
     </>
   );
 }
 
-export function RunResultsSection({ run }: { run: ScenarioRun }) {
+export function RunResultsSection({
+  run,
+  children,
+}: {
+  run: ScenarioRun;
+  children?: ReactNode;
+}) {
   const results = useQuery({
     queryKey: runResultsQueryKey(run.id),
     queryFn: ({ signal }) => getRunResults(run.id, signal),
@@ -479,9 +574,9 @@ export function RunResultsSection({ run }: { run: ScenarioRun }) {
   if (run.status !== "succeeded") {
     return (
       <section className="workspace-section" aria-labelledby="run-results">
-        <h2 id="run-results">Run Results</h2>
+        <h2 id="run-results">Resultados</h2>
         <p className="empty-state">
-          Resultados no disponibles para estado {run.status}.
+          Los resultados estarán disponibles cuando finalice la ejecución.
         </p>
       </section>
     );
@@ -490,7 +585,7 @@ export function RunResultsSection({ run }: { run: ScenarioRun }) {
   if (results.isPending) {
     return (
       <section className="workspace-section" aria-labelledby="run-results">
-        <h2 id="run-results">Run Results</h2>
+        <h2 id="run-results">Resultados</h2>
         <p className="inline-status" role="status">
           Cargando resultados
         </p>
@@ -498,21 +593,40 @@ export function RunResultsSection({ run }: { run: ScenarioRun }) {
     );
   }
 
-  if (results.isError) {
-    return (
-      <section className="workspace-section" aria-labelledby="run-results">
-        <h2 id="run-results">Run Results</h2>
-        <ResultError error={results.error} />
-      </section>
-    );
-  }
-
-  return <DashboardResultsContent results={results.data} />;
+  return (
+    <>
+      {results.isError ? (
+        <section
+          className="workspace-section"
+          aria-label="Error de consulta de resultados"
+        >
+          {results.data && mayRetainResult(results.error) ? (
+            <p>Se conserva el último resultado consultado.</p>
+          ) : null}
+          <ResultError error={results.error} />
+          <button
+            type="button"
+            disabled={results.isFetching}
+            onClick={() => void results.refetch()}
+          >
+            {results.isFetching
+              ? "Consultando resultados"
+              : "Reintentar resultados"}
+          </button>
+        </section>
+      ) : null}
+      {results.data && mayRetainResult(results.error) ? (
+        <DashboardResultsContent results={results.data} actions={children} />
+      ) : (
+        children
+      )}
+    </>
+  );
 }
 
 function ArtifactList({ artifacts }: { artifacts: RunArtifact[] }) {
   if (!artifacts.length) {
-    return <p className="empty-state">No artifacts registered yet.</p>;
+    return <p className="empty-state">Aún no hay archivos registrados.</p>;
   }
 
   return (
@@ -542,17 +656,31 @@ export function RunArtifactsSection({ run }: { run: ScenarioRun }) {
 
   return (
     <section className="workspace-section" aria-labelledby="run-artifacts">
-      <h2 id="run-artifacts">Artifacts</h2>
+      <h2 id="run-artifacts">Archivos de la ejecución</h2>
       {!terminalRunStatuses.has(run.status) ? (
         <p className="empty-state">
-          Artifacts pendientes para estado {run.status}.
+          Los archivos estarán disponibles cuando termine la ejecución.
         </p>
       ) : artifacts.isPending ? (
         <p className="inline-status" role="status">
-          Cargando artifacts
+          Cargando archivos
         </p>
       ) : artifacts.isError ? (
-        <ResultError error={artifacts.error} />
+        <>
+          <ResultError error={artifacts.error} />
+          <button
+            type="button"
+            disabled={artifacts.isFetching}
+            onClick={() => void artifacts.refetch()}
+          >
+            {artifacts.isFetching
+              ? "Consultando archivos"
+              : "Reintentar archivos"}
+          </button>
+          {artifacts.data && mayRetainResult(artifacts.error) ? (
+            <ArtifactList artifacts={artifacts.data} />
+          ) : null}
+        </>
       ) : (
         <ArtifactList artifacts={artifacts.data} />
       )}

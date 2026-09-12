@@ -1,0 +1,35 @@
+
+> bess-react-ui@0.1.0 check
+> tsc -b --pretty false && eslint . && prettier --check .
+
+Checking formatting...
+npm.cmd : [warn] e2e/global-setup.ts
+En línea: 2 Carácter: 1
++ npm.cmd run check *> ../.tmp/ux006-check-final.txt; Get-Content ../.t ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([warn] e2e/global-setup.ts:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+[warn] eslint.config.js
+[warn] index.html
+[warn] package-lock.json
+[warn] package.json
+[warn] playwright.config.ts
+[warn] scripts/check-generated.mjs
+[warn] scripts/export-openapi.mjs
+[warn] src/api/client.test.ts
+[warn] src/ErrorBoundary.test.tsx
+[warn] src/ErrorBoundary.tsx
+[warn] src/hydro/HydraulicInflowPanel.test.tsx
+[warn] src/hydro/inflowImport.test.ts
+[warn] src/hydro/inflowImport.ts
+[warn] src/main.tsx
+[warn] src/ProtectedMutationJourney.test.tsx
+[warn] src/ProtectedMutationJourney.tsx
+[warn] src/test/setup.ts
+[warn] src/timeSeriesCatalogMapping.ts
+[warn] tsconfig.app.json
+[warn] tsconfig.json
+[warn] tsconfig.node.json
+[warn] vite.config.ts
+[warn] Code style issues found in 23 files. Run Prettier with --write to fix.
