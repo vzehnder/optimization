@@ -490,78 +490,95 @@ Las rutas anteriores siguen siendo válidas.
 
 Presionar **Modelo** o **Crear modelo**. Si el escenario aún no tiene draft, la pantalla
 ofrece crear el documento inicial. El editor muestra estado, fecha del último
-guardado y **Guardar draft**.
+guardado y **Guardar modelo**. La pantalla se titula **Modelo en edición**.
 
 ### 11.1 Estados de edición
 
-- **saved** o equivalente: el documento visible coincide con lo persistido;
+- **Guardado**: el documento visible coincide con lo persistido;
 - cambios sin guardar: se modificó al menos un campo;
 - guardando: la petición está en curso;
 - error: revisar el mensaje y los campos marcados.
 
-Si se intenta navegar con cambios sin guardar aparece **Cambios sin guardar**:
+Los enlaces y la navegación Atrás/Adelante con cambios pendientes muestran **Cambios sin guardar**:
 
 - **Seguir editando** conserva la pantalla;
 - **Descartar cambios** navega sin guardar.
 
-Guardar el draft antes de subir fuentes, cambiar de pantalla, abrir el diagrama
-hidráulico, validar o promover.
+Al recargar o cerrar se usa la advertencia del navegador. Un fallo de guardado
+conserva los valores; los cambios hechos durante un envío siguen pendientes
+cuando llega su respuesta. Guardar no valida ni crea una versión ejecutable.
+**Guardar y abrir diagrama hidráulico** guarda explícitamente antes de navegar;
+si aparece un cambio posterior al envío, conserva el formulario abierto.
 
 ### 11.2 Sección Caso
 
 | Campo               | Uso                              | Recomendación                                                                         |
 | ------------------- | -------------------------------- | ------------------------------------------------------------------------------------- |
 | **Nombre del caso** | Nombre incluido en el contrato.  | Estable y descriptivo; no usar espacios ambiguos si también se consumirá por scripts. |
-| **Draft schema**    | Versión del documento de editor. | Mantener `bess_editor_draft.v1`; no experimentar con este valor.                      |
 | **Descripción**     | Contexto humano.                 | Registrar objetivo, fecha de datos y supuestos principales.                           |
 
-### 11.3 Sección Graph, grid y solver
+### 11.3 Red y opciones técnicas
 
-| Campo                                      | Significado                                    | Control experto                                                |
-| ------------------------------------------ | ---------------------------------------------- | -------------------------------------------------------------- |
-| **PCC ID**                                 | Identificador del bus o punto común.           | Debe ser único y estable, por ejemplo `bus_1`.                 |
-| **PCC type**                               | `bus` o `pcc`.                                 | Elegir según convención del caso; no agrega una red multi-bus. |
-| **Grid ID**                                | Identificador de la conexión a red.            | Por ejemplo `grid_1`.                                          |
-| **Maximum import (MW)**                    | Potencia máxima comprada a red.                | Número no negativo y coherente con el sistema.                 |
-| **Maximum export (MW)**                    | Potencia máxima inyectada.                     | Número no negativo y coherente con el PCC.                     |
-| **Solver**                                 | Solver solicitado.                             | Mantener `HiGHS` salvo diseño validado.                        |
-| **Prevent simultaneous import and export** | Evita importar y exportar en el mismo periodo. | Normalmente activado. Puede introducir variables binarias.     |
-| **Solver options (JSON)**                  | Opciones avanzadas.                            | Debe ser JSON válido; dejar `{}` si no se necesitan.           |
+**Red y punto de conexión** muestra los límites y la simultaneidad. Abre
+**Opciones técnicas del modelo** para IDs, tipo de conexión, **Esquema del
+modelo** (`bess_editor_draft.v1`), solver y opciones JSON. Cerrar el panel no
+borra ni reemplaza estos valores.
+
+| Campo                                             | Significado                                    | Control experto                                                |
+| ------------------------------------------------- | ---------------------------------------------- | -------------------------------------------------------------- |
+| **ID del punto de conexión**                      | Identificador del bus o punto común.           | Debe ser único y estable, por ejemplo `bus_1`.                 |
+| **Tipo de punto de conexión**                     | `bus` o `pcc`.                                 | Elegir según convención del caso; no agrega una red multi-bus. |
+| **ID de la red**                                  | Identificador de la conexión a red.            | Por ejemplo `grid_1`.                                          |
+| **Importación máxima (MW)**                       | Potencia máxima comprada a red.                | Número no negativo y coherente con el sistema.                 |
+| **Exportación máxima (MW)**                       | Potencia máxima inyectada.                     | Número no negativo y coherente con el PCC.                     |
+| **Solver**                                        | Solver solicitado.                             | Mantener `HiGHS` salvo diseño validado.                        |
+| **Impedir importación y exportación simultáneas** | Evita importar y exportar en el mismo periodo. | Normalmente activado. Puede introducir variables binarias.     |
+| **Opciones del solver (JSON)**                    | Opciones avanzadas.                            | Debe ser JSON válido; dejar `{}` si no se necesitan.           |
 
 El experto debe comprobar si el precio será único
 `price_usd_per_mwh` o separado en `import_price_usd_per_mwh` y
 `export_price_usd_per_mwh`. La elección afecta las señales requeridas.
 
-### 11.4 Agregar assets
+### 11.4 Seleccionar y agregar componentes
 
-La sección **Assets** ofrece como máximo una tarjeta inicial por tipo mediante:
+La sección **Componentes** ofrece como máximo una tarjeta inicial por tipo mediante:
 
-- **Agregar BESS**;
-- **Agregar load**;
-- **Agregar renewable**;
-- **Agregar hydro**.
+- **Agregar Batería**;
+- **Agregar Demanda**;
+- **Agregar Renovable**;
+- **Agregar Hidro**.
 
-Cada asset tiene una acción para quitarlo con confirmación. Quitar un asset
+Selecciona **Editar Batería**, **Editar Demanda**, **Editar Renovable** o
+**Editar Hidro** en la lista para abrir sus parámetros. La lista incluye su
+identidad y señala los errores encontrados. Cambiar de componente mantiene
+el documento completo. Los IDs están en **Identificación técnica** y solo
+cambian si editas ese campo explícitamente.
+
+Cada componente tiene una acción para quitarlo con confirmación. Quitar un asset
 puede cambiar las señales requeridas, dejar variantes desactualizadas y bloquear
 consolas activas que dependían de sus campos.
 
 #### 11.4.1 BESS
 
+Los campos habituales se agrupan en capacidad/límites, estado inicial,
+operación y economía. **Operación avanzada de la batería** contiene la
+condición terminal, energía terminal mínima y la restricción de simultaneidad.
+
 | Campo                                         | Unidad o valores                        | Interpretación                                                 |
 | --------------------------------------------- | --------------------------------------- | -------------------------------------------------------------- |
-| **BESS asset ID**                             | texto                                   | Identidad usada por series y resultados, por ejemplo `bess_1`. |
-| **Maximum charge**                            | MW                                      | Límite de carga.                                               |
-| **Maximum discharge**                         | MW                                      | Límite de descarga.                                            |
-| **Minimum energy**                            | MWh                                     | Piso de estado de energía.                                     |
-| **Maximum energy**                            | MWh                                     | Capacidad superior.                                            |
-| **Initial energy**                            | MWh                                     | Estado al comienzo del horizonte.                              |
-| **Charge efficiency**                         | fracción                                | Normalmente entre 0 y 1.                                       |
-| **Discharge efficiency**                      | fracción                                | Normalmente entre 0 y 1.                                       |
-| **Degradation cost**                          | USD/MWh                                 | Costo lineal asociado al movimiento de energía/SOC.            |
-| **Terminal condition**                        | `none`, `equal_initial`, `min_terminal` | Condición al final del horizonte.                              |
-| **Minimum terminal energy**                   | MWh                                     | Se usa con `min_terminal`.                                     |
-| **Prevent simultaneous charge and discharge** | checkbox                                | Evita carga y descarga simultáneas.                            |
-| **Apply linear degradation**                  | checkbox                                | Activa el término de degradación configurado.                  |
+| **ID de la batería**                          | texto                                   | Identidad usada por series y resultados, por ejemplo `bess_1`. |
+| **Potencia máxima de carga**                  | MW                                      | Límite de carga.                                               |
+| **Potencia máxima de descarga**               | MW                                      | Límite de descarga.                                            |
+| **Energía mínima**                            | MWh                                     | Piso de estado de energía.                                     |
+| **Capacidad máxima**                          | MWh                                     | Capacidad superior.                                            |
+| **Energía inicial**                           | MWh                                     | Estado al comienzo del horizonte.                              |
+| **Eficiencia de carga**                       | fracción                                | Normalmente entre 0 y 1.                                       |
+| **Eficiencia de descarga**                    | fracción                                | Normalmente entre 0 y 1.                                       |
+| **Costo de degradación**                      | USD/MWh                                 | Costo lineal asociado al movimiento de energía/SOC.            |
+| **Condición terminal**                        | `none`, `equal_initial`, `min_terminal` | Condición al final del horizonte.                              |
+| **Energía terminal mínima**                   | MWh                                     | Se usa con `min_terminal`.                                     |
+| **Impedir carga y descarga simultáneas**      | checkbox                                | Evita carga y descarga simultáneas.                            |
+| **Aplicar degradación lineal**                | checkbox                                | Activa el término de degradación configurado.                  |
 
 Comprobar siempre:
 
@@ -573,37 +590,41 @@ energy_min <= initial_energy <= energy_max
 
 #### 11.4.2 Renewable
 
-| Campo                             | Uso                                                                            |
-| --------------------------------- | ------------------------------------------------------------------------------ |
-| **Renewable asset ID**            | Identificador que debe coincidir con la entidad de su señal de disponibilidad. |
-| **Technology**                    | `solar` o `wind`; principalmente clasificación visible.                        |
-| **Curtailment penalty (USD/MWh)** | Penalización por energía disponible no utilizada.                              |
+| Campo                                      | Uso                                                                            |
+| ------------------------------------------ | ------------------------------------------------------------------------------ |
+| **ID de la renovable**                     | Identificador que debe coincidir con la entidad de su señal de disponibilidad. |
+| **Tecnología**                             | `solar` o `wind`; principalmente clasificación visible.                        |
+| **Penalización por vertimiento (USD/MWh)** | Penalización por energía disponible no utilizada.                              |
 
 La potencia disponible no se escribe como parámetro fijo: se suministra como
 serie `renewable_available_power_mw` para la entidad correspondiente.
 
 #### 11.4.3 Load
 
-El campo principal es **Load asset ID**. La demanda se suministra mediante la
+El campo principal es **ID de la demanda**. La demanda se suministra mediante la
 serie `load_demand_mw` vinculada a ese ID.
 
 #### 11.4.4 Hydro simple v2
 
-| Campo                                   | Unidad o valores                        |
-| --------------------------------------- | --------------------------------------- |
-| **Hydro asset ID**                      | texto                                   |
-| **Minimum / Maximum / Initial storage** | hm3                                     |
-| **Generation mode**                     | `linear` o `piecewise_linear`           |
-| **Power per flow**                      | MW por m3/s, solo modo lineal           |
-| **Minimum / Maximum turbine flow**      | m3/s                                    |
-| **Maximum power**                       | MW                                      |
-| **Minimum release**                     | m3/s                                    |
-| **Spill penalty**                       | USD/hm3                                 |
-| **Terminal condition**                  | `none`, `equal_initial`, `min_terminal` |
-| **Minimum terminal storage**            | hm3                                     |
-| **Terminal water value**                | USD/hm3                                 |
-| **Generation curve (JSON)**             | puntos caudal-potencia                  |
-| **Reservoir curve (JSON)**              | puntos almacenamiento-cota              |
+Los límites, estado inicial y modo de generación están visibles. **Curvas
+hidráulicas** abre las curvas; la del embalse es obligatoria. **Condiciones
+terminales de hidro** conserva sus opciones avanzadas.
+
+| Campo                                        | Unidad o valores                        |
+| -------------------------------------------- | --------------------------------------- |
+| **ID de hidro**                              | texto                                   |
+| **Almacenamiento mínimo / máximo / inicial** | hm3                                     |
+| **Modo de generación**                       | `linear` o `piecewise_linear`           |
+| **Potencia por caudal**                      | MW por m3/s, solo modo lineal           |
+| **Caudal turbinado mínimo / máximo**         | m3/s                                    |
+| **Potencia máxima**                          | MW                                      |
+| **Caudal mínimo de salida**                  | m3/s                                    |
+| **Penalización por vertimiento**             | USD/hm3                                 |
+| **Condición terminal**                       | `none`, `equal_initial`, `min_terminal` |
+| **Almacenamiento terminal mínimo**           | hm3                                     |
+| **Valor terminal del agua**                  | USD/hm3                                 |
+| **Curva de generación (JSON)**               | puntos caudal-potencia                  |
+| **Curva del embalse (JSON)**                 | puntos almacenamiento-cota              |
 
 En modo lineal se requiere una relación potencia/caudal válida. En modo
 piecewise, la curva debe tener caudales estrictamente crecientes. La curva de
@@ -616,10 +637,11 @@ de la sección 23, no intentar representar esa topología con un asset v2 simple
 ### 11.5 Guardar el draft
 
 1. Revisar campos obligatorios y JSON avanzado.
-2. Presionar **Guardar draft**.
+2. Presionar **Guardar modelo**.
 3. Esperar el estado guardado.
 4. Si aparece **Corrige los campos marcados antes de guardar**, corregir cada
-   campo; no recargar la página como primera respuesta.
+   campo mediante su enlace: el editor selecciona el componente, abre el panel
+   y enfoca el control. No recargar como primera respuesta.
 5. Si el mensaje indica consolas activas bloqueadas por el cambio, anotar sus
    nombres y revisar la sección 27 antes de volver a activarlas.
 
@@ -2019,8 +2041,7 @@ Después:
 ## 29. Diagrama hidráulico v3
 
 Usar esta superficie para red hidráulica con embalses, uniones, tramos,
-centrales y unidades. Desde un asset hydro del draft, presionar **Editar diagrama
-hidráulico**; el draft se guarda antes de navegar.
+centrales y unidades. Desde un asset hydro del draft, presionar **Guardar y abrir diagrama hidráulico**; el draft se guarda antes de navegar.
 
 ### 29.1 Barra de acciones
 
@@ -2314,7 +2335,7 @@ se muestre, junto con el paso y la acción que se intentó.
 - [ ] Crear/abrir draft.
 - [ ] Configurar caso, PCC, grid y solver.
 - [ ] Agregar assets y revisar todas las unidades.
-- [ ] Guardar draft.
+- [ ] Guardar modelo.
 - [ ] Generar preview y discutir el contrato.
 
 ### Bloque C: datos, 45-90 minutos

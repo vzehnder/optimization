@@ -1,9 +1,10 @@
 # Plan de simplificación de la experiencia de BESS Workspace
 
 Fecha de revisión: 2026-09-12. Base: commit `58cf602` y árbol de trabajo local.
-Estado: UX-000 completado; UX-001, UX-005 y UX-006 implementados y en revisión.
+Estado: UX-000 completado; UX-001, UX-002, UX-005 y UX-006 implementados y en revisión.
 [Evidencia UX-001](evidencia/ux-001/README.md), [UX-005](evidencia/ux-005/README.md)
 y [UX-006](evidencia/ux-006/README.md), este último sobre `61dc87a`.
+[UX-002](evidencia/ux-002/README.md) está implementado sobre `9c24c1b`.
 
 La recomendación es organizar la experiencia por tareas: **preparar el modelo, conectar datos, revisar y ejecutar, interpretar resultados y entregar un informe**. La plataforma ya tiene esas capacidades. El cambio consiste en orientar al usuario, reducir lo que debe decidir simultáneamente y mantener disponibles los controles expertos.
 
@@ -19,12 +20,13 @@ La recomendación es organizar la experiencia por tareas: **preparar el modelo, 
 Las rutas de archivos y los nombres de funciones de cada ticket permiten localizar el código. Los archivos nuevos mencionados dentro de los tickets son propuestas, salvo indicación contraria. Cada ticket requiere una PR revisable con su propio resultado visible; no se exige completar todos para obtener valor.
 
 El [tracker](issues/tracker_ux.md) centraliza estado, responsable, dependencias,
-bloqueos, PR/commit y evidencia de cierre. UX-000 está Done; UX-001, UX-005 y
-UX-006 están In Review. UX-006 muestra primero el resultado y permite comparar
-desde la ejecución elegida, con 273 pruebas funcionales aprobadas. El siguiente
-ticket recomendado es UX-002. UX-002/003/004 y UX-007/008/009 siguen pendientes.
+bloqueos, PR/commit y evidencia de cierre. UX-000 está Done; UX-001, UX-002,
+UX-005 y UX-006 están In Review. UX-002 permite editar por componente, conserva
+los campos avanzados y protege los cambios pendientes, con 243 pruebas
+funcionales aprobadas. El siguiente ticket recomendado es UX-003.
+UX-003/004 y UX-007/008/009 siguen pendientes.
 El chequeo global conserva fallos de formato previos en 23 archivos no
-modificados, documentados en la evidencia de UX-006.
+modificados, documentados en la evidencia de UX-002.
 
 ## Orden recomendado
 

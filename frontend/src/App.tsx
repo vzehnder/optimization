@@ -7,7 +7,8 @@ import {
 } from "@tanstack/react-query";
 import { FormEvent, ReactNode, useEffect, useState } from "react";
 import {
-  BrowserRouter,
+  createBrowserRouter,
+  RouterProvider,
   Link,
   Navigate,
   NavLink,
@@ -569,6 +570,19 @@ function Shell() {
 }
 
 export function App() {
+  const [router, setRouter] = useState<ReturnType<
+    typeof createBrowserRouter
+  > | null>(null);
+  useEffect(() => {
+    const instance = createBrowserRouter([{ path: "*", element: <Shell /> }], {
+      basename: "/react",
+    });
+    // Creating the router subscribes to browser history, so pair its lifetime
+    // with this effect, including Strict Mode's setup/cleanup cycle.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Publish the externally subscribed router after setup.
+    setRouter(instance);
+    return () => instance.dispose();
+  }, []);
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -578,9 +592,7 @@ export function App() {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <BrowserRouter basename="/react">
-          <Shell />
-        </BrowserRouter>
+        {router ? <RouterProvider router={router} /> : null}
       </QueryClientProvider>
     </ErrorBoundary>
   );

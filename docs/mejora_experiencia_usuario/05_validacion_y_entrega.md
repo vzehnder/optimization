@@ -35,6 +35,25 @@ publicaciones y revocación del portal. No se cambian contratos de producción
 ni se ejecuta Julia real, PostgreSQL o toda la suite Python. Las ejecuciones
 indexadas del servidor smoke son sintéticas; no validan resultados matemáticos.
 
+## Evidencia posterior: UX-002
+
+La [implementación sobre `9c24c1b`](evidencia/ux-002/README.md) queda In Review:
+edición por componente, campos por propósito, opciones técnicas desplegables,
+conservación de campos omitidos/null/cero/booleanos/JSON, foco en errores y
+protección del historial. F1/F2 se confirmaron antes de las pruebas; se registran
+ocho ciclos RED → GREEN y se conservan las regresiones de guardado y v3.
+
+Resultado final: **243 pruebas aprobadas** (201 frontend, 17 navegador, 25 API),
+sin duplicar línea base ni repeticiones focalizadas. TypeScript, ESLint, build,
+formato del frontend modificado y `git diff --check` pasan. El chequeo global
+falla en Prettier por 23 archivos previos sin modificaciones. Se revisaron cinco
+capturas de escritorio, 320 píxeles CSS, ampliación CSS al 200 % y error enfocado.
+El teclado protege el foco en la confirmación; axe no detecta serious/critical
+en la vista comprobada. No se ejecutaron Julia real, PostgreSQL, toda la suite
+Python ni pruebas con participantes o lectores de pantalla. No cambian contratos
+de producción ni semántica de versiones. Tutoriales actualizados y capturas
+locales regenerables excluidas de Git.
+
 ## Evidencia histórica de la revisión del plan
 
 El 2026-09-12 se ejecutó desde `frontend/`:

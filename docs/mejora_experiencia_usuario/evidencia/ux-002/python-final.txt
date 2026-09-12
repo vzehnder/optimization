@@ -1,0 +1,68 @@
+./.venv/Scripts/python.exe : C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\.venv\Lib\s
+ite-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is
+deprecated; install `httpx2` instead.
+En línea: 2 Carácter: 43
++ ... /:memory:'; ./.venv/Scripts/python.exe -m unittest tests.test_structu ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\vicen\...ttpx2` instead.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+  from starlette.testclient import TestClient as TestClient  # noqa
+test_api_generates_one_bus_graph_from_structured_draft_assets (tests.test_structured_draft_editor.StructuredDraftEditor
+Tests.test_api_generates_one_bus_graph_from_structured_draft_assets) ... ok
+test_api_generates_v2_hydro_asset_from_structured_draft (tests.test_structured_draft_editor.StructuredDraftEditorTests.
+test_api_generates_v2_hydro_asset_from_structured_draft) ... ok
+test_draft_initialized_from_v2_version_preserves_hydro_assets (tests.test_structured_draft_editor.StructuredDraftEditor
+Tests.test_draft_initialized_from_v2_version_preserves_hydro_assets) ... ok
+test_draft_initialized_from_version_prefills_structured_assets (tests.test_structured_draft_editor.StructuredDraftEdito
+rTests.test_draft_initialized_from_version_prefills_structured_assets) ... ok
+test_generated_preview_rejects_duplicate_asset_ids_and_bad_solver_options (tests.test_structured_draft_editor.Structure
+dDraftEditorTests.test_generated_preview_rejects_duplicate_asset_ids_and_bad_solver_options) ... ok
+test_api_generates_and_validates_system_case_from_csv_mapping (tests.test_draft_generated_system_case.DraftGeneratedSys
+temCaseTests.test_api_generates_and_validates_system_case_from_csv_mapping) ... ok
+test_api_generates_and_validates_system_case_from_xlsx_mapping (tests.test_draft_generated_system_case.DraftGeneratedSy
+stemCaseTests.test_api_generates_and_validates_system_case_from_xlsx_mapping) ... ok
+test_api_generates_v2_periods_with_hydro_inflow_from_csv_mapping (tests.test_draft_generated_system_case.DraftGenerated
+SystemCaseTests.test_api_generates_v2_periods_with_hydro_inflow_from_csv_mapping) ... ok
+test_api_surfaces_julia_validation_failure_for_generated_case (tests.test_draft_generated_system_case.DraftGeneratedSys
+temCaseTests.test_api_surfaces_julia_validation_failure_for_generated_case) ... ok
+test_existing_paste_json_version_validation_path_still_uses_supplied_case (tests.test_draft_generated_system_case.Draft
+GeneratedSystemCaseTests.test_existing_paste_json_version_validation_path_still_uses_supplied_case) ... ok
+test_promoted_hydro_generated_version_retains_hydro_mapping_metadata (tests.test_draft_generated_system_case.DraftGener
+atedSystemCaseTests.test_promoted_hydro_generated_version_retains_hydro_mapping_metadata) ... ok
+test_promoted_linear_hydro_generated_version_runs_and_registers_hydro_artifacts (tests.test_draft_generated_system_case
+.DraftGeneratedSystemCaseTests.test_promoted_linear_hydro_generated_version_runs_and_registers_hydro_artifacts) ... ok
+test_python_mapping_errors_stop_generated_case_validation_before_julia (tests.test_draft_generated_system_case.DraftGen
+eratedSystemCaseTests.test_python_mapping_errors_stop_generated_case_validation_before_julia) ... ok
+test_layout_only_edit_keeps_validation_non_stale_and_promotable (tests.test_stale_hierarchy_validation.HydraulicStaleVa
+lidationTests.test_layout_only_edit_keeps_validation_non_stale_and_promotable) ... ok
+test_parameter_only_edit_marks_validation_stale_with_parameters_flag (tests.test_stale_hierarchy_validation.HydraulicSt
+aleValidationTests.test_parameter_only_edit_marks_validation_stale_with_parameters_flag) ... ok
+test_topology_only_edit_marks_validation_stale_with_topology_flag (tests.test_stale_hierarchy_validation.HydraulicStale
+ValidationTests.test_topology_only_edit_marks_validation_stale_with_topology_flag) ... ok
+test_v3_preview_validation_snapshot_records_topology_and_parameters_hash (tests.test_stale_hierarchy_validation.Hydraul
+icStaleValidationTests.test_v3_preview_validation_snapshot_records_topology_and_parameters_hash) ... ok
+test_generated_system_case_validation_snapshot_records_topology_and_parameters_hash (tests.test_stale_hierarchy_validat
+ion.StructuredDraftStaleValidationTests.test_generated_system_case_validation_snapshot_records_topology_and_parameters_
+hash) ... ok
+test_parameter_only_draft_edit_blocks_promotion_with_parameters_message (tests.test_stale_hierarchy_validation.Structur
+edDraftStaleValidationTests.test_parameter_only_draft_edit_blocks_promotion_with_parameters_message) ... ok
+test_structural_draft_edit_blocks_promotion_with_topology_message (tests.test_stale_hierarchy_validation.StructuredDraf
+tStaleValidationTests.test_structural_draft_edit_blocks_promotion_with_topology_message) ... ok
+test_final_hydro_acceptance_covers_linear_v1_v2_no_hydro_and_errors (tests.test_iter5_acceptance.Iteration5AcceptanceTe
+sts.test_final_hydro_acceptance_covers_linear_v1_v2_no_hydro_and_errors) ... ok
+test_iteration_5_issue_008_documentation_and_tracker_are_done
+(tests.test_iter5_acceptance.Iteration5AcceptanceTests.test_iteration_5_issue_008_documentation_and_tracker_are_done)
+... ok
+test_iteration_5_issue_009_documentation_and_tracker_are_done
+(tests.test_iter5_acceptance.Iteration5AcceptanceTests.test_iteration_5_issue_009_documentation_and_tracker_are_done)
+... ok
+test_iteration_1_documentation_tracker_and_manual_checklist_are_done (tests.test_hydro_diagram_acceptance.HydroDiagramA
+cceptanceTests.test_iteration_1_documentation_tracker_and_manual_checklist_are_done) ... ok
+test_minimal_v3_diagram_workflow_reaches_run_results_and_preserves_v1_v2 (tests.test_hydro_diagram_acceptance.HydroDiag
+ramAcceptanceTests.test_minimal_v3_diagram_workflow_reaches_run_results_and_preserves_v1_v2) ... ok
+
+----------------------------------------------------------------------
+Ran 25 tests in 9.224s
+
+OK

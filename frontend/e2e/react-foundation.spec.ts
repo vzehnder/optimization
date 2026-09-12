@@ -792,9 +792,11 @@ test("UX-005 confirms sources, reloads, reviews an explicit period and submits o
   const url = `/react/scenarios/${scenario.id}?section=data`;
   await page.goto(`/react/scenarios/${scenario.id}/draft?section=data`);
   await page.getByRole("button", { name: "Crear draft", exact: true }).click();
-  await page.getByRole("button", { name: "Agregar BESS", exact: true }).click();
   await page
-    .getByRole("button", { name: "Guardar draft", exact: true })
+    .getByRole("button", { name: "Agregar Batería", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Guardar modelo", exact: true })
     .click();
   await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
   const uploaded = await api.post(`${root}/draft/time-series-sources/upload`, {
@@ -957,7 +959,7 @@ test("UX-001 keeps task context and pending model edits through navigation and r
   await page.goto(`${scenarioPath}?origin=review&section=advanced`);
   await page.getByRole("link", { name: "Modelo", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Draft estructurado" }),
+    page.getByRole("heading", { name: "Modelo en edición" }),
   ).toBeFocused();
   await page.getByRole("button", { name: "Crear draft", exact: true }).click();
   await page.getByLabel("Nombre del caso").fill("Invierno guardado");
@@ -970,7 +972,7 @@ test("UX-001 keeps task context and pending model edits through navigation and r
     "Invierno guardado",
   );
   await page
-    .getByRole("button", { name: "Guardar draft", exact: true })
+    .getByRole("button", { name: "Guardar modelo", exact: true })
     .click();
   await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
   await page
@@ -1126,6 +1128,248 @@ test("React analyst workspace creates a project and scenario, then preserves dir
   await expect(page.getByRole("heading", { name: scenarioName })).toBeVisible();
 });
 
+test("UX-002 preserves omitted fields null curves zero limits and false flags after saving a basic edit", async ({
+  page,
+}) => {
+  await ensureAdminSession(page);
+  const api = page.context().request;
+  const project = await (
+    await postWithCsrf(api, "/api/projects", {
+      name: `UX-002 paridad ${Date.now()}`,
+    })
+  ).json();
+  const scenario = await (
+    await postWithCsrf(api, `/api/projects/${project.id}/scenarios`, {
+      name: "Paridad del modelo",
+    })
+  ).json();
+  const document = {
+    schema_version: "bess_editor_draft.v1",
+    case: { name: "Modelo con campos opcionales" },
+    pcc: { id: "bus_1", type: "bus" },
+    grid: {
+      id: "grid_1",
+      import_power_max_mw: 0,
+      export_power_max_mw: null,
+      prevent_simultaneous_grid_import_export: false,
+    },
+    solver: { name: "HiGHS" },
+    assets: [
+      {
+        id: "hydro_1",
+        type: "hydro",
+        storage_min_hm3: 1,
+        storage_max_hm3: 5,
+        initial_storage_hm3: 2.5,
+        generation_mode: "linear",
+        power_per_flow_mw_per_m3s: 0.08,
+        generation_curve: null,
+        reservoir_curve: [
+          { storage_hm3: 1, elevation_masl: 700 },
+          { storage_hm3: 5, elevation_masl: 720 },
+        ],
+        terminal_condition: "none",
+        terminal_storage_min_hm3: null,
+      },
+    ],
+  };
+  expect(
+    (
+      await postWithCsrf(api, `/api/scenarios/${scenario.id}/draft`, {
+        document,
+      })
+    ).ok(),
+  ).toBeTruthy();
+  await page.goto(`/react/scenarios/${scenario.id}/draft`);
+  await page
+    .getByRole("textbox", { name: "Nombre del caso" })
+    .fill("Modelo revisado");
+  await page
+    .getByRole("button", { name: "Guardar modelo", exact: true })
+    .click();
+  await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
+  const { draft } = await (
+    await api.get(`/api/scenarios/${scenario.id}/draft`)
+  ).json();
+  expect(draft.document).toEqual({
+    ...document,
+    case: { name: "Modelo revisado" },
+  });
+  await page.reload();
+  await expect(
+    page.getByRole("textbox", { name: "Nombre del caso" }),
+  ).toHaveValue("Modelo revisado");
+  await expect(
+    page.getByRole("spinbutton", { name: "Importación máxima (MW)" }),
+  ).toHaveValue("0");
+  await expect(
+    page.getByRole("spinbutton", { name: "Exportación máxima (MW)" }),
+  ).toHaveValue("");
+});
+
+test("UX-002 protects pending model edits through browser back and forward", async ({
+  page,
+}, testInfo) => {
+  await ensureAdminSession(page);
+  const api = page.context().request;
+  const projectResponse = await postWithCsrf(api, "/api/projects", {
+    name: `UX-002 ${Date.now()}`,
+  });
+  expect(projectResponse.ok()).toBeTruthy();
+  const project = await projectResponse.json();
+  const scenarioResponse = await postWithCsrf(
+    api,
+    `/api/projects/${project.id}/scenarios`,
+    { name: "Modelo progresivo" },
+  );
+  expect(scenarioResponse.ok()).toBeTruthy();
+  const scenario = await scenarioResponse.json();
+  await page.goto(`/react/scenarios/${scenario.id}`);
+  await page.getByRole("link", { name: "Crear modelo", exact: true }).click();
+  await page.getByRole("button", { name: "Crear draft", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Agregar Batería", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Guardar modelo", exact: true })
+    .click();
+  await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
+  await page
+    .getByRole("spinbutton", { name: "Capacidad máxima (MWh)" })
+    .fill("12");
+  await page.evaluate(() => window.history.back());
+  await expect(
+    page.getByRole("dialog", { name: "Cambios sin guardar" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Seguir editando" }),
+  ).toBeFocused();
+  await page.getByRole("button", { name: "Seguir editando" }).click();
+  await expect(
+    page.getByRole("spinbutton", { name: "Capacidad máxima (MWh)" }),
+  ).toHaveValue("12");
+  await page.evaluate(() => window.history.back());
+  await page.getByRole("button", { name: "Descartar cambios" }).click();
+  await expect(page).toHaveURL(new RegExp(`/react/scenarios/${scenario.id}$`));
+  await page.goForward();
+  await expect(
+    page.getByRole("spinbutton", { name: "Capacidad máxima (MWh)" }),
+  ).toHaveValue("8");
+  // A forward destination exists after returning to the saved editor.
+  await page
+    .getByRole("navigation", { name: "Ruta" })
+    .getByRole("link", { name: "Modelo progresivo", exact: true })
+    .click();
+  await page.goBack();
+  await page
+    .getByRole("spinbutton", { name: "Capacidad máxima (MWh)" })
+    .fill("13");
+  await page.evaluate(() => window.history.forward());
+  await expect(
+    page.getByRole("dialog", { name: "Cambios sin guardar" }),
+  ).toBeVisible();
+  await page.keyboard.press("Shift+Tab");
+  await expect(
+    page.getByRole("button", { name: "Descartar cambios" }),
+  ).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(
+    page.getByRole("button", { name: "Seguir editando" }),
+  ).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(
+    page.getByRole("spinbutton", { name: "Capacidad máxima (MWh)" }),
+  ).toHaveValue("13");
+  const reloadDialog = page.waitForEvent("dialog");
+  await page.evaluate(() => {
+    window.setTimeout(() => window.location.reload(), 0);
+  });
+  const dialog = await reloadDialog;
+  expect(dialog.type()).toBe("beforeunload");
+  await dialog.dismiss();
+  await expect(
+    page.getByRole("spinbutton", { name: "Capacidad máxima (MWh)" }),
+  ).toHaveValue("13");
+  const popupEvent = page.context().waitForEvent("page");
+  await page
+    .getByRole("navigation", { name: "Ruta" })
+    .getByRole("link", { name: "Modelo progresivo", exact: true })
+    .click({ modifiers: ["Control"] });
+  const popup = await popupEvent;
+  await popup.waitForLoadState();
+  await popup.close();
+  await expect(
+    page.getByRole("spinbutton", { name: "Capacidad máxima (MWh)" }),
+  ).toHaveValue("13");
+  await page
+    .getByRole("button", { name: "Guardar modelo", exact: true })
+    .click();
+  await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("spinbutton", { name: "Capacidad máxima (MWh)" }),
+  ).toHaveValue("13");
+  for (const size of [
+    { width: 1440, height: 900 },
+    { width: 1280, height: 720 },
+    { width: 320, height: 900 },
+  ]) {
+    await page.setViewportSize(size);
+    await page
+      .getByRole("heading", { name: "Modelo en edición" })
+      .scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: testInfo.outputPath(`modelo-${size.width}.png`),
+      fullPage: true,
+    });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBeTruthy();
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.evaluate(() => {
+    document.documentElement.style.zoom = "2";
+  });
+  await page.screenshot({
+    path: testInfo.outputPath("modelo-zoom200.png"),
+    fullPage: true,
+  });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBeTruthy();
+  await page.evaluate(() => {
+    document.documentElement.style.zoom = "1";
+  });
+  await page
+    .getByRole("button", { name: "Agregar Hidro", exact: true })
+    .click();
+  await page.getByText("Curvas hidráulicas", { exact: true }).click();
+  await page
+    .getByRole("textbox", { name: "Curva del embalse (JSON)" })
+    .fill("invalid");
+  await page.getByText("Curvas hidráulicas", { exact: true }).click();
+  await page
+    .getByRole("button", { name: "Editar Batería · battery_1" })
+    .click();
+  await page
+    .getByRole("button", { name: "Guardar modelo", exact: true })
+    .click();
+  await expect(
+    page.getByRole("textbox", { name: "Curva del embalse (JSON)" }),
+  ).toBeFocused();
+  await page.screenshot({ path: testInfo.outputPath("error-hidro.png") });
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(
+    accessibility.violations.filter((item) =>
+      ["serious", "critical"].includes(item.impact || ""),
+    ),
+  ).toEqual([]);
+});
+
 test("React structured draft editor saves multi-asset edits, recovers from one failed save, and reopens persisted state", async ({
   page,
 }) => {
@@ -1162,31 +1406,43 @@ test("React structured draft editor saves multi-asset edits, recovers from one f
 
   await page.getByRole("link", { name: "Modelo", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Draft estructurado" }),
+    page.getByRole("heading", { name: "Modelo en edición" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Crear draft" }).click();
   await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
 
   await page.getByLabel("Nombre del caso").fill("PMGD verano");
-  await page.getByLabel("Maximum import (MW)").fill("12");
-  await page.getByLabel("Maximum export (MW)").fill("8");
-  await page.getByRole("button", { name: "Agregar BESS" }).click();
-  await page.getByLabel("BESS asset ID").fill("battery_alpha");
-  await page.getByLabel("Maximum charge (MW)").fill("3");
-  await page.getByLabel("Maximum discharge (MW)").fill("4");
-  await page.getByRole("button", { name: "Agregar renewable" }).click();
-  await page.getByLabel("Renewable asset ID").fill("solar_north");
-  await page.getByRole("button", { name: "Agregar hydro" }).click();
-  await page.getByLabel("Hydro asset ID").fill("hydro_north");
+  await page.getByLabel("Importación máxima (MW)").fill("12");
+  await page.getByLabel("Exportación máxima (MW)").fill("8");
+  await page.getByRole("button", { name: "Agregar Batería" }).click();
+  await page
+    .getByText("Identificación técnica de la batería", { exact: true })
+    .click();
+  await page.getByLabel("ID de la batería").fill("battery_alpha");
+  await page.getByLabel("Potencia máxima de carga (MW)").fill("3");
+  await page.getByLabel("Potencia máxima de descarga (MW)").fill("4");
+  await page.getByRole("button", { name: "Agregar Renovable" }).click();
+  await page
+    .getByText("Identificación técnica de renovable", { exact: true })
+    .click();
+  await page.getByLabel("ID de la renovable").fill("solar_north");
+  await page.getByRole("button", { name: "Agregar Hidro" }).click();
+  await page
+    .getByText("Identificación técnica de hidro", { exact: true })
+    .click();
+  await page.getByLabel("ID de hidro").fill("hydro_north");
   await expect(page.getByText("Cambios sin guardar")).toBeVisible();
 
-  await page.getByRole("button", { name: "Guardar draft" }).click();
+  await page.getByRole("button", { name: "Guardar modelo" }).click();
   await expect(page.getByRole("alert")).toContainText("synthetic save failure");
   await expect(page.getByLabel("Nombre del caso")).toHaveValue("PMGD verano");
 
-  await page.getByRole("button", { name: "Guardar draft" }).click();
+  await page.getByRole("button", { name: "Guardar modelo" }).click();
   await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
 
+  await page
+    .getByRole("button", { name: "Editar Renovable · solar_north" })
+    .click();
   await page.getByRole("button", { name: "Quitar solar_north" }).click();
   await expect(
     page.getByText("Confirma para quitar solar_north"),
@@ -1194,16 +1450,21 @@ test("React structured draft editor saves multi-asset edits, recovers from one f
   await page
     .getByRole("button", { name: "Confirmar quitar solar_north" })
     .click();
-  await page.getByRole("button", { name: "Guardar draft" }).click();
+  await page.getByRole("button", { name: "Guardar modelo" }).click();
   await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
 
   const draftUrl = page.url();
   await page.reload();
   await expect(page).toHaveURL(draftUrl);
   await expect(page.getByLabel("Nombre del caso")).toHaveValue("PMGD verano");
-  await expect(page.getByLabel("BESS asset ID")).toHaveValue("battery_alpha");
-  await expect(page.getByLabel("Hydro asset ID")).toHaveValue("hydro_north");
-  await expect(page.getByLabel("Renewable asset ID")).toHaveCount(0);
+  await expect(page.getByLabel("ID de la batería")).toHaveValue(
+    "battery_alpha",
+  );
+  await page
+    .getByRole("button", { name: "Editar Hidro · hydro_north" })
+    .click();
+  await expect(page.getByLabel("ID de hidro")).toHaveValue("hydro_north");
+  await expect(page.getByLabel("ID de la renovable")).toHaveCount(0);
 });
 
 test("React draft editor uploads, maps, edits, and validates time-series sources", async ({
@@ -1229,10 +1490,10 @@ test("React draft editor uploads, maps, edits, and validates time-series sources
   await page.getByRole("link", { name: "Modelo", exact: true }).click();
   await page.getByRole("button", { name: "Crear draft" }).click();
   await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Agregar load" }).click();
-  await page.getByRole("button", { name: "Agregar renewable" }).click();
-  await page.getByRole("button", { name: "Agregar hydro" }).click();
-  await page.getByRole("button", { name: "Guardar draft" }).click();
+  await page.getByRole("button", { name: "Agregar Demanda" }).click();
+  await page.getByRole("button", { name: "Agregar Renovable" }).click();
+  await page.getByRole("button", { name: "Agregar Hidro" }).click();
+  await page.getByRole("button", { name: "Guardar modelo" }).click();
   await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
 
   const csvText = [
@@ -1313,10 +1574,10 @@ test("React case validation and versioning covers generated and expert paths", a
   await page.getByRole("link", { name: "Modelo", exact: true }).click();
   await page.getByRole("button", { name: "Crear draft" }).click();
   await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Agregar BESS" }).click();
-  await page.getByRole("button", { name: "Agregar load" }).click();
-  await page.getByRole("button", { name: "Agregar renewable" }).click();
-  await page.getByRole("button", { name: "Guardar draft" }).click();
+  await page.getByRole("button", { name: "Agregar Batería" }).click();
+  await page.getByRole("button", { name: "Agregar Demanda" }).click();
+  await page.getByRole("button", { name: "Agregar Renovable" }).click();
+  await page.getByRole("button", { name: "Guardar modelo" }).click();
   await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
 
   const csvText = [

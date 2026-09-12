@@ -227,7 +227,7 @@ test("representative React pages pass automated accessibility and keyboard smoke
   // Editor page.
   await page.goto(`/react/scenarios/${scenario.id}/draft`);
   await expect(
-    page.getByRole("heading", { name: "Draft estructurado" }),
+    page.getByRole("heading", { name: "Modelo en edición" }),
   ).toBeVisible();
   await expectNoSeriousAccessibilityViolations(page, "editor");
   await expectKeyboardReachesInteractiveControls(page, "editor");

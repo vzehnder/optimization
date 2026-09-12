@@ -193,13 +193,12 @@ borrador que solo se convierte en algo ejecutable cuando tu lo decides.
 
 Secciones del editor:
 
-- **Caso**: nombre, descripcion y metadatos generales. El campo **Draft
-  schema** (`bess_editor_draft.v1`) es la version del formato del documento:
-  no lo edites; si cambia, el backend rechaza el draft.
-- **Graph, grid y solver**: definicion del PCC y la red (limites de
-  importacion/exportacion, anti-simultaneidad opcional, precios de compra y
-  venta separados) y configuracion del solver (HiGHS por defecto).
-- **Assets**: lista de activos conectados al bus. Tipos soportados:
+- **Caso**: nombre y descripción del modelo.
+- **Componentes**: selecciona una batería, demanda, renovable o hidro por su
+  nombre e identidad. Se abre solo el componente elegido, con campos de
+  capacidad/límites, estado inicial, operación y economía. Las condiciones
+  terminales y la identificación técnica se despliegan por separado; cambiar
+  de componente conserva todos los valores. Tipos soportados:
   - `battery`: potencia de carga/descarga, energia min/max, energia inicial,
     eficiencias, condicion terminal, degradacion lineal por movimiento de
     SOC, anti-simultaneidad opcional.
@@ -209,11 +208,20 @@ Secciones del editor:
   - `hydro`: activo despachable con stock intertemporal (tipo bateria con
     afluentes naturales), vertimiento y valor de agua opcionales.
 - **Time-series metadata**: metadatos de las series que el caso espera.
+- **Red y punto de conexión**: límites de importación/exportación y control de
+  simultaneidad. Cero y un límite vacío tienen significados distintos.
+- **Opciones técnicas del modelo**: IDs del PCC y de la red, tipo de conexión,
+  esquema `bess_editor_draft.v1`, solver y sus opciones JSON. No es necesario
+  abrirlas para editar la capacidad de una batería. Conserva el esquema vigente.
 
 Acciones importantes:
 
-- **Guardar draft**: persiste el documento (hay aviso si intentas salir con
-  cambios sin guardar).
+- **Guardar modelo**: persiste el documento completo, incluidos los campos
+  ocultos. El estado cambia a **Guardado** después de la aceptación del servidor.
+  Si hay errores, el resumen enlaza al campo y abre su panel. Un fallo conserva
+  el trabajo; una respuesta tardía no borra los cambios posteriores al envío.
+  Atrás, Adelante y los enlaces permiten **Seguir editando** o **Descartar
+  cambios**. Al recargar o cerrar, se usa el aviso del navegador.
 - **Generar preview**: muestra el `system_case` que se generaria desde el
   draft, para inspeccionarlo antes de comprometerte.
 - **Validar con Julia**: corre la validacion del contrato contra el motor
@@ -223,6 +231,11 @@ Para casos con hidrologia compleja existe ademas el **editor de diagrama
 hidraulico** (desde el escenario): nodos, tramos, curvas cota-volumen,
 afluentes por nodo y caudales minimos por tramo. Si tu caso es one-bus
 simple, puedes ignorarlo.
+
+En el componente hidro simple, **Curvas hidráulicas** permite editar la curva
+del embalse requerida y la de generación. **Guardar y abrir diagrama hidráulico**
+guarda antes de entrar al editor v3. Si haces cambios adicionales mientras se
+guarda, el formulario permanece abierto para que puedas conservarlos.
 
 Cada componente que declaras aqui queda registrado como **objeto vinculable**:
 la unidad a la que se le cuelgan series en el modelo canonico. Los tipos

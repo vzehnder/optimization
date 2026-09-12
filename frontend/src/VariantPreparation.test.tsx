@@ -467,7 +467,7 @@ describe("variant preparation", () => {
     ).toBeDisabled();
     await user.click(screen.getByRole("link", { name: "Corregir modelo" }));
     expect(
-      await screen.findByRole("heading", { name: "Draft estructurado" }),
+      await screen.findByRole("heading", { name: "Modelo en edición" }),
     ).toBeVisible();
   });
   it("reports partial source acceptance and keeps the pending choice without executing", async () => {

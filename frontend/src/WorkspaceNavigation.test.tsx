@@ -124,7 +124,7 @@ describe("workspace task navigation", () => {
     render(<App />);
     await user.click(await screen.findByRole("link", { name: "Crear modelo" }));
     expect(
-      await screen.findByRole("heading", { name: "Draft estructurado" }),
+      await screen.findByRole("heading", { name: "Modelo en edición" }),
     ).toHaveFocus();
     await user.click(
       within(screen.getByRole("navigation", { name: "Ruta" })).getByRole(

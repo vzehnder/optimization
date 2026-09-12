@@ -1,0 +1,499 @@
+UX-002: extractos reales de los ciclos TDD. Se omiten los volcados DOM extensos.
+
+
+CICLO 1 RED — .tmp/ux002-cycle1-red.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/DraftExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/DraftExperience.test.tsx (1 test | 1 failed) 1076ms
+     × selects a battery and preserves its accepted capacity when reopening the model 1074ms
+[... DOM / contexto omitido ...]
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/DraftExperience.test.tsx > progressive model editing > selects a battery and preserves its accepted
+capacity when reopening the model
+TestingLibraryElementError: Unable to find role="button" and name "Editar Batería · battery_norte"
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+[... DOM / contexto omitido ...]
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  20:00:16
+   Duration  4.42s (transform 930ms, setup 302ms, import 1.39s, tests 1.08s, environment 1.34s)
+
+                  />
+                </label>
+                <label
+[... DOM / contexto omitido ...]
+                    id="case_description"
+                    rows="3"
+                  />
+                </label>
+              [secuencia ANSI truncada]
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/DraftExperience.test.tsx:57:35
+     55|     const user = userEvent.setup();
+     56|     const view = render(<App />);
+     57|     await user.click(await screen.findByRole("button", { name: "Editar…
+       |                                   ^
+     58|     await user.clear(screen.getByRole("spinbutton", { name: "Capacidad…
+     59|     await user.type(screen.getByRole("spinbutton", { name: "Capacidad …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+CICLO 1 GREEN — .tmp/ux002-cycle1-green.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/DraftExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  20:00:50
+   Duration  4.43s (transform 995ms, setup 291ms, import 1.44s, tests 1.09s, environment 1.32s)
+
+CICLO 2 RED — .tmp/ux002-cycle2-red.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/DraftExperience.test.tsx -t terminal condition
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/DraftExperience.test.tsx (2 tests | 1 failed | 1 skipped) 537ms
+     × keeps a terminal condition and basic capacity across closed panels and save 535ms
+[... DOM / contexto omitido ...]
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/DraftExperience.test.tsx > progressive model editing > keeps a terminal condition and basic capacity across
+closed panels and save
+TestingLibraryElementError: Unable to find an element with the text: Operación avanzada de la batería. This could be
+because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to
+make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[... DOM / contexto omitido ...]
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 skipped (2)
+   Start at  20:01:35
+   Duration  3.99s (transform 968ms, setup 306ms, import 1.46s, tests 537ms, environment 1.38s)
+
+              Invierno
+            </p>
+          </header>
+[... DOM / contexto omitido ...]
+                  />
+                </label>
+              [secuencia ANSI truncada]
+ ❯ Object.getElementError node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/DraftExperience.test.tsx:58:29
+     56|     const view = render(<App />);
+     57|     await user.click(await screen.findByRole("button", { name: "Editar…
+     58|     await user.click(screen.getByText("Operación avanzada de la baterí…
+       |                             ^
+     59|     await user.selectOptions(screen.getByRole("combobox", { name: "Con…
+     60|     await user.type(screen.getByRole("spinbutton", { name: "Energía te…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+CICLO 2 GREEN — .tmp/ux002-cycle2-green.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/DraftExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  20:02:13
+   Duration  5.86s (transform 948ms, setup 286ms, import 1.38s, tests 2.50s, environment 1.39s)
+
+CICLO 3 RED — .tmp/ux002-cycle3-red.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/DraftExperience.test.tsx -t hidden hydro
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/DraftExperience.test.tsx (3 tests | 1 failed | 2 skipped) 2328ms
+     × reveals and focuses a hidden hydro curve error without losing battery edits 2326ms
+[... DOM / contexto omitido ...]
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/DraftExperience.test.tsx > progressive model editing > reveals and focuses a hidden hydro curve error
+without losing battery edits
+TestingLibraryElementError: Unable to find role="textbox" and name "Reservoir curve (JSON)"
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+[... DOM / contexto omitido ...]
+              </button>
+ Test Files  1 failed (1)
+            </div>
+            <div
+              class="validation-summary"
+              role="alert"
+[... DOM / contexto omitido ...]
+                  <spa...
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/DraftExperience.test.tsx:67:25
+     65|     await user.click(screen.getByRole("button", { name: "Editar Baterí…
+     66|     await user.click(screen.getByRole("button", { name: "Guardar model…
+     67|     expect(await screen.findByRole("textbox", { name: "Reservoir curve…
+       |                         ^
+     68|     expect(screen.getByRole("textbox", { name: "Reservoir curve (JSON)…
+     69|     await user.click(screen.getByRole("button", { name: "Editar Baterí…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+      Tests  1 failed | 2 skipped (3)
+   Start at  20:02:59
+   Duration  5.71s (transform 972ms, setup 297ms, import 1.42s, tests 2.33s, environment 1.36s)
+
+CICLO 3 GREEN — .tmp/ux002-cycle3-green.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/DraftExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  20:04:49
+   Duration  6.68s (transform 966ms, setup 318ms, import 1.40s, tests 3.34s, environment 1.32s)
+
+CICLO 4 RED — .tmp/ux002-cycle4-red.txt
+
+Running 1 test using 1 worker
+
+
+
+npm.cmd : (node:10536) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+En línea: 2 Carácter: 43
++ ... /:memory:'; npm.cmd exec playwright test -- --grep UX-002 > ../.tmp/u ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[... DOM / contexto omitido ...]
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByRole('dialog', { name: 'Cambios sin guardar' })
+    Expected: visible
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 5000ms
+[... DOM / contexto omitido ...]
+      1149 |   await expect(page.getByRole("spinbutton", { name: "Capacidad máxima (MWh)" })).toHaveValue("12");
+        at C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\frontend\e2e\react-foundation.spec.ts:1146:75
+
+    Error Context: test-results\react-foundation-UX-002-pr-3fd7d-gh-browser-back-and-forward\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\react-foundation-UX-002-pr-3fd7d-gh-browser-back-and-forward\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\react-foundation-UX-002-pr-3fd7d-gh-browser-back-and-forward\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+  1 failed
+    e2e\react-foundation.spec.ts:1129:1 › UX-002 protects pending model edits through browser back and forward
+
+CICLO 4 GREEN — .tmp/ux002-cycle4-green.txt
+
+En línea: 40 Carácter: 101
++ ... /:memory:'; npm.cmd run test:browser -- --grep UX-002 > ../.tmp/ux002 ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([plugin builtin:vite-reporter] :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking:
+https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+
+Running 1 test using 1 worker
+
+
+(node:38672) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1/1] e2e\react-foundation.spec.ts:1129:1 › UX-002 protects pending model edits through browser back and forward
+  1 passed (6.5s)
+
+CICLO 5 RED — .tmp/ux002-cycle5-red.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/DraftExperience.test.tsx -t network limits
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/DraftExperience.test.tsx (4 tests | 1 failed | 3 skipped) 1093ms
+     × edits network limits while keeping technical solver options and empty limits after reopening 1090ms
+[... DOM / contexto omitido ...]
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/DraftExperience.test.tsx > progressive model editing > edits network limits while keeping technical solver
+options and empty limits after reopening
+TestingLibraryElementError: Unable to find an element with the text: Opciones técnicas del modelo. This could be
+because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to
+make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[... DOM / contexto omitido ...]
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/DraftExperience.test.tsx:57:35
+     55|     const user = userEvent.setup();
+     56|     const view = render(<App />);
+     57|     await user.click(await screen.findByText("Opciones técnicas del mo…
+       |                                   ^
+     58|     expect(JSON.parse((screen.getByRole("textbox", { name: "Opciones d…
+     59|     await user.click(screen.getByText("Opciones técnicas del modelo", …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 skipped (4)
+   Start at  20:09:01
+   Duration  5.77s (transform 992ms, setup 314ms, import 1.46s, tests 1.09s, environment 2.58s)
+
+CICLO 5 GREEN — .tmp/ux002-cycle5-green.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/DraftExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  20:10:29
+   Duration  7.89s (transform 1.04s, setup 315ms, import 1.53s, tests 4.37s, environment 1.37s)
+
+CICLO 6 RED — .tmp/ux002-cycle6-red.txt
+
+> bess-react-ui@0.1.0 test:browser
+> npm run build && playwright test --grep UX-002 preserves
+
+
+> bess-react-ui@0.1.0 build
+> tsc -b && vite build
+
+vite v8.0.16 building client environment for production...
+[... DOM / contexto omitido ...]
+
+    Error: expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 4
+
+    @@ -1,9 +1,8 @@
+      Object {
+        "assets": Array [
+          Object {
+    -       "generation_curve": null,
+            "generation_mode": "linear",
+            "id": "hydro_1",
+            "initial_storage_hm3": 2.5,
+            "power_per_flow_mw_per_m3s": 0.08,
+            "reservoir_curve": Array [
+    @@ -37,7 +36,11 @@
+          "type": "bus",
+        },
+        "schema_version": "bess_editor_draft.v1",
+        "solver": Object {
+          "name": "HiGHS",
+    +     "options": Object {},
+    +   },
+    +   "time_series": Object {
+    +     "sources": Array [],
+        },
+      }
+
+      1148 |   await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
+      1149 |   const { draft } = await (await api.get(`/api/scenarios/${scenario.id}/draft`)).json();
+    > 1150 |   expect(draft.document).toEqual({ ...document, case: { name: "Modelo revisado" } });
+           |                          ^
+      1151 |   await page.reload();
+      1152 |   await expect(page.getByRole("textbox", { name: "Nombre del caso" })).toHaveValue("Modelo revisado");
+      1153 |   await expect(page.getByRole("spinbutton", { name: "Importación máxima (MW)" })).toHaveValue("0");
+        at C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\frontend\e2e\react-foundation.spec.ts:1150:26
+
+    Error Context: test-results\react-foundation-UX-002-pr-2fe10-s-after-saving-a-basic-edit\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\react-foundation-UX-002-pr-2fe10-s-after-saving-a-basic-edit\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\react-foundation-UX-002-pr-2fe10-s-after-saving-a-basic-edit\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+  1 failed
+    e2e\react-foundation.spec.ts:1129:1 › UX-002 preserves omitted fields null curves zero limits and false flags after saving a basic edit
+
+CICLO 6 GREEN — .tmp/ux002-cycle6-green.txt
+
+En línea: 2 Carácter: 43
++ ... /:memory:'; npm.cmd run test:browser -- --grep 'UX-002 preserves' > . ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([plugin builtin:vite-reporter] :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking:
+https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+
+Running 1 test using 1 worker
+
+
+(node:44796) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1/1] e2e\react-foundation.spec.ts:1129:1 › UX-002 preserves omitted fields null curves zero limits and false flags after saving a basic edit
+  1 passed (6.1s)
+
+CICLO 7 RED — .tmp/ux002-cycle7-red.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/DraftExperience.test.tsx -t explicitly edited solver
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/DraftExperience.test.tsx (5 tests | 1 failed | 4 skipped) 1803ms
+     × opens the hydraulic diagram after accepting an explicitly edited solver document 1800ms
+[... DOM / contexto omitido ...]
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/DraftExperience.test.tsx > progressive model editing > opens the hydraulic diagram after accepting an
+explicitly edited solver document
+AssertionError: expected '/react/scenarios/10/draft' to be '/react/scenarios/10/hydraulic-diagram' // Object.is
+equality
+
+Ignored nodes: comments, script, style
+<html>
+[... DOM / contexto omitido ...]
+
+Expected: "/react/scenarios/10/hydraulic-diagram"
+Received: "/react/scenarios/10/draft"
+
+ ❯ src/DraftExperience.test.tsx:88:58
+     86|     await user.click(screen.getByRole("button", { name: "Agregar Hidro…
+     87|     await user.click(screen.getByRole("button", { name: "Guardar y abr…
+     88|     await waitFor(() => expect(window.location.pathname).toBe("/react/…
+       |                                                          ^
+     89|     expect(screen.queryByRole("dialog", { name: "Cambios sin guardar" …
+     90|   });
+ ❯ runWithExpensiveErrorDiagnosticsDisabled node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 4 skipped (5)
+   Start at  20:20:05
+   Duration  5.35s (transform 1.05s, setup 303ms, import 1.57s, tests 1.80s, environment 1.39s)
+
+CICLO 7 GREEN — .tmp/ux002-cycle7-green.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/DraftExperience.test.tsx -t explicitly edited solver
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 4 skipped (5)
+   Start at  20:20:58
+   Duration  4.15s (transform 979ms, setup 292ms, import 1.41s, tests 778ms, environment 1.38s)
+
+CICLO 8 RED — .tmp/ux002-cycle8-red.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/DraftExperience.test.tsx -t hidden hydro
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/DraftExperience.test.tsx (6 tests | 1 failed | 5 skipped) 1626ms
+     × reveals and focuses a hidden hydro curve error without losing battery edits 1623ms
+[... DOM / contexto omitido ...]
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/DraftExperience.test.tsx > progressive model editing > reveals and focuses a hidden hydro curve error
+without losing battery edits
+Error: expect(element).toHaveAccessibleDescription()
+
+Expected element to have accessible description:
+  JSON inválido. Revisa comas, comillas y corchetes.
+Received:
+  Reservoir curve requerida.
+ ❯ src/DraftExperience.test.tsx:213:79
+    211|       screen.getByRole("textbox", { name: "Curva del embalse (JSON)" }…
+    212|     ).toHaveValue("invalid");
+    213|     expect(screen.getByRole("textbox", { name: "Curva del embalse (JSO…
+       |                                                                               ^
+    214|     await user.click(
+    215|       screen.getByRole("button", { name: "Editar Batería · battery_nor…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 skipped (6)
+   Start at  20:27:39
+   Duration  5.26s (transform 1.05s, setup 308ms, import 1.53s, tests 1.63s, environment 1.47s)
+
+CICLO 8 GREEN — .tmp/ux002-cycle8-green.txt
+
+> bess-react-ui@0.1.0 test
+> vitest run src/DraftExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  20:28:20
+   Duration  9.05s (transform 1.05s, setup 295ms, import 1.53s, tests 5.47s, environment 1.46s)

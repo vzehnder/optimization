@@ -1,6 +1,6 @@
 # UX-002 · Editar el modelo con complejidad progresiva
 
-Estado: Todo. Prioridad: P1. Dependencias: UX-001. Tamaño: M.
+Estado: In Review. Prioridad: P1. Dependencias: UX-001. Tamaño: M.
 
 ## Problema y resultado
 
@@ -43,3 +43,31 @@ No agregar pruebas de cada acordeón o clase CSS. Si los pasos no modifican el c
 - Mover un elemento del diagrama sin cambiar topología física conserva la semántica actual de validación; las pruebas existentes aplicables siguen pasando.
 
 Revisar posteriormente extracciones pequeñas de componentes si reducen duplicación. No refactorizar todo el editor antes de demostrar el primer comportamiento.
+
+## Resolución
+
+- Responsable: Codex. Inicio y entrega para revisión: 2026-09-12.
+- Estado: In Review; aceptación de producto pendiente.
+- PR/commit: `feat(ux): add progressive model editing and protect unsaved changes`,
+  sobre `9c24c1b`, solicitado por el usuario. Sin PR nueva.
+- Implementación: selector de componentes, campos por propósito, opciones
+  técnicas desplegables, conservación del documento completo, errores enlazados
+  con foco, estados de guardado y protección de Atrás/Adelante. Se conserva el
+  acceso a hidráulica v3 y a preview/validación/promoción.
+- Fronteras: el usuario confirmó «Confirmo F1 y F2 para UX-002» antes de la
+  primera prueba. F3 solo regresiones existentes, sin cambios de contrato.
+- TDD: ocho ciclos RED → GREEN y una prueba complementaria de respuesta tardía;
+  [registro y resultados](../evidencia/ux-002/README.md).
+- Validación: 201 pruebas frontend, 17 navegador y 25 API aprobadas. TypeScript,
+  ESLint, build y formato del frontend modificado pasan. El chequeo global falla
+  por formato previo en 23 archivos sin modificar; no se cuenta como aprobado.
+- Paridad: guardar/persistir, red y cuatro tecnologías, campos avanzados,
+  hidráulica v3 y generación/validación/promoción comprobadas en las fronteras
+  descritas en la evidencia. No cambia el significado de IDs, revisiones ni
+  versiones inmutables.
+- Presentación: cinco capturas revisadas a 1440, 1280, 320 y ampliación CSS al
+  200 %; teclado, foco y axe sin serious/critical en la vista comprobada.
+- Documentación: guía del analista, manual completo, estrategia, validación y
+  tracker actualizados. Capturas locales regenerables excluidas de Git.
+- Límites: sin Julia real, PostgreSQL, suite Python completa, lectores de pantalla
+  ni estudio con participantes. No hay revisión/aceptación externa registrada.

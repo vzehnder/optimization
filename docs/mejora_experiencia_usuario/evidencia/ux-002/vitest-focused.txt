@@ -1,0 +1,11 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/DraftExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  20:28:20
+   Duration  9.05s (transform 1.05s, setup 295ms, import 1.53s, tests 5.47s, environment 1.46s)

@@ -863,6 +863,9 @@ button:focus-visible {
 }
 
 .draft-status {
+  width: auto;
+  margin: 0;
+  box-shadow: none;
   padding: 0.25rem 0.55rem;
   border-radius: 999px;
   color: #053b2f;
@@ -887,6 +890,86 @@ button:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
+}
+
+.draft-component-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 15rem) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.draft-editor {
+  container-type: inline-size;
+}
+
+@container (max-width: 760px) {
+  .draft-component-workspace,
+  .draft-editor .draft-field-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .draft-toolbar {
+    position: static;
+  }
+}
+
+.draft-component-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.draft-component-list button {
+  text-align: left;
+  overflow-wrap: anywhere;
+  color: #243b53;
+  background: #eef4f8;
+  border: 2px solid transparent;
+}
+
+.draft-component-list button[aria-pressed="true"] {
+  border-color: #087f5b;
+  color: #064e3b;
+  background: #d9f2e8;
+}
+
+.draft-component-panel,
+.draft-editor .asset-settings,
+.draft-editor .field-row {
+  min-width: 0;
+}
+
+.draft-component-panel .asset-settings {
+  margin-top: 0;
+}
+
+.model-details > summary {
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0.6rem 0;
+  overflow-wrap: anywhere;
+}
+
+.model-details[open] > summary {
+  margin-bottom: 0.8rem;
+}
+
+.draft-editor input,
+.draft-editor textarea,
+.draft-editor select,
+.draft-editor summary {
+  scroll-margin-top: 6rem;
+}
+
+@media (max-width: 760px) {
+  .draft-component-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .draft-toolbar {
+    position: static;
+    overflow-wrap: anywhere;
+  }
 }
 
 .draft-field-grid {

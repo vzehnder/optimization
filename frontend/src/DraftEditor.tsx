@@ -7,7 +7,13 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import {
+  Link,
+  useBlocker,
+  useLocation,
+  useNavigate,
+  useParams,
+} from "react-router-dom";
 
 import {
   ApiError,
@@ -75,10 +81,17 @@ type JsonTextState = {
 };
 
 const assetLabels: Record<DraftAssetType, string> = {
-  battery: "BESS",
-  load: "load",
-  renewable: "renewable",
-  hydro: "hydro",
+  battery: "Batería",
+  load: "Demanda",
+  renewable: "Renovable",
+  hydro: "Hidro",
+};
+
+const componentLabels: Record<DraftAssetType, string> = {
+  battery: "Batería",
+  load: "Demanda",
+  renewable: "Renovable",
+  hydro: "Hidro",
 };
 
 const defaultAssets: Record<DraftAssetType, DraftAsset> = {
@@ -385,6 +398,32 @@ function fieldErrorId(field: string): string {
   return `${field}-error`;
 }
 
+const fieldNames: Record<string, string> = {
+  schema_version: "esquema del modelo",
+  case_name: "nombre del caso",
+  pcc_id: "ID del punto de conexión",
+  grid_id: "ID de la red",
+  solver_options_json: "opciones del solver",
+  time_series_sources_json: "fuentes de datos",
+  battery_id: "ID de la batería",
+  renewable_id: "ID de la renovable",
+  load_id: "ID de la demanda",
+  hydro_id: "ID de hidro",
+  battery_charge_power_max_mw: "potencia máxima de carga",
+  battery_discharge_power_max_mw: "potencia máxima de descarga",
+  battery_energy_min_mwh: "energía mínima",
+  battery_energy_max_mwh: "capacidad máxima",
+  battery_initial_energy_mwh: "energía inicial",
+  battery_charge_efficiency: "eficiencia de carga",
+  battery_discharge_efficiency: "eficiencia de descarga",
+  battery_degradation_cost_per_mwh_delta_soc: "costo de degradación",
+  hydro_storage_min_hm3: "almacenamiento mínimo",
+  hydro_storage_max_hm3: "almacenamiento máximo",
+  hydro_initial_storage_hm3: "almacenamiento inicial",
+  hydro_generation_curve_json: "curva de generación",
+  hydro_reservoir_curve_json: "curva del embalse",
+};
+
 function preserveGeneratedSnapshot(
   document: ScenarioDraftDocument,
 ): ScenarioDraftDocument {
@@ -456,9 +495,8 @@ function parseJsonField<T>(
       return fallback;
     }
     return parsed;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "JSON invalido.";
-    errors[field] = message;
+  } catch {
+    errors[field] = "JSON inválido. Revisa comas, comillas y corchetes.";
     return fallback;
   }
 }
@@ -469,6 +507,7 @@ function buildSaveDocument(
 ): { document: ScenarioDraftDocument; errors: ValidationErrors } {
   const errors: ValidationErrors = {};
   const candidate = cloneDocument(document);
+  const originalTexts = jsonTextsFromDocument(document);
   const options = parseJsonField<Record<string, unknown>>(
     jsonTexts.solverOptions,
     {},
@@ -482,11 +521,14 @@ function buildSaveDocument(
     errors,
     true,
   );
-  candidate.solver = { ...(candidate.solver || {}), options };
-  candidate.time_series = {
-    ...(candidate.time_series || {}),
-    sources,
-  };
+  if (jsonTexts.solverOptions !== originalTexts.solverOptions) {
+    candidate.solver = { ...(candidate.solver || {}), options };
+  }
+  if (jsonTexts.timeSeriesSources !== originalTexts.timeSeriesSources)
+    candidate.time_series = {
+      ...(candidate.time_series || {}),
+      sources,
+    };
 
   const hydroIndex = (candidate.assets || []).findIndex(
     (asset) => asset.type === "hydro",
@@ -508,30 +550,33 @@ function buildSaveDocument(
     );
     const hydro: DraftAsset = {
       ...candidate.assets![hydroIndex],
-      reservoir_curve: reservoirCurve,
     };
-    if (generationCurve.length) hydro.generation_curve = generationCurve;
-    else delete hydro.generation_curve;
+    if (jsonTexts.hydroReservoirCurve !== originalTexts.hydroReservoirCurve)
+      hydro.reservoir_curve = reservoirCurve;
+    if (jsonTexts.hydroGenerationCurve !== originalTexts.hydroGenerationCurve)
+      hydro.generation_curve = generationCurve;
     candidate.assets![hydroIndex] = hydro;
   }
 
-  Object.assign(errors, validateDocument(candidate));
-  return { document: candidate, errors };
+  return {
+    document: candidate,
+    errors: { ...validateDocument(candidate), ...errors },
+  };
 }
 
 function validateDocument(document: ScenarioDraftDocument): ValidationErrors {
   const errors: ValidationErrors = {};
   if (!String(document.schema_version || "").trim()) {
-    errors.schema_version = "Schema requerido.";
+    errors.schema_version = "Esquema requerido.";
   }
   if (!String(document.case?.name || "").trim()) {
     errors.case_name = "Nombre requerido.";
   }
   if (!String(document.pcc?.id || "").trim()) {
-    errors.pcc_id = "PCC requerido.";
+    errors.pcc_id = "Identificador del punto de conexión requerido.";
   }
   if (!String(document.grid?.id || "").trim()) {
-    errors.grid_id = "Grid requerido.";
+    errors.grid_id = "Identificador de la red requerido.";
   }
 
   const seenIds = new Set<string>();
@@ -539,9 +584,9 @@ function validateDocument(document: ScenarioDraftDocument): ValidationErrors {
     const assetId = String(asset.id || "").trim();
     const type = String(asset.type || "asset");
     const idField = `${type}_id`;
-    if (!assetId) errors[idField] = "Asset ID requerido.";
+    if (!assetId) errors[idField] = "Identificador del componente requerido.";
     if (assetId && seenIds.has(assetId)) {
-      errors[idField] = `Asset ID duplicado: ${assetId}.`;
+      errors[idField] = `Identificador duplicado: ${assetId}.`;
     }
     seenIds.add(assetId);
 
@@ -557,7 +602,7 @@ function validateDocument(document: ScenarioDraftDocument): ValidationErrors {
         "degradation_cost_per_mwh_delta_soc",
       ]) {
         if (typeof asset[field] !== "number") {
-          errors[`battery_${field}`] = "Valor numerico requerido.";
+          errors[`battery_${field}`] = "Valor numérico requerido.";
         }
       }
       const min = Number(asset.energy_min_mwh);
@@ -565,7 +610,7 @@ function validateDocument(document: ScenarioDraftDocument): ValidationErrors {
       const initial = Number(asset.initial_energy_mwh);
       if (Number.isFinite(min) && Number.isFinite(max) && min > max) {
         errors.battery_energy_max_mwh =
-          "Maximum energy debe ser mayor o igual al minimo.";
+          "La capacidad máxima debe ser mayor o igual a la energía mínima.";
       }
       if (
         Number.isFinite(min) &&
@@ -574,7 +619,7 @@ function validateDocument(document: ScenarioDraftDocument): ValidationErrors {
         (initial < min || initial > max)
       ) {
         errors.battery_initial_energy_mwh =
-          "Initial energy debe quedar entre minimo y maximo.";
+          "La energía inicial debe quedar entre el mínimo y el máximo.";
       }
     }
 
@@ -585,19 +630,19 @@ function validateDocument(document: ScenarioDraftDocument): ValidationErrors {
         "initial_storage_hm3",
       ]) {
         if (typeof asset[field] !== "number") {
-          errors[`hydro_${field}`] = "Valor numerico requerido.";
+          errors[`hydro_${field}`] = "Valor numérico requerido.";
         }
       }
       if (
         !Array.isArray(asset.reservoir_curve) ||
         !asset.reservoir_curve.length
       ) {
-        errors.hydro_reservoir_curve_json = "Reservoir curve requerida.";
+        errors.hydro_reservoir_curve_json = "Curva del embalse requerida.";
       }
     }
 
     if (!isAssetType(asset.type)) {
-      errors[`asset_${index}_type`] = "Tipo de asset no soportado.";
+      errors[`asset_${index}_type`] = "Tipo de componente no soportado.";
     }
   }
   return errors;
@@ -616,7 +661,11 @@ function StatusBadge({
   if (saving) label = "Guardando";
   else if (failed) label = "Error al guardar";
   else if (dirty) label = "Cambios sin guardar";
-  return <span className="draft-status">{label}</span>;
+  return (
+    <span className="draft-status" role="status">
+      {label}
+    </span>
+  );
 }
 
 function FieldError({
@@ -628,7 +677,7 @@ function FieldError({
 }) {
   if (!errors[field]) return null;
   return (
-    <span className="field-error" id={fieldErrorId(field)}>
+    <span className="field-error" id={fieldErrorId(field)} aria-hidden="true">
       {errors[field]}
     </span>
   );
@@ -657,6 +706,7 @@ function TextInput({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         aria-describedby={errors[id] ? fieldErrorId(id) : undefined}
+        aria-invalid={Boolean(errors[id])}
         required={required}
       />
       <FieldError errors={errors} field={id} />
@@ -689,6 +739,7 @@ function NumberInput({
         value={numberValue(value)}
         onChange={(event) => onChange(parseOptionalNumber(event.target.value))}
         aria-describedby={errors[id] ? fieldErrorId(id) : undefined}
+        aria-invalid={Boolean(errors[id])}
         required={required}
       />
       <FieldError errors={errors} field={id} />
@@ -750,6 +801,7 @@ function JsonTextarea({
         spellCheck={false}
         rows={5}
         aria-describedby={errors[id] ? fieldErrorId(id) : undefined}
+        aria-invalid={Boolean(errors[id])}
       />
       <FieldError errors={errors} field={id} />
     </label>
@@ -1977,7 +2029,6 @@ function AssetShell({
 function BatteryFields({
   asset,
   assetIndex,
-  document,
   setDocument,
   errors,
   removalProps,
@@ -1988,18 +2039,11 @@ function BatteryFields({
     );
   return (
     <AssetShell asset={asset} {...removalProps}>
+      <h3>Capacidad y límites</h3>
       <div className="draft-field-grid">
-        <TextInput
-          id="battery_id"
-          label="BESS asset ID"
-          value={textValue(asset.id)}
-          onChange={(value) => patch("id", value)}
-          errors={errors}
-          required
-        />
         <NumberInput
           id="battery_charge_power_max_mw"
-          label="Maximum charge (MW)"
+          label="Potencia máxima de carga (MW)"
           value={asset.charge_power_max_mw}
           onChange={(value) => patch("charge_power_max_mw", value)}
           errors={errors}
@@ -2007,7 +2051,7 @@ function BatteryFields({
         />
         <NumberInput
           id="battery_discharge_power_max_mw"
-          label="Maximum discharge (MW)"
+          label="Potencia máxima de descarga (MW)"
           value={asset.discharge_power_max_mw}
           onChange={(value) => patch("discharge_power_max_mw", value)}
           errors={errors}
@@ -2015,7 +2059,7 @@ function BatteryFields({
         />
         <NumberInput
           id="battery_energy_min_mwh"
-          label="Minimum energy (MWh)"
+          label="Energía mínima (MWh)"
           value={asset.energy_min_mwh}
           onChange={(value) => patch("energy_min_mwh", value)}
           errors={errors}
@@ -2023,23 +2067,29 @@ function BatteryFields({
         />
         <NumberInput
           id="battery_energy_max_mwh"
-          label="Maximum energy (MWh)"
+          label="Capacidad máxima (MWh)"
           value={asset.energy_max_mwh}
           onChange={(value) => patch("energy_max_mwh", value)}
           errors={errors}
           required
         />
+      </div>
+      <h3>Estado inicial</h3>
+      <div className="draft-field-grid">
         <NumberInput
           id="battery_initial_energy_mwh"
-          label="Initial energy (MWh)"
+          label="Energía inicial (MWh)"
           value={asset.initial_energy_mwh}
           onChange={(value) => patch("initial_energy_mwh", value)}
           errors={errors}
           required
         />
+      </div>
+      <h3>Operación</h3>
+      <div className="draft-field-grid">
         <NumberInput
           id="battery_charge_efficiency"
-          label="Charge efficiency"
+          label="Eficiencia de carga"
           value={asset.charge_efficiency}
           onChange={(value) => patch("charge_efficiency", value)}
           errors={errors}
@@ -2047,15 +2097,48 @@ function BatteryFields({
         />
         <NumberInput
           id="battery_discharge_efficiency"
-          label="Discharge efficiency"
+          label="Eficiencia de descarga"
           value={asset.discharge_efficiency}
           onChange={(value) => patch("discharge_efficiency", value)}
           errors={errors}
           required
         />
+      </div>
+      <details className="model-details">
+        <summary>Operación avanzada de la batería</summary>
+        <div className="draft-field-grid">
+          <SelectInput
+            id="battery_terminal_condition"
+            label="Condición terminal"
+            value={String(asset.terminal_condition || "equal_initial")}
+            onChange={(value) => patch("terminal_condition", value)}
+            options={[
+              { value: "none", label: "Sin condición" },
+              { value: "equal_initial", label: "Igual al estado inicial" },
+              { value: "min_terminal", label: "Mínimo terminal" },
+            ]}
+          />
+          <NumberInput
+            id="battery_terminal_energy_min_mwh"
+            label="Energía terminal mínima (MWh)"
+            value={asset.terminal_energy_min_mwh}
+            onChange={(value) => patch("terminal_energy_min_mwh", value)}
+            errors={errors}
+          />
+        </div>
+        <CheckboxInput
+          label="Impedir carga y descarga simultáneas"
+          checked={asset.prevent_simultaneous_charge_discharge !== false}
+          onChange={(value) =>
+            patch("prevent_simultaneous_charge_discharge", value)
+          }
+        />
+      </details>
+      <h3>Economía</h3>
+      <div className="draft-field-grid">
         <NumberInput
           id="battery_degradation_cost_per_mwh_delta_soc"
-          label="Degradation cost (USD/MWh)"
+          label="Costo de degradación (USD/MWh)"
           value={asset.degradation_cost_per_mwh_delta_soc}
           onChange={(value) =>
             patch("degradation_cost_per_mwh_delta_soc", value)
@@ -2063,38 +2146,23 @@ function BatteryFields({
           errors={errors}
           required
         />
-        <SelectInput
-          id="battery_terminal_condition"
-          label="Terminal condition"
-          value={String(asset.terminal_condition || "equal_initial")}
-          onChange={(value) => patch("terminal_condition", value)}
-          options={[
-            { value: "none", label: "None" },
-            { value: "equal_initial", label: "Equal initial" },
-            { value: "min_terminal", label: "Minimum terminal" },
-          ]}
-        />
-        <NumberInput
-          id="battery_terminal_energy_min_mwh"
-          label="Minimum terminal energy (MWh)"
-          value={asset.terminal_energy_min_mwh}
-          onChange={(value) => patch("terminal_energy_min_mwh", value)}
-          errors={errors}
-        />
       </div>
       <CheckboxInput
-        label="Prevent simultaneous charge and discharge"
-        checked={asset.prevent_simultaneous_charge_discharge !== false}
-        onChange={(value) =>
-          patch("prevent_simultaneous_charge_discharge", value)
-        }
-      />
-      <CheckboxInput
-        label="Apply linear degradation"
+        label="Aplicar degradación lineal"
         checked={asset.degradation_linear_delta_soc !== false}
         onChange={(value) => patch("degradation_linear_delta_soc", value)}
       />
-      <input type="hidden" value={String(document.schema_version || "")} />
+      <details className="model-details">
+        <summary>Identificación técnica de la batería</summary>
+        <TextInput
+          id="battery_id"
+          label="ID de la batería"
+          value={textValue(asset.id)}
+          onChange={(value) => patch("id", value)}
+          errors={errors}
+          required
+        />
+      </details>
     </AssetShell>
   );
 }
@@ -2113,27 +2181,30 @@ function RenewableFields({
   return (
     <AssetShell asset={asset} {...removalProps}>
       <div className="draft-field-grid">
-        <TextInput
-          id="renewable_id"
-          label="Renewable asset ID"
-          value={textValue(asset.id)}
-          onChange={(value) => patch("id", value)}
-          errors={errors}
-          required
-        />
+        <details className="model-details">
+          <summary>Identificación técnica de renovable</summary>
+          <TextInput
+            id="renewable_id"
+            label="ID de la renovable"
+            value={textValue(asset.id)}
+            onChange={(value) => patch("id", value)}
+            errors={errors}
+            required
+          />
+        </details>
         <SelectInput
           id="renewable_category"
-          label="Technology"
+          label="Tecnología"
           value={String(asset.category || asset.display_category || "solar")}
           onChange={(value) => patch("category", value)}
           options={[
             { value: "solar", label: "Solar" },
-            { value: "wind", label: "Wind" },
+            { value: "wind", label: "Eólica" },
           ]}
         />
         <NumberInput
           id="renewable_curtailment_penalty_usd_per_mwh"
-          label="Curtailment penalty (USD/MWh)"
+          label="Penalización por vertimiento (USD/MWh)"
           value={asset.curtailment_penalty_usd_per_mwh}
           onChange={(value) => patch("curtailment_penalty_usd_per_mwh", value)}
           errors={errors}
@@ -2156,14 +2227,17 @@ function LoadFields({
     );
   return (
     <AssetShell asset={asset} {...removalProps}>
-      <TextInput
-        id="load_id"
-        label="Load asset ID"
-        value={textValue(asset.id)}
-        onChange={(value) => patch("id", value)}
-        errors={errors}
-        required
-      />
+      <details className="model-details">
+        <summary>Identificación técnica de demanda</summary>
+        <TextInput
+          id="load_id"
+          label="ID de la demanda"
+          value={textValue(asset.id)}
+          onChange={(value) => patch("id", value)}
+          errors={errors}
+          required
+        />
+      </details>
     </AssetShell>
   );
 }
@@ -2182,24 +2256,24 @@ function HydroFields({
     setDocument((current) =>
       replaceAsset(current, assetIndex, { [field]: value }),
     );
-  const hasHydroError = Object.keys(errors).some((key) =>
-    key.startsWith("hydro_"),
-  );
   return (
     <AssetShell asset={asset} {...removalProps}>
       <div className="draft-field-grid">
-        <TextInput
-          id="hydro_id"
-          label="Hydro asset ID"
-          value={textValue(asset.id)}
-          onChange={(value) => patch("id", value)}
-          errors={errors}
-          required
-        />
+        <details className="model-details">
+          <summary>Identificación técnica de hidro</summary>
+          <TextInput
+            id="hydro_id"
+            label="ID de hidro"
+            value={textValue(asset.id)}
+            onChange={(value) => patch("id", value)}
+            errors={errors}
+            required
+          />
+        </details>
       </div>
       <p className="source-note">
-        Define la topologia y los parametros completos en el diagrama
-        hidraulico. Los campos de abajo son un resumen editable.
+        Edita aquí el modelo hidro simple. Para redes con nodos, tramos,
+        centrales y unidades, abre el diagrama hidráulico.
       </p>
       {onOpenHydraulicDiagram ? (
         <button
@@ -2207,119 +2281,96 @@ function HydroFields({
           className="hydraulic-diagram-link"
           onClick={onOpenHydraulicDiagram}
         >
-          Editar diagrama hidraulico
+          Guardar y abrir diagrama hidráulico
         </button>
       ) : null}
-      <details className="hydro-detail" open={hasHydroError || undefined}>
-        <summary>Parametros hidraulicos (resumen)</summary>
-        <div className="draft-field-grid">
-          <NumberInput
-            id="hydro_storage_min_hm3"
-            label="Minimum storage (hm3)"
-            value={asset.storage_min_hm3}
-            onChange={(value) => patch("storage_min_hm3", value)}
-            errors={errors}
-            required
-          />
-          <NumberInput
-            id="hydro_storage_max_hm3"
-            label="Maximum storage (hm3)"
-            value={asset.storage_max_hm3}
-            onChange={(value) => patch("storage_max_hm3", value)}
-            errors={errors}
-            required
-          />
-          <NumberInput
-            id="hydro_initial_storage_hm3"
-            label="Initial storage (hm3)"
-            value={asset.initial_storage_hm3}
-            onChange={(value) => patch("initial_storage_hm3", value)}
-            errors={errors}
-            required
-          />
-          <SelectInput
-            id="hydro_generation_mode"
-            label="Generation mode"
-            value={String(asset.generation_mode || "linear")}
-            onChange={(value) => patch("generation_mode", value)}
-            options={[
-              { value: "linear", label: "Linear" },
-              { value: "piecewise_linear", label: "Piecewise linear" },
-            ]}
-          />
-          <NumberInput
-            id="hydro_power_per_flow_mw_per_m3s"
-            label="Power per flow (MW per m3/s)"
-            value={asset.power_per_flow_mw_per_m3s}
-            onChange={(value) => patch("power_per_flow_mw_per_m3s", value)}
-            errors={errors}
-          />
-          <NumberInput
-            id="hydro_turbine_flow_min_m3s"
-            label="Minimum turbine flow (m3/s)"
-            value={asset.turbine_flow_min_m3s}
-            onChange={(value) => patch("turbine_flow_min_m3s", value)}
-            errors={errors}
-          />
-          <NumberInput
-            id="hydro_turbine_flow_max_m3s"
-            label="Maximum turbine flow (m3/s)"
-            value={asset.turbine_flow_max_m3s}
-            onChange={(value) => patch("turbine_flow_max_m3s", value)}
-            errors={errors}
-          />
-          <NumberInput
-            id="hydro_power_max_mw"
-            label="Maximum power (MW)"
-            value={asset.power_max_mw}
-            onChange={(value) => patch("power_max_mw", value)}
-            errors={errors}
-          />
-          <NumberInput
-            id="hydro_minimum_release_m3s"
-            label="Minimum release (m3/s)"
-            value={asset.minimum_release_m3s}
-            onChange={(value) => patch("minimum_release_m3s", value)}
-            errors={errors}
-          />
-          <NumberInput
-            id="hydro_spill_penalty_usd_per_hm3"
-            label="Spill penalty (USD/hm3)"
-            value={asset.spill_penalty_usd_per_hm3}
-            onChange={(value) => patch("spill_penalty_usd_per_hm3", value)}
-            errors={errors}
-          />
-          <SelectInput
-            id="hydro_terminal_condition"
-            label="Terminal condition"
-            value={String(asset.terminal_condition || "none")}
-            onChange={(value) => patch("terminal_condition", value)}
-            options={[
-              { value: "none", label: "None" },
-              { value: "equal_initial", label: "Equal initial" },
-              { value: "min_terminal", label: "Minimum terminal" },
-            ]}
-          />
-          <NumberInput
-            id="hydro_terminal_storage_min_hm3"
-            label="Minimum terminal storage (hm3)"
-            value={asset.terminal_storage_min_hm3}
-            onChange={(value) => patch("terminal_storage_min_hm3", value)}
-            errors={errors}
-          />
-          <NumberInput
-            id="hydro_terminal_water_value_usd_per_hm3"
-            label="Terminal water value (USD/hm3)"
-            value={asset.terminal_water_value_usd_per_hm3}
-            onChange={(value) =>
-              patch("terminal_water_value_usd_per_hm3", value)
-            }
-            errors={errors}
-          />
-        </div>
+      <h3>Capacidad y límites</h3>
+      <div className="draft-field-grid">
+        <NumberInput
+          id="hydro_storage_min_hm3"
+          label="Almacenamiento mínimo (hm3)"
+          value={asset.storage_min_hm3}
+          onChange={(value) => patch("storage_min_hm3", value)}
+          errors={errors}
+          required
+        />
+        <NumberInput
+          id="hydro_storage_max_hm3"
+          label="Almacenamiento máximo (hm3)"
+          value={asset.storage_max_hm3}
+          onChange={(value) => patch("storage_max_hm3", value)}
+          errors={errors}
+          required
+        />
+        <NumberInput
+          id="hydro_turbine_flow_min_m3s"
+          label="Caudal turbinado mínimo (m3/s)"
+          value={asset.turbine_flow_min_m3s}
+          onChange={(value) => patch("turbine_flow_min_m3s", value)}
+          errors={errors}
+        />
+        <NumberInput
+          id="hydro_turbine_flow_max_m3s"
+          label="Caudal turbinado máximo (m3/s)"
+          value={asset.turbine_flow_max_m3s}
+          onChange={(value) => patch("turbine_flow_max_m3s", value)}
+          errors={errors}
+        />
+        <NumberInput
+          id="hydro_power_max_mw"
+          label="Potencia máxima (MW)"
+          value={asset.power_max_mw}
+          onChange={(value) => patch("power_max_mw", value)}
+          errors={errors}
+        />
+      </div>
+      <h3>Estado inicial</h3>
+      <div className="draft-field-grid">
+        <NumberInput
+          id="hydro_initial_storage_hm3"
+          label="Almacenamiento inicial (hm3)"
+          value={asset.initial_storage_hm3}
+          onChange={(value) => patch("initial_storage_hm3", value)}
+          errors={errors}
+          required
+        />
+      </div>
+      <h3>Operación</h3>
+      <div className="draft-field-grid">
+        <SelectInput
+          id="hydro_generation_mode"
+          label="Modo de generación"
+          value={String(asset.generation_mode || "linear")}
+          onChange={(value) => patch("generation_mode", value)}
+          options={[
+            { value: "linear", label: "Lineal" },
+            { value: "piecewise_linear", label: "Lineal por tramos" },
+          ]}
+        />
+        <NumberInput
+          id="hydro_power_per_flow_mw_per_m3s"
+          label="Potencia por caudal (MW por m3/s)"
+          value={asset.power_per_flow_mw_per_m3s}
+          onChange={(value) => patch("power_per_flow_mw_per_m3s", value)}
+          errors={errors}
+        />
+        <NumberInput
+          id="hydro_minimum_release_m3s"
+          label="Caudal mínimo de salida (m3/s)"
+          value={asset.minimum_release_m3s}
+          onChange={(value) => patch("minimum_release_m3s", value)}
+          errors={errors}
+        />
+      </div>
+      <p>
+        La curva del embalse es obligatoria. Revisa también la curva de
+        generación si usas el modo lineal por tramos.
+      </p>
+      <details className="model-details">
+        <summary>Curvas hidráulicas</summary>
         <JsonTextarea
           id="hydro_generation_curve_json"
-          label="Generation curve (JSON)"
+          label="Curva de generación (JSON)"
           value={jsonTexts.hydroGenerationCurve}
           onChange={(value) =>
             setJsonTexts((current) => ({
@@ -2331,7 +2382,7 @@ function HydroFields({
         />
         <JsonTextarea
           id="hydro_reservoir_curve_json"
-          label="Reservoir curve (JSON)"
+          label="Curva del embalse (JSON)"
           value={jsonTexts.hydroReservoirCurve}
           onChange={(value) =>
             setJsonTexts((current) => ({
@@ -2341,6 +2392,48 @@ function HydroFields({
           }
           errors={errors}
         />
+      </details>
+      <h3>Economía</h3>
+      <div className="draft-field-grid">
+        <NumberInput
+          id="hydro_spill_penalty_usd_per_hm3"
+          label="Penalización por vertimiento (USD/hm3)"
+          value={asset.spill_penalty_usd_per_hm3}
+          onChange={(value) => patch("spill_penalty_usd_per_hm3", value)}
+          errors={errors}
+        />
+      </div>
+      <details className="model-details">
+        <summary>Condiciones terminales de hidro</summary>
+        <div className="draft-field-grid">
+          <SelectInput
+            id="hydro_terminal_condition"
+            label="Condición terminal"
+            value={String(asset.terminal_condition || "none")}
+            onChange={(value) => patch("terminal_condition", value)}
+            options={[
+              { value: "none", label: "Sin condición" },
+              { value: "equal_initial", label: "Igual al estado inicial" },
+              { value: "min_terminal", label: "Mínimo terminal" },
+            ]}
+          />
+          <NumberInput
+            id="hydro_terminal_storage_min_hm3"
+            label="Almacenamiento terminal mínimo (hm3)"
+            value={asset.terminal_storage_min_hm3}
+            onChange={(value) => patch("terminal_storage_min_hm3", value)}
+            errors={errors}
+          />
+          <NumberInput
+            id="hydro_terminal_water_value_usd_per_hm3"
+            label="Valor terminal del agua (USD/hm3)"
+            value={asset.terminal_water_value_usd_per_hm3}
+            onChange={(value) =>
+              patch("terminal_water_value_usd_per_hm3", value)
+            }
+            errors={errors}
+          />
+        </div>
       </details>
     </AssetShell>
   );
@@ -2482,11 +2575,13 @@ function DraftEditor({
   const [generatedValidationStale, setGeneratedValidationStale] =
     useState(false);
   const [pendingRemovalId, setPendingRemovalId] = useState<string | null>(null);
-  const [pendingNavigation, setPendingNavigation] = useState<string | null>(
+  const [selectedAssetIndex, setSelectedAssetIndex] = useState(0);
+  const continueEditingRef = useRef<HTMLButtonElement | null>(null);
+  const [focusRequest, setFocusRequest] = useState<{ field: string } | null>(
     null,
   );
-  const validationSummaryRef = useRef<HTMLDivElement | null>(null);
   const currentSignatureRef = useRef("");
+  const persistedSignatureRef = useRef(persistedSignature);
   const navigate = useNavigate();
 
   const currentSignature = useMemo(
@@ -2494,9 +2589,46 @@ function DraftEditor({
     [document, jsonTexts],
   );
   const dirty = currentSignature !== persistedSignature;
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      currentSignatureRef.current !== persistedSignatureRef.current &&
+      (currentLocation.pathname !== nextLocation.pathname ||
+        currentLocation.search !== nextLocation.search),
+  );
+  const leaving = blocker.state === "blocked";
+  useEffect(() => {
+    if (!leaving) return;
+    const previous = window.document.activeElement as HTMLElement | null;
+    continueEditingRef.current?.focus();
+    return () => previous?.focus();
+  }, [leaving]);
+
+  function revealField(field: string) {
+    const index = (document.assets || []).findIndex((asset) =>
+      field.startsWith(`${asset.type}_`),
+    );
+    if (index >= 0) setSelectedAssetIndex(index);
+    setFocusRequest({ field });
+  }
+  useEffect(() => {
+    if (!focusRequest) return;
+    const frame = window.requestAnimationFrame(() => {
+      const input = window.document.getElementById(focusRequest.field);
+      for (
+        let parent = input?.parentElement;
+        parent;
+        parent = parent.parentElement
+      ) {
+        if (parent instanceof HTMLDetailsElement) parent.open = true;
+      }
+      input?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusRequest]);
   useEffect(() => {
     currentSignatureRef.current = currentSignature;
-  }, [currentSignature]);
+    persistedSignatureRef.current = persistedSignature;
+  }, [currentSignature, persistedSignature]);
 
   useEffect(() => {
     function handleBeforeUnload(event: BeforeUnloadEvent) {
@@ -2506,34 +2638,6 @@ function DraftEditor({
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [dirty]);
-  useEffect(() => {
-    function handleLinkClick(event: MouseEvent) {
-      if (!dirty || event.defaultPrevented || event.button !== 0) return;
-      const target = event.target as HTMLElement | null;
-      const anchor = target?.closest("a[href]");
-      if (!anchor) return;
-      const href = anchor.getAttribute("href");
-      if (!href || href.startsWith("#")) return;
-      const destination = new URL(
-        (anchor as HTMLAnchorElement).href,
-        window.location.href,
-      );
-      if (destination.origin !== window.location.origin) return;
-      const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-      const nextPath = `${destination.pathname}${destination.search}${destination.hash}`;
-      if (nextPath === currentPath) return;
-      event.preventDefault();
-      setPendingNavigation(
-        nextPath.startsWith("/react")
-          ? nextPath.slice("/react".length) || "/"
-          : nextPath,
-      );
-    }
-    window.document.addEventListener("click", handleLinkClick, true);
-    return () =>
-      window.document.removeEventListener("click", handleLinkClick, true);
-  }, [dirty]);
-
   const saveMutation = useMutation({
     mutationFn: (variables: {
       candidate: ScenarioDraftDocument;
@@ -2545,6 +2649,9 @@ function DraftEditor({
       queryClient.setQueryData(draftQueryKey(scenario.id), savedDraft);
       const savedTexts = jsonTextsFromDocument(savedDraft.document);
       const savedSignature = editorSignature(savedDraft.document, savedTexts);
+      // The accepted submission can have differently formatted JSON from the
+      // server document. Navigation may run before React commits that document.
+      persistedSignatureRef.current = variables.submittedSignature;
       setPersistedSignature(savedSignature);
       if (currentSignatureRef.current === variables.submittedSignature) {
         setDocument(cloneDocument(savedDraft.document));
@@ -2590,6 +2697,10 @@ function DraftEditor({
     const updatedTexts = jsonTextsFromDocument(updatedDocument);
     setDocument(cloneDocument(updatedDocument));
     setJsonTexts(updatedTexts);
+    persistedSignatureRef.current = editorSignature(
+      updatedDocument,
+      updatedTexts,
+    );
     setPersistedSignature(editorSignature(updatedDocument, updatedTexts));
     setGeneratedValidationStale(false);
     queryClient.setQueryData<ScenarioDraft>(
@@ -2606,6 +2717,7 @@ function DraftEditor({
   }
 
   function addAsset(assetType: DraftAssetType) {
+    setSelectedAssetIndex((document.assets || []).length);
     updateDocument((current) => {
       if ((current.assets || []).some((asset) => asset.type === assetType)) {
         return current;
@@ -2640,6 +2752,7 @@ function DraftEditor({
       }),
     );
     setPendingRemovalId(null);
+    setSelectedAssetIndex(0);
   }
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -2649,7 +2762,7 @@ function DraftEditor({
     if (Object.keys(built.errors).length) {
       setValidationErrors(built.errors);
       setSaveError("");
-      window.requestAnimationFrame(() => validationSummaryRef.current?.focus());
+      revealField(Object.keys(built.errors)[0]);
       return;
     }
     setDocument(cloneDocument(built.document));
@@ -2667,7 +2780,7 @@ function DraftEditor({
     if (Object.keys(built.errors).length) {
       setValidationErrors(built.errors);
       setSaveError("");
-      window.requestAnimationFrame(() => validationSummaryRef.current?.focus());
+      revealField(Object.keys(built.errors)[0]);
       return;
     }
     setDocument(cloneDocument(built.document));
@@ -2676,8 +2789,11 @@ function DraftEditor({
     saveMutation.mutate(
       { candidate: built.document, submittedSignature },
       {
-        onSuccess: () =>
-          navigate(`/scenarios/${scenario.id}/hydraulic-diagram`),
+        onSuccess: () => {
+          if (currentSignatureRef.current === submittedSignature) {
+            navigate(`/scenarios/${scenario.id}/hydraulic-diagram`);
+          }
+        },
       },
     );
   }
@@ -2687,6 +2803,10 @@ function DraftEditor({
     const updatedTexts = jsonTextsFromDocument(updatedDocument);
     setDocument(cloneDocument(updatedDocument));
     setJsonTexts(updatedTexts);
+    persistedSignatureRef.current = editorSignature(
+      updatedDocument,
+      updatedTexts,
+    );
     setPersistedSignature(editorSignature(updatedDocument, updatedTexts));
     setSaveError("");
     setValidationErrors({});
@@ -2722,26 +2842,49 @@ function DraftEditor({
 
   return (
     <>
-      {pendingNavigation ? (
+      {leaving ? (
         <div className="modal-backdrop" role="presentation">
           <section
             className="draft-leave-dialog"
             role="dialog"
             aria-modal="true"
             aria-labelledby="leave-draft-title"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                blocker.reset?.();
+              }
+              if (event.key === "Tab") {
+                const buttons = event.currentTarget.querySelectorAll("button");
+                const first = buttons[0],
+                  last = buttons[buttons.length - 1];
+                if (event.shiftKey && window.document.activeElement === first) {
+                  event.preventDefault();
+                  last.focus();
+                } else if (
+                  !event.shiftKey &&
+                  window.document.activeElement === last
+                ) {
+                  event.preventDefault();
+                  first.focus();
+                }
+              }
+            }}
           >
             <h2 id="leave-draft-title">Cambios sin guardar</h2>
             <p>Guarda o descarta cambios antes de salir del editor.</p>
-            <button type="button" onClick={() => setPendingNavigation(null)}>
+            <button
+              type="button"
+              ref={continueEditingRef}
+              onClick={() => blocker.reset?.()}
+            >
               Seguir editando
             </button>
             <button
               type="button"
               className="secondary-action"
               onClick={() => {
-                const target = pendingNavigation;
-                setPendingNavigation(null);
-                navigate(target);
+                blocker.proceed?.();
               }}
             >
               Descartar cambios
@@ -2749,19 +2892,24 @@ function DraftEditor({
           </section>
         </div>
       ) : null}
-      <form className="draft-editor" onSubmit={submit}>
+      <form className="draft-editor" onSubmit={submit} noValidate>
         <div className="draft-toolbar">
           <StatusBadge
             dirty={dirty}
             saving={saveMutation.isPending}
             failed={Boolean(saveError)}
           />
-          <span>Ultimo guardado: {draft.updated_at}</span>
+          <span>Último guardado: {draft.updated_at}</span>
           <button type="submit" disabled={saveMutation.isPending}>
-            Guardar draft
+            Guardar modelo
           </button>
         </div>
-        {saveError ? <p role="alert">{saveError}</p> : null}
+        {saveError ? (
+          <p role="alert">
+            {saveError} Tus cambios siguen en el formulario. Puedes volver a
+            guardar.
+          </p>
+        ) : null}
         {/* Informative only: the save already went through. */}
         {blockedConsoles.length ? (
           <p role="status" className="source-note">
@@ -2770,13 +2918,24 @@ function DraftEditor({
           </p>
         ) : null}
         {Object.keys(validationErrors).length ? (
-          <div
-            className="validation-summary"
-            role="alert"
-            tabIndex={-1}
-            ref={validationSummaryRef}
-          >
+          <div className="validation-summary" role="alert" tabIndex={-1}>
             Corrige los campos marcados antes de guardar.
+            <ul>
+              {Object.entries(validationErrors).map(([field, message]) => (
+                <li key={field}>
+                  <a
+                    href={`#${field}`}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      revealField(field);
+                    }}
+                  >
+                    Corregir {fieldNames[field] || "componente"}
+                  </a>
+                  : {message}
+                </li>
+              ))}
+            </ul>
           </div>
         ) : null}
         <section className="workspace-section" aria-labelledby="case-settings">
@@ -2794,28 +2953,9 @@ function DraftEditor({
               errors={validationErrors}
               required
             />
-            <TextInput
-              id="schema_version"
-              label="Draft schema"
-              value={textValue(
-                document.schema_version ?? "bess_editor_draft.v1",
-              )}
-              onChange={(value) =>
-                updateDocument((current) =>
-                  preserveGeneratedSnapshot({
-                    ...current,
-                    schema_version: value,
-                  }),
-                )
-              }
-              errors={validationErrors}
-              required
-            />
-            <label
-              className="field-row field-row-wide"
-              htmlFor="case_description"
-            >
-              <span>Descripcion</span>
+
+            <label className="field-row" htmlFor="case_description">
+              <span>Descripción</span>
               <textarea
                 id="case_description"
                 value={textValue(document.case?.description)}
@@ -2834,125 +2974,9 @@ function DraftEditor({
             </label>
           </div>
         </section>
-        <section className="workspace-section" aria-labelledby="graph-settings">
-          <h2 id="graph-settings">Graph, grid y solver</h2>
-          <div className="draft-field-grid">
-            <TextInput
-              id="pcc_id"
-              label="PCC ID"
-              value={textValue(document.pcc?.id ?? "bus_1")}
-              onChange={(value) =>
-                updateDocument((current) =>
-                  setNestedValue(current, "pcc", "id", value),
-                )
-              }
-              errors={validationErrors}
-              required
-            />
-            <SelectInput
-              id="pcc_type"
-              label="PCC type"
-              value={textValue(document.pcc?.type ?? "bus")}
-              onChange={(value) =>
-                updateDocument((current) =>
-                  setNestedValue(current, "pcc", "type", value),
-                )
-              }
-              options={[
-                { value: "bus", label: "bus" },
-                { value: "pcc", label: "pcc" },
-              ]}
-            />
-            <TextInput
-              id="grid_id"
-              label="Grid ID"
-              value={textValue(document.grid?.id ?? "grid_1")}
-              onChange={(value) =>
-                updateDocument((current) =>
-                  setNestedValue(current, "grid", "id", value),
-                )
-              }
-              errors={validationErrors}
-              required
-            />
-            <NumberInput
-              id="grid_import_power_max_mw"
-              label="Maximum import (MW)"
-              value={document.grid?.import_power_max_mw}
-              onChange={(value) =>
-                updateDocument((current) =>
-                  setNestedValue(current, "grid", "import_power_max_mw", value),
-                )
-              }
-              errors={validationErrors}
-            />
-            <NumberInput
-              id="grid_export_power_max_mw"
-              label="Maximum export (MW)"
-              value={document.grid?.export_power_max_mw}
-              onChange={(value) =>
-                updateDocument((current) =>
-                  setNestedValue(current, "grid", "export_power_max_mw", value),
-                )
-              }
-              errors={validationErrors}
-            />
-            <TextInput
-              id="solver_name"
-              label="Solver"
-              value={textValue(document.solver?.name ?? "HiGHS")}
-              onChange={(value) =>
-                updateDocument((current) =>
-                  setNestedValue(current, "solver", "name", value),
-                )
-              }
-              errors={validationErrors}
-            />
-          </div>
-          <CheckboxInput
-            label="Prevent simultaneous import and export"
-            checked={
-              document.grid?.prevent_simultaneous_grid_import_export !== false
-            }
-            onChange={(value) =>
-              updateDocument((current) =>
-                setNestedValue(
-                  current,
-                  "grid",
-                  "prevent_simultaneous_grid_import_export",
-                  value,
-                ),
-              )
-            }
-          />
-          <JsonTextarea
-            id="solver_options_json"
-            label="Solver options (JSON)"
-            value={jsonTexts.solverOptions}
-            onChange={(value) =>
-              updateJsonTexts((current) => ({
-                ...current,
-                solverOptions: value,
-              }))
-            }
-            errors={validationErrors}
-          />
-        </section>
-        <section
-          className="workspace-section"
-          aria-labelledby="time-series-metadata"
-        >
-          <h2 id="time-series-metadata">Time-series metadata</h2>
-          <TimeSeriesWorkflow
-            scenarioId={scenario.id}
-            document={document}
-            dirty={dirty}
-            onSourcePersisted={persistTimeSeriesSource}
-          />
-        </section>
         <section className="workspace-section" aria-labelledby="asset-settings">
           <div className="draft-section-heading">
-            <h2 id="asset-settings">Assets</h2>
+            <h2 id="asset-settings">Componentes</h2>
             <div className="draft-actions">
               {missingTypes.map((assetType) => (
                 <button
@@ -2968,31 +2992,212 @@ function DraftEditor({
           </div>
           {(document.assets || []).length === 0 ? (
             <p className="empty-state">
-              Agrega BESS, load, renewable o hydro para modelar recursos.
+              Agrega una batería, demanda, renovable o hidro para comenzar el
+              modelo.
             </p>
           ) : null}
-          {(document.assets || []).map((asset, assetIndex) => {
-            const props = {
-              asset,
-              assetIndex,
-              document,
-              setDocument: updateDocumentState,
-              errors: validationErrors,
-              jsonTexts,
-              setJsonTexts: updateJsonTexts,
-              removalProps,
-              onOpenHydraulicDiagram: openHydraulicDiagram,
-            };
-            if (asset.type === "battery")
-              return <BatteryFields key={assetIndex} {...props} />;
-            if (asset.type === "renewable")
-              return <RenewableFields key={assetIndex} {...props} />;
-            if (asset.type === "load")
-              return <LoadFields key={assetIndex} {...props} />;
-            if (asset.type === "hydro")
-              return <HydroFields key={assetIndex} {...props} />;
-            return null;
-          })}
+          <div className="draft-component-workspace">
+            <div
+              className="draft-component-list"
+              role="group"
+              aria-label="Componentes del modelo"
+            >
+              {(document.assets || []).map((asset, index) => (
+                <button
+                  key={index}
+                  type="button"
+                  aria-pressed={selectedAssetIndex === index}
+                  aria-describedby={
+                    Object.keys(validationErrors).some((field) =>
+                      field.startsWith(`${asset.type}_`),
+                    )
+                      ? `component-errors-${index}`
+                      : undefined
+                  }
+                  onClick={() => setSelectedAssetIndex(index)}
+                >
+                  Editar{" "}
+                  {componentLabels[asset.type as DraftAssetType] || asset.type}{" "}
+                  · {String(asset.name || asset.id || "Sin nombre")}
+                  {Object.keys(validationErrors).some((field) =>
+                    field.startsWith(`${asset.type}_`),
+                  ) ? (
+                    <span id={`component-errors-${index}`} aria-hidden="true">
+                      {" "}
+                      · Revisar errores
+                    </span>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+            <div className="draft-component-panel">
+              {(document.assets || []).map((asset, assetIndex) => {
+                if (assetIndex !== selectedAssetIndex) return null;
+                const props = {
+                  asset,
+                  assetIndex,
+                  document,
+                  setDocument: updateDocumentState,
+                  errors: validationErrors,
+                  jsonTexts,
+                  setJsonTexts: updateJsonTexts,
+                  removalProps,
+                  onOpenHydraulicDiagram: openHydraulicDiagram,
+                };
+                if (asset.type === "battery")
+                  return <BatteryFields key={assetIndex} {...props} />;
+                if (asset.type === "renewable")
+                  return <RenewableFields key={assetIndex} {...props} />;
+                if (asset.type === "load")
+                  return <LoadFields key={assetIndex} {...props} />;
+                if (asset.type === "hydro")
+                  return <HydroFields key={assetIndex} {...props} />;
+                return null;
+              })}
+            </div>
+          </div>
+        </section>
+        <section className="workspace-section" aria-labelledby="graph-settings">
+          <h2 id="graph-settings">Red y punto de conexión</h2>
+          <div className="draft-field-grid">
+            <NumberInput
+              id="grid_import_power_max_mw"
+              label="Importación máxima (MW)"
+              value={document.grid?.import_power_max_mw}
+              onChange={(value) =>
+                updateDocument((current) =>
+                  setNestedValue(current, "grid", "import_power_max_mw", value),
+                )
+              }
+              errors={validationErrors}
+            />
+            <NumberInput
+              id="grid_export_power_max_mw"
+              label="Exportación máxima (MW)"
+              value={document.grid?.export_power_max_mw}
+              onChange={(value) =>
+                updateDocument((current) =>
+                  setNestedValue(current, "grid", "export_power_max_mw", value),
+                )
+              }
+              errors={validationErrors}
+            />
+          </div>
+          <CheckboxInput
+            label="Impedir importación y exportación simultáneas"
+            checked={
+              document.grid?.prevent_simultaneous_grid_import_export !== false
+            }
+            onChange={(value) =>
+              updateDocument((current) =>
+                setNestedValue(
+                  current,
+                  "grid",
+                  "prevent_simultaneous_grid_import_export",
+                  value,
+                ),
+              )
+            }
+          />
+        </section>
+        <details className="workspace-section model-details">
+          <summary>Opciones técnicas del modelo</summary>
+          <p>
+            Identificadores, esquema y configuración del solver. Editarlos no
+            crea una versión ejecutable.
+          </p>
+          <div className="draft-field-grid">
+            <TextInput
+              id="schema_version"
+              label="Esquema del modelo"
+              value={textValue(
+                document.schema_version ?? "bess_editor_draft.v1",
+              )}
+              onChange={(value) =>
+                updateDocument((current) =>
+                  preserveGeneratedSnapshot({
+                    ...current,
+                    schema_version: value,
+                  }),
+                )
+              }
+              errors={validationErrors}
+              required
+            />
+            <TextInput
+              id="pcc_id"
+              label="ID del punto de conexión"
+              value={textValue(document.pcc?.id ?? "bus_1")}
+              onChange={(value) =>
+                updateDocument((current) =>
+                  setNestedValue(current, "pcc", "id", value),
+                )
+              }
+              errors={validationErrors}
+              required
+            />
+            <SelectInput
+              id="pcc_type"
+              label="Tipo de punto de conexión"
+              value={textValue(document.pcc?.type ?? "bus")}
+              onChange={(value) =>
+                updateDocument((current) =>
+                  setNestedValue(current, "pcc", "type", value),
+                )
+              }
+              options={[
+                { value: "bus", label: "bus" },
+                { value: "pcc", label: "pcc" },
+              ]}
+            />
+            <TextInput
+              id="grid_id"
+              label="ID de la red"
+              value={textValue(document.grid?.id ?? "grid_1")}
+              onChange={(value) =>
+                updateDocument((current) =>
+                  setNestedValue(current, "grid", "id", value),
+                )
+              }
+              errors={validationErrors}
+              required
+            />
+            <TextInput
+              id="solver_name"
+              label="Solver"
+              value={textValue(document.solver?.name ?? "HiGHS")}
+              onChange={(value) =>
+                updateDocument((current) =>
+                  setNestedValue(current, "solver", "name", value),
+                )
+              }
+              errors={validationErrors}
+            />
+          </div>
+          <JsonTextarea
+            id="solver_options_json"
+            label="Opciones del solver (JSON)"
+            value={jsonTexts.solverOptions}
+            onChange={(value) =>
+              updateJsonTexts((current) => ({
+                ...current,
+                solverOptions: value,
+              }))
+            }
+            errors={validationErrors}
+          />
+        </details>
+        <section
+          className="workspace-section"
+          aria-labelledby="time-series-metadata"
+        >
+          <h2 id="time-series-metadata">Time-series metadata</h2>
+          <TimeSeriesWorkflow
+            scenarioId={scenario.id}
+            document={document}
+            dirty={dirty}
+            onSourcePersisted={persistTimeSeriesSource}
+          />
         </section>
         <GeneratedSystemCasePanel
           scenario={scenario}
@@ -3057,7 +3262,7 @@ export function ScenarioDraftEditorView() {
     <section className="workspace-view">
       <Breadcrumbs scenario={scenario.data} project={project.data} draft />
       <header className="workspace-heading">
-        <h1>Draft estructurado</h1>
+        <h1>Modelo en edición</h1>
         <p>{scenario.data.name}</p>
       </header>
       {draft.isError ? (

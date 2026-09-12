@@ -838,30 +838,35 @@ describe("application shell", () => {
     await user.click(screen.getByRole("link", { name: "Modelo" }));
 
     expect(
-      await screen.findByRole("heading", { name: "Draft estructurado" }),
+      await screen.findByRole("heading", { name: "Modelo en edición" }),
     ).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Crear draft" }));
     expect(await screen.findByText("Guardado")).toBeVisible();
 
     await user.clear(screen.getByLabelText("Nombre del caso"));
     await user.type(screen.getByLabelText("Nombre del caso"), "PMGD verano");
-    await user.click(screen.getByRole("button", { name: "Agregar BESS" }));
-    await user.clear(screen.getByLabelText("BESS asset ID"));
-    await user.type(screen.getByLabelText("BESS asset ID"), "battery_alpha");
-    await user.click(screen.getByRole("button", { name: "Agregar hydro" }));
-    await user.clear(screen.getByLabelText("Hydro asset ID"));
-    await user.type(screen.getByLabelText("Hydro asset ID"), "hydro_north");
+    await user.click(screen.getByRole("button", { name: "Agregar Batería" }));
+    await user.click(screen.getByText("Identificación técnica de la batería"));
+    await user.clear(screen.getByLabelText("ID de la batería"));
+    await user.type(screen.getByLabelText("ID de la batería"), "battery_alpha");
+    await user.click(screen.getByRole("button", { name: "Agregar Hidro" }));
+    await user.click(screen.getByText("Identificación técnica de hidro"));
+    await user.clear(screen.getByLabelText("ID de hidro"));
+    await user.type(screen.getByLabelText("ID de hidro"), "hydro_north");
     expect(screen.getByText("Cambios sin guardar")).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "Guardar draft" }));
+    await user.click(screen.getByRole("button", { name: "Guardar modelo" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "database unavailable",
     );
     expect(screen.getByLabelText("Nombre del caso")).toHaveValue("PMGD verano");
 
-    await user.click(screen.getByRole("button", { name: "Guardar draft" }));
+    await user.click(screen.getByRole("button", { name: "Guardar modelo" }));
     expect(await screen.findByText("Guardado")).toBeVisible();
 
+    await user.click(
+      screen.getByRole("button", { name: "Editar Batería · battery_alpha" }),
+    );
     await user.click(
       screen.getByRole("button", { name: "Quitar battery_alpha" }),
     );
@@ -871,7 +876,7 @@ describe("application shell", () => {
     await user.click(
       screen.getByRole("button", { name: "Confirmar quitar battery_alpha" }),
     );
-    await user.click(screen.getByRole("button", { name: "Guardar draft" }));
+    await user.click(screen.getByRole("button", { name: "Guardar modelo" }));
     expect(await screen.findByText("Guardado")).toBeVisible();
 
     await user.click(screen.getByRole("link", { name: "Base case" }));
@@ -879,8 +884,8 @@ describe("application shell", () => {
     expect(await screen.findByLabelText("Nombre del caso")).toHaveValue(
       "PMGD verano",
     );
-    expect(screen.queryByLabelText("BESS asset ID")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Hydro asset ID")).toHaveValue("hydro_north");
+    expect(screen.queryByLabelText("ID de la batería")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("ID de hidro")).toHaveValue("hydro_north");
   });
 
   it("binds a price series to the default input variant and runs it from the scenario page", async () => {
@@ -2923,14 +2928,16 @@ describe("application shell", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "Draft estructurado" }),
+      await screen.findByRole("heading", { name: "Modelo en edición" }),
     ).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Crear draft" }));
     expect(await screen.findByText("Guardado")).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "Agregar hydro" }));
+    await user.click(screen.getByRole("button", { name: "Agregar Hidro" }));
     await user.click(
-      screen.getByRole("button", { name: "Editar diagrama hidraulico" }),
+      screen.getByRole("button", {
+        name: "Guardar y abrir diagrama hidráulico",
+      }),
     );
 
     expect(
@@ -5753,11 +5760,11 @@ describe("application shell", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "Draft estructurado" }),
+      await screen.findByRole("heading", { name: "Modelo en edición" }),
     ).toBeVisible();
     await user.clear(screen.getByLabelText("Nombre del caso"));
     await user.type(screen.getByLabelText("Nombre del caso"), "First save");
-    await user.click(screen.getByRole("button", { name: "Guardar draft" }));
+    await user.click(screen.getByRole("button", { name: "Guardar modelo" }));
     expect(await screen.findByText("Guardando")).toBeVisible();
 
     await user.clear(screen.getByLabelText("Nombre del caso"));
@@ -5871,11 +5878,11 @@ describe("application shell", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "Draft estructurado" }),
+      await screen.findByRole("heading", { name: "Modelo en edición" }),
     ).toBeVisible();
     await user.clear(screen.getByLabelText("Nombre del caso"));
     await user.type(screen.getByLabelText("Nombre del caso"), "Nuevo caso");
-    await user.click(screen.getByRole("button", { name: "Guardar draft" }));
+    await user.click(screen.getByRole("button", { name: "Guardar modelo" }));
 
     expect(await screen.findByText("Guardado")).toBeVisible();
     expect(savedName).toBe("Nuevo caso");
@@ -6145,7 +6152,7 @@ describe("application shell", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "Draft estructurado" }),
+      await screen.findByRole("heading", { name: "Modelo en edición" }),
     ).toBeVisible();
     expect(
       screen.getByText(/embedded time series is this draft's legacy storage/),
@@ -6385,7 +6392,7 @@ describe("application shell", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "Draft estructurado" }),
+      await screen.findByRole("heading", { name: "Modelo en edición" }),
     ).toBeVisible();
     await user.upload(
       screen.getByLabelText("Source file"),
@@ -6624,7 +6631,7 @@ describe("application shell", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "Draft estructurado" }),
+      await screen.findByRole("heading", { name: "Modelo en edición" }),
     ).toBeVisible();
     expect(screen.getByText("Ultima validacion guardada")).toBeVisible();
     expect(screen.getByText("Validation succeeded")).toBeVisible();
@@ -6638,7 +6645,7 @@ describe("application shell", () => {
     expect(
       screen.getByText("Validacion stale; valida de nuevo antes de promover."),
     ).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Guardar draft" }));
+    await user.click(screen.getByRole("button", { name: "Guardar modelo" }));
     expect(await screen.findByText("Guardado")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Generar preview" }));
@@ -6788,7 +6795,7 @@ describe("application shell", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "Draft estructurado" }),
+      await screen.findByRole("heading", { name: "Modelo en edición" }),
     ).toBeVisible();
     expect(screen.getByText("Validation succeeded")).toBeVisible();
     expect(screen.getByText("topo1111hash")).toBeVisible();
