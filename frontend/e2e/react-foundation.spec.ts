@@ -774,6 +774,160 @@ test("React client portal reviews published results, downloads allowlisted artif
   ).toBeVisible();
 });
 
+test("UX-005 confirms sources, reloads, reviews an explicit period and submits one variant run", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(60_000);
+  await ensureAdminSession(page);
+  const api = page.context().request;
+  const project = await (
+    await postWithCsrf(api, "/api/projects", { name: `UX-005 ${Date.now()}` })
+  ).json();
+  const scenario = await (
+    await postWithCsrf(api, `/api/projects/${project.id}/scenarios`, {
+      name: "Dos horas de invierno",
+    })
+  ).json();
+  const root = `/api/scenarios/${scenario.id}`;
+  const url = `/react/scenarios/${scenario.id}?section=data`;
+  await page.goto(`/react/scenarios/${scenario.id}/draft?section=data`);
+  await page.getByRole("button", { name: "Crear draft", exact: true }).click();
+  await page.getByRole("button", { name: "Agregar BESS", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Guardar draft", exact: true })
+    .click();
+  await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
+  const uploaded = await api.post(`${root}/draft/time-series-sources/upload`, {
+    headers: { "X-CSRF-Token": await csrfToken(api) },
+    multipart: {
+      source_file: {
+        name: "precios.csv",
+        mimeType: "text/csv",
+        buffer: Buffer.from(
+          "time,hours,price\n2026-01-01T00:00:00,1,50\n2026-01-01T01:00:00,1,70\n",
+        ),
+      },
+    },
+  });
+  expect(uploaded.ok()).toBeTruthy();
+  const source = (await uploaded.json()).source;
+  const imported = await postWithCsrf(
+    api,
+    `${root}/draft/time-series-sources/${source.id}/catalog-import`,
+    {
+      set_name: "Precio invierno",
+      version_label: "v1",
+      data_kind: "real",
+      timezone: "America/Santiago",
+      timestamp_column: "time",
+      duration_hours_column: "hours",
+      signal_mappings: [
+        {
+          source_column: "price",
+          signal_key: "import_price_usd_per_mwh",
+          source_unit: "USD/MWh",
+        },
+      ],
+    },
+  );
+  expect(imported.ok()).toBeTruthy();
+  const price = (await imported.json()).time_series_set;
+  await page.goto(url);
+  await expect(
+    page.getByRole("button", { name: "Ejecutar variante", exact: true }),
+  ).toBeDisabled();
+  await page.screenshot({
+    path: testInfo.outputPath("preparacion-pendiente.png"),
+    fullPage: true,
+  });
+  await page
+    .getByRole("link", { name: "Corregir price_usd_per_mwh (grid_1)" })
+    .focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    page.getByLabel("Serie de precio (price_usd_per_mwh)"),
+  ).toBeFocused();
+  await page
+    .getByLabel("Serie de precio (price_usd_per_mwh)")
+    .selectOption(String(price.id));
+  await page
+    .getByRole("button", { name: "Confirmar fuentes", exact: true })
+    .click();
+  await expect(
+    page.getByText(
+      "Fuentes confirmadas. Revisa la preparación antes de ejecutar.",
+    ),
+  ).toBeVisible();
+  expect((await (await api.get(`${root}/runs`)).json()).runs).toEqual([]);
+  expect((await (await api.get(`${root}/versions`)).json()).versions).toEqual(
+    [],
+  );
+  await page.reload();
+  await expect(
+    page.getByLabel("Serie de precio (price_usd_per_mwh)"),
+  ).toHaveValue(String(price.id));
+  await page
+    .getByRole("button", { name: "Revisar preparación", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Ejecutar variante", exact: true }),
+  ).toBeEnabled();
+  await expect(page.getByText("Duración: 2 horas")).toBeVisible();
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 1280, height: 720 },
+    { width: 320, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.screenshot({
+      path: testInfo.outputPath(`preparacion-${viewport.width}.png`),
+      fullPage: true,
+    });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBeTruthy();
+  }
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.evaluate(() => {
+    document.documentElement.style.zoom = "2";
+  });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBeTruthy();
+  await page.screenshot({
+    path: testInfo.outputPath("preparacion-zoom-200.png"),
+    fullPage: true,
+  });
+  await page.evaluate(() => {
+    document.documentElement.style.zoom = "1";
+  });
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(
+    accessibility.violations.filter((item) =>
+      ["serious", "critical"].includes(item.impact ?? ""),
+    ),
+  ).toEqual([]);
+  await page
+    .getByRole("button", { name: "Ejecutar variante", exact: true })
+    .dblclick();
+  await expect(page).toHaveURL(/\/react\/runs\/\d+$/);
+  const runs = (await (await api.get(`${root}/runs`)).json()).runs;
+  expect(runs).toHaveLength(1);
+  const version = (
+    await (
+      await api.get(`/api/scenario-versions/${runs[0].scenario_version_id}`)
+    ).json()
+  ).scenario_version;
+  expect(version.generation_metadata.date_range).toEqual({
+    start: "2026-01-01T00:00:00-03:00",
+    end: "2026-01-01T02:00:00-03:00",
+  });
+});
+
 test("UX-001 keeps task context and pending model edits through navigation and reload", async ({
   page,
 }) => {
@@ -835,6 +989,7 @@ test("UX-001 keeps task context and pending model edits through navigation and r
   ).toHaveAttribute("aria-current", "page");
 
   await page.getByRole("link", { name: "Datos", exact: true }).click();
+  await page.getByText("Entrada ISO avanzada", { exact: true }).click();
   await page
     .getByLabel("Inicio de rango", { exact: true })
     .fill("2026-01-01T00:00:00-03:00");

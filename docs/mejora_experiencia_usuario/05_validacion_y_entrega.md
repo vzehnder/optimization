@@ -10,6 +10,12 @@ La [implementación sobre `aeeb22e`](evidencia/ux-001/README.md) queda In Review
 
 TypeScript, ESLint, formato de los archivos de código cambiados y `git diff --check` pasan. `npm.cmd run check` **no pasa** porque Prettier detecta 25 archivos previos sin modificaciones, enumerados en la evidencia. La comprobación visual cubre 1440 × 900, 1280 × 720, 320 × 900 y ampliación CSS al 200 %; axe sin serious/critical en las nuevas vistas comprobadas. No equivale a una auditoría con lectores de pantalla ni a validación de usabilidad con participantes. No se modificó backend y no se ejecutó Julia/PostgreSQL ni toda la suite Python.
 
+## Evidencia posterior: UX-005
+
+La [implementación sobre `e4eec65`](evidencia/ux-005/README.md) queda In Review. Se separan confirmar fuentes, revisar preparación y ejecutar; el servidor expone capacidades según C6 y fuentes exactas. Los ciclos F2/F3 cubren necesidades y modelo faltantes, período conservado, revisión invalidada, aceptación parcial, conflicto, doble clic y envío incierto. F1 comprueba el recorrido completo con persistencia tras recarga y una sola corrida aceptada.
+
+Resultado: **250 pruebas funcionales aprobadas** (179 componentes, 14 navegador y 57 Python). Se omiten 13 pruebas PostgreSQL por falta de configuración dedicada. TypeScript, ESLint, build, contrato OpenAPI, formato del código frontend modificado y `git diff --check` pasan. `npm.cmd run check` falla en Prettier por 24 archivos previos no modificados; lista y salida en la evidencia. La comprobación visual incluye 1440, 1280 y 320 píxeles, ampliación CSS al 200 %, teclado y axe sin serious/critical en la vista comprobada. No se ejecutó Julia real porque no cambian generación, materialización ni lógica matemática; se usan sus validadores existentes para revisar cobertura. No es una prueba con participantes ni una auditoría completa de accesibilidad.
+
 ## Evidencia histórica de la revisión del plan
 
 El 2026-09-12 se ejecutó desde `frontend/`:

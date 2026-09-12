@@ -438,7 +438,12 @@ function AuthenticatedRoutes({
           path="projects/:projectId/time-series-sets/:timeSeriesSetId"
           element={<TimeSeriesSetDetailView />}
         />
-        <Route path="scenarios/:scenarioId" element={<ScenarioDetailView />} />
+        <Route
+          path="scenarios/:scenarioId"
+          element={
+            <ScenarioDetailView canonicalCatalogRead={canonicalCatalogRead} />
+          }
+        />
         <Route
           path="scenarios/:scenarioId/draft"
           element={<ScenarioDraftEditorView />}

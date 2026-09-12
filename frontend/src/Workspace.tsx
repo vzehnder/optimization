@@ -12,6 +12,7 @@ import {
 } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { workspaceSectionSearch } from "./workspaceNavigation";
+import { objectJourneyPath } from "./journeyRoutes";
 
 import { ProjectExternalAccessSection } from "./Admin";
 import {
@@ -7858,16 +7859,23 @@ function CaseInputVariantBindingEditor({
   projectId,
   variantDetail,
   timeSeriesSets,
+  preparationCurrent,
+  canonicalCatalogRead,
 }: {
   scenarioId: number;
   projectId: number;
   variantDetail: CaseInputVariantDetail;
   timeSeriesSets: ProjectTimeSeriesSetSummary[];
+  preparationCurrent: boolean;
+  canonicalCatalogRead: boolean;
 }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [error, setError] = useState("");
-  const requiredSignals = variantDetail.required_signals || [];
+  const preparation = variantDetail.preparation;
+  const protectedSources = preparation?.binding_mode === "protected";
+  const requiredSignals =
+    preparation?.required_signals ?? variantDetail.required_signals ?? [];
   const [selectedSetIds, setSelectedSetIds] = useState<
     Record<string, number | "">
   >(() =>
@@ -7894,6 +7902,28 @@ function CaseInputVariantBindingEditor({
     : "";
   const [rangeStartDraft, setRangeStartDraft] = useState<string | null>(null);
   const [rangeEndDraft, setRangeEndDraft] = useState<string | null>(null);
+  const [confirmedSetIds, setConfirmedSetIds] = useState(selectedSetIds);
+  const publicBindingSnapshot = JSON.stringify(variantDetail.bindings);
+  const [confirmedBindingSnapshot, setConfirmedBindingSnapshot] = useState(
+    publicBindingSnapshot,
+  );
+  const effectiveConfirmedSetIds =
+    publicBindingSnapshot === confirmedBindingSnapshot
+      ? confirmedSetIds
+      : Object.fromEntries(
+          requiredSignals.map((signal) => [
+            inputVariantRequirementKey(signal),
+            variantDetail.bindings.find((binding) =>
+              bindingMatchesRequiredSignal(binding, signal),
+            )?.time_series_set_id ?? "",
+          ]),
+        );
+  const [reviewedSelection, setReviewedSelection] = useState("");
+  const [saveMessage, setSaveMessage] = useState("");
+  const [uncertainSubmission, setUncertainSubmission] = useState(false);
+  const [historyOpened, setHistoryOpened] = useState(false);
+  const submissionLock = useRef(false);
+  const saveProgress = useRef({ accepted: 0, total: 0 });
 
   const selectedSetIdList = Array.from(
     new Set(
@@ -7914,7 +7944,7 @@ function CaseInputVariantBindingEditor({
           getProjectTimeSeriesSet(projectId, timeSeriesSetId, signal),
         ),
       ),
-    enabled: selectedSetIdList.length > 0,
+    enabled: !protectedSources && selectedSetIdList.length > 0,
     retry: false,
   });
   const selectedSetDetailsById = new Map(
@@ -7930,19 +7960,90 @@ function CaseInputVariantBindingEditor({
     .filter((set): set is ProjectTimeSeriesSet => set !== undefined);
 
   const rangeStart =
-    rangeStartDraft ?? orderedSelectedSets[0]?.horizon.start ?? "";
-  const rangeEnd = rangeEndDraft ?? orderedSelectedSets[0]?.horizon.end ?? "";
-  const rangeValidation = validateInputVariantRange(
-    orderedSelectedSets,
-    rangeStart,
-    rangeEnd,
-  );
+    rangeStartDraft ??
+    preparation?.available_coverage?.start ??
+    orderedSelectedSets[0]?.horizon.start ??
+    "";
+  const rangeEnd =
+    rangeEndDraft ??
+    preparation?.available_coverage?.end ??
+    orderedSelectedSets[0]?.horizon.end ??
+    "";
+  const periodParts = (value: string) =>
+    /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?)(Z|[+-]\d{2}:\d{2})?$/.exec(
+      value,
+    );
+  const startParts = periodParts(rangeStart);
+  const endParts = periodParts(rangeEnd);
+  const durationHours =
+    startParts && endParts
+      ? (Date.parse(`${endParts[1]}${endParts[2] || "Z"}`) -
+          Date.parse(`${startParts[1]}${startParts[2] || "Z"}`)) /
+        3_600_000
+      : NaN;
+  const zones = [
+    ...new Set(
+      protectedSources
+        ? preparation.sources.map((source) => source.timezone)
+        : orderedSelectedSets.map((source) => source.timezone),
+    ),
+  ];
+  const validRangeInput =
+    !!startParts &&
+    !!endParts &&
+    Number.isFinite(durationHours) &&
+    durationHours > 0;
+  const rangeValidation: InputVariantRangeValidation =
+    rangeStart && rangeEnd && !validRangeInput
+      ? {
+          kind: "horizon_mismatch",
+          message: "Revisa las fechas y los offsets del período.",
+        }
+      : protectedSources
+        ? rangeStart && rangeEnd && rangeStart < rangeEnd
+          ? {
+              kind: "valid",
+              message:
+                "Revisa la preparación para comprobar la cobertura exacta.",
+            }
+          : { kind: "idle", message: "Indica el período que quieres ejecutar." }
+        : validateInputVariantRange(orderedSelectedSets, rangeStart, rangeEnd);
   const allRequiredSignalsSelected = requiredSignals.every(
     (signal: RequiredSignalStatus) =>
-      typeof selectedSetIds[inputVariantRequirementKey(signal)] === "number",
+      protectedSources
+        ? signal.bound
+        : typeof selectedSetIds[inputVariantRequirementKey(signal)] ===
+          "number",
   );
-  const isStale = variantDetail.staleness.stale;
+  const isStale = protectedSources
+    ? preparation.sources.some(
+        (source) => !["valid_current", "valid_pinned"].includes(source.state),
+      )
+    : variantDetail.staleness.stale;
+  const selectionKey = JSON.stringify([
+    selectedSetIds,
+    rangeStart,
+    rangeEnd,
+    publicBindingSnapshot,
+    selectedSetDetailsQuery.data?.map((source) => [
+      source.id,
+      source.content_hash,
+    ]),
+    preparation?.bindings_revision,
+    preparation?.sources,
+  ]);
+  const sourcesConfirmed =
+    protectedSources ||
+    JSON.stringify(selectedSetIds) === JSON.stringify(effectiveConfirmedSetIds);
   const canRun =
+    preparationCurrent &&
+    (protectedSources ||
+      (!selectedSetDetailsQuery.isError &&
+        !selectedSetDetailsQuery.isFetching)) &&
+    !uncertainSubmission &&
+    preparation?.model_status === "available" &&
+    sourcesConfirmed &&
+    reviewedSelection === selectionKey &&
     allRequiredSignalsSelected &&
     rangeStart.trim() !== "" &&
     rangeEnd.trim() !== "" &&
@@ -7952,26 +8053,47 @@ function CaseInputVariantBindingEditor({
   const revalidateMutation = useMutation({
     mutationFn: async () =>
       validateCaseInputVariant(scenarioId, variantDetail.variant.id, {
+        ...(protectedSources
+          ? { expected_bindings_revision: preparation.bindings_revision }
+          : {}),
         range_start: rangeStart,
         range_end: rangeEnd,
       }),
-    onSuccess: () => {
+    onSuccess: async () => {
       setError("");
-      void queryClient.invalidateQueries({
-        queryKey: caseInputVariantsQueryKey(scenarioId),
-      });
+      await queryClient.invalidateQueries(
+        {
+          queryKey: caseInputVariantsQueryKey(scenarioId),
+        },
+        { throwOnError: true },
+      );
+      setReviewedSelection(selectionKey);
     },
     onError: (mutationError) => setError(errorMessage(mutationError)),
   });
 
-  const runMutation = useMutation({
+  const saveSourcesMutation = useMutation({
+    retry: false,
     mutationFn: async () => {
+      saveProgress.current = {
+        accepted: 0,
+        total: requiredSignals.filter(
+          (signal) =>
+            selectedSetIds[inputVariantRequirementKey(signal)] !==
+            effectiveConfirmedSetIds[inputVariantRequirementKey(signal)],
+        ).length,
+      };
       for (const signal of requiredSignals) {
         const selectedSetId =
           selectedSetIds[inputVariantRequirementKey(signal)];
         if (typeof selectedSetId !== "number") {
           throw new Error(`Falta vincular ${signal.signal_key}.`);
         }
+        if (
+          effectiveConfirmedSetIds[inputVariantRequirementKey(signal)] ===
+          selectedSetId
+        )
+          continue;
         await bindCaseTimeSeries(scenarioId, variantDetail.variant.id, {
           ...buildRequiredSignalBindingPayload(
             signal,
@@ -7979,12 +8101,53 @@ function CaseInputVariantBindingEditor({
             selectedSetDetailsById.get(selectedSetId),
           ),
         });
+        saveProgress.current.accepted += 1;
+        setConfirmedSetIds((current) => ({
+          ...current,
+          [inputVariantRequirementKey(signal)]: selectedSetId,
+        }));
       }
-      return runCaseInputVariant(scenarioId, variantDetail.variant.id, {
-        range_start: rangeStart,
-        range_end: rangeEnd,
+    },
+    onSuccess: async () => {
+      setConfirmedSetIds(selectedSetIds);
+      setReviewedSelection("");
+      setError("");
+      await queryClient.invalidateQueries({
+        queryKey: caseInputVariantsQueryKey(scenarioId),
+      });
+      setSaveMessage(
+        "Fuentes confirmadas. Revisa la preparación antes de ejecutar.",
+      );
+      const refreshed = queryClient.getQueryData<
+        Awaited<ReturnType<typeof listCaseInputVariants>>
+      >(caseInputVariantsQueryKey(scenarioId));
+      const bindings = refreshed?.variants.find(
+        (entry) => entry.variant.id === variantDetail.variant.id,
+      )?.bindings;
+      if (bindings) setConfirmedBindingSnapshot(JSON.stringify(bindings));
+    },
+    onError: async (mutationError) => {
+      setReviewedSelection("");
+      setSaveMessage("");
+      setError(
+        `Confirmación incompleta: ${saveProgress.current.accepted} de ${saveProgress.current.total} cambios aceptados. ${errorMessage(mutationError)}. Consulta el estado actualizado antes de reintentar; el último envío puede no haberse confirmado.`,
+      );
+      await queryClient.invalidateQueries({
+        queryKey: caseInputVariantsQueryKey(scenarioId),
       });
     },
+  });
+
+  const runMutation = useMutation({
+    retry: false,
+    mutationFn: () =>
+      runCaseInputVariant(scenarioId, variantDetail.variant.id, {
+        ...(protectedSources
+          ? { expected_bindings_revision: preparation.bindings_revision }
+          : {}),
+        range_start: rangeStart,
+        range_end: rangeEnd,
+      }),
     onSuccess: (run) => {
       setError("");
       void queryClient.invalidateQueries({
@@ -7995,12 +8158,146 @@ function CaseInputVariantBindingEditor({
       });
       navigate(`/runs/${run.id}`);
     },
-    onError: (mutationError) => setError(errorMessage(mutationError)),
+    onError: (mutationError) => {
+      setReviewedSelection("");
+      const uncertain =
+        !(mutationError instanceof ApiError) ||
+        mutationError.status >= 500 ||
+        mutationError.status === 408;
+      setUncertainSubmission(uncertain);
+      submissionLock.current = uncertain;
+      setError(
+        uncertain
+          ? "No pudimos confirmar el envío. La ejecución puede haber sido aceptada; consulta el historial antes de preparar otro intento."
+          : errorMessage(mutationError),
+      );
+      void queryClient.invalidateQueries({
+        queryKey: scenarioRunsQueryKey(scenarioId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: caseInputVariantsQueryKey(scenarioId),
+      });
+    },
   });
+
+  const preparing =
+    !preparationCurrent ||
+    saveSourcesMutation.isPending ||
+    revalidateMutation.isPending ||
+    runMutation.isPending;
 
   return (
     <>
       {error ? <p role="alert">{error}</p> : null}
+      {uncertainSubmission ? (
+        <div>
+          <Link to={`?section=runs`} onClick={() => setHistoryOpened(true)}>
+            Consultar historial de ejecuciones
+          </Link>
+          {historyOpened ? (
+            <button
+              type="button"
+              onClick={() => {
+                setUncertainSubmission(false);
+                submissionLock.current = false;
+                setError("");
+                setReviewedSelection("");
+              }}
+            >
+              Ya consulté el historial: preparar otro intento
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {!preparation ? (
+        <p role="alert">
+          No pudimos comprobar la preparación. Actualiza la consulta antes de
+          continuar.
+        </p>
+      ) : preparation.model_status !== "available" ? (
+        <div role="alert">
+          <p>Falta definir o corregir el modelo.</p>
+          <Link to={`/scenarios/${scenarioId}/draft?section=data`}>
+            Corregir modelo
+          </Link>{" "}
+          ·{" "}
+          <Link to={`/scenarios/${scenarioId}/hydraulic-diagram`}>
+            Revisar modelo hidráulico
+          </Link>
+        </div>
+      ) : null}
+      {saveMessage ? <p role="status">{saveMessage}</p> : null}
+      {canRun ? (
+        <p role="status">Preparado para ejecutar este período</p>
+      ) : null}
+      {!allRequiredSignalsSelected ? (
+        <p>Faltan datos para los componentes indicados abajo.</p>
+      ) : !sourcesConfirmed ? (
+        <p>Hay fuentes seleccionadas sin confirmar.</p>
+      ) : !canRun && !isStale ? (
+        <p>
+          Revisa la preparación de la variante{" "}
+          {variantDetail.variant.display_name} para este período.
+        </p>
+      ) : null}
+      {!protectedSources && selectedSetDetailsQuery.isError ? (
+        <div role="alert">
+          <p>No pudimos consultar las fuentes seleccionadas.</p>
+          <button
+            type="button"
+            onClick={() => void selectedSetDetailsQuery.refetch()}
+          >
+            Reintentar consulta de fuentes
+          </button>
+        </div>
+      ) : null}
+      {protectedSources && !canonicalCatalogRead ? (
+        <p role="alert">
+          La edición de estas fuentes aún no está habilitada para tu cuenta.
+        </p>
+      ) : null}
+      {preparation?.sources?.length ? (
+        <ul aria-label="Fuentes confirmadas">
+          {preparation.sources.map((source, index) => (
+            <li key={source.binding_id ?? index}>
+              {source.name} · revisión {source.revision_number} ·{" "}
+              {source.timezone}
+              {protectedSources &&
+              canonicalCatalogRead &&
+              source.linkable_object_id ? (
+                <>
+                  {" "}
+                  ·{" "}
+                  <Link
+                    to={objectJourneyPath({
+                      projectId,
+                      linkableObjectId: source.linkable_object_id,
+                      intent: "use_revision",
+                    })}
+                  >
+                    Revisar fuente {source.name}
+                  </Link>
+                </>
+              ) : !protectedSources ? (
+                <>
+                  {" "}
+                  ·{" "}
+                  <Link
+                    to={`/projects/${projectId}/time-series-sets/${source.time_series_set_id}`}
+                  >
+                    Ver fuente {source.name}
+                  </Link>
+                </>
+              ) : null}
+              {!["confirmed", "valid_current", "valid_pinned"].includes(
+                source.state,
+              ) ? (
+                <strong> · Requiere revisión</strong>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {isStale ? (
         <div className="stale-banner" role="alert">
           <p>Variante desactualizada: revalida antes de correr.</p>
@@ -8011,27 +8308,40 @@ function CaseInputVariantBindingEditor({
                   key={`${reason.dependency_type}:${reason.dependency_id ?? ""}:${index}`}
                 >
                   {reason.detail}
+                  {reason.dependency_type.startsWith("time_series_set") &&
+                  /^\d+$/.test(reason.dependency_id ?? "") ? (
+                    <>
+                      {" "}
+                      ·{" "}
+                      <Link
+                        to={`/projects/${projectId}/time-series-sets/${reason.dependency_id}`}
+                      >
+                        Revisar fuente
+                      </Link>
+                    </>
+                  ) : (
+                    <>
+                      {" "}
+                      ·{" "}
+                      <Link to={`/scenarios/${scenarioId}/draft?section=data`}>
+                        Revisar modelo
+                      </Link>{" "}
+                      ·{" "}
+                      <Link to={`/scenarios/${scenarioId}/hydraulic-diagram`}>
+                        Revisar hidráulica
+                      </Link>
+                    </>
+                  )}
                 </li>
               ),
             )}
           </ul>
-          <button
-            type="button"
-            disabled={revalidateMutation.isPending}
-            onClick={() => {
-              if (!revalidateMutation.isPending) revalidateMutation.mutate();
-            }}
-          >
-            {revalidateMutation.isPending
-              ? "Revalidando variante"
-              : "Revalidar variante"}
-          </button>
         </div>
       ) : null}
-      {priceSignal ? (
+      {priceSignal && !protectedSources ? (
         <p className="source-note">
           {typeof selectedPriceSetId === "number"
-            ? `Precio vinculado: set #${selectedPriceSetId}.`
+            ? `${sourcesConfirmed ? "Precio vinculado" : "Precio seleccionado"}: set #${selectedPriceSetId}.`
             : "Aun no hay una serie de precio vinculada."}
         </p>
       ) : null}
@@ -8040,80 +8350,266 @@ function CaseInputVariantBindingEditor({
           <li
             key={`${signal.entity_type}:${signal.entity_id}:${signal.signal_key}`}
           >
-            {signal.bound
-              ? `${signal.signal_key} (${signal.entity_id}): vinculada (set #${signal.time_series_set_id})`
-              : `${signal.signal_key} (${signal.entity_id}): falta vincular`}
+            <span>
+              {signal.bound
+                ? `${signal.signal_key} (${signal.entity_id}): vinculada (set #${signal.time_series_set_id})`
+                : `${signal.signal_key} (${signal.entity_id}): falta vincular`}
+            </span>
+            {!signal.bound && protectedSources && canonicalCatalogRead ? (
+              signal.linkable_object_id ? (
+                <>
+                  {" "}
+                  ·{" "}
+                  <Link
+                    to={objectJourneyPath({
+                      projectId,
+                      linkableObjectId: signal.linkable_object_id,
+                      intent: "use_revision",
+                    })}
+                  >
+                    Corregir {signal.signal_key} ({signal.entity_id})
+                  </Link>
+                </>
+              ) : (
+                <>
+                  {" "}
+                  ·{" "}
+                  <Link to={`/scenarios/${scenarioId}/draft?section=data`}>
+                    Revisar el componente en el modelo
+                  </Link>
+                </>
+              )
+            ) : null}
+            {!signal.bound && !protectedSources ? (
+              <>
+                {" "}
+                ·{" "}
+                <a
+                  href={`#${requiredSignalSelectId(signal)}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    document
+                      .getElementById(requiredSignalSelectId(signal))
+                      ?.focus();
+                  }}
+                >
+                  Corregir {signal.signal_key} ({signal.entity_id})
+                </a>
+              </>
+            ) : null}
           </li>
         ))}
       </ul>
-      {requiredSignals.map((signal: RequiredSignalStatus) => (
-        <div
-          className="field-row"
-          key={`binding-select:${inputVariantRequirementKey(signal)}`}
-        >
-          <label htmlFor={requiredSignalSelectId(signal)}>
-            {requiredSignalSelectLabel(signal)}
-          </label>
-          <select
-            id={requiredSignalSelectId(signal)}
-            value={selectedSetIds[inputVariantRequirementKey(signal)] ?? ""}
-            onChange={(event) => {
-              const value = event.target.value;
-              setError("");
-              setRangeStartDraft(null);
-              setRangeEndDraft(null);
-              setSelectedSetIds((current) => ({
-                ...current,
-                [inputVariantRequirementKey(signal)]:
-                  value === "" ? "" : Number(value),
-              }));
-            }}
+      {!protectedSources &&
+        requiredSignals.map((signal: RequiredSignalStatus) => (
+          <div
+            className="field-row"
+            key={`binding-select:${inputVariantRequirementKey(signal)}`}
           >
-            <option value="">Selecciona una serie</option>
-            {timeSeriesSets.map((set: ProjectTimeSeriesSetSummary) => (
-              <option key={`${signal.entity_id}:${set.id}`} value={set.id}>
-                {set.name} - {set.version_label}
-              </option>
-            ))}
-          </select>
+            <label htmlFor={requiredSignalSelectId(signal)}>
+              {requiredSignalSelectLabel(signal)}
+            </label>
+            <select
+              id={requiredSignalSelectId(signal)}
+              disabled={preparing || preparation?.binding_mode !== "legacy"}
+              value={selectedSetIds[inputVariantRequirementKey(signal)] ?? ""}
+              onChange={(event) => {
+                const value = event.target.value;
+                setError("");
+                setRangeStartDraft(rangeStart || null);
+                setRangeEndDraft(rangeEnd || null);
+                setReviewedSelection("");
+                setSaveMessage("");
+                setSelectedSetIds((current) => ({
+                  ...current,
+                  [inputVariantRequirementKey(signal)]:
+                    value === "" ? "" : Number(value),
+                }));
+              }}
+            >
+              <option value="">Selecciona una serie</option>
+              {timeSeriesSets.map((set: ProjectTimeSeriesSetSummary) => (
+                <option key={`${signal.entity_id}:${set.id}`} value={set.id}>
+                  {set.name} - {set.version_label}
+                </option>
+              ))}
+            </select>
+          </div>
+        ))}
+      <fieldset className="variant-period" disabled={preparing}>
+        <legend>Período de ejecución</legend>
+        <p>
+          Zona de las fuentes: {zones.join(", ") || "selecciona una fuente"}.
+          Inicio incluido, fin excluido.
+        </p>
+        <div className="variant-period-grid">
+          {(
+            [
+              ["start", "Inicio", rangeStart, startParts, setRangeStartDraft],
+              ["end", "Fin", rangeEnd, endParts, setRangeEndDraft],
+            ] as const
+          ).map(([key, label, value, parts, change]) => (
+            <div key={key} className="variant-time-boundary">
+              <div className="field-row">
+                <label htmlFor={`period-${key}`}>{label} del período</label>
+                <input
+                  id={`period-${key}`}
+                  type="datetime-local"
+                  step="1"
+                  value={parts?.[1] ?? ""}
+                  onChange={(event) => {
+                    const local = event.target.value;
+                    change(
+                      local
+                        ? `${local.length === 16 ? `${local}:00` : local}${parts?.[2] ?? ""}`
+                        : "",
+                    );
+                    setReviewedSelection("");
+                  }}
+                />
+              </div>
+              <div className="field-row">
+                <label htmlFor={`offset-${key}`}>
+                  Offset de {key === "start" ? "inicio" : "fin"}
+                </label>
+                <input
+                  id={`offset-${key}`}
+                  type="text"
+                  value={parts?.[2] ?? ""}
+                  placeholder="Zona de la fuente"
+                  aria-describedby="period-offset-help"
+                  onChange={(event) => {
+                    change(`${parts?.[1] ?? value}${event.target.value}`);
+                    setReviewedSelection("");
+                  }}
+                />
+              </div>
+            </div>
+          ))}
         </div>
-      ))}
-      <div className="field-row">
-        <label htmlFor="input_variant_range_start">Inicio de rango</label>
-        <input
-          id="input_variant_range_start"
-          type="text"
-          value={rangeStart}
-          onChange={(event) => setRangeStartDraft(event.target.value)}
-          placeholder="2026-01-01T00:00:00-03:00"
-        />
-      </div>
-      <div className="field-row">
-        <label htmlFor="input_variant_range_end">Fin de rango</label>
-        <input
-          id="input_variant_range_end"
-          type="text"
-          value={rangeEnd}
-          onChange={(event) => setRangeEndDraft(event.target.value)}
-          placeholder="2026-01-02T00:00:00-03:00"
-        />
-      </div>
+        <p id="period-offset-help">
+          Conserva el offset de los datos (por ejemplo, -03:00 o Z). Si el
+          origen no incluye offset, se usa la zona indicada por la fuente. No se
+          convierten horarios automáticamente.
+        </p>
+        {rangeStart && rangeEnd ? (
+          <p className="source-note">
+            [{rangeStart}, {rangeEnd})
+          </p>
+        ) : null}
+        {Number.isFinite(durationHours) && durationHours > 0 ? (
+          <p>Duración: {durationHours} horas</p>
+        ) : null}
+        {preparation?.available_coverage && sourcesConfirmed ? (
+          <div>
+            <p>
+              Cobertura común comprobada: [
+              {preparation.available_coverage.start},{" "}
+              {preparation.available_coverage.end})
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setRangeStartDraft(preparation.available_coverage!.start);
+                setRangeEndDraft(preparation.available_coverage!.end);
+                setReviewedSelection("");
+              }}
+            >
+              Usar cobertura disponible
+            </button>
+          </div>
+        ) : (
+          <p>La revisión comprueba huecos y resolución de todas las fuentes.</p>
+        )}
+        <details>
+          <summary>Entrada ISO avanzada</summary>
+          <div className="field-row">
+            <label htmlFor="input_variant_range_start">Inicio de rango</label>
+            <input
+              id="input_variant_range_start"
+              type="text"
+              value={rangeStart}
+              onChange={(event) => {
+                setRangeStartDraft(event.target.value);
+                setReviewedSelection("");
+              }}
+              placeholder="2026-01-01T00:00:00-03:00"
+            />
+          </div>
+          <div className="field-row">
+            <label htmlFor="input_variant_range_end">Fin de rango</label>
+            <input
+              id="input_variant_range_end"
+              type="text"
+              value={rangeEnd}
+              onChange={(event) => {
+                setRangeEndDraft(event.target.value);
+                setReviewedSelection("");
+              }}
+              placeholder="2026-01-02T00:00:00-03:00"
+            />
+          </div>
+        </details>
+      </fieldset>
       {rangeValidation.message ? (
         <p role={rangeValidation.kind === "valid" ? "status" : "alert"}>
           {rangeValidation.message}
         </p>
       ) : null}
-      <button
-        type="button"
-        disabled={!canRun || runMutation.isPending}
-        onClick={() => {
-          if (canRun && !runMutation.isPending) runMutation.mutate();
-        }}
-      >
-        {runMutation.isPending
-          ? "Corriendo variante"
-          : "Vincular y correr variante"}
-      </button>
+      <div className="inline-actions variant-actions">
+        {!protectedSources && (
+          <button
+            type="button"
+            disabled={
+              !allRequiredSignalsSelected ||
+              sourcesConfirmed ||
+              preparing ||
+              preparation?.binding_mode !== "legacy" ||
+              selectedSetDetailsQuery.isFetching ||
+              selectedSetDetailsQuery.isError
+            }
+            onClick={() => saveSourcesMutation.mutate()}
+          >
+            {saveSourcesMutation.isPending
+              ? "Confirmando fuentes"
+              : "Confirmar fuentes"}
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={
+            preparation?.model_status !== "available" ||
+            !sourcesConfirmed ||
+            !allRequiredSignalsSelected ||
+            rangeValidation.kind !== "valid" ||
+            preparing ||
+            uncertainSubmission ||
+            (!protectedSources &&
+              (selectedSetDetailsQuery.isError ||
+                selectedSetDetailsQuery.isFetching))
+          }
+          onClick={() => {
+            setReviewedSelection("");
+            revalidateMutation.mutate();
+          }}
+        >
+          {revalidateMutation.isPending
+            ? "Revisando preparación"
+            : "Revisar preparación"}
+        </button>
+        <button
+          type="button"
+          disabled={!canRun || preparing}
+          onClick={() => {
+            if (canRun && !runMutation.isPending && !submissionLock.current) {
+              submissionLock.current = true;
+              runMutation.mutate();
+            }
+          }}
+        >
+          {runMutation.isPending ? "Corriendo variante" : "Ejecutar variante"}
+        </button>
+      </div>
     </>
   );
 }
@@ -8121,9 +8617,11 @@ function CaseInputVariantBindingEditor({
 function CaseInputVariantPanel({
   scenarioId,
   projectId,
+  canonicalCatalogRead,
 }: {
   scenarioId: number;
   projectId: number;
+  canonicalCatalogRead: boolean;
 }) {
   const queryClient = useQueryClient();
   const [cloneError, setCloneError] = useState("");
@@ -8137,12 +8635,6 @@ function CaseInputVariantPanel({
     queryFn: ({ signal }) => listCaseInputVariants(scenarioId, signal),
     retry: false,
   });
-  const timeSeriesSetsQuery = useQuery({
-    queryKey: timeSeriesCatalogQueryKey(projectId),
-    queryFn: ({ signal }) => listProjectTimeSeriesSets(projectId, signal),
-    retry: false,
-  });
-
   const selectedVariantId = resolveSelectedInputVariantId(
     scenarioId,
     selectedVariantPreference,
@@ -8154,6 +8646,14 @@ function CaseInputVariantPanel({
       (entry: CaseInputVariantDetail) => entry.variant.id === selectedVariantId,
     ) ?? variantQuery.data?.variants[0];
   const activeVariant = activeVariantDetail?.variant;
+  const needsLegacyCatalog =
+    activeVariantDetail?.preparation?.binding_mode !== "protected";
+  const timeSeriesSetsQuery = useQuery({
+    queryKey: timeSeriesCatalogQueryKey(projectId),
+    queryFn: ({ signal }) => listProjectTimeSeriesSets(projectId, signal),
+    enabled: variantQuery.isSuccess && needsLegacyCatalog,
+    retry: false,
+  });
 
   const cloneMutation = useMutation({
     mutationFn: async () => {
@@ -8174,10 +8674,15 @@ function CaseInputVariantPanel({
     onError: (mutationError) => setCloneError(errorMessage(mutationError)),
   });
 
-  if (variantQuery.isPending || timeSeriesSetsQuery.isPending) {
+  if (
+    variantQuery.isPending ||
+    (needsLegacyCatalog &&
+      !variantQuery.isError &&
+      timeSeriesSetsQuery.isPending)
+  ) {
     return <LoadingView label="Cargando variantes de entrada" />;
   }
-  if (variantQuery.isError) {
+  if (variantQuery.isError && !variantQuery.data) {
     return (
       <RequestErrorView
         error={variantQuery.error}
@@ -8185,7 +8690,11 @@ function CaseInputVariantPanel({
       />
     );
   }
-  if (timeSeriesSetsQuery.isError) {
+  if (
+    needsLegacyCatalog &&
+    timeSeriesSetsQuery.isError &&
+    !timeSeriesSetsQuery.data
+  ) {
     return (
       <RequestErrorView
         error={timeSeriesSetsQuery.error}
@@ -8219,6 +8728,16 @@ function CaseInputVariantPanel({
         Variante de entrada: {activeVariant.display_name}
       </h2>
       {cloneError ? <p role="alert">{cloneError}</p> : null}
+      {variantQuery.isError ? (
+        <div role="alert">
+          <p>No pudimos actualizar la preparación. Conservamos tus cambios.</p>
+          <button type="button" onClick={() => void variantQuery.refetch()}>
+            Reintentar consulta de preparación
+          </button>
+        </div>
+      ) : variantQuery.isFetching ? (
+        <p role="status">Consultando preparación</p>
+      ) : null}
       <div className="field-row">
         <label htmlFor="input_variant_active">Variante activa</label>
         <select
@@ -8240,33 +8759,40 @@ function CaseInputVariantPanel({
           ))}
         </select>
       </div>
-      <div className="field-row">
-        <label htmlFor="input_variant_clone_name">Nombre nueva variante</label>
-        <input
-          id="input_variant_clone_name"
-          type="text"
-          value={cloneName}
-          onChange={(event) => setCloneName(event.target.value)}
-          placeholder="Stress prices"
-        />
-        <button
-          type="button"
-          disabled={!canClone}
-          onClick={() => {
-            if (canClone) cloneMutation.mutate();
-          }}
-        >
-          {cloneMutation.isPending
-            ? "Clonando variante"
-            : "Clonar variante activa"}
-        </button>
-      </div>
+      <details>
+        <summary>Gestionar variantes</summary>
+        <div className="field-row">
+          <label htmlFor="input_variant_clone_name">
+            Nombre nueva variante
+          </label>
+          <input
+            id="input_variant_clone_name"
+            type="text"
+            value={cloneName}
+            onChange={(event) => setCloneName(event.target.value)}
+            placeholder="Stress prices"
+          />
+          <button
+            type="button"
+            disabled={!canClone}
+            onClick={() => {
+              if (canClone) cloneMutation.mutate();
+            }}
+          >
+            {cloneMutation.isPending
+              ? "Clonando variante"
+              : "Clonar variante activa"}
+          </button>
+        </div>
+      </details>
       <CaseInputVariantBindingEditor
         key={activeVariant.id}
         scenarioId={scenarioId}
         projectId={projectId}
         variantDetail={activeVariantDetail}
         timeSeriesSets={timeSeriesSetsQuery.data || []}
+        preparationCurrent={!variantQuery.isError && !variantQuery.isFetching}
+        canonicalCatalogRead={canonicalCatalogRead}
       />
     </section>
   );
@@ -8308,7 +8834,11 @@ function ScenarioModelSummary({ scenarioId }: { scenarioId: number }) {
   );
 }
 
-export function ScenarioDetailView() {
+export function ScenarioDetailView({
+  canonicalCatalogRead = false,
+}: {
+  canonicalCatalogRead?: boolean;
+}) {
   const location = useLocation();
   const requestedSection = new URLSearchParams(location.search).get("section");
   const section = ["data", "runs", "advanced"].includes(requestedSection || "")
@@ -8424,6 +8954,7 @@ export function ScenarioDetailView() {
           <CaseInputVariantPanel
             scenarioId={scenario.data.id}
             projectId={scenario.data.project_id}
+            canonicalCatalogRead={canonicalCatalogRead}
           />
         </div>
         <div className="workspace-stack" hidden={section !== "advanced"}>
@@ -8435,6 +8966,12 @@ export function ScenarioDetailView() {
             <p>
               Importa JSON, consulta versiones inmutables o configura modelos
               hidráulicos y consolas.
+            </p>
+            <p>
+              La ejecución manual de versiones es un camino independiente. Para
+              ejecutar una variante, confirma sus fuentes y revisa su
+              preparación en Datos; la versión inmutable se crea
+              automáticamente.
             </p>
             <Link to={`/scenarios/${scenario.data.id}/hydraulic-diagram`}>
               Diagrama hidráulico

@@ -4918,6 +4918,7 @@ def create_app(
 
     def build_case_input_variant_detail(scenario_id: int, variant: dict[str, Any]) -> dict[str, Any]:
         return {
+            "preparation": analyst_store.read_input_variant_preparation(scenario_id=scenario_id, variant_id=variant["id"]),
             "variant": variant,
             "bindings": analyst_store.list_case_time_series_bindings(variant["id"]),
             "required_signals": analyst_store.evaluate_case_input_variant_required_signals(
@@ -5064,6 +5065,12 @@ def create_app(
     ):
         try:
             case, _ = get_case_and_variant_for_scenario(scenario_id, variant_id)
+            canonical = analyst_store.review_canonical_input_variant(
+                scenario_id=scenario_id, variant_id=variant_id, range_start=payload.range_start,
+                range_end=payload.range_end, expected_bindings_revision=payload.expected_bindings_revision,
+            )
+            if canonical is not None:
+                return canonical
             validated = analyst_store.validate_case_input_variant(
                 scenario_id=scenario_id,
                 case_input_variant_id=variant_id,
@@ -5075,7 +5082,9 @@ def create_app(
             )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        except (DraftGenerationError, InputVariantRangeError, MissingRequiredSignalsError) as error:
+        except BindingMutationError as error:
+            return JSONResponse(binding_error_payload(error, request_id=f"req_{secrets.token_hex(8)}"), status_code=409)
+        except (DraftGenerationError, InputVariantRangeError, MissingRequiredSignalsError, VariantStaleError) as error:
             return JSONResponse(
                 error_response_body("input_variant", str(error), phase="python_validation"),
                 status_code=400,

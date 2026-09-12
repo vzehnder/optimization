@@ -31550,6 +31550,170 @@ class AnalystStore:
         except (KeyError, DraftGenerationError):
             return self._generate_base_system_case_from_hydraulic_diagram(scenario_id)
 
+    def _input_variant_preparation_data(
+        self, *, scenario_id: int, variant_id: int
+    ) -> tuple[dict[str, Any], list[tuple[dict[str, Any], dict[str, Any]]]]:
+        """Read the same source identities the run path consumes; never move a revision."""
+        page = self.read_case_bindings(scenario_id=scenario_id, variant_id=variant_id)
+        active = [item for item in page["items"] if item["status"] == "active"]
+        protected = bool(active) or self.read_time_series_c6_state()["cutover_active"]
+        scenario = self.get_scenario(scenario_id)
+        rows = []
+        sources = []
+        bindings = []
+        if protected:
+            for item in active:
+                raw = self._canonical_binding_row(item["binding_id"])
+                key = raw["execution_contract_key"]
+                entity_type, entity_id = self._canonical_binding_scope(item)
+                revision = self.read_canonical_revision(item["set_revision_id"])
+                values = revision["values"].get(item["signal"]["series_key"], [])
+                adapted = {
+                    "id": item["time_series_set_id"],
+                    "periods": revision["periods"],
+                    "values": [
+                        {
+                            "period_index": period["period_index"],
+                            "signal_key": key,
+                            "value_numeric": value,
+                        }
+                        for period, value in zip(revision["periods"], values)
+                    ],
+                }
+                binding = {
+                    "signal_key": key,
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "time_series_set_id": item["time_series_set_id"],
+                }
+                bindings.append(binding)
+                rows.append((binding, adapted))
+                sources.append(
+                    {
+                        **binding,
+                        "name": item["signal"]["display_name"],
+                        "revision_number": revision["revision_number"],
+                        "content_hash": item["bound_content_hash"],
+                        "state": item["state"],
+                        "binding_id": item["binding_id"],
+                        "linkable_object_id": item["object"]["id"],
+                        "timezone": revision["timezone"],
+                    }
+                )
+        else:
+            bindings = self.list_case_time_series_bindings(variant_id)
+            for binding in bindings:
+                source = self.get_time_series_set(
+                    int(scenario["project_id"]), binding["time_series_set_id"]
+                )
+                rows.append((binding, source))
+                sources.append(
+                    {
+                        **binding,
+                        "name": source["name"],
+                        "revision_number": source["revision_number"],
+                        "content_hash": source["content_hash"],
+                        "state": "confirmed",
+                        "timezone": source["timezone"],
+                    }
+                )
+        try:
+            base = self._generate_base_system_case_for_variant(scenario_id)
+            required = discover_required_signals(base)
+            model_status = "available"
+        except (KeyError, DraftGenerationError):
+            required = []
+            model_status = "unavailable"
+        statuses = [
+            required_signal_status_to_dict(status)
+            for status in evaluate_variant_completeness(required, bindings)
+        ]
+        objects = (
+            self.list_linkable_objects(project_id=int(scenario["project_id"]))
+            if protected else []
+        )
+        for status in statuses:
+            matches = [
+                item for item in objects
+                if (
+                    item["object_type_key"] == "global:system"
+                    if status["entity_type"] == "grid"
+                    else item["object_type_key"] == status["entity_type"]
+                    and str(item["object_key"]) == status["entity_id"]
+                )
+            ]
+            status["linkable_object_id"] = matches[0]["id"] if len(matches) == 1 else None
+        return {
+            "binding_mode": "protected" if protected else "legacy",
+            "model_status": model_status,
+            "bindings_revision": page["meta"]["bindings_revision"],
+            "required_signals": statuses,
+            "sources": sources,
+        }, rows
+
+    def read_input_variant_preparation(
+        self, *, scenario_id: int, variant_id: int
+    ) -> dict[str, Any]:
+        preparation, rows = self._input_variant_preparation_data(
+            scenario_id=scenario_id, variant_id=variant_id
+        )
+        preparation["available_coverage"] = None
+        if (
+            rows
+            and all(source["periods"] for _, source in rows)
+            and all(status["bound"] for status in preparation["required_signals"])
+        ):
+            start = max(source["periods"][0]["timestamp_start"] for _, source in rows)
+            end = min(source["periods"][-1]["timestamp_end"] for _, source in rows)
+            try:
+                resolved = {
+                    (binding["signal_key"], binding.get("entity_type"), binding.get("entity_id")):
+                    resolve_bound_signal_series(source, binding["signal_key"], start, end)
+                    for binding, source in rows
+                }
+                materialize_variant_time_series(resolved)
+                preparation["available_coverage"] = {"start": start, "end": end}
+            except InputVariantRangeError:
+                pass
+        return preparation
+
+    def review_canonical_input_variant(
+        self, *, scenario_id: int, variant_id: int,
+        range_start: str, range_end: str,
+        expected_bindings_revision: int | None = None,
+    ) -> dict[str, Any] | None:
+        preparation, rows = self._input_variant_preparation_data(
+            scenario_id=scenario_id, variant_id=variant_id
+        )
+        if preparation["binding_mode"] != "protected":
+            return None
+        if (
+            expected_bindings_revision is not None
+            and preparation["bindings_revision"] != expected_bindings_revision
+        ):
+            raise BindingMutationError(
+                "TS_LINK_PRECONDITION_CHANGED",
+                expected_bindings_revision=expected_bindings_revision,
+                actual_bindings_revision=preparation["bindings_revision"],
+            )
+        self.assert_case_bindings_executable(scenario_id=scenario_id, variant_id=variant_id)
+        if preparation["model_status"] != "available":
+            raise InputVariantRangeError("Falta definir o corregir el modelo.")
+        if not rows or any(not status["bound"] for status in preparation["required_signals"]):
+            raise InputVariantRangeError("Faltan fuentes confirmadas para los componentes del modelo.")
+        resolved = {}
+        for binding, source in rows:
+            key = binding["signal_key"]
+            scope = (key, binding.get("entity_type"), binding.get("entity_id"))
+            resolved[scope] = resolve_bound_signal_series(source, key, range_start, range_end)
+        # The established resolver checks holes and exact resolution across all signals.
+        materialize_variant_time_series(resolved)
+        return {
+            "status": "valid",
+            "series_bindings": preparation["sources"],
+            "bindings_revision": preparation["bindings_revision"],
+        }
+
     def evaluate_case_input_variant_required_signals(
         self, *, scenario_id: int, case_input_variant_id: int
     ) -> list[dict[str, Any]]:

@@ -1988,6 +1988,7 @@ export interface CaseTimeSeriesBinding {
 }
 
 export interface RequiredSignalStatus {
+  linkable_object_id?: number | null;
   entity_type: string;
   entity_id: string;
   signal_key: string;
@@ -2023,6 +2024,23 @@ export interface DefaultInputVariantResponse {
 }
 
 export interface CaseInputVariantDetail {
+  preparation?: {
+    binding_mode: "legacy" | "protected";
+    model_status: "available" | "unavailable";
+    bindings_revision: number;
+    required_signals: RequiredSignalStatus[];
+    sources: {
+      name: string;
+      revision_number: number;
+      content_hash: string;
+      state: string;
+      timezone: string;
+      time_series_set_id: number;
+      linkable_object_id?: number;
+      binding_id?: number;
+    }[];
+    available_coverage: { start: string; end: string } | null;
+  };
   variant: CaseInputVariant;
   bindings: CaseTimeSeriesBinding[];
   required_signals: RequiredSignalStatus[];
@@ -2053,6 +2071,7 @@ export interface CaseInputVariantWritePayload {
 }
 
 export interface CaseInputVariantRunPayload {
+  expected_bindings_revision?: number;
   range_start: string;
   range_end: string;
 }

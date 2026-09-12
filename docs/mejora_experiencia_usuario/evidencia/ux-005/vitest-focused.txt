@@ -1,0 +1,12 @@
+
+> bess-react-ui@0.1.0 test
+> vitest run src/VariantPreparation.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  13 passed (13)
+   Start at  17:23:26
+   Duration  11.73s (transform 1.30s, setup 458ms, import 1.97s, tests 6.95s, environment 1.97s)

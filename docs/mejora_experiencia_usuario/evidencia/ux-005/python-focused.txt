@@ -1,0 +1,26 @@
+.venv/Scripts/python.exe : C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\.venv\Lib\sit
+e-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is
+deprecated; install `httpx2` instead.
+En línea: 2 Carácter: 41
++ ... /:memory:'; .venv/Scripts/python.exe -m unittest tests.test_ux005_pre ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\vicen\...ttpx2` instead.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+  from starlette.testclient import TestClient as TestClient  # noqa
+test_available_coverage_is_only_offered_when_all_bound_periods_have_no_holes (tests.test_ux005_preparation.VariantPrepa
+rationApiTests.test_available_coverage_is_only_offered_when_all_bound_periods_have_no_holes) ... ok
+test_binding_editor_capability_follows_c6_even_when_canonical_read_is_enabled_before_cutover (tests.test_ux005_preparat
+ion.VariantPreparationApiTests.test_binding_editor_capability_follows_c6_even_when_canonical_read_is_enabled_before_cut
+over) ... ok
+test_c6_execution_keeps_the_reviewed_revision_and_rejects_a_changed_model_without_touching_history (tests.test_ux005_pr
+eparation.VariantPreparationApiTests.test_c6_execution_keeps_the_reviewed_revision_and_rejects_a_changed_model_without_
+touching_history) ... ok
+test_canonical_preparation_reviews_exact_sources_and_range_without_creating_a_version_or_run (tests.test_ux005_preparat
+ion.VariantPreparationApiTests.test_canonical_preparation_reviews_exact_sources_and_range_without_creating_a_version_or
+_run) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 6.641s
+
+OK

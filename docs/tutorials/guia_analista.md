@@ -398,7 +398,7 @@ revision exacta**. Son referencias, no copias.
 - Todo caso parte con una variante **Default**.
 - **Variante activa**: selector de con que variante trabajas. Si aparece
   "(desactualizada)", hay que revalidar antes de correr.
-- **Clonar variante activa**: escribe un nombre descriptivo (por ejemplo
+- En **Gestionar variantes**, usa **Clonar variante activa**: escribe un nombre descriptivo (por ejemplo
   "Precios estresados 2027") y clona. La copia hereda todos los bindings y
   puedes cambiarle solo los que te interesan, sin tocar la Default. Asi se
   estudian sensibilidades de datos sobre el mismo modelo.
@@ -406,7 +406,10 @@ revision exacta**. Son referencias, no copias.
 Debajo del selector, el editor de bindings lista las **senales requeridas**
 del caso (derivadas automaticamente de su topologia: si agregas un activo
 `load`, aparece `load_demand_mw`; si agregas nodos hidraulicos, aparecen sus
-afluentes; etc.) con un select por senal para elegir el set que la cubre.
+afluentes; etc.). En compatibilidad hay un selector por senal y la accion
+**Confirmar fuentes**. Cuando el servidor exige el recorrido protegido, el
+panel muestra las revisiones fijadas y enlaces para corregir cada necesidad
+desde el objeto. Ese recorrido conserva prevalidacion y confirmacion de impacto.
 
 Como el binding apunta a una revision exacta y no a "la ultima", una revision
 nueva de la fuente **no** entra sola: el binding queda marcado obsoleto y hay
@@ -417,13 +420,22 @@ de la seccion 8 sea detectable en vez de una sorpresa.
 
 En el mismo panel de la variante:
 
-1. Vincula todas las senales requeridas.
-2. Define **Inicio de rango** y **Fin de rango**: el intervalo `[inicio,
-   fin)` de las series que quieres optimizar, en ISO-8601 con offset de zona
-   horaria (por ejemplo `2026-01-01T00:00:00-03:00`). Por defecto se
-   propone el horizonte del primer set vinculado. La UI valida cobertura y
-   compatibilidad de resolucion en linea ("Rango valido para correr").
-3. Presiona **Vincular y correr variante**.
+1. Confirma todas las fuentes: **Confirmar fuentes** en compatibilidad, o el
+   recorrido protegido enlazado desde cada necesidad. Esto no crea una corrida.
+2. Define **Inicio del período**, **Fin del período** y sus offsets. El panel
+   muestra la zona de las fuentes, la duracion y el intervalo `[inicio, fin)`.
+   **Entrada ISO avanzada** conserva la entrada literal. Cambiar de fuente
+   mantiene el rango digitado. **Usar cobertura disponible** adopta expresamente
+   la cobertura comun que pudo comprobar el servidor.
+3. Presiona **Revisar preparación**. El servidor comprueba cobertura exacta,
+   huecos, resolucion y dependencias. Cualquier cambio posterior exige otra revision.
+4. Cuando aparezca **Preparado para ejecutar este período**, presiona
+   **Ejecutar variante**.
+
+Si la confirmacion de fuentes falla parcialmente, el mensaje cuenta los cambios
+aceptados y conserva los pendientes. Si aparece **No pudimos confirmar el envío**,
+consulta el historial: la corrida puede haberse aceptado. No se reenvia
+automaticamente; despues de consultar, puedes preparar otro intento y revisarlo.
 
 Que pasa por debajo (util para confiar en el resultado): la aplicacion
 valida que cada set vinculado cubra el rango exacto sin huecos y con
@@ -442,10 +454,10 @@ variante queda **desactualizada** y la aplicacion se niega a correr:
 - la topologia o los parametros del caso cambiaron;
 - un set derivado vinculado quedo stale respecto de su receta.
 
-Veras un banner con los motivos y el boton **Revalidar variante**. Esto es
-deliberado: nunca hay re-runs silenciosos con datos distintos a los que
-crees estar usando. Revalida (y regenera derivados si corresponde) y vuelve
-a correr.
+Veras los motivos y enlaces al modelo o la fuente que debes corregir. Resuelve
+esos cambios (y regenera derivados si corresponde) y usa **Revisar preparación**.
+Las revisiones canonicas obsoletas requieren resolver su uso en el recorrido
+protegido; la revision general no reemplaza una revision fijada silenciosamente.
 
 ### Estados y detalle de la corrida
 
@@ -600,8 +612,8 @@ primero de los dos que se elimine.
 
 | Sintoma | Causa probable | Solucion |
 | --- | --- | --- |
-| "Variante desactualizada: revalida antes de correr" | Alguna serie, la topologia o los parametros cambiaron desde la ultima validacion. | Revisar los motivos del banner y presionar **Revalidar variante**. |
-| El boton de correr esta deshabilitado | Falta vincular alguna senal requerida, o el rango esta vacio/invalido. | Completar todos los selects de senales y revisar el mensaje de validacion del rango. |
+| Variante desactualizada | Alguna serie, la topologia o los parametros cambiaron desde la ultima validacion. | Corregir los motivos indicados y presionar **Revisar preparación**. |
+| El boton de correr esta deshabilitado | Falta modelo, fuente confirmada, rango valido o una revision vigente. | Seguir los enlaces de correccion, confirmar fuentes y revisar la preparacion. |
 | "missing coverage for [...)" | Algun set vinculado no cubre el rango pedido, o tiene huecos. | Acortar el rango, o completar/interpolar la serie (explicitamente) y revalidar. |
 | "Horizonte incompatible" / rechazo por resolucion | Sets vinculados con resoluciones distintas. | No hay resampling implicito: usar la transformacion `resample` para unificar resolucion antes de vincular. |
 | Set derivado con badge "Desactualizado" | Su origen cambio despues de generarlo. | **Regenerar set derivado** y luego revalidar las variantes que lo usan. |

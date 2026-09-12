@@ -1040,6 +1040,10 @@ describe("application shell", () => {
                       time_series_set_id: null,
                     },
                   ],
+                  preparation: {
+                    binding_mode: "legacy",
+                    model_status: "available",
+                  },
                   staleness: { validated: false, stale: false, reasons: [] },
                 },
               ],
@@ -1083,6 +1087,12 @@ describe("application shell", () => {
             }),
             { status: 201, headers: { "Content-Type": "application/json" } },
           );
+        }
+        if (
+          path === "/api/scenarios/10/case/variants/3/validate" &&
+          method === "POST"
+        ) {
+          return Response.json({ status: "valid", series_bindings: [] });
         }
         if (
           path === "/api/scenarios/10/case/variants/3/run" &&
@@ -1138,9 +1148,19 @@ describe("application shell", () => {
     );
     expect(screen.getByText("Rango valido para correr.")).toBeVisible();
 
-    await user.click(
-      screen.getByRole("button", { name: "Vincular y correr variante" }),
+    await user.click(screen.getByRole("button", { name: "Confirmar fuentes" }));
+    await screen.findByText(
+      "Fuentes confirmadas. Revisa la preparación antes de ejecutar.",
     );
+    await user.click(
+      screen.getByRole("button", { name: "Revisar preparación" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Ejecutar variante" }),
+      ).toBeEnabled(),
+    );
+    await user.click(screen.getByRole("button", { name: "Ejecutar variante" }));
 
     await waitFor(() => expect(bindCalls).toBe(1));
     await waitFor(() => expect(runCalls).toBe(1));
@@ -1512,6 +1532,10 @@ describe("application shell", () => {
                       time_series_set_id: null,
                     },
                   ],
+                  preparation: {
+                    binding_mode: "legacy",
+                    model_status: "available",
+                  },
                   staleness: { validated: false, stale: false, reasons: [] },
                 },
               ],
@@ -1575,6 +1599,12 @@ describe("application shell", () => {
           );
         }
         if (
+          path === "/api/scenarios/10/case/variants/3/validate" &&
+          method === "POST"
+        ) {
+          return Response.json({ status: "valid", series_bindings: [] });
+        }
+        if (
           path === "/api/scenarios/10/case/variants/3/run" &&
           method === "POST"
         ) {
@@ -1619,9 +1649,19 @@ describe("application shell", () => {
     await waitFor(() =>
       expect(screen.getByText("Rango valido para correr.")).toBeVisible(),
     );
-    await user.click(
-      screen.getByRole("button", { name: "Vincular y correr variante" }),
+    await user.click(screen.getByRole("button", { name: "Confirmar fuentes" }));
+    await screen.findByText(
+      "Fuentes confirmadas. Revisa la preparación antes de ejecutar.",
     );
+    await user.click(
+      screen.getByRole("button", { name: "Revisar preparación" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Ejecutar variante" }),
+      ).toBeEnabled(),
+    );
+    await user.click(screen.getByRole("button", { name: "Ejecutar variante" }));
 
     await waitFor(() => expect(runCalls).toBe(1));
     expect(bindPayloads).toEqual([
@@ -1787,6 +1827,7 @@ describe("application shell", () => {
           },
         ],
         required_signals: requiredSignals,
+        preparation: { binding_mode: "legacy", model_status: "available" },
         staleness: { validated: false, stale: false, reasons: [] },
       },
     ];
@@ -1890,6 +1931,7 @@ describe("application shell", () => {
             required_signals: source.required_signals.map((signal) => ({
               ...signal,
             })),
+            preparation: { binding_mode: "legacy", model_status: "available" },
             staleness: { validated: false, stale: false, reasons: [] },
           };
           variantEntries.push(clonedVariant);
@@ -1936,6 +1978,12 @@ describe("application shell", () => {
           });
         }
         if (
+          path === "/api/scenarios/10/case/variants/4/validate" &&
+          method === "POST"
+        ) {
+          return Response.json({ status: "valid", series_bindings: [] });
+        }
+        if (
           path === "/api/scenarios/10/case/variants/4/run" &&
           method === "POST"
         ) {
@@ -1979,6 +2027,7 @@ describe("application shell", () => {
       "2026-01-01T03:00:00-03:00",
     );
 
+    await user.click(screen.getByText("Gestionar variantes"));
     await user.type(
       screen.getByLabelText("Nombre nueva variante"),
       "Stress prices",
@@ -2001,9 +2050,19 @@ describe("application shell", () => {
       screen.getByLabelText("Serie de precio (price_usd_per_mwh)"),
       "6",
     );
-    await user.click(
-      screen.getByRole("button", { name: "Vincular y correr variante" }),
+    await user.click(screen.getByRole("button", { name: "Confirmar fuentes" }));
+    await screen.findByText(
+      "Fuentes confirmadas. Revisa la preparación antes de ejecutar.",
     );
+    await user.click(
+      screen.getByRole("button", { name: "Revisar preparación" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Ejecutar variante" }),
+      ).toBeEnabled(),
+    );
+    await user.click(screen.getByRole("button", { name: "Ejecutar variante" }));
 
     await waitFor(() => expect(bindCalls).toBe(1));
     await waitFor(() => expect(runCalls).toBe(1));
@@ -2179,6 +2238,10 @@ describe("application shell", () => {
                       time_series_set_id: null,
                     },
                   ],
+                  preparation: {
+                    binding_mode: "legacy",
+                    model_status: "available",
+                  },
                   staleness: { validated: false, stale: false, reasons: [] },
                 },
               ],
@@ -2228,7 +2291,7 @@ describe("application shell", () => {
 
     expect(screen.getByText(/Cobertura incompleta/)).toBeVisible();
     expect(
-      screen.getByRole("button", { name: "Vincular y correr variante" }),
+      screen.getByRole("button", { name: "Ejecutar variante" }),
     ).toBeDisabled();
     expect(runCalls).toBe(0);
   });
@@ -2384,6 +2447,10 @@ describe("application shell", () => {
                       time_series_set_id: null,
                     },
                   ],
+                  preparation: {
+                    binding_mode: "legacy",
+                    model_status: "available",
+                  },
                   staleness: { validated: false, stale: false, reasons: [] },
                 },
               ],
@@ -2427,7 +2494,7 @@ describe("application shell", () => {
 
     expect(screen.getByText(/Horizonte incompatible/)).toBeVisible();
     expect(
-      screen.getByRole("button", { name: "Vincular y correr variante" }),
+      screen.getByRole("button", { name: "Ejecutar variante" }),
     ).toBeDisabled();
   });
 
@@ -2597,6 +2664,10 @@ describe("application shell", () => {
                       time_series_set_id: 5,
                     },
                   ],
+                  preparation: {
+                    binding_mode: "legacy",
+                    model_status: "available",
+                  },
                   staleness: stale
                     ? {
                         validated: true,
@@ -2658,11 +2729,11 @@ describe("application shell", () => {
     expect(await screen.findByText(/Variante desactualizada/)).toBeVisible();
     expect(screen.getByText(/time-series set 5 changed/)).toBeVisible();
     expect(
-      screen.getByRole("button", { name: "Vincular y correr variante" }),
+      screen.getByRole("button", { name: "Ejecutar variante" }),
     ).toBeDisabled();
 
     await user.click(
-      screen.getByRole("button", { name: "Revalidar variante" }),
+      screen.getByRole("button", { name: "Revisar preparación" }),
     );
 
     await waitFor(() => {
@@ -2670,7 +2741,7 @@ describe("application shell", () => {
     });
     expect(validateCalls).toBe(1);
     expect(
-      screen.getByRole("button", { name: "Vincular y correr variante" }),
+      screen.getByRole("button", { name: "Ejecutar variante" }),
     ).toBeEnabled();
   });
 

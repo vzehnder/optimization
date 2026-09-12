@@ -1351,16 +1351,21 @@ antes de elegir. En el recorrido protegido TS-7, las candidatas incompatibles
 se muestran bloqueadas y explicadas. Que un nombre aparezca en un selector no
 garantiza que pase la validación del servidor.
 
-Tras C6, el flujo del selector crea los enlaces mediante el escritor canónico.
-Si ya existe un binding a otra fuente, cambiar el selector puede devolver
-`TS_LINK_CONFLICT`: reemplazar el uso mediante el recorrido protegido. Elegir
-otra vez el mismo set conserva la revisión ya fijada; no acepta una revisión
-nueva silenciosamente.
+En compatibilidad, **Confirmar fuentes** guarda las selecciones pendientes sin
+ejecutar. Tras C6, o si la variante ya tiene usos canónicos activos, este panel
+muestra las fuentes y revisiones exactas con enlaces al recorrido protegido.
+Allí se confirma cualquier asociación o reemplazo con sus prevalidaciones e
+impacto. La capacidad proviene del servidor; disponer de lectura del catálogo
+canónico no habilita un escritor diferente.
 
 ### 19.3 Elegir el rango
 
-Completar **Inicio de rango** y **Fin de rango** en ISO-8601 con offset. La UI
-propone el horizonte del primer set seleccionado, pero ese valor debe revisarse.
+Completar **Inicio del período**, **Fin del período** y sus offsets; revisar
+la zona de las fuentes y el resumen `[inicio, fin)`. **Entrada ISO avanzada**
+permite editar los valores ISO literales. La sugerencia inicial debe revisarse.
+Cambiar una fuente conserva el rango digitado. **Usar cobertura disponible**
+es una acción explícita y solo aparece cuando el servidor pudo comprobar una
+cobertura común sin huecos y con resolución compatible.
 
 La validación comprueba:
 
@@ -1370,9 +1375,10 @@ La validación comprueba:
 - resolución consistente;
 - ausencia de huecos o solapes incompatibles.
 
-Esperar el mensaje **Rango válido para correr** o equivalente. Si hay distintas
-resoluciones, crear previamente un set resampleado; la corrida no transforma
-datos.
+El mensaje local de rango no habilita por sí solo la corrida. Presionar
+**Revisar preparación** y esperar **Preparado para ejecutar este período**.
+Cambiar el período o las fuentes invalida esa revisión. Si hay distintas
+resoluciones, crear previamente un set resampleado; la corrida no transforma datos.
 
 ### 19.4 Variante desactualizada
 
@@ -1391,13 +1397,13 @@ Para las dependencias que muestra el panel del escenario:
 2. corregir orígenes o modelo;
 3. regenerar derivados si corresponde;
 4. confirmar rango;
-5. presionar **Revalidar variante**;
+5. presionar **Revisar preparación**;
 6. esperar que desaparezca el bloqueo.
 
 Revisar también el estado de los bindings en el resumen del objeto. Un binding
 canónico **Obsoleta** o **Inválida** puede seguir bloqueando la corrida después
-de revalidar la variante. **Revalidar variante** actualiza la validación del
-caso/rango; no reemplaza la revisión exacta del binding.
+de revisar la preparación. **Revisar preparación** comprueba el caso/rango;
+no reemplaza la revisión exacta del binding.
 
 Si una fuente tiene una nueva revisión, usar **Usar revisión en una variante**
 para comparar y aceptar el reemplazo con motivo. Si la intención es conservar
@@ -1437,15 +1443,14 @@ seleccionarla entre las fuentes genéricas.
 
 ## 20. Ejecutar una corrida desde una variante
 
-En el panel del escenario, cuando están seleccionadas todas las señales, el
-rango es válido y la variante no está stale, se habilita **Vincular y correr
-variante**. El servidor comprueba además los bindings canónicos y puede rechazar
-la ejecución aunque el botón estuviera habilitado.
+En el panel del escenario, confirmar las fuentes, indicar el período y pulsar
+**Revisar preparación**. Cuando la revisión está vigente se habilita
+**Ejecutar variante**. El servidor comprueba de nuevo las dependencias y puede
+rechazar la ejecución si cambiaron después de revisar.
 
 Al presionarlo, la aplicación:
 
-1. procesa los bindings seleccionados sin sustituir usos existentes a otra
-   fuente o revisión de forma implícita;
+1. solicita la corrida con las fuentes ya confirmadas y el período revisado;
 2. comprueba los usos canónicos y materializa el rango desde sus revisiones
    exactas cuando existen bindings TS-7;
 3. congela topología, parámetros, variante, revisiones y hashes de series;
@@ -1454,14 +1459,20 @@ Al presionarlo, la aplicación:
 6. lo encola;
 7. navega al detalle del run.
 
-No hacer doble clic. Esperar la navegación o el mensaje de error.
+Durante el envío se bloquean los controles para evitar un doble clic. Esperar
+la navegación o el mensaje de error.
 
-Los enlaces se procesan antes de solicitar la corrida. Si falla una selección
-posterior, revisar qué bindings ya quedaron guardados antes de reintentar;
-este botón no representa un único lote de asociaciones para todo el formulario.
-En la ejecución TS-7, snapshot y run se crean juntos una vez superadas las
+**Confirmar fuentes** es una acción anterior e independiente. Si falla una
+selección posterior, el mensaje informa cuántos cambios fueron aceptados,
+conserva las selecciones pendientes y consulta el estado actualizado. No ejecuta
+después de ese fallo. **Ejecutar variante** no vuelve a guardar bindings.
+
+Si aparece **No pudimos confirmar el envío**, la corrida puede haberse aceptado.
+Usar **Consultar historial de ejecuciones** antes de preparar un nuevo intento.
+La aplicación no reintenta automáticamente y exige una nueva revisión al
+prepararlo. En TS-7, snapshot y run se crean juntos una vez superadas las
 validaciones. `TS_BINDING_EXECUTION_BLOCKED` requiere resolver los usos señalados
-en el objeto; no se arregla repitiendo **Vincular y correr variante**.
+en el objeto; no se arregla repitiendo **Ejecutar variante**.
 
 ### 20.1 Estados del run
 
@@ -1587,7 +1598,7 @@ reproducciones controladas.
 
 En el detalle de versión, la sección **Manual run** ofrece **Lanzar run**. Esta
 acción ejecuta exactamente el snapshot inmutable abierto. Es diferente de
-**Vincular y correr variante**, que primero materializa la variante y crea una
+**Ejecutar variante**, que primero materializa la variante y crea una
 nueva versión.
 
 Eliminar una versión es una acción destructiva con confirmación. Puede estar
@@ -2194,7 +2205,7 @@ residente dentro del proceso web.
 | Derivado **Desactualizado**         | Cambió un input.                                     | Revisar receta y regenerar.                                       |
 | Falta una señal requerida           | Asset agregado sin set compatible.                   | Importar/matchear set para esa entidad.                           |
 | Rango inválido                      | Falta cobertura, huecos, resoluciones o timezone.    | Acortar rango o normalizar datos explícitamente.                  |
-| **Vincular y correr** deshabilitado | Binding, rango o staleness bloquea.                  | Resolver el mensaje asociado.                                     |
+| **Ejecutar variante** deshabilitado | Falta preparación confirmada y revisada, o cambió una dependencia. | Resolver el mensaje asociado y revisar la preparación. |
 | Run queda `queued`                  | Worker no avanza.                                    | Revisar proceso, cola y logs del backend.                         |
 | Run falla al iniciar                | Julia o entorno no disponible.                       | Verificar `JULIA`, proyecto y paquetes.                           |
 | Run infactible                      | Restricciones o datos incompatibles.                 | Revisar límites, condiciones terminales y series.                 |

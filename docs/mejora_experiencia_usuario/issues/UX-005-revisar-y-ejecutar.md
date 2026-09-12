@@ -1,6 +1,6 @@
 # UX-005 · Revisar la preparación y ejecutar con contexto
 
-Estado: Todo. Prioridad: P0. Dependencias: UX-001. Tamaño: L.
+Estado: In Review. Prioridad: P0. Dependencias: UX-001. Tamaño: L.
 
 ## Problema y resultado
 
@@ -50,3 +50,17 @@ Cada conducta es un ciclo separado. No crear un orquestador genérico ni reescri
 - Casos hidráulicos, versiones expertas, corridas históricas y ambos estados C6 relevantes conservan su comportamiento.
 
 Si cambia materialización o generación, ejecutar integración con Julia real según el protocolo. Si solo cambia presentación, usar regresiones del backend y del navegador apropiadas. La revisión posterior decide extracciones del componente; no forma parte del ciclo RED → GREEN.
+
+## Resolución
+
+- Responsable: Codex. Inicio y entrega para revisión: 2026-09-12.
+- Estado: In Review; aceptación del resultado pendiente.
+- Base: `e4eec65`, que integra la implementación de UX-001. Commit solicitado por el usuario: `feat(ux): guide variant preparation and execution`; sin PR.
+- Implementado: preparación y bloqueos con destinos de corrección, fuentes confirmadas antes de revisar/ejecutar, período con fecha/hora y offset, cobertura comprobada por servidor, gestión de variantes, revisión exacta TS-7 y recuperación de fallos parciales/inciertos.
+- Contrato aditivo: detalle `preparation` calculado por backend y revisión canónica mediante `/validate`; no se cambia el escritor, el generador ni el materializador de corridas.
+- Fronteras: F1/F2/F3 confirmadas explícitamente por el usuario con «confirmo» en esta conversación.
+- Evidencia: [ciclos RED → GREEN, comandos, paridad y límites](../evidencia/ux-005/README.md).
+- Pruebas: 179 componentes, 14 navegador y 57 Python aprobadas; 13 PostgreSQL omitidas. Build, TypeScript, ESLint y contrato OpenAPI comprobados. El formato global conserva 24 fallos previos.
+- Revisión visual: formulario en 1440, 1280 y 320 píxeles, ampliación CSS al 200 %, teclado y axe; capturas locales regenerables.
+- Guías actualizadas: [analista](../../tutorials/guia_analista.md) y [manual completo](../../tutorials/manual_completo_uso_pagina_web.md).
+- Revisión posterior: se mejoró el formato de los cambios; no se introduce un orquestador ni una extracción general del workspace. Sin modificaciones de lógica matemática, transacciones o esquema persistente.

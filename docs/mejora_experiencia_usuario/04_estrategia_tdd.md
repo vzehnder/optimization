@@ -12,15 +12,17 @@ Durante la planificación se propusieron fronteras y no se escribieron pruebas n
 
 UX-000 preparó el [acuerdo concreto para UX-001 y su primer comportamiento](evidencia/ux-000/README.md#fronteras-propuestas-para-aprobación), junto con recorridos y regresiones existentes. El usuario confirmó F1/F2 y F3 condicional el 2026-09-12 para UX-001. [Ciclos de implementación](evidencia/ux-001/README.md). Este acuerdo no confirma automáticamente fronteras nuevas de otros tickets.
 
+Para UX-005, el usuario respondió «confirmo» al acuerdo F1 (navegador con React y FastAPI aislado), F2 (interfaz React con respuestas HTTP controladas) y F3 (API pública para capacidades C6, validación y ejecución), antes de la primera prueba. El primer ciclo identificó una señal faltante, permitió ir a corregirla y mantuvo bloqueada la ejecución. [Registro de ciclos y resultados](evidencia/ux-005/README.md). No se incorporó F4.
+
 ## Fronteras propuestas
 
 Una frontera es la interfaz pública desde la que se observa el comportamiento. No es un archivo interno elegido por conveniencia.
 
 | Frontera | Observación permitida | Uso propuesto | Estado |
 | --- | --- | --- | --- |
-| F1: navegador → React → FastAPI aislado | Tarea visible, navegación, formularios, autenticación, persistencia tras recarga, descargas | Aceptación del recorrido de cada ticket | Confirmada para UX-001 |
-| F2: React renderizado con Testing Library | Roles/nombres accesibles, mensajes, interacción y resultado mostrado; respuestas HTTP controladas | Variantes de estado/errores difíciles de reproducir; feedback rápido | Confirmada para UX-001 |
-| F3: API pública FastAPI → almacén de prueba | Requests autenticados, códigos y payloads, lectura posterior por API, archivo descargado | Cambios de contrato, permisos, precondiciones o persistencia | Confirmada condicionalmente para UX-001 |
+| F1: navegador → React → FastAPI aislado | Tarea visible, navegación, formularios, autenticación, persistencia tras recarga, descargas | Aceptación del recorrido de cada ticket | Confirmada para UX-001 y UX-005 |
+| F2: React renderizado con Testing Library | Roles/nombres accesibles, mensajes, interacción y resultado mostrado; respuestas HTTP controladas | Variantes de estado/errores difíciles de reproducir; feedback rápido | Confirmada para UX-001 y UX-005 |
+| F3: API pública FastAPI → almacén de prueba | Requests autenticados, códigos y payloads, lectura posterior por API, archivo descargado | Cambios de contrato, permisos, precondiciones o persistencia | Condicional para UX-001; confirmada para UX-005 |
 | F4: API/CLI pública de Julia | Resultado del caso conocido y archivos de salida | Solo si se cambia generación, contrato matemático o materialización | Condicional, por confirmar |
 
 El repositorio ya usa estas herramientas. No añadir otro runner, framework BDD o framework de mocks para este plan. Los helpers de fixtures pueden preparar datos, pero las aserciones de un comportamiento nuevo se hacen en la misma frontera pública: no verificar un guardado de API consultando tablas privadas.
