@@ -5,11 +5,12 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { FormEvent, ReactNode, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useState } from "react";
 import {
   BrowserRouter,
   Link,
   Navigate,
+  NavLink,
   Outlet,
   Route,
   Routes,
@@ -303,18 +304,49 @@ function AnalystRoot({ user, landingPath, canonicalCatalogRead }: RootProps) {
         <IdentityStrip user={user} />
       </header>
       <nav className="primary-nav" aria-label="Navegacion principal">
-        <Link to="/projects">Analista</Link>
+        <NavLink to="/projects">Proyectos</NavLink>
         {canonicalCatalogRead ? (
-          <Link to="/time-series/catalog">Catalogo</Link>
+          <NavLink to="/time-series/catalog">Catálogo de series</NavLink>
         ) : null}
-        {user.role === "admin" ? <Link to="/admin/users">Admin</Link> : null}
-        <Link to="/system">Sistema</Link>
+        {user.role === "admin" ? (
+          <NavLink to="/admin/users">Administración</NavLink>
+        ) : null}
+        <details className="workspace-utilities">
+          <summary>Utilidades</summary>
+          <Link to="/system">Estado del sistema</Link>
+        </details>
       </nav>
       <main id="main-content">
+        <AnalystRouteFocus />
         <Outlet />
       </main>
     </div>
   );
+}
+
+function AnalystRouteFocus() {
+  const location = useLocation();
+  useEffect(() => {
+    const main = document.getElementById("main-content");
+    if (!main) return;
+    function focusHeading() {
+      const heading = main?.querySelector<HTMLElement>(
+        ":scope > .workspace-view > .workspace-heading h1, :scope > .content-panel > h1",
+      );
+      if (!heading) return false;
+      heading.tabIndex = -1;
+      heading.focus({ preventScroll: true });
+      return true;
+    }
+    if (focusHeading()) return;
+    // A destination can still be waiting for its public queries to finish.
+    const observer = new MutationObserver(() => {
+      if (focusHeading()) observer.disconnect();
+    });
+    observer.observe(main, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [location.key]);
+  return null;
 }
 
 function ConsoleRoot({ user }: RootProps) {

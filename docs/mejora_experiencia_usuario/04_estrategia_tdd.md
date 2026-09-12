@@ -8,9 +8,9 @@ La referencia es [`.agents/skills/tdd/SKILL.md`](../../.agents/skills/tdd/SKILL.
 
 > Refactoring is not part of the loop. It belongs to the review stage.
 
-Este plan propone fronteras; no afirma que el usuario ya las confirmó. No se escribieron pruebas nuevas durante la planificación. Antes de la primera prueba de implementación, presentar las fronteras necesarias del ticket y registrar su confirmación por el usuario/responsable de la implementación. No es necesario volver a confirmar una frontera que ya haya sido aceptada para ese alcance; una frontera nueva sí requiere acuerdo.
+Durante la planificación se propusieron fronteras y no se escribieron pruebas nuevas. Antes de la primera prueba de implementación, presentar las fronteras necesarias del ticket y registrar su confirmación por el usuario/responsable de la implementación. No es necesario volver a confirmar una frontera que ya haya sido aceptada para ese alcance; una frontera nueva sí requiere acuerdo. El acuerdo posterior de UX-001 se registra a continuación.
 
-UX-000 preparó el [acuerdo concreto para UX-001 y su primer comportamiento](evidencia/ux-000/README.md#fronteras-propuestas-para-aprobación), junto con recorridos y regresiones existentes. La confirmación del usuario sigue pendiente; no se han escrito pruebas nuevas de producto.
+UX-000 preparó el [acuerdo concreto para UX-001 y su primer comportamiento](evidencia/ux-000/README.md#fronteras-propuestas-para-aprobación), junto con recorridos y regresiones existentes. El usuario confirmó F1/F2 y F3 condicional el 2026-09-12 para UX-001. [Ciclos de implementación](evidencia/ux-001/README.md). Este acuerdo no confirma automáticamente fronteras nuevas de otros tickets.
 
 ## Fronteras propuestas
 
@@ -18,9 +18,9 @@ Una frontera es la interfaz pública desde la que se observa el comportamiento. 
 
 | Frontera | Observación permitida | Uso propuesto | Estado |
 | --- | --- | --- | --- |
-| F1: navegador → React → FastAPI aislado | Tarea visible, navegación, formularios, autenticación, persistencia tras recarga, descargas | Aceptación del recorrido de cada ticket | Propuesta, por confirmar |
-| F2: React renderizado con Testing Library | Roles/nombres accesibles, mensajes, interacción y resultado mostrado; respuestas HTTP controladas | Variantes de estado/errores difíciles de reproducir; feedback rápido | Propuesta, por confirmar |
-| F3: API pública FastAPI → almacén de prueba | Requests autenticados, códigos y payloads, lectura posterior por API, archivo descargado | Cambios de contrato, permisos, precondiciones o persistencia | Propuesta, por confirmar |
+| F1: navegador → React → FastAPI aislado | Tarea visible, navegación, formularios, autenticación, persistencia tras recarga, descargas | Aceptación del recorrido de cada ticket | Confirmada para UX-001 |
+| F2: React renderizado con Testing Library | Roles/nombres accesibles, mensajes, interacción y resultado mostrado; respuestas HTTP controladas | Variantes de estado/errores difíciles de reproducir; feedback rápido | Confirmada para UX-001 |
+| F3: API pública FastAPI → almacén de prueba | Requests autenticados, códigos y payloads, lectura posterior por API, archivo descargado | Cambios de contrato, permisos, precondiciones o persistencia | Confirmada condicionalmente para UX-001 |
 | F4: API/CLI pública de Julia | Resultado del caso conocido y archivos de salida | Solo si se cambia generación, contrato matemático o materialización | Condicional, por confirmar |
 
 El repositorio ya usa estas herramientas. No añadir otro runner, framework BDD o framework de mocks para este plan. Los helpers de fixtures pueden preparar datos, pero las aserciones de un comportamiento nuevo se hacen en la misma frontera pública: no verificar un guardado de API consultando tablas privadas.

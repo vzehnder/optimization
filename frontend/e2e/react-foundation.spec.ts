@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import AxeBuilder from "@axe-core/playwright";
 
 import {
   expect,
@@ -455,7 +456,7 @@ test("React admin users and project access cover assignment, removal, deactivati
     await page.getByRole("button", { name: "Entrar" }).click();
   }
 
-  await page.getByRole("link", { name: "Admin" }).click();
+  await page.getByRole("link", { name: "Administración", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Administracion" }),
   ).toBeVisible();
@@ -470,13 +471,17 @@ test("React admin users and project access cover assignment, removal, deactivati
   await page.getByRole("button", { name: "Crear usuario" }).click();
   await expect(page.getByRole("alert")).toContainText("email already exists");
 
-  await page.getByRole("link", { name: "Analista" }).click();
+  await page
+    .getByRole("navigation", { name: "Navegacion principal" })
+    .getByRole("link", { name: "Proyectos", exact: true })
+    .click();
   await page.getByLabel("Nombre del proyecto").fill(projectName);
   await page
     .getByLabel("Descripcion del proyecto")
     .fill("Client access browser acceptance");
   await page.getByRole("button", { name: "Crear proyecto" }).click();
   await page.getByRole("link", { name: projectName }).click();
+  await page.getByRole("link", { name: "Accesos", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Capacidades externas" }),
   ).toBeVisible();
@@ -523,7 +528,7 @@ test("React admin users and project access cover assignment, removal, deactivati
 
   await page.getByRole("button", { name: "Salir" }).click();
   await login("admin@example.local", "admin-pass");
-  await page.getByRole("link", { name: "Admin" }).click();
+  await page.getByRole("link", { name: "Administración", exact: true }).click();
   await page.getByRole("button", { name: `Desactivar ${clientEmail}` }).click();
   await expect(
     page.getByText(`Confirma desactivar ${clientEmail}`),
@@ -626,6 +631,7 @@ test("React client portal reviews published results, downloads allowlisted artif
 
   await page.goto(`/react/projects/${project.id}`);
   await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
+  await page.getByRole("link", { name: "Accesos", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Capacidades externas" }),
   ).toBeVisible();
@@ -642,6 +648,7 @@ test("React client portal reviews published results, downloads allowlisted artif
   await loginThroughPage(analystEmail, "analyst-pass");
   await page.goto(`/react/projects/${project.id}`);
   await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
+  await page.getByRole("link", { name: "Informes", exact: true }).click();
   await page.getByLabel("Nombre nuevo template").fill(templateName);
   await page.getByLabel("Asset dispatch table").uncheck();
   await page.getByRole("button", { name: "Crear template" }).click();
@@ -767,6 +774,152 @@ test("React client portal reviews published results, downloads allowlisted artif
   ).toBeVisible();
 });
 
+test("UX-001 keeps task context and pending model edits through navigation and reload", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await ensureAdminSession(page);
+  const api = page.context().request;
+  const projectResponse = await postWithCsrf(api, "/api/projects", {
+    name: `UX-001 Planta Norte ${Date.now()}`,
+  });
+  expect(projectResponse.status()).toBe(201);
+  const project = (await projectResponse.json()) as {
+    id: number;
+    name: string;
+  };
+  const scenarioResponse = await postWithCsrf(
+    api,
+    `/api/projects/${project.id}/scenarios`,
+    { name: "Preparación de invierno" },
+  );
+  expect(scenarioResponse.status()).toBe(201);
+  const scenario = (await scenarioResponse.json()) as {
+    id: number;
+    name: string;
+  };
+  const scenarioPath = `/react/scenarios/${scenario.id}`;
+
+  await page.goto(`${scenarioPath}?origin=review&section=advanced`);
+  await page.getByRole("link", { name: "Modelo", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Draft estructurado" }),
+  ).toBeFocused();
+  await page.getByRole("button", { name: "Crear draft", exact: true }).click();
+  await page.getByLabel("Nombre del caso").fill("Invierno guardado");
+  await page
+    .getByRole("navigation", { name: "Navegacion principal" })
+    .getByRole("link", { name: "Proyectos", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Seguir editando" }).click();
+  await expect(page.getByLabel("Nombre del caso")).toHaveValue(
+    "Invierno guardado",
+  );
+  await page
+    .getByRole("button", { name: "Guardar draft", exact: true })
+    .click();
+  await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
+  await page
+    .getByRole("navigation", { name: "Ruta", exact: true })
+    .getByRole("link", { name: scenario.name, exact: true })
+    .click();
+  await expect(page).toHaveURL(
+    `${scenarioPath}?origin=review&section=advanced`,
+  );
+  await expect(
+    page.getByRole("heading", { name: "Versiones inmutables" }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("link", { name: "Avanzado", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
+
+  await page.getByRole("link", { name: "Datos", exact: true }).click();
+  await page
+    .getByLabel("Inicio de rango", { exact: true })
+    .fill("2026-01-01T00:00:00-03:00");
+  await page.getByRole("link", { name: "Ejecuciones", exact: true }).click();
+  await page.goBack();
+  await expect(page.getByLabel("Inicio de rango", { exact: true })).toHaveValue(
+    "2026-01-01T00:00:00-03:00",
+  );
+  await page.goForward();
+  await expect(
+    page.getByRole("heading", { name: "Corridas", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Resumen", exact: true }).click();
+  await page
+    .getByRole("link", { name: "Continuar preparación", exact: true })
+    .click();
+  await page.reload();
+  await expect(page.getByLabel("Nombre del caso")).toHaveValue(
+    "Invierno guardado",
+  );
+
+  // An unknown section is not a redirect target and falls back to the summary.
+  await page.goto(`${scenarioPath}?section=https%3A%2F%2Fexample.com`);
+  await expect(
+    page.getByRole("link", { name: "Resumen", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
+  for (const width of [1440, 1280, 320]) {
+    await page.setViewportSize({ width, height: width === 1280 ? 720 : 900 });
+    await page.goto(`${scenarioPath}?section=summary`);
+    await expect(
+      page.getByRole("link", { name: "Continuar preparación" }),
+    ).toBeVisible();
+    await page.screenshot({
+      path: test.info().outputPath(`escenario-${width}.png`),
+      fullPage: true,
+    });
+    if (width === 320) {
+      const audit = await new AxeBuilder({ page })
+        .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+        .analyze();
+      expect(
+        audit.violations.filter((v) =>
+          ["serious", "critical"].includes(v.impact || ""),
+        ),
+      ).toEqual([]);
+    }
+    await page.goto(`/react/projects/${project.id}`);
+    await expect(
+      page.getByRole("heading", { name: project.name }),
+    ).toBeVisible();
+    await page.screenshot({
+      path: test.info().outputPath(`proyecto-${width}.png`),
+      fullPage: true,
+    });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+  }
+  const audit = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  expect(
+    audit.violations.filter((v) =>
+      ["serious", "critical"].includes(v.impact || ""),
+    ),
+  ).toEqual([]);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  // CSS zoom exercises enlarged controls and reflow; this is not a screen-reader audit.
+  await page.evaluate(() => {
+    document.body.style.zoom = "2";
+  });
+  await page.getByRole("link", { name: "Consolas", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: project.name })).toBeFocused();
+  await expect(
+    page.getByRole("link", { name: `Consolas de ${scenario.name}` }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: test.info().outputPath("proyecto-zoom-200.png"),
+    fullPage: true,
+  });
+});
+
 test("React analyst workspace creates a project and scenario, then preserves direct scenario refresh", async ({
   page,
 }) => {
@@ -796,9 +949,11 @@ test("React analyst workspace creates a project and scenario, then preserves dir
 
   await expect(page).toHaveURL(/\/react\/scenarios\/\d+$/);
   await expect(page.getByRole("heading", { name: scenarioName })).toBeVisible();
+  await page.getByRole("link", { name: "Avanzado", exact: true }).click();
   await expect(
     page.getByText("Aun no hay versiones inmutables."),
   ).toBeVisible();
+  await page.getByRole("link", { name: "Ejecuciones", exact: true }).click();
   await expect(
     page.getByText("Aun no hay corridas para este escenario."),
   ).toBeVisible();
@@ -808,6 +963,8 @@ test("React analyst workspace creates a project and scenario, then preserves dir
   await expect(page).toHaveURL(scenarioUrl);
   await expect(page.getByRole("heading", { name: scenarioName })).toBeVisible();
 
+  await page.goBack();
+  await page.goBack();
   await page.goBack();
   await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
   await page.goForward();
@@ -848,7 +1005,7 @@ test("React structured draft editor saves multi-asset edits, recovers from one f
     .fill("Structured editor branch");
   await page.getByRole("button", { name: "Crear escenario" }).click();
 
-  await page.getByRole("link", { name: "Abrir draft" }).click();
+  await page.getByRole("link", { name: "Modelo", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Draft estructurado" }),
   ).toBeVisible();
@@ -914,7 +1071,7 @@ test("React draft editor uploads, maps, edits, and validates time-series sources
     .fill("Upload and mapping branch");
   await page.getByRole("button", { name: "Crear escenario" }).click();
 
-  await page.getByRole("link", { name: "Abrir draft" }).click();
+  await page.getByRole("link", { name: "Modelo", exact: true }).click();
   await page.getByRole("button", { name: "Crear draft" }).click();
   await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Agregar load" }).click();
@@ -998,7 +1155,7 @@ test("React case validation and versioning covers generated and expert paths", a
     .fill("Generate validate promote branch");
   await page.getByRole("button", { name: "Crear escenario" }).click();
 
-  await page.getByRole("link", { name: "Abrir draft" }).click();
+  await page.getByRole("link", { name: "Modelo", exact: true }).click();
   await page.getByRole("button", { name: "Crear draft" }).click();
   await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Agregar BESS" }).click();
@@ -1045,7 +1202,7 @@ test("React case validation and versioning covers generated and expert paths", a
   ).toBeVisible();
 
   await page.getByRole("link", { name: scenarioName }).click();
-  await page.getByRole("link", { name: "Abrir draft" }).click();
+  await page.getByRole("link", { name: "Modelo", exact: true }).click();
   await page.getByLabel("Nombre del caso").fill(`${scenarioName} stale`);
   await expect(
     page.getByText("Validacion stale; valida de nuevo antes de promover."),
@@ -1678,12 +1835,14 @@ test("React dashboard templates and publications cover draft preview publish and
   expect(portalConfiguration.status()).toBe(200);
 
   await page.goto(`/react/projects/${project.id}`);
+  await page.getByRole("link", { name: "Informes", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Dashboard templates" }),
   ).toBeVisible();
 
   const templateName = `Client Summary ${suffix}`;
   const updatedTemplateName = `Client Board ${suffix}`;
+  await page.getByRole("link", { name: "Informes", exact: true }).click();
   await page.getByLabel("Nombre nuevo template").fill(templateName);
   await page.getByLabel("Renewable chart").uncheck();
   await page.getByLabel("Asset dispatch table").uncheck();

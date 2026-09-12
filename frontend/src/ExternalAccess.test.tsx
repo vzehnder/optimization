@@ -39,7 +39,7 @@ describe("external identity compatibility", () => {
     ).toBeVisible();
     expect(screen.getByRole("link", { name: "Cliente" })).toBeVisible();
     expect(
-      screen.queryByRole("link", { name: "Analista" }),
+      screen.queryByRole("link", { name: "Proyectos" }),
     ).not.toBeInTheDocument();
   });
 });

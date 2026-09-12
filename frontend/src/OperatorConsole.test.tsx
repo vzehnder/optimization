@@ -222,7 +222,7 @@ function stubScenarioWorkspace(
 
 describe("operator consoles in the scenario workspace", () => {
   it("creates a draft console from a chosen source variant", async () => {
-    window.history.replaceState({}, "", "/react/scenarios/10");
+    window.history.replaceState({}, "", "/react/scenarios/10?section=advanced");
     const created: unknown[] = [];
     let consoles: unknown[] = [];
     stubScenarioWorkspace((path, method, body) => {
@@ -273,7 +273,7 @@ describe("operator consoles in the scenario workspace", () => {
   });
 
   it("shows the console state and links to configure and to test it", async () => {
-    window.history.replaceState({}, "", "/react/scenarios/10");
+    window.history.replaceState({}, "", "/react/scenarios/10?section=advanced");
     stubScenarioWorkspace((path, method) => {
       if (path === "/api/scenarios/10/consoles" && method === "GET") {
         return Response.json({ operator_consoles: [draftConsole] });
@@ -300,7 +300,7 @@ describe("operator consoles in the scenario workspace", () => {
   });
 
   it("revalidates the owned variant from a moved-dependency recovery row", async () => {
-    window.history.replaceState({}, "", "/react/scenarios/10");
+    window.history.replaceState({}, "", "/react/scenarios/10?section=advanced");
     const validations: unknown[] = [];
     let blocked = true;
     const movedConsole = {
@@ -373,7 +373,7 @@ describe("operator consoles in the scenario workspace", () => {
   });
 
   it("links an unavailable parameter to its exact configuration target", async () => {
-    window.history.replaceState({}, "", "/react/scenarios/10");
+    window.history.replaceState({}, "", "/react/scenarios/10?section=advanced");
     const brokenConsole = {
       ...draftConsole,
       status: "active",
@@ -417,7 +417,7 @@ describe("operator consoles in the scenario workspace", () => {
   });
 
   it("offers only field correction while a field and moved dependency coexist", async () => {
-    window.history.replaceState({}, "", "/react/scenarios/10");
+    window.history.replaceState({}, "", "/react/scenarios/10?section=advanced");
     const mixedConsole = {
       ...draftConsole,
       status: "active",
@@ -467,7 +467,7 @@ describe("operator consoles in the scenario workspace", () => {
   });
 
   it("shows an old-origin-copy badge without presenting it as a block", async () => {
-    window.history.replaceState({}, "", "/react/scenarios/10");
+    window.history.replaceState({}, "", "/react/scenarios/10?section=advanced");
     const oldCopyConsole = {
       ...draftConsole,
       status: "active",
@@ -510,7 +510,7 @@ describe("operator consoles in the scenario workspace", () => {
   });
 
   it("links the latest operator failure reference to internal run detail", async () => {
-    window.history.replaceState({}, "", "/react/scenarios/10");
+    window.history.replaceState({}, "", "/react/scenarios/10?section=advanced");
     const failedConsole = {
       ...draftConsole,
       status: "active",
@@ -1036,7 +1036,7 @@ describe("the operator console shell", () => {
       await screen.findByRole("heading", { name: "Plan diario Planta Norte" }),
     ).toBeVisible();
     expect(screen.getByText("Preparado por Ada Analyst")).toBeVisible();
-    expect(screen.queryByRole("link", { name: "Analista" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Proyectos" })).toBeNull();
   });
 
   it("shows an internal tester their real identity and the way back", async () => {

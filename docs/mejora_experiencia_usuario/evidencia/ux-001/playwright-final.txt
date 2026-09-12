@@ -1,0 +1,54 @@
+
+> bess-react-ui@0.1.0 test:browser
+> npm run build && playwright test
+
+
+> bess-react-ui@0.1.0 build
+> tsc -b && vite build
+
+vite v8.0.16 building client environment for production...
+[2K
+transforming...✓ 92 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.47 kB │ gzip:   0.30 kB
+dist/assets/index-D_LqFTHC.css   25.73 kB │ gzip:   5.86 kB
+dist/assets/index-DjYtUPIb.js   976.95 kB │ gzip: 280.30 kB
+
+✓ built in 784ms
+npm.cmd : [plugin builtin:vite-reporter]
+En línea: 2 Carácter: 41
++ ... /:memory:'; npm.cmd run test:browser > ../.tmp/ux-001-all-browser-fin ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([plugin builtin:vite-reporter] :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking:
+https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+
+Running 13 tests using 1 worker
+
+
+(node:61172) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1/13] e2e\react-foundation.spec.ts:154:1 › React auth handles bootstrap, login, refresh, roles, logout, and deactivation
+[2/13] e2e\react-foundation.spec.ts:251:1 › React hydraulic diagram persists reservoir parameters curves junction and plant nodes across reload
+[3/13] e2e\react-foundation.spec.ts:426:1 › React admin users and project access cover assignment, removal, deactivation, and denials
+[4/13] e2e\react-foundation.spec.ts:548:1 › React client portal reviews published results, downloads allowlisted artifacts, and honors revocation
+[5/13] e2e\react-foundation.spec.ts:777:1 › UX-001 keeps task context and pending model edits through navigation and reload
+[6/13] e2e\react-foundation.spec.ts:923:1 › React analyst workspace creates a project and scenario, then preserves direct scenario refresh
+[7/13] e2e\react-foundation.spec.ts:974:1 › React structured draft editor saves multi-asset edits, recovers from one failed save, and reopens persisted state
+[8/13] e2e\react-foundation.spec.ts:1054:1 › React draft editor uploads, maps, edits, and validates time-series sources
+
+e2e\react-foundation.spec.ts:1054:1 › React draft editor uploads, maps, edits, and validates time-series sources
+
+[9/13] e2e\react-foundation.spec.ts:1132:1 › React case validation and versioning covers generated and expert paths
+[10/13] e2e\react-foundation.spec.ts:1266:1 › React manual run lifecycle launches, polls success, and exposes failure logs
+[11/13] e2e\react-foundation.spec.ts:1452:1 › React run results renders Plotly charts, tables, missing legacy columns, and artifact downloads
+[12/13] e2e\react-foundation.spec.ts:1783:1 › React dashboard templates and publications cover draft preview publish and unpublish
+[13/13] e2e\smoke-accessibility.spec.ts:103:1 › representative React pages pass automated accessibility and keyboard smoke checks
+  13 passed (1.1m)

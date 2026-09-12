@@ -1,6 +1,6 @@
 # UX-000 · Línea base reproducible y propuesta de fronteras
 
-Fecha: 2026-09-12. Responsable: Codex. Estado: **In Review; falta confirmar las fronteras**.
+Fecha: 2026-09-12. Responsable: Codex. Estado: **Done; fronteras confirmadas por el usuario**.
 Ticket: [UX-000](../../issues/UX-000-acordar-fronteras-y-linea-base.md).
 
 Se preparó la línea base del siguiente ticket disponible, UX-000. Esta entrega incluye un servidor desechable, un registrador de recorridos, observaciones y capturas. No cambia el producto ni añade pruebas. La primera prueba RED corresponde a UX-001 después de la confirmación indicada abajo.
@@ -179,16 +179,16 @@ La habilidad [TDD local](../../../../.agents/skills/tdd/SKILL.md) exige explíci
 
 > Before writing any test, write down the seams under test and confirm them with the user.
 
-Se propone el siguiente acuerdo para UX-001. La autorización para ejecutar UX-000 permitió preparar esta evidencia y ejecutar pruebas existentes; no se registra como confirmación implícita de fronteras nuevas.
+El siguiente acuerdo para UX-001 fue confirmado por el usuario con «confirmo» el 2026-09-12, antes de escribir la primera prueba nueva. La confirmación corresponde a la conversación de implementación de UX-001, no a la autorización anterior para preparar UX-000.
 
 | Frontera | Alcance concreto propuesto | Estado |
 | --- | --- | --- |
-| F1: navegador → React → FastAPI aislado | Recorrido visible de proyecto/escenario a editor, retornos, enlaces directos, recarga y persistencia; cookies/permisos reales. Reusar Playwright y servidor smoke. | Pendiente de confirmación del usuario. |
-| F2: React renderizado con Testing Library | Nombres/roles accesibles, navegación, carga/error/desconocido, foco y cambios pendientes; HTTP controlado en la frontera. Sin mocks de hooks ni detalles privados. | Pendiente de confirmación del usuario. |
-| F3: API pública autenticada → almacén de prueba | Solo si la primera implementación amplía contrato, permisos, precondiciones o persistencia. Si no cambia API, bastan sus regresiones existentes. | Propuesta condicional, pendiente de confirmación. |
+| F1: navegador → React → FastAPI aislado | Recorrido visible de proyecto/escenario a editor, retornos, enlaces directos, recarga y persistencia; cookies/permisos reales. Reusar Playwright y servidor smoke. | Confirmada para UX-001. |
+| F2: React renderizado con Testing Library | Nombres/roles accesibles, navegación, carga/error/desconocido, foco y cambios pendientes; HTTP controlado en la frontera. Sin mocks de hooks ni detalles privados. | Confirmada para UX-001. |
+| F3: API pública autenticada → almacén de prueba | Solo si la primera implementación amplía contrato, permisos, precondiciones o persistencia. Si no cambia API, bastan sus regresiones existentes. | Confirmada condicionalmente para UX-001. |
 | F4: API/CLI pública de Julia | No necesaria para UX-001: no se propone cambiar generación, materialización ni matemática. Reabrir el acuerdo si el alcance cambia. | No aplica al alcance actual; no solicitada. |
 
-Fecha propuesta: 2026-09-12. Persona que confirma y referencia de confirmación: **pendientes de respuesta del usuario**. Tras la aceptación, actualizar esta tabla, la estrategia TDD, el ticket y el tracker. No marcar UX-000 `Done` antes de ese acuerdo.
+Fecha de confirmación: 2026-09-12. Persona que confirma: **usuario de esta conversación**, respuesta «confirmo». [Registro de inicio de UX-001](../ux-001/README.md). El acuerdo permite cerrar UX-000.
 
 ## Primer comportamiento de UX-001
 
@@ -200,12 +200,12 @@ Fecha propuesta: 2026-09-12. Persona que confirma y referencia de confirmación:
 
 Primera frontera propuesta: **F2**, renderizando la aplicación y navegando con Testing Library. Una sola prueba RED del enlace/contexto esperado (hoy dice «Abrir draft»), GREEN mínimo y regresión pertinente; después adaptar el recorrido F1. No se escribió esa prueba ni las conductas posteriores. El error de consulta será un ciclo separado si el primer cambio introduce esa decisión de estado.
 
-## Aceptación pendiente
+## Aceptación
 
 - [x] Registro nuevo de línea base con commit, entorno, datos, capturas, comandos y límites.
 - [x] Tarea principal repetible sin proyectos de trabajo, con siete recorridos automatizados documentados.
 - [x] Capacidades de UX-001 identificadas y primer comportamiento redactado.
 - [x] Pruebas existentes ejecutadas y resultados explícitos.
-- [ ] Fronteras F1/F2 y uso condicional de F3 confirmados por el usuario; aceptación de UX-000.
+- [x] Fronteras F1/F2 y uso condicional de F3 confirmados por el usuario; aceptación de UX-000.
 
-No aplica RED → GREEN a esta preparación, tal como indica UX-000. El commit `docs(ux): record reproducible UX-000 baseline` registra la evidencia para revisión; no cierra el issue ni confirma las fronteras. No hay PR de resolución todavía.
+No aplica RED → GREEN a esta preparación, tal como indica UX-000. El commit `aeeb22e` registra la evidencia previa; el acuerdo posterior del usuario cierra el issue. Los ciclos de producto se registran en UX-001.

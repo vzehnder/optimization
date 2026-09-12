@@ -221,5 +221,6 @@ __marimo__/
 .tmp/
 outputs/
 
-# Locally generated UX baseline screenshots
+# Locally generated UX screenshots
 /docs/mejora_experiencia_usuario/evidencia/ux-000/capturas/
+/docs/mejora_experiencia_usuario/evidencia/ux-001/capturas/

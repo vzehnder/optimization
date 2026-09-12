@@ -1,7 +1,7 @@
 # Plan de simplificación de la experiencia de BESS Workspace
 
 Fecha de revisión: 2026-09-12. Base: commit `58cf602` y árbol de trabajo local.
-Estado: UX-000 en revisión con [línea base reproducible](evidencia/ux-000/README.md); falta confirmar las fronteras TDD. No se han modificado funcionalidades.
+Estado: UX-000 completado tras confirmar las fronteras TDD; UX-001 implementado y en revisión con [ciclos, regresiones y capturas](evidencia/ux-001/README.md), sobre `aeeb22e`.
 
 La recomendación es organizar la experiencia por tareas: **preparar el modelo, conectar datos, revisar y ejecutar, interpretar resultados y entregar un informe**. La plataforma ya tiene esas capacidades. El cambio consiste en orientar al usuario, reducir lo que debe decidir simultáneamente y mantener disponibles los controles expertos.
 
@@ -16,7 +16,7 @@ La recomendación es organizar la experiencia por tareas: **preparar el modelo, 
 
 Las rutas de archivos y los nombres de funciones de cada ticket permiten localizar el código. Los archivos nuevos mencionados dentro de los tickets son propuestas, salvo indicación contraria. Cada ticket requiere una PR revisable con su propio resultado visible; no se exige completar todos para obtener valor.
 
-El [tracker](issues/tracker_ux.md) centraliza estado, responsable, dependencias, bloqueos, PR/commit y evidencia de cierre. UX-000 tiene evidencia preparada; UX-001 a UX-009 siguen pendientes de implementación.
+El [tracker](issues/tracker_ux.md) centraliza estado, responsable, dependencias, bloqueos, PR/commit y evidencia de cierre. UX-000 está Done; UX-001 está In Review con navegación por tareas y 197 pruebas funcionales aprobadas. UX-002 a UX-009 siguen pendientes de implementación. El chequeo global de formato conserva fallos previos en 25 archivos no modificados, documentados en la evidencia de UX-001.
 
 ## Orden recomendado
 
@@ -51,4 +51,4 @@ Primera entrega útil: UX-001 + UX-005 + UX-006. Las demás mejoras pueden entre
 
 Se inspeccionaron rutas, componentes, cliente API, endpoints relevantes, pruebas y decisiones de arquitectura. El diagnóstico identifica hechos de código e hipótesis de usabilidad por separado. No constituye una sesión observada con usuarios ni una auditoría visual en navegador. La evidencia de ejecución de pruebas y sus límites se registra en [validación](05_validacion_y_entrega.md).
 
-Se conservaron los cambios locales existentes en `docs/tutorials/guia_analista.md` y `docs/tutorials/manual_completo_uso_pagina_web.md`. Los manuales sirven como contexto, pero el código y las decisiones vigentes prevalecen sobre instrucciones históricas.
+Durante la planificación se conservaron los cambios locales existentes en `docs/tutorials/guia_analista.md` y `docs/tutorials/manual_completo_uso_pagina_web.md`. Ambos manuales se actualizaron posteriormente para la navegación implementada en UX-001. El código y las decisiones vigentes prevalecen sobre instrucciones históricas.

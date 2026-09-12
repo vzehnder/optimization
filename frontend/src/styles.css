@@ -17,6 +17,40 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
+.workspace-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 1.25rem 0;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #bcccdc;
+}
+
+.workspace-nav a {
+  padding: 0.6rem 0.9rem;
+  border-radius: 0.5rem;
+  text-decoration: none;
+  font-weight: 650;
+}
+
+.workspace-nav a[aria-current="page"] {
+  color: #fff;
+  background: #075985;
+}
+
+.workspace-nav a:focus-visible {
+  outline: 3px solid #0369a1;
+  outline-offset: 2px;
+}
+
+.scenario-continuation {
+  margin-bottom: 1rem;
+}
+
 body {
   margin: 0;
   min-width: 320px;
@@ -96,6 +130,8 @@ a {
 
 .primary-nav {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 0.35rem;
   padding: 0.7rem clamp(1rem, 4vw, 3rem);
   border-bottom: 1px solid #d8e2eb;
@@ -109,10 +145,36 @@ a {
 }
 
 .primary-nav a:hover,
+.primary-nav a[aria-current="page"],
 .primary-nav a:focus-visible {
   color: #075985;
   background: #eaf5fb;
   outline: none;
+}
+
+.workspace-utilities {
+  margin-left: auto;
+}
+
+.workspace-utilities summary {
+  cursor: pointer;
+  padding: 0.55rem 0.85rem;
+  font-weight: 650;
+}
+
+.workspace-utilities a {
+  display: block;
+}
+
+.workspace-heading h1:focus-visible {
+  outline: 3px solid #0369a1;
+  outline-offset: 4px;
+}
+
+.workspace-view .workspace-section [role="status"],
+.workspace-view .workspace-section [role="alert"] {
+  width: 100%;
+  margin: 0.75rem 0;
 }
 
 main {

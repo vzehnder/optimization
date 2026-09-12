@@ -176,16 +176,36 @@ function revisionPage() {
 function descriptorPage(kind: string) {
   const items: Record<string, unknown[]> = {
     semantic_type: [
-      { id: 1, key: "energy_price", display_name: "Precio de energia", status: "active" },
-      { id: 2, key: "hydro_inflow", display_name: "Caudal afluente", status: "active" },
+      {
+        id: 1,
+        key: "energy_price",
+        display_name: "Precio de energia",
+        status: "active",
+      },
+      {
+        id: 2,
+        key: "hydro_inflow",
+        display_name: "Caudal afluente",
+        status: "active",
+      },
     ],
     data_class: [
       { id: 3, key: "real", display_name: "Real", status: "active" },
       { id: 4, key: "forecast", display_name: "Pronostico", status: "active" },
     ],
     unit: [
-      { id: 5, key: "usd_per_mwh", display_name: "USD por MWh", status: "active" },
-      { id: 6, key: "m3_per_s", display_name: "Metros cubicos por segundo", status: "active" },
+      {
+        id: 5,
+        key: "usd_per_mwh",
+        display_name: "USD por MWh",
+        status: "active",
+      },
+      {
+        id: 6,
+        key: "m3_per_s",
+        display_name: "Metros cubicos por segundo",
+        status: "active",
+      },
     ],
   };
   return {
@@ -274,7 +294,8 @@ describe("layered catalog read surface", () => {
         requested.push(url.search);
         // The filtered answer carries a signal the first page never held, so a
         // client that filtered its own rows could not produce this table.
-        const filtered = url.searchParams.get("semantic_type_key") === "hydro_inflow";
+        const filtered =
+          url.searchParams.get("semantic_type_key") === "hydro_inflow";
         return json({
           items: filtered
             ? [
@@ -306,7 +327,9 @@ describe("layered catalog read surface", () => {
 
     render(<App />);
 
-    await screen.findByRole("table", { name: "Senales genericas del catalogo" });
+    await screen.findByRole("table", {
+      name: "Senales genericas del catalogo",
+    });
     await user.type(screen.getByLabelText("Buscar"), "caudal");
     await user.selectOptions(
       screen.getByLabelText("Tipo semantico"),
@@ -408,7 +431,8 @@ describe("layered catalog read surface", () => {
           meta: { section: "inputs", catalog_generation: 1842 },
         }),
       "/api/time-series/catalog/inputs/41": () => json(inputDetail()),
-      "/api/time-series/catalog/inputs/41/revisions": () => json(revisionPage()),
+      "/api/time-series/catalog/inputs/41/revisions": () =>
+        json(revisionPage()),
     });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
@@ -447,9 +471,7 @@ describe("layered catalog read surface", () => {
 
     const consumers = block("Consumidores");
     expect(within(consumers).getByText("2 asociaciones")).toBeVisible();
-    expect(
-      within(consumers).getByText("1 binding de ejecucion"),
-    ).toBeVisible();
+    expect(within(consumers).getByText("1 binding de ejecucion")).toBeVisible();
 
     const history = block("Historia de revisiones");
     expect(within(history).getByText("Actualizacion mensual")).toBeVisible();
@@ -475,7 +497,8 @@ describe("layered catalog read surface", () => {
           meta: { section: "inputs", catalog_generation: 1842 },
         }),
       "/api/time-series/catalog/inputs/41": () => json(inputDetail()),
-      "/api/time-series/catalog/inputs/41/revisions": () => json(revisionPage()),
+      "/api/time-series/catalog/inputs/41/revisions": () =>
+        json(revisionPage()),
       "/api/time-series/catalog/inputs/41/preview": (url) => {
         previewQuery = url.search;
         return json({
@@ -552,7 +575,8 @@ describe("layered catalog read surface", () => {
           meta: { section: "inputs", catalog_generation: 1842 },
         }),
       "/api/time-series/catalog/inputs/41": () => json(inputDetail()),
-      "/api/time-series/catalog/inputs/41/revisions": () => json(revisionPage()),
+      "/api/time-series/catalog/inputs/41/revisions": () =>
+        json(revisionPage()),
       "/api/time-series/catalog/inputs/41/preview": () =>
         json(
           {
@@ -586,7 +610,9 @@ describe("layered catalog read surface", () => {
       "El rango pedido supera el limite del preview",
     );
     expect(refusal).toHaveTextContent("req_preview");
-    expect(screen.queryByRole("table", { name: "Preview" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("table", { name: "Preview" }),
+    ).not.toBeInTheDocument();
   });
 
   it("hands the inspector off to the protected journey instead of mutating", async () => {
@@ -638,7 +664,8 @@ describe("layered catalog read surface", () => {
           meta: { section: "inputs", catalog_generation: 1842 },
         }),
       "/api/time-series/catalog/inputs/41": () => json(inputDetail()),
-      "/api/time-series/catalog/inputs/41/revisions": () => json(revisionPage()),
+      "/api/time-series/catalog/inputs/41/revisions": () =>
+        json(revisionPage()),
     });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
@@ -731,7 +758,7 @@ describe("layered catalog read surface", () => {
       await screen.findByRole("heading", { name: "No encontrado" }),
     ).toBeVisible();
     expect(
-      screen.queryByRole("link", { name: "Catalogo" }),
+      screen.queryByRole("link", { name: "Catálogo de series" }),
     ).not.toBeInTheDocument();
     expect(
       fetchMock.mock.calls.filter(([input]) =>
@@ -742,15 +769,18 @@ describe("layered catalog read surface", () => {
 
   it("answers an external identity the way it answers a route that is not there", async () => {
     window.history.replaceState({}, "", "/react/time-series/catalog");
-    const fetchMock = catalogFetch({}, {
-      ...REGULAR_IDENTITY,
-      user: {
-        ...REGULAR_IDENTITY.user,
-        role: "external",
-        email: "client@example.local",
+    const fetchMock = catalogFetch(
+      {},
+      {
+        ...REGULAR_IDENTITY,
+        user: {
+          ...REGULAR_IDENTITY.user,
+          role: "external",
+          email: "client@example.local",
+        },
+        landing_path: "/react/client",
       },
-      landing_path: "/react/client",
-    });
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);

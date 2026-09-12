@@ -1,6 +1,9 @@
 # UX-001 · Orientación y navegación por tareas
 
-Estado: Todo. Prioridad: P0. Dependencias: UX-000. Tamaño: M.
+Estado: In Review. Prioridad: P0. Dependencias: UX-000 (Done). Tamaño: M.
+
+F1/F2 y F3 condicional confirmadas por el usuario el 2026-09-12.
+[Acuerdo y evidencia de implementación](../evidencia/ux-001/README.md).
 
 ## Problema y resultado
 
@@ -40,3 +43,17 @@ Fronteras propuestas F1/F2, sujetas a UX-000. Ejecutar un ciclo antes de comenza
 - Teclado, foco, viewport estrecho y breadcrumbs se comprueban en navegador.
 
 Entregar capturas de proyecto y escenario y las filas de paridad afectadas. La reorganización interna de `Workspace.tsx`, si conviene, se evalúa en revisión posterior; no es un requisito previo para empezar el ciclo TDD.
+
+## Resolución
+
+- Responsable: Codex. Inicio y revisión técnica: 2026-09-12.
+- Estado: In Review; implementación local completa y pendiente de aceptación del resultado.
+- PR o commits: `feat(ux): implement task-oriented workspace navigation`, sobre `aeeb22e`; sin PR creada. Capturas locales excluidas de Git por solicitud del usuario.
+- Comportamiento: navegación por tareas, proyecto y escenario divididos en secciones, continuidad basada en la consulta del modelo, errores del historial locales, retorno contextual y foco al destino.
+- Fronteras: F1/F2 y F3 condicional confirmadas por el usuario con «confirmo» antes de escribir pruebas nuevas.
+- TDD: siete ciclos RED → GREEN registrados; prueba adicional de error/reintento que ya pasaba al añadirse, identificada como cobertura complementaria.
+- Validación: 166 pruebas de componentes, 13 de navegador y 18 de API aprobadas. TypeScript, ESLint y formato de los archivos de código cambiados pasan. `npm.cmd run check` conserva un fallo de formato previo en 25 archivos ajenos al cambio.
+- Revisión visual: proyecto y escenario a 1440 × 900, 1280 × 720 y 320 × 900; ampliación CSS al 200 %, teclado, foco, recarga e historial. Axe sin serious/critical en las nuevas vistas comprobadas.
+- Paridad, comandos, salidas, capturas y límites: [evidencia de UX-001](../evidencia/ux-001/README.md).
+- Documentación: guía del analista, manual completo, estrategia, validación y tracker actualizados.
+- Aceptación del resultado: pendiente; la confirmación inicial habilitó las fronteras y cerró UX-000, no sustituye la revisión de esta implementación.

@@ -2,9 +2,15 @@
 
 ## Evidencia posterior: UX-000
 
-La [línea base del 2026-09-12](evidencia/ux-000/README.md) registra la base `428b6ad`, cinco identidades en SQLite aislado, estado C6 separado de lectura canónica, siete recorridos automatizados, 17 capturas y **86 pruebas existentes aprobadas** (62 componentes, 6 navegador, 18 Python). Incluye límites del servidor smoke, errores corregidos en el registrador y comandos para repetir la tarea. No es un estudio con participantes ni una prueba de Julia real. UX-000 está en revisión, pendiente de confirmar las fronteras de implementación.
+La [línea base del 2026-09-12](evidencia/ux-000/README.md) registra la base `428b6ad`, cinco identidades en SQLite aislado, estado C6 separado de lectura canónica, siete recorridos automatizados, 17 capturas y **86 pruebas existentes aprobadas** (62 componentes, 6 navegador, 18 Python). Incluye límites del servidor smoke, errores corregidos en el registrador y comandos para repetir la tarea. No es un estudio con participantes ni una prueba de Julia real. UX-000 quedó Done tras confirmar el usuario las fronteras F1/F2 y F3 condicional para UX-001 el 2026-09-12.
 
-## Evidencia de esta revisión
+## Evidencia posterior: UX-001
+
+La [implementación sobre `aeeb22e`](evidencia/ux-001/README.md) queda In Review con navegación por tareas, secciones contextuales, continuidad del modelo y foco al destino. Se registran siete ciclos RED → GREEN, **197 pruebas funcionales aprobadas** (166 componentes, 13 navegador, 18 API), siete capturas y paridad de las capacidades afectadas.
+
+TypeScript, ESLint, formato de los archivos de código cambiados y `git diff --check` pasan. `npm.cmd run check` **no pasa** porque Prettier detecta 25 archivos previos sin modificaciones, enumerados en la evidencia. La comprobación visual cubre 1440 × 900, 1280 × 720, 320 × 900 y ampliación CSS al 200 %; axe sin serious/critical en las nuevas vistas comprobadas. No equivale a una auditoría con lectores de pantalla ni a validación de usabilidad con participantes. No se modificó backend y no se ejecutó Julia/PostgreSQL ni toda la suite Python.
+
+## Evidencia histórica de la revisión del plan
 
 El 2026-09-12 se ejecutó desde `frontend/`:
 

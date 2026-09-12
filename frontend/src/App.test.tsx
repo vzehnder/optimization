@@ -286,7 +286,11 @@ describe("application shell", () => {
       y: [45],
     });
 
-    await user.click(screen.getByRole("link", { name: "Analista" }));
+    await user.click(
+      within(
+        screen.getByRole("navigation", { name: "Navegacion principal" }),
+      ).getByRole("link", { name: "Proyectos" }),
+    );
     expect(
       await screen.findByRole("heading", { name: "Proyectos" }),
     ).toBeVisible();
@@ -822,7 +826,7 @@ describe("application shell", () => {
     expect(
       await screen.findByRole("heading", { name: "Base case" }),
     ).toBeVisible();
-    await user.click(screen.getByRole("link", { name: "Abrir draft" }));
+    await user.click(screen.getByRole("link", { name: "Modelo" }));
 
     expect(
       await screen.findByRole("heading", { name: "Draft estructurado" }),
@@ -862,7 +866,7 @@ describe("application shell", () => {
     expect(await screen.findByText("Guardado")).toBeVisible();
 
     await user.click(screen.getByRole("link", { name: "Base case" }));
-    await user.click(screen.getByRole("link", { name: "Abrir draft" }));
+    await user.click(screen.getByRole("link", { name: "Modelo" }));
     expect(await screen.findByLabelText("Nombre del caso")).toHaveValue(
       "PMGD verano",
     );
@@ -871,7 +875,7 @@ describe("application shell", () => {
   });
 
   it("binds a price series to the default input variant and runs it from the scenario page", async () => {
-    window.history.replaceState({}, "", "/react/scenarios/10");
+    window.history.replaceState({}, "", "/react/scenarios/10?section=data");
     const scenario = {
       id: 10,
       project_id: 1,
@@ -1320,7 +1324,7 @@ describe("application shell", () => {
   });
 
   it("binds entity-scoped required signals independently before running", async () => {
-    window.history.replaceState({}, "", "/react/scenarios/10");
+    window.history.replaceState({}, "", "/react/scenarios/10?section=data");
     const scenario = {
       id: 10,
       project_id: 1,
@@ -1645,7 +1649,7 @@ describe("application shell", () => {
 
   it("clones variants, switches them from dropdown, and persists active selection", async () => {
     window.localStorage.clear();
-    window.history.replaceState({}, "", "/react/scenarios/10");
+    window.history.replaceState({}, "", "/react/scenarios/10?section=data");
     const scenario = {
       id: 10,
       project_id: 1,
@@ -2008,7 +2012,7 @@ describe("application shell", () => {
     ).toBeVisible();
 
     firstRender.unmount();
-    window.history.replaceState({}, "", "/react/scenarios/10");
+    window.history.replaceState({}, "", "/react/scenarios/10?section=data");
     render(<App />);
 
     await waitFor(() =>
@@ -2023,7 +2027,7 @@ describe("application shell", () => {
   });
 
   it("surfaces input variant coverage errors before launching", async () => {
-    window.history.replaceState({}, "", "/react/scenarios/10");
+    window.history.replaceState({}, "", "/react/scenarios/10?section=data");
     const scenario = {
       id: 10,
       project_id: 1,
@@ -2230,7 +2234,7 @@ describe("application shell", () => {
   });
 
   it("surfaces input variant horizon mismatches before launching", async () => {
-    window.history.replaceState({}, "", "/react/scenarios/10");
+    window.history.replaceState({}, "", "/react/scenarios/10?section=data");
     const scenario = {
       id: 10,
       project_id: 1,
@@ -2428,7 +2432,7 @@ describe("application shell", () => {
   });
 
   it("shows a stale input variant, blocks the run button, and clears the marker after revalidating", async () => {
-    window.history.replaceState({}, "", "/react/scenarios/10");
+    window.history.replaceState({}, "", "/react/scenarios/10?section=data");
     const scenario = {
       id: 10,
       project_id: 1,
@@ -6566,7 +6570,7 @@ describe("application shell", () => {
     expect(
       await screen.findByRole("heading", { name: "Base case" }),
     ).toBeVisible();
-    expect(screen.getByText("Version 1")).toBeVisible();
+    expect(await screen.findByText("Version 1")).toBeVisible();
     expect(screen.getByText(/Summer case/)).toBeVisible();
   });
 
@@ -6702,7 +6706,7 @@ describe("application shell", () => {
   });
 
   it("keeps expert version paste/upload, immutable detail, and protected delete visible", async () => {
-    window.history.replaceState({}, "", "/react/scenarios/10");
+    window.history.replaceState({}, "", "/react/scenarios/10?section=advanced");
     const scenario = {
       id: 10,
       project_id: 1,
@@ -6959,7 +6963,7 @@ describe("application shell", () => {
   });
 
   it("shows topology and parameter provenance on scenario version detail, with graceful fallback for versions without it", async () => {
-    window.history.replaceState({}, "", "/react/scenarios/10");
+    window.history.replaceState({}, "", "/react/scenarios/10?section=advanced");
     const scenario = {
       id: 10,
       project_id: 1,
@@ -7073,7 +7077,7 @@ describe("application shell", () => {
   });
 
   it("shows which input variant produced each run in the case run list", async () => {
-    window.history.replaceState({}, "", "/react/scenarios/10");
+    window.history.replaceState({}, "", "/react/scenarios/10?section=runs");
     const project = {
       id: 1,
       name: "Hybrid PMGD",
@@ -7709,7 +7713,11 @@ describe("application shell", () => {
       await screen.findByRole("heading", { name: "Base case" }),
     ).toBeVisible();
     expect(window.location.pathname).toBe("/react/scenarios/10");
-    expect(screen.getByText("Aun no hay versiones inmutables.")).toBeVisible();
+    await user.click(screen.getByRole("link", { name: "Avanzado" }));
+    expect(
+      await screen.findByText("Aun no hay versiones inmutables."),
+    ).toBeVisible();
+    await user.click(screen.getByRole("link", { name: "Ejecuciones" }));
     expect(
       screen.getByText("Aun no hay corridas para este escenario."),
     ).toBeVisible();
@@ -8159,11 +8167,16 @@ describe("application shell", () => {
     expect(screen.getByText("external@example.local creado.")).toBeVisible();
     expect(screen.getByLabelText("Email")).toHaveFocus();
 
-    await user.click(screen.getByRole("link", { name: "Analista" }));
+    await user.click(
+      within(
+        screen.getByRole("navigation", { name: "Navegacion principal" }),
+      ).getByRole("link", { name: "Proyectos" }),
+    );
     await user.click(await screen.findByRole("link", { name: "Hybrid PMGD" }));
     expect(
       await screen.findByRole("heading", { name: "Hybrid PMGD" }),
     ).toBeVisible();
+    await user.click(screen.getByRole("link", { name: "Accesos" }));
     expect(
       screen.getByRole("heading", { name: "Capacidades externas" }),
     ).toBeVisible();
@@ -8214,7 +8227,7 @@ describe("application shell", () => {
       screen.getByLabelText("Operar external@example.local"),
     ).not.toBeChecked();
 
-    await user.click(screen.getByRole("link", { name: "Admin" }));
+    await user.click(screen.getByRole("link", { name: "Administración" }));
     await user.click(
       await screen.findByRole("button", {
         name: "Desactivar external@example.local",
@@ -8708,7 +8721,8 @@ describe("application shell", () => {
     render(<App />);
     await screen.findByText("Ada Analyst");
 
-    await user.click(screen.getByRole("link", { name: "Sistema" }));
+    await user.click(screen.getByText("Utilidades", { exact: true }));
+    await user.click(screen.getByRole("link", { name: "Estado del sistema" }));
 
     expect(
       screen.getByRole("heading", { name: "Estado del sistema" }),
@@ -8718,7 +8732,7 @@ describe("application shell", () => {
   });
 
   it("browses the project time-series catalog and opens a set's detail", async () => {
-    window.history.replaceState({}, "", "/react/projects/1");
+    window.history.replaceState({}, "", "/react/projects/1?section=data");
     const project = {
       id: 1,
       name: "Hybrid PMGD",
@@ -9148,7 +9162,7 @@ describe("application shell", () => {
   });
 
   it("lists a legacy hydraulic series set in the project catalog and opens its detail", async () => {
-    window.history.replaceState({}, "", "/react/projects/1");
+    window.history.replaceState({}, "", "/react/projects/1?section=data");
     const project = {
       id: 1,
       name: "Hybrid PMGD",
@@ -9319,7 +9333,7 @@ describe("application shell", () => {
   });
 
   it("shows a legacy hydraulic set's migration status on load, without needing to click migrate again", async () => {
-    window.history.replaceState({}, "", "/react/projects/1");
+    window.history.replaceState({}, "", "/react/projects/1?section=data");
     const project = {
       id: 1,
       name: "Hybrid PMGD",

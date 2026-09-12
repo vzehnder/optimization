@@ -124,7 +124,7 @@ function stubProjectWorkspace(
 
 describe("portal configuration workspace", () => {
   it("lets an analyst upload a PNG logo at the current revision", async () => {
-    window.history.replaceState({}, "", "/react/projects/1");
+    window.history.replaceState({}, "", "/react/projects/1?section=reports");
     const uploads: FormData[] = [];
     stubProjectWorkspace((path, method, body) => {
       if (
@@ -169,7 +169,7 @@ describe("portal configuration workspace", () => {
   });
 
   it("lets an analyst remove the current logo at the current revision", async () => {
-    window.history.replaceState({}, "", "/react/projects/1");
+    window.history.replaceState({}, "", "/react/projects/1?section=reports");
     const removals: unknown[] = [];
     stubProjectWorkspace((path, method, body) => {
       if (path === "/api/projects/1/portal-configuration" && method === "GET") {
@@ -212,7 +212,7 @@ describe("portal configuration workspace", () => {
   });
 
   it("lets an analyst declare a display name, a KPI label and one KPI", async () => {
-    window.history.replaceState({}, "", "/react/projects/1");
+    window.history.replaceState({}, "", "/react/projects/1?section=reports");
     const saved: unknown[] = [];
     stubProjectWorkspace((path, method, body) => {
       if (path === "/api/projects/1/portal-configuration" && method === "PUT") {
@@ -306,7 +306,7 @@ describe("portal configuration workspace", () => {
   });
 
   it("surfaces a rejected document without clearing the analyst's edits", async () => {
-    window.history.replaceState({}, "", "/react/projects/1");
+    window.history.replaceState({}, "", "/react/projects/1?section=reports");
     stubProjectWorkspace((path, method) => {
       if (path === "/api/projects/1/portal-configuration" && method === "PUT") {
         return Response.json(
@@ -344,7 +344,7 @@ describe("portal configuration workspace", () => {
   });
 
   it("lets an analyst publish a chart, a table and the downloads from the catalog", async () => {
-    window.history.replaceState({}, "", "/react/projects/1");
+    window.history.replaceState({}, "", "/react/projects/1?section=reports");
     const saved: unknown[] = [];
     stubProjectWorkspace((path, method, body) => {
       if (path === "/api/projects/1/portal-configuration" && method === "PUT") {
@@ -467,7 +467,7 @@ describe("portal configuration workspace", () => {
   });
 
   it("never offers a chart or column outside the backend catalog", async () => {
-    window.history.replaceState({}, "", "/react/projects/1");
+    window.history.replaceState({}, "", "/react/projects/1?section=reports");
     stubProjectWorkspace();
     const user = userEvent.setup();
 

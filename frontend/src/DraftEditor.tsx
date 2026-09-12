@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import {
   ApiError,
@@ -1198,7 +1198,10 @@ function TimeSeriesCatalogImportPanel(props: {
   // The suggested mappings are seeded from the registry, so the form only
   // exists once the registry has answered.
   return (
-    <TimeSeriesCatalogImportForm {...props} catalog={signalCatalog.data ?? []} />
+    <TimeSeriesCatalogImportForm
+      {...props}
+      catalog={signalCatalog.data ?? []}
+    />
   );
 }
 
@@ -1244,7 +1247,8 @@ function TimeSeriesCatalogImportForm({
   const signalMappings = payload.signal_mappings || [];
   const completeSignalMappings = signalMappings.filter(
     (mapping) =>
-      Boolean(mapping.source_column.trim()) && Boolean(mapping.signal_key.trim()),
+      Boolean(mapping.source_column.trim()) &&
+      Boolean(mapping.signal_key.trim()),
   );
   const canImport =
     Boolean(payload.set_name.trim()) &&
@@ -1303,9 +1307,9 @@ function TimeSeriesCatalogImportForm({
       <h3>Import mapped columns to catalog</h3>
       <p className="source-note">
         Preview source, map columns to canonical signals, then create one
-        project-scoped catalog set. Use this for a fresh mapping; to reuse
-        this source&apos;s already-validated draft rows instead, use
-        &quot;Extract legacy series to catalog&quot; below.
+        project-scoped catalog set. Use this for a fresh mapping; to reuse this
+        source&apos;s already-validated draft rows instead, use &quot;Extract
+        legacy series to catalog&quot; below.
       </p>
       <div className="draft-field-grid">
         <TextInput
@@ -1375,7 +1379,10 @@ function TimeSeriesCatalogImportForm({
       <div className="source-mapping">
         <h4>Signal mappings</h4>
         {signalMappings.map((mapping, mappingIndex) => (
-          <div className="draft-field-grid" key={`catalog-signal-${mappingIndex}`}>
+          <div
+            className="draft-field-grid"
+            key={`catalog-signal-${mappingIndex}`}
+          >
             <SelectInput
               id={`catalog_signal_source_${mappingIndex}`}
               label={`Mapped source column ${mappingIndex + 1}`}
@@ -1526,10 +1533,10 @@ function DraftSeriesExtractionPanel({
     <section className="source-catalog">
       <h3>Extract legacy series to catalog</h3>
       <p className="source-note">
-        Reuses this source&apos;s already-validated mapping directly, no
-        column remapping needed. The draft itself is never modified;
-        extraction adds a new catalog set with origin metadata pointing back
-        at this draft and source file.
+        Reuses this source&apos;s already-validated mapping directly, no column
+        remapping needed. The draft itself is never modified; extraction adds a
+        new catalog set with origin metadata pointing back at this draft and
+        source file.
       </p>
       <div className="draft-field-grid">
         <TextInput
@@ -1659,11 +1666,11 @@ function TimeSeriesWorkflow({
   return (
     <div className="time-series-workflow">
       <p className="source-note">
-        A draft's embedded time series is this draft's legacy storage: rows
-        live inside the draft document itself. For new work, prefer building
-        reusable series directly in the project's time-series catalog; use
-        &quot;Extract legacy series to catalog&quot; below to turn an
-        already-validated source here into a catalog set instead.
+        A draft's embedded time series is this draft's legacy storage: rows live
+        inside the draft document itself. For new work, prefer building reusable
+        series directly in the project's time-series catalog; use &quot;Extract
+        legacy series to catalog&quot; below to turn an already-validated source
+        here into a catalog set instead.
       </p>
       {dirty ? (
         <p className="source-note">
@@ -1815,7 +1822,7 @@ function GeneratedSystemCasePanel({
       void queryClient.invalidateQueries({
         queryKey: scenarioVersionsQueryKey(scenario.id),
       });
-      navigate(`/scenarios/${scenario.id}`);
+      navigate(`/scenarios/${scenario.id}?section=advanced`);
     },
     onError: setError,
   });
@@ -2395,6 +2402,7 @@ function Breadcrumbs({
   project?: Project;
   draft?: boolean;
 }) {
+  const location = useLocation();
   return (
     <nav className="breadcrumbs" aria-label="Ruta">
       <Link to="/projects">Proyectos</Link>
@@ -2405,7 +2413,9 @@ function Breadcrumbs({
       <span aria-hidden="true">/</span>
       {draft ? (
         <>
-          <Link to={`/scenarios/${scenario.id}`}>{scenario.name}</Link>
+          <Link to={`/scenarios/${scenario.id}${location.search}`}>
+            {scenario.name}
+          </Link>
           <span aria-hidden="true">/</span>
           <span>Draft</span>
         </>

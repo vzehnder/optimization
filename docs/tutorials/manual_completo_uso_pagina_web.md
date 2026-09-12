@@ -368,9 +368,9 @@ ubicación. Es preferible navegar mediante enlaces y breadcrumbs.
 | Proyecto en portal         | `/react/client/projects/{projectId}`                              |
 | Publicación en portal      | `/react/client/projects/{projectId}/publications/{publicationId}` |
 
-La navegación interna principal muestra **Analista**, **Catálogo** cuando la
-cuenta tiene lectura canónica habilitada, **Admin** solo para el administrador,
-y **Sistema**.
+La navegación interna principal muestra **Proyectos**, **Catálogo de series**
+cuando la cuenta tiene lectura canónica habilitada y **Administración** solo
+para el administrador. **Utilidades** contiene **Estado del sistema**.
 
 ### 7.1 Disponibilidad del catálogo TS-7
 
@@ -413,7 +413,7 @@ nombres de activos o columnas no permiten asociar las series.
 
 ## 9. Crear un proyecto
 
-1. Entrar en **Analista**.
+1. Entrar en **Proyectos**.
 2. Localizar **Proyectos activos** y **Nuevo proyecto**.
 3. En **Nombre del proyecto**, usar un nombre inequívoco, por ejemplo
    `Tutorial BESS 2026-09`.
@@ -427,13 +427,16 @@ Su confirmación y alcance se describen en la sección 9.2.
 
 ### 9.1 Qué contiene la pantalla del proyecto
 
-La pantalla del proyecto reúne:
+La pantalla del proyecto organiza sus tareas en secciones:
 
-- **Escenarios** y el formulario **Nuevo escenario**;
-- enlace **Ver catálogo de series de tiempo**;
-- **Capacidades externas**, solo para admin;
-- **Portal del cliente**;
-- **Dashboard templates**.
+- **Escenarios**: listado y formulario **Nuevo escenario**;
+- **Datos**: enlace **Ver catálogo de series de tiempo**;
+- **Informes**: **Portal del cliente** y **Dashboard templates**;
+- **Consolas**: enlaces a las consolas de cada escenario;
+- **Accesos**: **Capacidades externas**, solo para admin.
+
+La sección se conserva en la URL al recargar. Alternar entre secciones de la
+misma pantalla conserva los valores todavía sin enviar de sus formularios.
 
 No es necesario configurar portal y dashboards antes de modelar. Para el flujo
 principal, crear primero escenario, datos y corrida; preparar la publicación al
@@ -469,18 +472,23 @@ Usar un escenario distinto cuando cambia la topología o la lógica del caso.
 Usar variantes de entrada cuando solo cambian las fuentes de datos o una
 sensibilidad temporal.
 
-La pantalla del escenario contiene, en este orden aproximado:
+La pantalla del escenario contiene esta navegación:
 
-1. **Abrir draft**;
-2. **Variante de entrada**;
-3. **Consolas de operador**;
-4. **Versiones inmutables**;
-5. **Versión experta**;
-6. **Corridas** y **Comparar corridas**.
+1. **Resumen**: contexto, estado de consulta del modelo y **Crear modelo** o
+   **Continuar preparación**. Un fallo de consulta ofrece reintentar;
+2. **Modelo**: acceso directo al editor estructurado;
+3. **Datos**: variante, fuentes y período;
+4. **Ejecuciones**: **Corridas** y **Comparar corridas**;
+5. **Avanzado**: **Diagrama hidráulico**, **Consolas de operador**,
+   **Versiones inmutables** y **Versión experta**.
+
+Los enlaces de retorno desde el editor y la comparación mantienen la sección
+de origen; una versión vuelve a **Avanzado** y una corrida a **Ejecuciones**.
+Las rutas anteriores siguen siendo válidas.
 
 ## 11. Crear y editar el draft estructurado
 
-Presionar **Abrir draft**. Si el escenario aún no tiene draft, la pantalla
+Presionar **Modelo** o **Crear modelo**. Si el escenario aún no tiene draft, la pantalla
 ofrece crear el documento inicial. El editor muestra estado, fecha del último
 guardado y **Guardar draft**.
 
@@ -1821,7 +1829,7 @@ posee una variante clonada; el operador no modifica la variante del analista.
 
 ### 27.1 Crear consola
 
-En el escenario, **Consolas de operador**:
+En **Avanzado** del escenario, **Consolas de operador**:
 
 1. escribir **Nombre de la consola**;
 2. elegir **Variante de origen**;

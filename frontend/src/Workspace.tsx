@@ -10,7 +10,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { workspaceSectionSearch } from "./workspaceNavigation";
 
 import { ProjectExternalAccessSection } from "./Admin";
 import {
@@ -46,6 +47,7 @@ import {
   getProject,
   ingestTimeSeriesConnector,
   getScenario,
+  getScenarioDraft,
   getScenarioVersion,
   listCaseInputVariants,
   runCaseInputVariant,
@@ -1596,6 +1598,17 @@ export function ProjectDetailView({
 }: {
   canManageExternalAccess?: boolean;
 }) {
+  const location = useLocation();
+  const requestedSection = new URLSearchParams(location.search).get("section");
+  const allowedSections = [
+    "data",
+    "reports",
+    "consoles",
+    ...(canManageExternalAccess ? ["access"] : []),
+  ];
+  const section = allowedSections.includes(requestedSection || "")
+    ? requestedSection
+    : "scenarios";
   const projectId = useNumericParam("projectId");
   const project = useQuery({
     queryKey: projectQueryKey(projectId || 0),
@@ -1644,8 +1657,25 @@ export function ProjectDetailView({
         <h1>{project.data.name}</h1>
         <p>{project.data.description || "Sin descripcion."}</p>
       </header>
+      <nav className="workspace-nav" aria-label="Secciones del proyecto">
+        {[
+          ["scenarios", "Escenarios"],
+          ["data", "Datos"],
+          ["reports", "Informes"],
+          ["consoles", "Consolas"],
+          ...(canManageExternalAccess ? [["access", "Accesos"]] : []),
+        ].map(([key, label]) => (
+          <Link
+            key={key}
+            to={workspaceSectionSearch(location.search, key)}
+            aria-current={section === key ? "page" : undefined}
+          >
+            {label}
+          </Link>
+        ))}
+      </nav>
       <div className="workspace-stack">
-        <div className="workspace-grid">
+        <div className="workspace-grid" hidden={section !== "scenarios"}>
           <section
             className="workspace-section"
             aria-labelledby="scenario-list"
@@ -1656,6 +1686,7 @@ export function ProjectDetailView({
           <CreateScenarioForm projectId={projectId} />
         </div>
         <section
+          hidden={section !== "data"}
           className="workspace-section"
           aria-labelledby="project-time-series-catalog"
         >
@@ -1664,14 +1695,41 @@ export function ProjectDetailView({
             Ver catalogo de series de tiempo
           </Link>
         </section>
+        <section
+          hidden={section !== "consoles"}
+          className="workspace-section"
+          aria-labelledby="project-consoles"
+        >
+          <h2 id="project-consoles">Consolas por escenario</h2>
+          <p>Abre un escenario para crear, configurar o probar sus consolas.</p>
+          {scenarios.data.length ? (
+            <ul className="resource-list">
+              {scenarios.data.map((scenario) => (
+                <li key={scenario.id}>
+                  <Link
+                    to={`/scenarios/${scenario.id}?section=advanced#operator-console-list`}
+                  >
+                    Consolas de {scenario.name}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>Crea primero un escenario en la sección Escenarios.</p>
+          )}
+        </section>
         {canManageExternalAccess ? (
-          <ProjectExternalAccessSection
-            projectId={projectId}
-            projectName={project.data.name}
-          />
+          <div hidden={section !== "access"}>
+            <ProjectExternalAccessSection
+              projectId={projectId}
+              projectName={project.data.name}
+            />
+          </div>
         ) : null}
-        <PortalConfigurationSection projectId={projectId} />
-        <DashboardTemplatesSection projectId={projectId} />
+        <div className="workspace-stack" hidden={section !== "reports"}>
+          <PortalConfigurationSection projectId={projectId} />
+          <DashboardTemplatesSection projectId={projectId} />
+        </div>
       </div>
     </section>
   );
@@ -4114,6 +4172,7 @@ function VersionList({
   scenarioId: number;
   versions: ScenarioVersion[];
 }) {
+  const location = useLocation();
   if (versions.length === 0) {
     return <EmptyState>Aun no hay versiones inmutables.</EmptyState>;
   }
@@ -4121,7 +4180,7 @@ function VersionList({
     <ul className="resource-list">
       {versions.map((version) => (
         <li key={version.id}>
-          <Link to={`/scenario-versions/${version.id}`}>
+          <Link to={`/scenario-versions/${version.id}${location.search}`}>
             Version {version.version_number}
           </Link>
           <p>
@@ -4253,6 +4312,7 @@ function RunList({
   runs: ScenarioRun[];
   versions: ScenarioVersion[];
 }) {
+  const location = useLocation();
   if (runs.length === 0) {
     return <EmptyState>Aun no hay corridas para este escenario.</EmptyState>;
   }
@@ -4269,7 +4329,7 @@ function RunList({
             : undefined;
         return (
           <li key={run.id}>
-            <Link to={`/runs/${run.id}`}>Run {run.id}</Link>
+            <Link to={`/runs/${run.id}${location.search}`}>Run {run.id}</Link>
             <p>
               Estado: {run.status} | Version{" "}
               {version?.version_number || "desconocida"}
@@ -4284,6 +4344,7 @@ function RunList({
 }
 
 export function RunComparisonView() {
+  const location = useLocation();
   const scenarioId = useNumericParam("scenarioId");
   const scenario = useQuery({
     queryKey: scenarioQueryKey(scenarioId || 0),
@@ -4381,7 +4442,11 @@ export function RunComparisonView() {
       <Breadcrumbs>
         <Link to="/projects">Proyectos</Link>
         <span aria-hidden="true">/</span>
-        <Link to={`/scenarios/${scenario.data.id}`}>{scenario.data.name}</Link>
+        <Link
+          to={`/scenarios/${scenario.data.id}${workspaceSectionSearch(location.search, "runs")}`}
+        >
+          {scenario.data.name}
+        </Link>
         <span aria-hidden="true">/</span>
         <span>Comparar corridas</span>
       </Breadcrumbs>
@@ -8207,7 +8272,48 @@ function CaseInputVariantPanel({
   );
 }
 
+function ScenarioModelSummary({ scenarioId }: { scenarioId: number }) {
+  const location = useLocation();
+  const draft = useQuery({
+    queryKey: ["scenario-draft", scenarioId],
+    queryFn: ({ signal }) => getScenarioDraft(scenarioId, signal),
+    retry: false,
+  });
+  const missing = draft.error instanceof ApiError && draft.error.status === 404;
+
+  if (draft.isPending) return <p role="status">Consultando modelo</p>;
+  if (draft.isError && !missing)
+    return (
+      <div role="alert">
+        <p>No pudimos comprobar el modelo.</p>
+        <button type="button" onClick={() => void draft.refetch()}>
+          Reintentar consulta del modelo
+        </button>
+      </div>
+    );
+  return (
+    <div className="scenario-continuation">
+      <p>
+        {missing
+          ? "Falta definir el modelo."
+          : "Modelo guardado. Continúa su preparación."}
+      </p>
+      <Link
+        className="button-link"
+        to={`/scenarios/${scenarioId}/draft${location.search}`}
+      >
+        {missing ? "Crear modelo" : "Continuar preparación"}
+      </Link>
+    </div>
+  );
+}
+
 export function ScenarioDetailView() {
+  const location = useLocation();
+  const requestedSection = new URLSearchParams(location.search).get("section");
+  const section = ["data", "runs", "advanced"].includes(requestedSection || "")
+    ? requestedSection
+    : "summary";
   const scenarioId = useNumericParam("scenarioId");
   const scenario = useQuery({
     queryKey: scenarioQueryKey(scenarioId || 0),
@@ -8237,7 +8343,7 @@ export function ScenarioDetailView() {
   if (scenarioId === null) {
     return <NotFoundView>El escenario solicitado no existe.</NotFoundView>;
   }
-  if (scenario.isPending || versions.isPending || runs.isPending) {
+  if (scenario.isPending) {
     return <LoadingView label="Cargando escenario" />;
   }
   if (scenario.isError) {
@@ -8246,19 +8352,6 @@ export function ScenarioDetailView() {
         error={scenario.error}
         retry={() => void scenario.refetch()}
       />
-    );
-  }
-  if (versions.isError) {
-    return (
-      <RequestErrorView
-        error={versions.error}
-        retry={() => void versions.refetch()}
-      />
-    );
-  }
-  if (runs.isError) {
-    return (
-      <RequestErrorView error={runs.error} retry={() => void runs.refetch()} />
     );
   }
 
@@ -8276,37 +8369,124 @@ export function ScenarioDetailView() {
       <header className="workspace-heading">
         <h1>{scenario.data.name}</h1>
         <p>{scenario.data.description || "Sin descripcion."}</p>
-        <div className="inline-actions">
-          <Link
-            className="button-link"
-            to={`/scenarios/${scenario.data.id}/draft`}
-          >
-            Abrir draft
-          </Link>
-        </div>
       </header>
+      <nav className="workspace-nav" aria-label="Secciones del escenario">
+        <Link
+          to={workspaceSectionSearch(location.search, "summary")}
+          aria-current={section === "summary" ? "page" : undefined}
+        >
+          Resumen
+        </Link>
+        <Link to={`/scenarios/${scenario.data.id}/draft${location.search}`}>
+          Modelo
+        </Link>
+        <Link
+          to={workspaceSectionSearch(location.search, "data")}
+          aria-current={section === "data" ? "page" : undefined}
+        >
+          Datos
+        </Link>
+        <Link
+          to={workspaceSectionSearch(location.search, "runs")}
+          aria-current={section === "runs" ? "page" : undefined}
+        >
+          Ejecuciones
+        </Link>
+        <Link
+          to={workspaceSectionSearch(location.search, "advanced")}
+          aria-current={section === "advanced" ? "page" : undefined}
+        >
+          Avanzado
+        </Link>
+      </nav>
       <div className="workspace-stack">
-        <CaseInputVariantPanel
-          scenarioId={scenario.data.id}
-          projectId={scenario.data.project_id}
-        />
-        <OperatorConsolePanel scenarioId={scenario.data.id} />
-        <section className="workspace-section" aria-labelledby="version-list">
-          <h2 id="version-list">Versiones inmutables</h2>
-          <VersionList scenarioId={scenario.data.id} versions={versions.data} />
-        </section>
-        <ExpertVersionForm scenarioId={scenario.data.id} />
-        <section className="workspace-section" aria-labelledby="run-list">
+        <div className="workspace-section" hidden={section !== "summary"}>
+          <h2>Preparación del escenario</h2>
+          <ScenarioModelSummary scenarioId={scenario.data.id} />
+          <p>
+            Define el modelo, conecta sus datos y revisa el período antes de
+            ejecutar.
+          </p>
+        </div>
+        <div className="workspace-stack" hidden={section !== "data"}>
+          <section
+            className="workspace-section"
+            aria-labelledby="scenario-data"
+          >
+            <h2 id="scenario-data">Datos y período</h2>
+            <p>
+              Selecciona la variante, sus fuentes y el período de ejecución.
+            </p>
+            <Link to={`/projects/${scenario.data.project_id}/time-series-sets`}>
+              Ver catálogo del proyecto
+            </Link>
+          </section>
+          <CaseInputVariantPanel
+            scenarioId={scenario.data.id}
+            projectId={scenario.data.project_id}
+          />
+        </div>
+        <div className="workspace-stack" hidden={section !== "advanced"}>
+          <section
+            className="workspace-section"
+            aria-labelledby="scenario-advanced"
+          >
+            <h2 id="scenario-advanced">Herramientas avanzadas</h2>
+            <p>
+              Importa JSON, consulta versiones inmutables o configura modelos
+              hidráulicos y consolas.
+            </p>
+            <Link to={`/scenarios/${scenario.data.id}/hydraulic-diagram`}>
+              Diagrama hidráulico
+            </Link>
+          </section>
+          <OperatorConsolePanel scenarioId={scenario.data.id} />
+          <section className="workspace-section" aria-labelledby="version-list">
+            <h2 id="version-list">Versiones inmutables</h2>
+            {versions.isPending ? (
+              <p role="status">Cargando versiones</p>
+            ) : versions.isError ? (
+              <div role="alert">
+                <p>{errorMessage(versions.error)}</p>
+                <button type="button" onClick={() => void versions.refetch()}>
+                  Reintentar versiones
+                </button>
+              </div>
+            ) : (
+              <VersionList
+                scenarioId={scenario.data.id}
+                versions={versions.data}
+              />
+            )}
+          </section>
+          <ExpertVersionForm scenarioId={scenario.data.id} />
+        </div>
+        <section
+          hidden={section !== "runs"}
+          className="workspace-section"
+          aria-labelledby="run-list"
+        >
           <h2 id="run-list">Corridas</h2>
           <div className="inline-actions">
             <Link
               className="button-link"
-              to={`/scenarios/${scenario.data.id}/runs/compare`}
+              to={`/scenarios/${scenario.data.id}/runs/compare${location.search}`}
             >
               Comparar corridas
             </Link>
           </div>
-          <RunList runs={runs.data} versions={versions.data} />
+          {runs.isPending ? (
+            <p role="status">Cargando ejecuciones</p>
+          ) : runs.isError ? (
+            <div role="alert">
+              <p>{errorMessage(runs.error)}</p>
+              <button type="button" onClick={() => void runs.refetch()}>
+                Reintentar ejecuciones
+              </button>
+            </div>
+          ) : (
+            <RunList runs={runs.data} versions={versions.data || []} />
+          )}
         </section>
       </div>
     </section>
@@ -8411,6 +8591,7 @@ function VersionProvenance({ version }: { version: ScenarioVersionDetail }) {
 }
 
 export function ScenarioVersionDetailView() {
+  const location = useLocation();
   const versionId = useNumericParam("versionId");
   const version = useQuery({
     queryKey: ["scenario-version", versionId || 0] as const,
@@ -8445,7 +8626,9 @@ export function ScenarioVersionDetailView() {
       <Breadcrumbs>
         <Link to="/projects">Proyectos</Link>
         <span aria-hidden="true">/</span>
-        <Link to={`/scenarios/${version.data.scenario_id}`}>
+        <Link
+          to={`/scenarios/${version.data.scenario_id}${workspaceSectionSearch(location.search, "advanced")}`}
+        >
           {scenario.data?.name || "Escenario"}
         </Link>
         <span aria-hidden="true">/</span>
@@ -9244,6 +9427,7 @@ export function PublicationPreviewView() {
 }
 
 export function RunDetailView() {
+  const location = useLocation();
   const runId = useNumericParam("runId");
   const run = useQuery({
     queryKey: runQueryKey(runId || 0),
@@ -9296,7 +9480,9 @@ export function RunDetailView() {
         <Link to="/projects">Proyectos</Link>
         <span aria-hidden="true">/</span>
         {scenario.data ? (
-          <Link to={`/scenarios/${scenario.data.id}`}>
+          <Link
+            to={`/scenarios/${scenario.data.id}${workspaceSectionSearch(location.search, "runs")}`}
+          >
             {scenario.data.name}
           </Link>
         ) : (

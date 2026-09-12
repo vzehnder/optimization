@@ -81,7 +81,7 @@ describe("the three sibling application roots", () => {
     expect(within(header).getByText("Olga Operadora")).toBeVisible();
     expect(within(header).getByRole("button", { name: "Salir" })).toBeVisible();
     expect(screen.queryByText("BESS Workspace")).toBeNull();
-    expect(screen.queryByRole("link", { name: "Analista" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Proyectos" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Portal cliente" })).toBeNull();
   });
 
@@ -94,7 +94,7 @@ describe("the three sibling application roots", () => {
     expect(
       await screen.findByRole("heading", { name: "No encontrado" }),
     ).toBeVisible();
-    expect(screen.queryByRole("link", { name: "Analista" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Proyectos" })).toBeNull();
     expect(screen.getByRole("link", { name: "Volver" })).toHaveAttribute(
       "href",
       "/react/console/4",

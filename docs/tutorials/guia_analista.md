@@ -160,28 +160,34 @@ si tiene una sola) y, sin `operate`, en el portal. Entrar a una raiz que no te
 corresponde muestra una pantalla que lo dice y ofrece volver, no un error.
 
 La barra superior muestra tu identidad y rol. La navegacion del analista es
-**Analista** (proyectos), **Sistema**, **Admin** si corresponde, y
-**Catalogo** si tu cuenta tiene habilitada la lectura canonica (seccion 6.2).
+**Proyectos**, **Administración** si corresponde, y **Catálogo de series** si
+tu cuenta tiene habilitada la lectura canonica (seccion 6.2). **Estado del
+sistema** se encuentra dentro de **Utilidades**.
 
 ## 4. Crear Proyecto Y Escenario
 
-1. En **Analista** (`/projects`), usar el formulario **Nuevo proyecto** y
+1. En **Proyectos** (`/projects`), usar el formulario **Nuevo proyecto** y
    presionar **Crear proyecto**.
-2. Entrar al proyecto. Veras: la lista de **Escenarios**, el acceso al
-   **catalogo de series de tiempo** del proyecto, **Dashboard templates**,
-   **Portal del cliente** (que vera un usuario externo) y, si eres admin, la
-   gestion de capacidades externas.
+2. Entrar al proyecto. **Escenarios** contiene la lista y el formulario de
+   creación; **Datos**, el catálogo del proyecto; **Informes**, el portal y
+   las plantillas; **Consolas**, enlaces a los escenarios. **Accesos** aparece
+   solo para admin y permite gestionar capacidades externas.
 3. Crear un escenario con **Nuevo escenario** -> **Crear escenario**. Un
    escenario es un caso de optimizacion: conviene uno por configuracion de
    sistema que quieras estudiar (las alternativas de *datos* no requieren
    escenarios nuevos; para eso estan las variantes, seccion 7).
 
-Dentro del escenario, ademas del draft y las corridas, esta el panel
-**Consolas de operador** (seccion 11).
+El escenario abre en **Resumen**, con su contexto y una acción para crear o
+continuar el modelo según la consulta al servidor. **Modelo** abre el editor;
+**Datos** contiene variantes, fuentes y período; **Ejecuciones**, corridas y
+comparación; **Avanzado**, JSON experto, versiones, diagrama hidráulico y
+**Consolas de operador** (seccion 11). La sección queda en la URL y los campos
+pendientes se conservan al alternar secciones de la misma pantalla.
 
 ## 5. Modelar El Caso: El Draft
 
-Dentro del escenario, presionar **Abrir draft**. El editor es estructurado
+Dentro del escenario, presionar **Modelo** o **Crear modelo** si aún no existe.
+El editor es estructurado
 (formularios y tablas, no un canvas libre) y trabaja sobre un documento
 borrador que solo se convierte en algo ejecutable cuando tu lo decides.
 
@@ -384,7 +390,7 @@ registrar "alguien".
 
 ## 7. Variantes De Entrada: Conectar Datos Al Caso
 
-De vuelta en el escenario, el panel **Variantes de entrada** es donde el caso
+De vuelta en el escenario, abrir **Datos**. El panel **Variantes de entrada** es donde el caso
 se conecta con el catalogo. Una variante es un juego nombrado de *bindings*:
 para cada senal requerida por el caso, que fuente la alimenta y **en que
 revision exacta**. Son referencias, no copias.
@@ -460,7 +466,7 @@ detalle del run muestra:
 
 ### Camino experto (opcional)
 
-El escenario tambien lista las **Versiones inmutables** y permite crear una
+En **Avanzado**, el escenario lista las **Versiones inmutables** y permite crear una
 version pegando un `system_case_json` a mano (formulario experto) y lanzarle
 un run manual desde su detalle. Es un camino de escape: el flujo normal es
 correr desde la variante.
@@ -470,10 +476,10 @@ correr desde la variante.
 - Los graficos base cubren precios, importacion/exportacion, renovable usada
   y vertida, carga/descarga y SOC del BESS, generacion y stock hidraulico,
   demanda y profit por periodo, mas KPIs economicos por corrida.
-- **Plantillas de dashboard**: en la pagina del proyecto puedes guardar
+- **Plantillas de dashboard**: en **Informes** del proyecto puedes guardar
   configuraciones de graficos como plantillas reutilizables y aplicarlas a
   corridas nuevas.
-- **Comparar corridas**: desde el escenario, **Comparar corridas** abre una
+- **Comparar corridas**: desde **Ejecuciones** del escenario, **Comparar corridas** abre una
   vista que enfrenta dos runs del mismo caso: contexto de cada una (variante,
   rango, hashes), KPIs lado a lado y series superpuestas. Como cada run
   guarda su lineage completo, la comparacion te dice tambien *por que*
@@ -488,7 +494,7 @@ portal no es una vista automatica de los resultados; es una configuracion.
 1. **Publicar la corrida.** En el detalle de un run exitoso, seccion de
    publicacion -> **Nueva publicacion**: eliges que artefactos y dashboards
    expone. Puedes previsualizarla exactamente como la vera el externo.
-2. **Configurar el portal del proyecto.** En la pagina del proyecto, la
+2. **Configurar el portal del proyecto.** En **Informes** del proyecto, la
    seccion **Portal del cliente** define nombre publico, logo (PNG o JPEG,
    hasta 256 KiB) y que se muestra: titulos de secciones, KPIs (con signo y
    enfasis), graficos, tablas y descargas, elegidos desde un catalogo de
@@ -496,7 +502,7 @@ portal no es una vista automatica de los resultados; es una configuracion.
    estado **Borrador** o **Activa**; solo lo activo llega al portal.
 3. **Asignar capacidades.** Un admin decide, proyecto por proyecto, que
    usuario externo tiene **Portal** (`portal_view`) y/o **Operar**
-   (`operate`), en la gestion de acceso externo de la pagina del proyecto.
+   (`operate`), en **Accesos** de la pagina del proyecto.
    Revocar una capacidad surte efecto en el siguiente request.
 
 El externo entra, aterriza en el portal, ve los proyectos que le asignaron,
@@ -511,7 +517,7 @@ tocarlo: cambia unos pocos datos y parametros declarados, ejecuta y mira
 resultados. La configura el analista; la usa un `external` con `operate` en
 `/console` (o tu mismo, con **Probar**, para verificarla).
 
-**Crearla.** En el escenario, panel **Consolas de operador**: nombre de la
+**Crearla.** En **Avanzado** del escenario, panel **Consolas de operador**: nombre de la
 consola y **variante de origen**, luego **Crear consola**. La consola recibe
 **su propia variante clonada**: el operador nunca ve ni toca la variante del
 analista.
