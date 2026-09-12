@@ -1,5 +1,9 @@
 # Validación, medición y entrega
 
+## Evidencia posterior: UX-000
+
+La [línea base del 2026-09-12](evidencia/ux-000/README.md) registra la base `428b6ad`, cinco identidades en SQLite aislado, estado C6 separado de lectura canónica, siete recorridos automatizados, 17 capturas y **86 pruebas existentes aprobadas** (62 componentes, 6 navegador, 18 Python). Incluye límites del servidor smoke, errores corregidos en el registrador y comandos para repetir la tarea. No es un estudio con participantes ni una prueba de Julia real. UX-000 está en revisión, pendiente de confirmar las fronteras de implementación.
+
 ## Evidencia de esta revisión
 
 El 2026-09-12 se ejecutó desde `frontend/`:

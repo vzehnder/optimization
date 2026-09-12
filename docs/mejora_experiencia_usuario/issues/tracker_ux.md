@@ -3,7 +3,7 @@
 Fecha de creación: 2026-09-12. Última actualización: 2026-09-12.
 Referencia: [plan y orden recomendado](../README.md).
 
-Este archivo registra el avance de los diez tickets del plan UX. Los tickets contienen los pasos y criterios de aceptación; el tracker centraliza estado, responsables, dependencias y evidencia de resolución. Crear los documentos no implica haber implementado los cambios: todos comienzan en `Todo`.
+Este archivo registra el avance de los diez tickets del plan UX. Los tickets contienen los pasos y criterios de aceptación; el tracker centraliza estado, responsables, dependencias y evidencia de resolución. Crear los documentos no implica haber implementado los cambios: inicialmente todos estaban en `Todo`; UX-000 ahora tiene evidencia para revisión.
 
 ## Estados
 
@@ -21,7 +21,7 @@ Un ticket pendiente de su orden de ejecución puede permanecer en `Todo`; no hac
 
 | ID | Ticket | Prioridad | Estado | Responsable | Dependencias | PR o commit de resolución | Cierre |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| UX-000 | [Acordar fronteras y registrar la línea base](UX-000-acordar-fronteras-y-linea-base.md) | P0 | Todo | Sin asignar | Ninguna | — | — |
+| UX-000 | [Acordar fronteras y registrar la línea base](UX-000-acordar-fronteras-y-linea-base.md) | P0 | In Review | Codex | Ninguna | [Evidencia sobre 428b6ad](../evidencia/ux-000/README.md); commit de preparación `docs(ux): record reproducible UX-000 baseline` | Pendiente de confirmar fronteras |
 | UX-001 | [Orientación y navegación por tareas](UX-001-orientacion-y-navegacion.md) | P0 | Todo | Sin asignar | UX-000 | — | — |
 | UX-002 | [Editar el modelo con complejidad progresiva](UX-002-edicion-progresiva-del-modelo.md) | P1 | Todo | Sin asignar | UX-001 | — | — |
 | UX-003 | [Importación guiada de series de tiempo](UX-003-importacion-guiada.md) | P1 | Todo | Sin asignar | UX-002 | — | — |
@@ -34,9 +34,9 @@ Un ticket pendiente de su orden de ejecución puede permanecer en `Todo`; no hac
 
 ## Próximos tickets disponibles
 
-Inicialmente solo UX-000 tiene sus dependencias satisfechas. Actualizar esta sección al cerrar o reabrir un ticket:
+UX-000 tiene su preparación técnica disponible en revisión. UX-001 todavía depende de su aceptación. Actualizar esta sección al cerrar o reabrir un ticket:
 
-1. Resolver UX-000: línea base y fronteras de prueba confirmadas.
+1. Confirmar las [fronteras concretas para UX-001](../evidencia/ux-000/README.md#fronteras-propuestas-para-aprobación) y aceptar la línea base para cerrar UX-000.
 2. Resolver UX-001: navegación y contexto que usarán los demás cambios.
 3. Priorizar UX-005 y UX-006 para la primera entrega útil.
 4. Continuar con UX-002 → UX-003, UX-004, UX-007 y UX-008 según la prioridad de producto y sus dependencias.
@@ -105,12 +105,14 @@ No hay bloqueos registrados al crear el tracker. Añadir una fila cuando exista 
 | Fecha | Ticket | Cambio de estado | Evidencia o motivo |
 | --- | --- | --- | --- |
 | 2026-09-12 | UX-000 a UX-009 | Creación → Todo | Se registran los diez tickets del plan; implementación aún pendiente. |
+| 2026-09-12 | UX-000 | Todo → In Progress | Lectura completa del paquete, inspección de la base `428b6ad` y preparación de evidencia aislada. |
+| 2026-09-12 | UX-000 | In Progress → In Review | [Servidor reproducible, siete recorridos, 17 capturas y 86 pruebas existentes aprobadas](../evidencia/ux-000/README.md). Sin cambios de producto; pendiente de confirmación de fronteras por el usuario. |
 
 ## Control de entregas
 
 | Entrega | Tickets previstos | Estado | Evidencia de integración |
 | --- | --- | --- | --- |
-| Primera mejora del flujo principal | UX-000, UX-001, UX-005, UX-006 | Pendiente | — |
+| Primera mejora del flujo principal | UX-000, UX-001, UX-005, UX-006 | Preparación UX-000 en revisión | [Línea base](../evidencia/ux-000/README.md); integración funcional aún pendiente. |
 | Modelo y datos | UX-002, UX-003, UX-004 | Pendiente | — |
 | Informes y consola | UX-007, UX-008 | Pendiente | — |
 | Administración | UX-009 | Pendiente | — |

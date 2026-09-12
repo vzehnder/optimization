@@ -1,7 +1,7 @@
 # Plan de simplificación de la experiencia de BESS Workspace
 
 Fecha de revisión: 2026-09-12. Base: commit `58cf602` y árbol de trabajo local.
-Estado: propuesta para implementar; no se han modificado funcionalidades.
+Estado: UX-000 en revisión con [línea base reproducible](evidencia/ux-000/README.md); falta confirmar las fronteras TDD. No se han modificado funcionalidades.
 
 La recomendación es organizar la experiencia por tareas: **preparar el modelo, conectar datos, revisar y ejecutar, interpretar resultados y entregar un informe**. La plataforma ya tiene esas capacidades. El cambio consiste en orientar al usuario, reducir lo que debe decidir simultáneamente y mantener disponibles los controles expertos.
 
@@ -16,7 +16,7 @@ La recomendación es organizar la experiencia por tareas: **preparar el modelo, 
 
 Las rutas de archivos y los nombres de funciones de cada ticket permiten localizar el código. Los archivos nuevos mencionados dentro de los tickets son propuestas, salvo indicación contraria. Cada ticket requiere una PR revisable con su propio resultado visible; no se exige completar todos para obtener valor.
 
-El [tracker](issues/tracker_ux.md) centraliza estado, responsable, dependencias, bloqueos, PR/commit y evidencia de cierre. Todos los tickets comienzan pendientes de implementación.
+El [tracker](issues/tracker_ux.md) centraliza estado, responsable, dependencias, bloqueos, PR/commit y evidencia de cierre. UX-000 tiene evidencia preparada; UX-001 a UX-009 siguen pendientes de implementación.
 
 ## Orden recomendado
 

@@ -1,0 +1,251 @@
+{
+  "recorded_at": "2026-09-12T16:10:18.433Z",
+  "browser": "149.0.7827.55",
+  "viewport": {
+    "width": 1280,
+    "height": 720
+  },
+  "timezone": "America/Santiago",
+  "method": "Scripted exploration informed by source and existing fixtures. No human participants; elapsed times include browser/API latency, not solver computation or screenshot capture.",
+  "fixture": {
+    "project": {
+      "id": 1,
+      "name": "UX-000 Planta de prueba"
+    },
+    "scenarios": {
+      "empty": {
+        "id": 1,
+        "name": "Sin modelo",
+        "project_id": 1
+      },
+      "partial": {
+        "id": 2,
+        "name": "Preparacion parcial",
+        "project_id": 1,
+        "variant_id": 1
+      },
+      "ready": {
+        "id": 3,
+        "name": "Operacion preparada",
+        "project_id": 1,
+        "variant_id": 2,
+        "set_id": 1,
+        "range_start": "2026-01-01T00:00:00-03:00",
+        "range_end": "2026-01-01T03:00:00-03:00",
+        "console_id": 1
+      },
+      "stale": {
+        "id": 4,
+        "name": "Fuente modificada",
+        "project_id": 2,
+        "variant_id": 4,
+        "set_id": 2,
+        "range_start": "2026-01-01T00:00:00-03:00",
+        "range_end": "2026-01-01T03:00:00-03:00"
+      },
+      "comparison": {
+        "id": 5,
+        "name": "Comparacion de referencia",
+        "run_ids": [
+          1,
+          2
+        ]
+      }
+    },
+    "c6": {
+      "cutover_active": false,
+      "ts_next_canonical_read": false,
+      "ts_next_canonical_write": false,
+      "ts_legacy_aliases": false,
+      "phase": null,
+      "status": "not_started",
+      "migration_run_id": null
+    },
+    "canonical_read_accounts": [
+      "verification@ux.example.local"
+    ],
+    "database": "sqlite:///:memory:"
+  },
+  "identities": {
+    "admin": {
+      "role": "admin",
+      "landing_path": "/react/projects",
+      "ts_next_canonical_read": false,
+      "observed_path": "/react/projects"
+    },
+    "analyst": {
+      "role": "analyst",
+      "landing_path": "/react/projects",
+      "ts_next_canonical_read": false,
+      "observed_path": "/react/projects"
+    },
+    "operator": {
+      "role": "external",
+      "landing_path": "/react/console/1",
+      "ts_next_canonical_read": false,
+      "observed_path": "/react/console/1"
+    },
+    "reader": {
+      "role": "external",
+      "landing_path": "/react/client",
+      "ts_next_canonical_read": false,
+      "observed_path": "/react/client"
+    },
+    "verification": {
+      "role": "analyst",
+      "landing_path": "/react/projects",
+      "ts_next_canonical_read": true,
+      "observed_path": "/react/projects"
+    }
+  },
+  "tasks": [
+    {
+      "name": "01-retomar",
+      "elapsed_ms": 308,
+      "help": "Recorder author consulted source and existing tests; no human usability measurement.",
+      "captures": [
+        "01-retomar.png"
+      ],
+      "observed": {
+        "case_name": "grid_battery_case",
+        "actions": "Proyecto → Preparacion parcial → Abrir draft",
+        "pending": "Modelo guardado sin fuentes"
+      },
+      "outcome": "completed",
+      "url": "http://127.0.0.1:8124/react/scenarios/2/draft"
+    },
+    {
+      "name": "02-importar",
+      "elapsed_ms": 815,
+      "help": "Recorder author consulted source and existing tests; no human usability measurement.",
+      "captures": [
+        "02-importar.png"
+      ],
+      "observed": {
+        "imported": "Precio y demanda UX",
+        "revision": 1,
+        "values": [
+          {
+            "period_index": 0,
+            "signal_key": "import_price_usd_per_mwh",
+            "value_numeric": 55
+          },
+          {
+            "period_index": 0,
+            "signal_key": "load_demand_mw",
+            "value_numeric": 2
+          },
+          {
+            "period_index": 1,
+            "signal_key": "import_price_usd_per_mwh",
+            "value_numeric": 60
+          },
+          {
+            "period_index": 1,
+            "signal_key": "load_demand_mw",
+            "value_numeric": 2.5
+          }
+        ],
+        "binding": "price_usd_per_mwh (grid_1): vinculada (set #3)\nload_demand_mw (load_1): vinculada (set #3)",
+        "limitation": "El guardado visible de los dos usos exige Vincular y correr variante y crea una corrida."
+      },
+      "outcome": "completed",
+      "url": "http://127.0.0.1:8124/react/scenarios/2"
+    },
+    {
+      "name": "03-ejecutar",
+      "elapsed_ms": 199,
+      "help": "Recorder author consulted source and existing tests; no human usability measurement.",
+      "captures": [
+        "03-ejecutar.png"
+      ],
+      "observed": {
+        "run_id": 4,
+        "range": [
+          "2026-01-01T00:00:00-03:00",
+          "2026-01-01T03:00:00-03:00"
+        ],
+        "manual_promotion": false
+      },
+      "outcome": "completed",
+      "url": "http://127.0.0.1:8124/react/runs/4"
+    },
+    {
+      "name": "04-recuperar-desactualizada",
+      "elapsed_ms": 83,
+      "help": "Recorder author consulted source and existing tests; no human usability measurement.",
+      "captures": [
+        "04-recuperar-desactualizada.png"
+      ],
+      "observed": {
+        "reasons": "time-series set 2 changed since last validation",
+        "run_disabled_before": true,
+        "run_disabled_after": false
+      },
+      "outcome": "completed",
+      "url": "http://127.0.0.1:8124/react/scenarios/4"
+    },
+    {
+      "name": "05-interpretar-comparar",
+      "elapsed_ms": 1488,
+      "help": "Recorder author consulted source and existing tests; no human usability measurement.",
+      "captures": [
+        "05-interpretar-comparar.png"
+      ],
+      "observed": {
+        "base": "1",
+        "candidate": "2",
+        "kpi_row": "objective_value_usd\t1000\t1500\t500",
+        "result_model": "Existing create_indexed_run fixture: base 1000 USD; candidate 1500 USD; known difference 500 USD"
+      },
+      "outcome": "completed",
+      "url": "http://127.0.0.1:8124/react/scenarios/5/runs/compare"
+    },
+    {
+      "name": "06-entregar-informe",
+      "elapsed_ms": 950,
+      "help": "Recorder author consulted source and existing tests; no human usability measurement.",
+      "captures": [
+        "06-entregar-informe.png"
+      ],
+      "observed": {
+        "publication_id": 1,
+        "action": "Crear publicacion → Preview as client → regresar → Publicar"
+      },
+      "outcome": "completed",
+      "url": "http://127.0.0.1:8124/react/runs/4"
+    },
+    {
+      "name": "07-operar",
+      "elapsed_ms": 267,
+      "help": "Recorder author consulted source and existing tests; no human usability measurement.",
+      "captures": [
+        "07-operar.png"
+      ],
+      "observed": {
+        "pending": "Guarda los cambios antes de ejecutar.",
+        "disabled_before_save": true,
+        "run_status": 201,
+        "body": {
+          "run": {
+            "id": 5,
+            "started_at": "2026-09-12T16:10:24+00:00",
+            "state": "en_espera",
+            "duration_seconds": null,
+            "triggered_by": "UX operator"
+          }
+        }
+      },
+      "outcome": "completed",
+      "url": "http://127.0.0.1:8124/react/console/1"
+    }
+  ],
+  "observations": {
+    "operator_internal_access": "No encontrado",
+    "keyboard": {
+      "action": "Focus Abrir draft; Enter",
+      "reached": "http://127.0.0.1:8124/react/scenarios/1/draft",
+      "focused_tag": "BODY"
+    }
+  }
+}

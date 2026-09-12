@@ -10,6 +10,8 @@ La referencia es [`.agents/skills/tdd/SKILL.md`](../../.agents/skills/tdd/SKILL.
 
 Este plan propone fronteras; no afirma que el usuario ya las confirmó. No se escribieron pruebas nuevas durante la planificación. Antes de la primera prueba de implementación, presentar las fronteras necesarias del ticket y registrar su confirmación por el usuario/responsable de la implementación. No es necesario volver a confirmar una frontera que ya haya sido aceptada para ese alcance; una frontera nueva sí requiere acuerdo.
 
+UX-000 preparó el [acuerdo concreto para UX-001 y su primer comportamiento](evidencia/ux-000/README.md#fronteras-propuestas-para-aprobación), junto con recorridos y regresiones existentes. La confirmación del usuario sigue pendiente; no se han escrito pruebas nuevas de producto.
+
 ## Fronteras propuestas
 
 Una frontera es la interfaz pública desde la que se observa el comportamiento. No es un archivo interno elegido por conveniencia.
