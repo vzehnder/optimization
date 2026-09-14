@@ -7774,6 +7774,19 @@ function requiredSignalSelectId(signal: RequiredSignalStatus): string {
   return `input_variant_binding_${signal.entity_type.replaceAll(":", "_")}_${signal.entity_id}_${signal.signal_key}`;
 }
 
+function requiredSignalName(key: string): string {
+  const labels: Record<string, string> = {
+    price_usd_per_mwh: "Precio de compra a la red",
+    import_price_usd_per_mwh: "Precio de compra a la red",
+    export_price_usd_per_mwh: "Precio de venta a la red",
+    load_demand_mw: "Demanda eléctrica",
+    renewable_available_power_mw: "Potencia renovable disponible",
+    natural_inflow_m3s: "Afluente de agua",
+    minimum_flow_m3s: "Caudal mínimo",
+  };
+  return labels[key] ?? key;
+}
+
 function selectedPeriodsForInputVariantRange(
   set: ProjectTimeSeriesSet | undefined,
   rangeStart: string,
@@ -8381,6 +8394,9 @@ function CaseInputVariantBindingEditor({
                       projectId,
                       linkableObjectId: source.linkable_object_id,
                       intent: "use_revision",
+                      scenarioId,
+                      variantId: variantDetail.variant.id,
+                      returnTo: `/scenarios/${scenarioId}?section=data&variant=${variantDetail.variant.id}`,
                     })}
                   >
                     Revisar fuente {source.name}
@@ -8454,59 +8470,109 @@ function CaseInputVariantBindingEditor({
         </p>
       ) : null}
       <ul aria-label="Senales requeridas">
-        {requiredSignals.map((signal: RequiredSignalStatus) => (
-          <li
-            key={`${signal.entity_type}:${signal.entity_id}:${signal.signal_key}`}
-          >
-            <span>
-              {signal.bound
-                ? `${signal.signal_key} (${signal.entity_id}): vinculada (set #${signal.time_series_set_id})`
-                : `${signal.signal_key} (${signal.entity_id}): falta vincular`}
-            </span>
-            {!signal.bound && protectedSources && canonicalCatalogRead ? (
+        {requiredSignals.map((signal: RequiredSignalStatus) => {
+          const source = preparation?.sources?.find(
+            (entry) =>
+              candidateSignalKeysForRequiredSignal(signal).includes(
+                entry.signal_key ?? "",
+              ) &&
+              ((entry.entity_type == null && entry.entity_id == null) ||
+                (entry.entity_type === signal.entity_type &&
+                  entry.entity_id === signal.entity_id)),
+          );
+          return (
+            <li
+              key={`${signal.entity_type}:${signal.entity_id}:${signal.signal_key}`}
+            >
+              <span>
+                <strong>{requiredSignalName(signal.signal_key)}</strong>
+                {" · "}
+                <span>
+                  {signal.bound
+                    ? `${signal.signal_key} (${signal.entity_id}): vinculada (set #${signal.time_series_set_id})`
+                    : `${signal.signal_key} (${signal.entity_id}): falta vincular`}
+                </span>
+              </span>
+              {source && (
+                <span className="object-summary-secondary">
+                  {source.name} · revisión {source.revision_number} ·{" "}
+                  {source.state === "stale"
+                    ? "Obsoleta: revisar"
+                    : source.state === "invalid"
+                      ? "Inválida: corregir"
+                      : ["valid_current", "valid_pinned", "confirmed"].includes(
+                            source.state,
+                          )
+                        ? "Revisión fijada"
+                        : source.state}
+                </span>
+              )}
+              {!signal.bound && protectedSources && canonicalCatalogRead ? (
+                signal.linkable_object_id ? (
+                  <>
+                    {" "}
+                    ·{" "}
+                    <Link
+                      to={objectJourneyPath({
+                        projectId,
+                        linkableObjectId: signal.linkable_object_id,
+                        intent: "use_revision",
+                        scenarioId,
+                        variantId: variantDetail.variant.id,
+                        returnTo: `/scenarios/${scenarioId}?section=data&variant=${variantDetail.variant.id}`,
+                      })}
+                    >
+                      Corregir {signal.signal_key} ({signal.entity_id})
+                    </Link>
+                  </>
+                ) : (
+                  <>
+                    {" "}
+                    ·{" "}
+                    <Link to={`/scenarios/${scenarioId}/draft?section=data`}>
+                      Revisar el componente en el modelo
+                    </Link>
+                  </>
+                )
+              ) : null}
+              {protectedSources &&
+              canonicalCatalogRead &&
               signal.linkable_object_id ? (
                 <>
-                  {" "}
-                  ·{" "}
+                  {" · "}
                   <Link
-                    to={objectJourneyPath({
-                      projectId,
-                      linkableObjectId: signal.linkable_object_id,
-                      intent: "use_revision",
-                    })}
+                    to={`/projects/${projectId}/linkable-objects/${signal.linkable_object_id}/time-series?${new URLSearchParams(
+                      {
+                        scenario_id: String(scenarioId),
+                        variant_id: String(variantDetail.variant.id),
+                        return_to: `/scenarios/${scenarioId}?section=data&variant=${variantDetail.variant.id}`,
+                      },
+                    )}`}
                   >
-                    Corregir {signal.signal_key} ({signal.entity_id})
+                    Ver fuentes del componente {signal.entity_id}
                   </Link>
                 </>
-              ) : (
+              ) : null}
+              {!signal.bound && !protectedSources ? (
                 <>
                   {" "}
                   ·{" "}
-                  <Link to={`/scenarios/${scenarioId}/draft?section=data`}>
-                    Revisar el componente en el modelo
-                  </Link>
+                  <a
+                    href={`#${requiredSignalSelectId(signal)}`}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      document
+                        .getElementById(requiredSignalSelectId(signal))
+                        ?.focus();
+                    }}
+                  >
+                    Corregir {signal.signal_key} ({signal.entity_id})
+                  </a>
                 </>
-              )
-            ) : null}
-            {!signal.bound && !protectedSources ? (
-              <>
-                {" "}
-                ·{" "}
-                <a
-                  href={`#${requiredSignalSelectId(signal)}`}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    document
-                      .getElementById(requiredSignalSelectId(signal))
-                      ?.focus();
-                  }}
-                >
-                  Corregir {signal.signal_key} ({signal.entity_id})
-                </a>
-              </>
-            ) : null}
-          </li>
-        ))}
+              ) : null}
+            </li>
+          );
+        })}
       </ul>
       {!protectedSources &&
         requiredSignals.map((signal: RequiredSignalStatus) => (
@@ -8732,6 +8798,13 @@ function CaseInputVariantPanel({
   canonicalCatalogRead: boolean;
 }) {
   const queryClient = useQueryClient();
+  const [variantParams, setVariantParams] = useSearchParams();
+  const rawVariantId = variantParams.get("variant") ?? "";
+  const returnVariantId =
+    /^[1-9]\d*$/.test(rawVariantId) &&
+    Number.isSafeInteger(Number(rawVariantId))
+      ? Number(rawVariantId)
+      : null;
   const [cloneError, setCloneError] = useState("");
   const [selectedVariantPreference, setSelectedVariantPreference] = useState<
     number | null
@@ -8745,7 +8818,7 @@ function CaseInputVariantPanel({
   });
   const selectedVariantId = resolveSelectedInputVariantId(
     scenarioId,
-    selectedVariantPreference,
+    returnVariantId ?? selectedVariantPreference,
     variantQuery.data?.variants ?? [],
     variantQuery.data?.default_variant_id ?? null,
   );
@@ -8775,6 +8848,9 @@ function CaseInputVariantPanel({
       setCloneError("");
       setSelectedVariantPreference(variant.id);
       persistInputVariantId(scenarioId, variant.id);
+      const nextParams = new URLSearchParams(variantParams);
+      nextParams.set("variant", String(variant.id));
+      setVariantParams(nextParams);
       void queryClient.invalidateQueries({
         queryKey: caseInputVariantsQueryKey(scenarioId),
       });
@@ -8855,6 +8931,9 @@ function CaseInputVariantPanel({
             const nextVariantId = Number(event.target.value);
             setSelectedVariantPreference(nextVariantId);
             persistInputVariantId(scenarioId, nextVariantId);
+            const nextParams = new URLSearchParams(variantParams);
+            nextParams.set("variant", String(nextVariantId));
+            setVariantParams(nextParams);
           }}
         >
           {variantQuery.data.variants.map((entry: CaseInputVariantDetail) => (

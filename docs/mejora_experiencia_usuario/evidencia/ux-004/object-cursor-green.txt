@@ -1,0 +1,11 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/ObjectTimeSeriesSummary.test.tsx -t recovers the object cursor
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 5 skipped (6)
+   Start at  12:13:22
+   Duration  3.72s (transform 1.08s, setup 295ms, import 1.58s, tests 448ms, environment 1.20s)

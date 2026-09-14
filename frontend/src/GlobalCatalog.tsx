@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { FormEvent, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 
 import {
   ApiError,
+  catalogInputSearchParams,
   getCatalogInputDetail,
   getCatalogInputPreview,
   listCatalogDescriptors,
@@ -15,7 +16,7 @@ import {
   type CatalogPreviewQuery,
   type CatalogRevisionRow,
 } from "./api/client";
-import { catalogJourneyPath } from "./journeyRoutes";
+import { catalogJourneyPath, safeReturnPath } from "./journeyRoutes";
 
 const SCOPE_OPTIONS = [
   { value: "", label: "Todos" },
@@ -319,7 +320,12 @@ function BoundedPreview({
               )?.number ?? "?"
             } (id ${preview.data.revision.id}) - hash ${preview.data.revision.content_hash} - ${preview.data.returned_point_count} de ${preview.data.source_point_count} puntos - ${preview.data.unit.symbol}`}
           </p>
-          <div className="time-series-table-scroll">
+          <div
+            className="time-series-table-scroll"
+            tabIndex={0}
+            role="region"
+            aria-label="Tabla con desplazamiento horizontal"
+          >
             <table>
               <caption>Preview</caption>
               <thead>
@@ -351,6 +357,7 @@ function BoundedPreview({
 // The inspector answers from metadata only: one detail and one page of
 // immutable revision metadata. Points arrive only when a preview is asked for.
 function SignalInspector({ signalId }: { signalId: number }) {
+  const location = useLocation();
   const detail = useQuery({
     queryKey: ["catalog-input-detail", signalId],
     queryFn: ({ signal }) => getCatalogInputDetail(signalId, signal),
@@ -469,6 +476,7 @@ function SignalInspector({ signalId }: { signalId: number }) {
               to={catalogJourneyPath({
                 signalId,
                 projectId: detail.data.owner.project_id,
+                returnTo: location.pathname + location.search,
               })}
             >
               Abrir el recorrido protegido
@@ -533,12 +541,71 @@ function SignalInspector({ signalId }: { signalId: number }) {
 }
 
 export function GlobalCatalogView() {
-  const [draft, setDraft] = useState<CatalogInputQuery>(EMPTY_FILTERS);
-  const [applied, setApplied] = useState<CatalogInputQuery>(EMPTY_FILTERS);
+  const [params] = useSearchParams();
+  return <CatalogContent key={params.toString()} />;
+}
+
+function readFilters(params: URLSearchParams): CatalogInputQuery {
+  const filters = { ...EMPTY_FILTERS };
+  filters.q = (params.get("q") ?? "").slice(0, 200);
+  for (const key of [
+    "semantic_type_key",
+    "data_class_key",
+    "unit_key",
+  ] as const) {
+    const value = params.get(key) ?? "";
+    if (/^[a-z][a-z0-9_]{0,99}$/.test(value)) filters[key] = value;
+  }
+  for (const [key, options] of [
+    ["visibility_scope", SCOPE_OPTIONS],
+    ["signal_status", STATUS_OPTIONS],
+    ["order", ORDER_OPTIONS],
+  ] as const) {
+    const value = params.get(key);
+    if (options.some((option) => option.value === value)) filters[key] = value!;
+  }
+  return filters;
+}
+
+function CatalogContent() {
+  const [params, setParams] = useSearchParams();
+  const returnTo = safeReturnPath(params.get("return_to"));
+  const applied = readFilters(params);
+  const [draft, setDraft] = useState<CatalogInputQuery>(applied);
   // Keyset pagination only walks forward, so going back means replaying the
   // cursor that opened each visited page. The first page has none.
-  const [cursorTrail, setCursorTrail] = useState<(string | null)[]>([null]);
-  const [inspected, setInspected] = useState<number | null>(null);
+  const cursorTrail: (string | null)[] = [
+    null,
+    ...params
+      .getAll("cursor")
+      .filter((value) => value.length > 0 && value.length <= 4096)
+      .slice(0, 50),
+  ];
+  const rawInspector = params.get("inspector") ?? "";
+  const inspected =
+    /^\d+$/.test(rawInspector) &&
+    Number.isSafeInteger(Number(rawInspector)) &&
+    Number(rawInspector) > 0
+      ? Number(rawInspector)
+      : null;
+
+  function navigate(
+    filters = applied,
+    trail = cursorTrail,
+    inspector = inspected,
+  ) {
+    const next = catalogInputSearchParams(filters);
+    if (returnTo) next.set("return_to", returnTo);
+    for (const entry of trail) if (entry) next.append("cursor", entry);
+    if (inspector !== null) next.set("inspector", String(inspector));
+    setParams(next);
+  }
+  const activeExtraFilters = [
+    Boolean(applied.data_class_key),
+    Boolean(applied.visibility_scope),
+    applied.signal_status !== EMPTY_FILTERS.signal_status,
+    applied.order !== EMPTY_FILTERS.order,
+  ].filter(Boolean).length;
 
   const semanticTypes = useDescriptors("semantic_type");
   const dataClasses = useDescriptors("data_class");
@@ -554,8 +621,7 @@ export function GlobalCatalogView() {
 
   function submitFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setApplied({ ...draft });
-    setCursorTrail([null]);
+    navigate(draft, [null]);
   }
 
   function update(patch: Partial<CatalogInputQuery>) {
@@ -566,6 +632,7 @@ export function GlobalCatalogView() {
     <section className="workspace-view catalog-surface">
       <header className="workspace-heading">
         <h1>Catalogo de series genericas</h1>
+        {returnTo && <Link to={returnTo}>Volver al origen</Link>}
         <p>
           Superficie de solo lectura: explorar, inspeccionar procedencia y
           consultar historia no modifica ninguna fuente.
@@ -591,72 +658,75 @@ export function GlobalCatalogView() {
           onChange={(value) => update({ semantic_type_key: value })}
         />
         <DescriptorSelect
-          id="catalog-data-class"
-          label="Clase"
-          value={draft.data_class_key ?? ""}
-          descriptors={dataClasses.data?.items ?? []}
-          onChange={(value) => update({ data_class_key: value })}
-        />
-        <DescriptorSelect
           id="catalog-unit"
           label="Unidad"
           value={draft.unit_key ?? ""}
           descriptors={units.data?.items ?? []}
           onChange={(value) => update({ unit_key: value })}
         />
-        <div className="field-row">
-          <label htmlFor="catalog-scope">Alcance</label>
-          <select
-            id="catalog-scope"
-            value={draft.visibility_scope ?? ""}
-            onChange={(event) =>
-              update({ visibility_scope: event.target.value })
-            }
-          >
-            {SCOPE_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="field-row">
-          <label htmlFor="catalog-status">Estado</label>
-          <select
-            id="catalog-status"
-            value={draft.signal_status ?? "active"}
-            onChange={(event) => update({ signal_status: event.target.value })}
-          >
-            {STATUS_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="field-row">
-          <label htmlFor="catalog-order">Orden</label>
-          <select
-            id="catalog-order"
-            value={draft.order ?? ORDER_OPTIONS[0].value}
-            onChange={(event) => update({ order: event.target.value })}
-          >
-            {ORDER_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
+        <details className="catalog-more-filters">
+          <summary>Más filtros ({activeExtraFilters} activos)</summary>
+          <DescriptorSelect
+            id="catalog-data-class"
+            label="Clase"
+            value={draft.data_class_key ?? ""}
+            descriptors={dataClasses.data?.items ?? []}
+            onChange={(value) => update({ data_class_key: value })}
+          />
+          <div className="field-row">
+            <label htmlFor="catalog-scope">Alcance</label>
+            <select
+              id="catalog-scope"
+              value={draft.visibility_scope ?? ""}
+              onChange={(event) =>
+                update({ visibility_scope: event.target.value })
+              }
+            >
+              {SCOPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field-row">
+            <label htmlFor="catalog-status">Estado</label>
+            <select
+              id="catalog-status"
+              value={draft.signal_status ?? "active"}
+              onChange={(event) =>
+                update({ signal_status: event.target.value })
+              }
+            >
+              {STATUS_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field-row">
+            <label htmlFor="catalog-order">Orden</label>
+            <select
+              id="catalog-order"
+              value={draft.order ?? ORDER_OPTIONS[0].value}
+              onChange={(event) => update({ order: event.target.value })}
+            >
+              {ORDER_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </details>
         <div className="inline-actions">
           <button type="submit">Filtrar</button>
           <button
             className="secondary-button"
             type="button"
             onClick={() => {
-              setDraft(EMPTY_FILTERS);
-              setApplied(EMPTY_FILTERS);
-              setCursorTrail([null]);
+              navigate(EMPTY_FILTERS, [null]);
             }}
           >
             Limpiar
@@ -665,9 +735,27 @@ export function GlobalCatalogView() {
       </form>
 
       {inputs.isPending ? <p role="status">Cargando el catalogo</p> : null}
-      {inputs.isError ? <CatalogRefusal error={inputs.error} /> : null}
-      {inputs.data ? (
-        <div className="time-series-table-scroll">
+      {inputs.isError ? (
+        <>
+          <CatalogRefusal error={inputs.error} />
+          {cursor ? (
+            <button type="button" onClick={() => navigate(applied, [null])}>
+              Volver al inicio conservando filtros
+            </button>
+          ) : (
+            <button type="button" onClick={() => void inputs.refetch()}>
+              Reintentar catálogo
+            </button>
+          )}
+        </>
+      ) : null}
+      {inputs.data && !inputs.isError ? (
+        <div
+          className="time-series-table-scroll"
+          tabIndex={0}
+          role="region"
+          aria-label="Tabla con desplazamiento horizontal"
+        >
           <table>
             <caption>Senales genericas del catalogo</caption>
             <thead>
@@ -710,7 +798,9 @@ export function GlobalCatalogView() {
                       className="secondary-button"
                       type="button"
                       aria-pressed={inspected === row.signal_id}
-                      onClick={() => setInspected(row.signal_id)}
+                      onClick={() =>
+                        navigate(applied, cursorTrail, row.signal_id)
+                      }
                     >
                       Inspeccionar
                     </button>
@@ -721,7 +811,7 @@ export function GlobalCatalogView() {
           </table>
         </div>
       ) : null}
-      {inputs.data ? (
+      {inputs.data && !inputs.isError ? (
         <nav
           className="catalog-pagination"
           aria-label="Paginacion del catalogo"
@@ -730,7 +820,7 @@ export function GlobalCatalogView() {
             className="secondary-button"
             type="button"
             disabled={cursorTrail.length === 1}
-            onClick={() => setCursorTrail((trail) => trail.slice(0, -1))}
+            onClick={() => navigate(applied, cursorTrail.slice(0, -1))}
           >
             Anterior
           </button>
@@ -746,17 +836,14 @@ export function GlobalCatalogView() {
             type="button"
             disabled={!inputs.data.page.has_more}
             onClick={() =>
-              setCursorTrail((trail) => [
-                ...trail,
-                inputs.data.page.next_cursor,
-              ])
+              navigate(applied, [...cursorTrail, inputs.data.page.next_cursor])
             }
           >
             Siguiente
           </button>
         </nav>
       ) : null}
-      {inputs.data && inputs.data.items.length === 0 ? (
+      {inputs.data && !inputs.isError && inputs.data.items.length === 0 ? (
         <p className="empty-state">
           Ningun resultado con estos filtros. Ajusta la busqueda, el tipo, la
           clase, la unidad o el alcance.

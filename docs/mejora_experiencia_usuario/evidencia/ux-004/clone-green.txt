@@ -1,0 +1,11 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/App.test.tsx -t clones variants, switches
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 56 skipped (57)
+   Start at  12:26:54
+   Duration  6.35s (transform 1.61s, setup 367ms, import 2.17s, tests 1.83s, environment 1.63s)

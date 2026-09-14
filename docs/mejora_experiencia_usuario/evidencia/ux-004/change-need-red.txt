@@ -1,0 +1,43 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx -t changing the need
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ProtectedMutationJourney.test.tsx (18 tests | 1 failed | 17 skipped) 747ms
+   × UX-004 changing the need discards its candidate and cursor 745ms
+npm.cmd :
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/ProtectedMutationJourney.test.tsx -t 'changing th ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ProtectedMutationJourney.test.tsx > UX-004 changing the need discards its candidate and cursor
+Error: expect(element).not.toBeChecked()
+
+Received element is checked:
+  <input
+  aria-label="Elegir Precio de energia"
+  checked=""
+  name="journey-candidate"
+  type="radio"
+  value="41"
+/>
+ ❯ src/ProtectedMutationJourney.test.tsx:25:86
+     23|   await user.selectOptions(screen.getByLabelText("Necesidad funcional"…
+     24|   await user.click(screen.getByRole("button", { name: "Siguiente" }));
+     25|   expect(await screen.findByRole("radio", { name: "Elegir Precio de en…
+       |                                                                                      ^
+     26|   expect(screen.getByRole("button", { name: "Siguiente" })).toBeDisabl…
+     27|   expect(screen.getByText("Página 1")).toBeVisible();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 17 skipped (18)
+   Start at  12:05:20
+   Duration  4.27s (transform 1.12s, setup 291ms, import 1.59s, tests 747ms, environment 1.34s)

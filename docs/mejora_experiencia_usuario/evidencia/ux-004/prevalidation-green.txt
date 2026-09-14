@@ -1,0 +1,11 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx -t retries a failed prevalidation
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 18 skipped (19)
+   Start at  12:07:14
+   Duration  4.72s (transform 1.20s, setup 288ms, import 1.69s, tests 1.11s, environment 1.33s)

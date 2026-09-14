@@ -1,0 +1,11 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx -t changing the need
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 17 skipped (18)
+   Start at  12:05:44
+   Duration  4.57s (transform 1.13s, setup 326ms, import 1.61s, tests 940ms, environment 1.39s)

@@ -1,0 +1,297 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/ObjectTimeSeriesSummary.test.tsx -t recovers the object cursor
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ObjectTimeSeriesSummary.test.tsx (6 tests | 1 failed | 5 skipped) 356ms
+     × UX-004 recovers the object cursor without losing its origin or filters 353ms
+npm.cmd :
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/ObjectTimeSeriesSummary.test.tsx -t 'recovers the ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ObjectTimeSeriesSummary.test.tsx > contextual object time-series summary > UX-004 recovers the object
+cursor without losing its origin or filters
+TestingLibraryElementError: Unable to find an accessible element with the role "button" and name "Volver al inicio
+conservando filtros"
+
+Here are the accessible roles:
+
+  banner:
+
+  Name "":
+  <header
+    class="topbar"
+  />
+
+  --------------------------------------------------
+  link:
+
+  Name "BESS Workspace":
+  <a
+    class="brand"
+    data-discover="true"
+    href="/react"
+  />
+
+  Name "Proyectos":
+  <a
+    aria-current="page"
+    class="active"
+    data-discover="true"
+    href="/react/projects"
+  />
+
+  Name "Catálogo de series":
+  <a
+    class=""
+    data-discover="true"
+    href="/react/time-series/catalog"
+  />
+
+  Name "Administración":
+  <a
+    class=""
+    data-discover="true"
+    href="/react/admin/users"
+  />
+
+  Name "Estado del sistema":
+  <a
+    data-discover="true"
+    href="/react/system"
+  />
+
+  Name "Proyecto":
+  <a
+    data-discover="true"
+    href="/react/projects/1"
+  />
+
+  Name "Volver al escenario":
+  <a
+    data-discover="true"
+    href="/react/scenarios/4?section=data&variant=9"
+  />
+
+  Name "Explorar catálogo general":
+  <a
+    data-discover="true"
+    href="/react/time-series/catalog?return_to=%2Fprojects%2F1%2Flinkable-objects%2F7%2Ftime-series%3Fq%
+3Dprecio%26cursor%3Dexpired%26return_to%3D%252Fscenarios%252F4%253Fsection%253Ddata%2526variant%253D9"
+  />
+
+  --------------------------------------------------
+  strong:
+
+  Name "":
+  <strong />
+
+  Name "":
+  <strong />
+
+  --------------------------------------------------
+  button:
+
+  Name "Salir":
+  <button
+    class="secondary-button"
+    type="button"
+  />
+
+  --------------------------------------------------
+  navigation:
+
+  Name "Navegacion principal":
+  <nav
+    aria-label="Navegacion principal"
+    class="primary-nav"
+  />
+
+  Name "Ruta del resumen":
+  <nav
+    aria-label="Ruta del resumen"
+  />
+
+  --------------------------------------------------
+  group:
+
+  Name "":
+  <details
+    class="workspace-utilities"
+  />
+
+  --------------------------------------------------
+  main:
+
+  Name "":
+  <main
+    id="main-content"
+  />
+
+  --------------------------------------------------
+  alert:
+
+  Name "":
+  <p
+    class="result-alert"
+    role="alert"
+  />
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+    >
+      <header
+        class="topbar"
+      >
+        <a
+          class="brand"
+          data-discover="true"
+          href="/react"
+        >
+          <span
+            aria-hidden="true"
+            class="brand-mark"
+          >
+            Z
+          </span>
+          <span>
+            BESS Workspace
+          </span>
+        </a>
+        <div
+          class="identity"
+        >
+          <strong>
+            Cuenta de verificacion
+          </strong>
+          <span
+            class="role-badge"
+          >
+            admin
+          </span>
+          <button
+            class="secondary-button"
+            type="button"
+          >
+            Salir
+          </button>
+        </div>
+      </header>
+      <nav
+        aria-label="Navegacion principal"
+        class="primary-nav"
+      >
+        <a
+          aria-current="page"
+          class="active"
+          data-discover="true"
+          href="/react/projects"
+        >
+          Proyectos
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/time-series/catalog"
+        >
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 skipped (6)
+   Start at  12:12:51
+   Duration  3.97s (transform 1.05s, setup 317ms, import 1.53s, tests 356ms, environment 1.48s)
+
+          Catálogo de series
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/admin/users"
+        >
+          Administración
+        </a>
+        <details
+          class="workspace-utilities"
+        >
+          <summary>
+            Utilidades
+          </summary>
+          <a
+            data-discover="true"
+            href="/react/system"
+          >
+            Estado del sistema
+          </a>
+        </details>
+      </nav>
+      <main
+        id="main-content"
+      >
+        <section
+          class="content-panel catalog-surface object-summary-surface"
+        >
+          <nav
+            aria-label="Ruta del resumen"
+          >
+            <a
+              data-discover="true"
+              href="/react/projects/1"
+            >
+              Proyecto
+            </a>
+             / Series del objeto
+             ·
+            <a
+              data-discover="true"
+              href="/react/scenarios/4?section=data&variant=9"
+            >
+              Volver al escenario
+            </a>
+             ·
+            <a
+              data-discover="true"
+              href="/react/time-series/catalog?return_to=%2Fprojects%2F1%2Flinkable-objects%2F7%2Ftime-s
+eries%3Fq%3Dprecio%26cursor%3Dexpired%26return_to%3D%252Fscenarios%252F4%253Fsection%253Ddata%2526variant%253D9"
+            >
+              Explorar catálogo general
+            </a>
+          </nav>
+          <p
+            class="result-alert"
+            role="alert"
+          >
+            <strong>
+              TS_QUERY_CURSOR_EXPIRED
+            </strong>
+
+            Cursor vencido
+             No se modifico nada: esta superficie solo lee.
+          </p>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ Object.getElementError node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/ObjectTimeSeriesSummary.test.tsx:176:29
+    174|     const user = userEvent.setup();
+    175|     expect(await screen.findByRole("alert")).toHaveTextContent("Cursor…
+    176|     await user.click(screen.getByRole("button", { name: "Volver al ini…
+       |                             ^
+    177|     expect(await screen.findByRole("table", { name: "Series del objeto…
+    178|     expect(screen.getByLabelText("Buscar")).toHaveValue("precio");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯

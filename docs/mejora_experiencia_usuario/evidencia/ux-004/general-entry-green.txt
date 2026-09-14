@@ -1,0 +1,11 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/ObjectTimeSeriesSummary.test.tsx -t UX-004 keeps object
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 4 skipped (5)
+   Start at  12:12:41
+   Duration  4.34s (transform 1.23s, setup 345ms, import 1.70s, tests 568ms, environment 1.42s)

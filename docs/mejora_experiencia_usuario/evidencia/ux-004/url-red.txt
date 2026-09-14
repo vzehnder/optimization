@@ -1,0 +1,849 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/GlobalCatalog.test.tsx -t UX-004 restores
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/GlobalCatalog.test.tsx (12 tests | 1 failed | 11 skipped) 1097ms
+     × UX-004 restores applied filters and the inspector when reopening the catalog URL 1095ms
+npm.cmd :
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/GlobalCatalog.test.tsx -t 'UX-004 restores' *> .. ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/GlobalCatalog.test.tsx > layered catalog read surface > UX-004 restores applied filters and the inspector
+when reopening the catalog URL
+TestingLibraryElementError: Unable to find role="row" and name `/Precio de energia/`
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+    >
+      <header
+        class="topbar"
+      >
+        <a
+          class="brand"
+          data-discover="true"
+          href="/react"
+        >
+          <span
+            aria-hidden="true"
+            class="brand-mark"
+          >
+            Z
+          </span>
+          <span>
+            BESS Workspace
+          </span>
+        </a>
+        <div
+          class="identity"
+        >
+          <strong>
+            Cuenta de verificacion
+          </strong>
+          <span
+            class="role-badge"
+          >
+            admin
+          </span>
+          <button
+            class="secondary-button"
+            type="button"
+          >
+            Salir
+          </button>
+        </div>
+      </header>
+      <nav
+        aria-label="Navegacion principal"
+        class="primary-nav"
+      >
+        <a
+          class=""
+          data-discover="true"
+          href="/react/projects"
+        >
+          Proyectos
+        </a>
+        <a
+          aria-current="page"
+          class="active"
+          data-discover="true"
+          href="/react/time-series/catalog"
+        >
+          Catálogo de series
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/admin/users"
+        >
+          Administración
+        </a>
+        <details
+          class="workspace-utilities"
+        >
+          <summary>
+            Utilidades
+          </summary>
+          <a
+            data-discover="true"
+            href="/react/system"
+          >
+            Estado del sistema
+          </a>
+        </details>
+      </nav>
+      <main
+        id="main-content"
+      >
+        <section
+          class="workspace-view catalog-surface"
+        >
+          <header
+            class="workspace-heading"
+          >
+            <h1
+              tabindex="-1"
+            >
+              Catalogo de series genericas
+            </h1>
+            <p>
+              Superficie de solo lectura: explorar, inspeccionar procedencia y consultar historia no modifica
+ninguna fuente.
+            </p>
+          </header>
+          <form
+            class="workspace-form catalog-filters"
+          >
+            <div
+              class="field-row"
+            >
+              <label
+                for="catalog-q"
+              >
+                Buscar
+              </label>
+              <input
+                id="catalog-q"
+                maxlength="200"
+                type="search"
+                value=""
+              />
+            </div>
+            <div
+              class="field-row"
+            >
+              <label
+                for="catalog-semantic-type"
+              >
+                Tipo semantico
+              </label>
+              <select
+                id="catalog-semantic-type"
+              >
+                <option
+                  value=""
+                >
+                  Todos
+                </option>
+                <option
+                  value="energy_price"
+                >
+                  Precio de energia
+                </option>
+                <option
+                  value="hydro_inflow"
+                >
+                  Caudal afluente
+                </option>
+              </select>
+            </div>
+            <div
+              class="field-row"
+            >
+              <label
+                for="catalog-data-class"
+              >
+                Clase
+              </label>
+              <select
+                id="catalog-data-class"
+              >
+                <option
+                  value=""
+                >
+                  Todos
+                </option>
+                <option
+                  value="real"
+                >
+                  Real
+                </option>
+                <option
+                  value="forecast"
+                >
+                  Pronostico
+                </option>
+              </select>
+            </div>
+            <div
+              class="field-row"
+            >
+              <label
+                for="catalog-unit"
+              >
+                Unidad
+              </label>
+              <select
+                id="catalog-unit"
+              >
+                <option
+                  value=""
+                >
+                  Todos
+                </option>
+                <option
+                  value="usd_per_mwh"
+                >
+                  USD por MWh
+                </option>
+                <option
+                  value="m3_per_s"
+                >
+                  Metros cubicos por segundo
+                </option>
+              </select>
+            </div>
+            <div
+              class="field-row"
+            >
+              <label
+                for="catalog-scope"
+              >
+                Alcance
+              </label>
+              <select
+                id="catalog-scope"
+              >
+                <option
+                  value=""
+                >
+                  Todos
+                </option>
+                <option
+                  value="project"
+                >
+                  Proyecto
+                </option>
+                <option
+                  value="global"
+                >
+                  Global
+                </option>
+              </select>
+            </div>
+            <div
+              class="field-row"
+            >
+              <label
+                for="catalog-status"
+              >
+                Estado
+              </label>
+              <select
+                id="catalog-status"
+              >
+                <option
+                  value="active"
+                >
+                  Activas
+                </option>
+                <option
+                  value="archived"
+                >
+                  Archivadas
+                </option>
+              </select>
+            </div>
+            <div
+              class="field-row"
+            >
+              <label
+                for="catalog-order"
+              >
+                Orden
+              </label>
+              <select
+                id="catalog-order"
+              >
+                <option
+                  value="-updated_at,display_name"
+                >
+                  Actualizacion reciente
+                </option>
+                <option
+                  value="display_name"
+                >
+                  Nombre
+                </option>
+                <option
+                  value="owner_project_name"
+                >
+                  Proyecto propietario
+                </option>
+                <option
+                  value="-coverage_end"
+                >
+                  Fin de cobertura
+                </option>
+                <option
+                  value="-association_count"
+                >
+                  Asociaciones
+                </option>
+              </select>
+            </div>
+            <div
+              class="inline-actions"
+            >
+              <button
+                type="submit"
+              >
+                Filtrar
+              </button>
+              <button
+                class="secondary-button"
+                type="button"
+              >
+                Limpiar
+              </button>
+            </div>
+          </form>
+          <div
+            class="time-series-table-scroll"
+          >
+            <table>
+              <caption>
+                Senales genericas del catalogo
+              </caption>
+              <thead>
+                <tr>
+                  <th
+                    scope="col"
+                  >
+                    Senal
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Propietario
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Alcance
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Tipo
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Clase
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Unidad
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Cobertura
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Resolucion
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Detalle
+                  </th>
+                </tr>
+              </thead>
+              <tbody />
+            </table>
+          </div>
+          <nav
+            aria-label="Paginacion del catalogo"
+            class="catalog-pagination"
+          >
+            <button
+              class="secondary-button"
+              disabled=""
+              type="button"
+            >
+              Anterior
+            </button>
+            <span>
+              Pagina
+              1
+               -
+              0
+               senales en esta pagina
+               de 1
+            </span>
+            <button
+              class="secondary-button"
+              disabled=""
+              type="button"
+            >
+              Siguiente
+            </button>
+          </nav>
+          <p
+            class="empty-state"
+          >
+            Ningun resultado con estos filtros. Ajusta la busqueda, el tipo, la clase, la unidad o el alcance.
+          </p>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+    >
+      <header
+        class="topbar"
+      >
+        <a
+          class="brand"
+          data-discover="true"
+          href="/react"
+        >
+          <span
+            aria-hidden="true"
+            class="brand-mark"
+          >
+            Z
+          </span>
+          <span>
+            BESS Workspace
+          </span>
+        </a>
+        <div
+          class="identity"
+        >
+          <strong>
+            Cuenta de verificacion
+          </strong>
+          <span
+            class="role-badge"
+          >
+            admin
+          </span>
+          <button
+            class="secondary-button"
+            type="button"
+          >
+            Salir
+          </button>
+        </div>
+      </header>
+      <nav
+        aria-label="Navegacion principal"
+        class="primary-nav"
+      >
+        <a
+          class=""
+          data-discover="true"
+          href="/react/projects"
+        >
+          Proyectos
+        </a>
+        <a
+          aria-current="page"
+          class="active"
+          data-discover="true"
+          href="/react/time-series/catalog"
+        >
+          Catálogo de series
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/admin/users"
+        >
+          Administración
+        </a>
+        <details
+          class="workspace-utilities"
+        >
+          <summary>
+            Utilidades
+          </summary>
+          <a
+            data-discover="true"
+            href="/react/system"
+          >
+            Estado del sistema
+          </a>
+        </details>
+      </nav>
+      <main
+        id="main-content"
+      >
+        <section
+          class="workspace-view catalog-surface"
+        >
+          <header
+            class="workspace-heading"
+          >
+            <h1
+              tabindex="-1"
+            >
+              Catalogo de series genericas
+            </h1>
+            <p>
+              Superficie de solo lectura: explorar, inspeccionar procedencia y consultar historia no modifica
+ninguna fuente.
+            </p>
+          </header>
+          <form
+            class="workspace-form catalog-filters"
+          >
+            <div
+              class="field-row"
+            >
+              <label
+                for="catalog-q"
+              >
+                Buscar
+              </label>
+              <input
+                id="catalog-q"
+                maxlength="200"
+                type="search"
+                value=""
+              />
+            </div>
+            <div
+              class="field-row"
+            >
+              <label
+                for="catalog-semantic-type"
+              >
+                Tipo semantico
+              </label>
+              <select
+                id="catalog-semantic-type"
+              >
+                <option
+                  value=""
+                >
+                  Todos
+                </option>
+                <option
+                  value="energy_price"
+                >
+                  Precio de energia
+                </option>
+                <option
+                  value="hydro_inflow"
+                >
+                  Caudal afluente
+                </option>
+              </select>
+            </div>
+            <div
+              class="field-row"
+            >
+              <label
+                for="catalog-data-class"
+              >
+                Clase
+              </label>
+              <select
+                id="catalog-data-class"
+              >
+                <option
+                  value=""
+                >
+                  Todos
+                </option>
+                <option
+                  value="real"
+                >
+                  Real
+                </option>
+                <option
+                  value="forecast"
+                >
+                  Pronostico
+                </option>
+              </select>
+            </div>
+            <div
+              class="field-row"
+            >
+              <label
+                for="catalog-unit"
+              >
+                Unidad
+              </label>
+              <select
+                id="catalog-unit"
+              >
+                <option
+                  value=""
+                >
+                  Todos
+                </option>
+                <option
+                  value="usd_per_mwh"
+                >
+                  USD por MWh
+                </option>
+                <option
+                  value="m3_per_s"
+                >
+                  Metros cubicos por segundo
+                </option>
+              </select>
+            </div>
+            <div
+              class="field-row"
+            >
+              <label
+                for="catalog-scope"
+              >
+                Alcance
+              </label>
+              <select
+                id="catalog-scope"
+              >
+                <option
+                  value=""
+                >
+                  Todos
+                </option>
+                <option
+                  value="project"
+                >
+                  Proyecto
+                </option>
+                <option
+                  value="global"
+                >
+                  Global
+                </option>
+              </select>
+            </div>
+            <div
+              class="field-row"
+            >
+              <label
+                for="catalog-status"
+              >
+                Estado
+              </label>
+              <select
+                id="catalog-status"
+              >
+                <option
+                  value="active"
+                >
+                  Activas
+                </option>
+                <option
+                  value="archived"
+                >
+                  Archivadas
+                </option>
+              </select>
+            </div>
+            <div
+              class="field-row"
+            >
+              <label
+                for="catalog-order"
+              >
+                Orden
+              </label>
+              <select
+                id="catalog-order"
+              >
+                <option
+                  value="-updated_at,display_name"
+                >
+                  Actualizacion reciente
+                </option>
+                <option
+                  value="display_name"
+                >
+                  Nombre
+                </option>
+                <option
+                  value="owner_project_name"
+                >
+                  Proyecto propietario
+                </option>
+                <option
+                  value="-coverage_end"
+                >
+                  Fin de cobertura
+                </option>
+                <option
+                  value="-association_count"
+                >
+                  Asociaciones
+                </option>
+              </select>
+            </div>
+            <div
+              class="inline-actions"
+            >
+              <button
+                type="submit"
+              >
+                Filtrar
+              </button>
+              <button
+                class="secondary-button"
+                type="button"
+              >
+                Limpiar
+              </button>
+            </div>
+          </form>
+          <div
+            class="time-series-table-scroll"
+          >
+            <table>
+              <caption>
+                Senales genericas del catalogo
+              </caption>
+              <thead>
+                <tr>
+                  <th
+                    scope="col"
+                  >
+                    Senal
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Propietario
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Alcance
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Tipo
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Clase
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Unidad
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Cobertura
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Resolucion
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Detalle
+                  </th>
+                </tr>
+              </thead>
+              <tbody />
+            </table>
+          </div>
+          <nav
+            aria-label="Paginacion del catalogo"
+            class="catalog-pagination"
+          >
+            <button
+              class="secondary-button"
+              disabled=""
+              type="button"
+            >
+              Anterior
+            </button>
+            <span>
+              Pagina
+              1
+               -
+              0
+               senales en esta pagina
+               de 1
+            </span>
+            <button
+              class="secondary-button"
+              disabled=""
+              type="button"
+            >
+              Siguiente
+            </button>
+          </nav>
+          <p
+            class="empty-state"
+          >
+            Ningun resultado con estos filtros. Ajusta la busqueda, el tipo, la clase, la unidad o el alcance.
+          </p>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/GlobalCatalog.test.tsx:260:25
+    258|     }));
+    259|     const first = render(<App />);
+    260|     expect(await screen.findByRole("row", { name: /Precio de energia/ …
+       |                         ^
+    261|     expect(screen.getByLabelText("Buscar")).toHaveValue("precio");
+    262|     expect(await screen.findByRole("region", { name: "Inspector de sen…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 11 skipped (12)
+   Start at  11:39:54
+   Duration  4.78s (transform 1.08s, setup 307ms, import 1.56s, tests 1.10s, environment 1.51s)

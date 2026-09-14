@@ -245,6 +245,163 @@ function json(body: unknown, status = 200) {
 }
 
 describe("layered catalog read surface", () => {
+  it("UX-004 retains only public origin context while filtering the general catalog", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      `/react/time-series/catalog?${new URLSearchParams({ return_to: "/scenarios/4?section=data&variant=9&token=private", unknown: "discard" })}`,
+    );
+    vi.stubGlobal(
+      "fetch",
+      catalogFetch({
+        "/api/time-series/catalog/inputs": () =>
+          json({
+            items: [inputRow()],
+            page: { has_more: false, next_cursor: null },
+            meta: {},
+          }),
+      }),
+    );
+    render(<App />);
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Buscar"), "precio");
+    await user.click(screen.getByRole("button", { name: "Filtrar" }));
+    expect(
+      screen.getByRole("link", { name: "Volver al origen" }),
+    ).toHaveAttribute("href", "/react/scenarios/4?section=data&variant=9");
+    expect(window.location.search).not.toContain("token");
+    expect(window.location.search).not.toContain("unknown");
+  });
+  it("UX-004 recovers an expired cursor without discarding the applied search", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/react/time-series/catalog?q=precio&cursor=expired",
+    );
+    vi.stubGlobal(
+      "fetch",
+      catalogFetch({
+        "/api/time-series/catalog/inputs": (url) =>
+          url.searchParams.has("cursor")
+            ? json(
+                {
+                  error: {
+                    code: "TS_QUERY_CURSOR_EXPIRED",
+                    message: "Cursor vencido",
+                    request_id: "expired",
+                  },
+                },
+                409,
+              )
+            : json({
+                items:
+                  url.searchParams.get("q") === "precio" ? [inputRow()] : [],
+                page: { limit: 50, has_more: false, next_cursor: null },
+                summary: { total_count: 1 },
+                meta: {},
+              }),
+      }),
+    );
+    render(<App />);
+    const user = userEvent.setup();
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Volver al inicio conservando filtros",
+      }),
+    );
+    expect(
+      await screen.findByRole("row", { name: /Precio de energia/ }),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Buscar")).toHaveValue("precio");
+    expect(screen.getByRole("button", { name: "Anterior" })).toBeDisabled();
+  });
+  it("UX-004 returns from the protected journey to the same catalog page and inspector", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/react/time-series/catalog?q=precio&cursor=page-2&inspector=41",
+    );
+    vi.stubGlobal(
+      "fetch",
+      catalogFetch({
+        "/api/time-series/catalog/inputs": (url) =>
+          json({
+            items:
+              url.searchParams.get("cursor") === "page-2" ? [inputRow()] : [],
+            page: { limit: 50, has_more: false, next_cursor: null },
+            summary: { total_count: 2 },
+            meta: {},
+          }),
+        "/api/time-series/catalog/inputs/41": () => json(inputDetail()),
+        "/api/time-series/catalog/inputs/41/revisions": () =>
+          json(revisionPage()),
+      }),
+    );
+    render(<App />);
+    const user = userEvent.setup();
+    await user.click(
+      await screen.findByRole("link", { name: "Abrir el recorrido protegido" }),
+    );
+    await user.click(
+      await screen.findByRole("link", { name: "Volver al origen" }),
+    );
+    expect(
+      await screen.findByRole("row", { name: /Precio de energia/ }),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Buscar")).toHaveValue("precio");
+    await waitFor(() =>
+      expect(
+        screen.getByRole("region", { name: "Inspector de senal" }),
+      ).toHaveTextContent("USD/MWh"),
+    );
+    expect(screen.getByText(/Pagina 2/)).toBeVisible();
+  });
+  it("UX-004 restores applied filters and the inspector when reopening the catalog URL", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/react/time-series/catalog?q=precio&unit_key=usd_per_mwh&visibility_scope=global&inspector=41",
+    );
+    vi.stubGlobal(
+      "fetch",
+      catalogFetch({
+        "/api/time-series/catalog/inputs": (url) =>
+          json({
+            items: url.searchParams.get("q") === "precio" ? [inputRow()] : [],
+            page: { limit: 50, has_more: false, next_cursor: null },
+            summary: { total_count: 1 },
+            meta: {},
+          }),
+        "/api/time-series/catalog/inputs/41": () => json(inputDetail()),
+        "/api/time-series/catalog/inputs/41/revisions": () =>
+          json(revisionPage()),
+      }),
+    );
+    const first = render(<App />);
+    expect(
+      await screen.findByRole("row", { name: /Precio de energia/ }),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Buscar")).toHaveValue("precio");
+    await waitFor(() =>
+      expect(
+        screen.getByRole("region", { name: "Inspector de senal" }),
+      ).toHaveTextContent("USD/MWh"),
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByText("Más filtros (1 activos)"));
+    await user.selectOptions(screen.getByLabelText("Alcance"), "project");
+    await user.click(screen.getByRole("button", { name: "Filtrar" }));
+    first.unmount();
+    render(<App />);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("region", { name: "Inspector de senal" }),
+      ).toHaveTextContent("USD/MWh"),
+    );
+    expect(screen.getByLabelText("Buscar")).toHaveValue("precio");
+    await user.click(screen.getByText("Más filtros (1 activos)"));
+    expect(screen.getByLabelText("Alcance")).toHaveValue("project");
+  });
   it("lists one row per signal with owner, scope, contract, coverage and resolution", async () => {
     window.history.replaceState({}, "", "/react/time-series/catalog");
     const fetchMock = catalogFetch({
@@ -335,6 +492,7 @@ describe("layered catalog read surface", () => {
       screen.getByLabelText("Tipo semantico"),
       "hydro_inflow",
     );
+    await user.click(screen.getByText("Más filtros (0 activos)"));
     await user.selectOptions(screen.getByLabelText("Clase"), "real");
     await user.selectOptions(screen.getByLabelText("Unidad"), "m3_per_s");
     await user.selectOptions(screen.getByLabelText("Alcance"), "global");
@@ -645,7 +803,9 @@ describe("layered catalog read surface", () => {
       screen.getByRole("link", { name: "Abrir el recorrido protegido" }),
     ).toHaveAttribute(
       "href",
-      "/react/time-series/journey?entry=catalog&signal_id=41&project_id=1",
+      expect.stringContaining(
+        "/react/time-series/journey?entry=catalog&signal_id=41&project_id=1&return_to=",
+      ),
     );
     for (const [, init] of fetchMock.mock.calls) {
       expect((init?.method ?? "GET").toUpperCase()).toBe("GET");

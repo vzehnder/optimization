@@ -1,0 +1,511 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx -t UX-004 explains
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ProtectedMutationJourney.test.tsx (17 tests | 1 failed | 16 skipped) 1511ms
+   × UX-004 explains a refused candidate query and retries without losing the need 1509ms
+npm.cmd :
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/ProtectedMutationJourney.test.tsx -t 'UX-004 expl ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ProtectedMutationJourney.test.tsx > UX-004 explains a refused candidate query and retries without losing
+the need
+TestingLibraryElementError: Unable to find role="alert"
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+    >
+      <header
+        class="topbar"
+      >
+        <a
+          class="brand"
+          data-discover="true"
+          href="/react"
+        >
+          <span
+            aria-hidden="true"
+            class="brand-mark"
+          >
+            Z
+          </span>
+          <span>
+            BESS Workspace
+          </span>
+        </a>
+        <div
+          class="identity"
+        >
+          <strong>
+            Cuenta de verificacion
+          </strong>
+          <span
+            class="role-badge"
+          >
+            admin
+          </span>
+          <button
+            class="secondary-button"
+            type="button"
+          >
+            Salir
+          </button>
+        </div>
+      </header>
+      <nav
+        aria-label="Navegacion principal"
+        class="primary-nav"
+      >
+        <a
+          class=""
+          data-discover="true"
+          href="/react/projects"
+        >
+          Proyectos
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/time-series/catalog"
+        >
+          Catálogo de series
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/admin/users"
+        >
+          Administración
+        </a>
+        <details
+          class="workspace-utilities"
+        >
+          <summary>
+            Utilidades
+          </summary>
+          <a
+            data-discover="true"
+            href="/react/system"
+          >
+            Estado del sistema
+          </a>
+        </details>
+      </nav>
+      <main
+        id="main-content"
+      >
+        <section
+          class="workspace-view journey-surface"
+        >
+          <header
+            class="workspace-heading"
+          >
+            <h1
+              tabindex="-1"
+            >
+              Asociar fuente al objeto
+            </h1>
+            <p>
+              Revisa el origen, elige la fuente y comprueba su revisión. El cuarto paso explica el impacto antes
+de confirmar el cambio.
+            </p>
+          </header>
+          <div
+            class="journey-layout"
+          >
+            <aside
+              aria-label="Contexto del recorrido"
+              class="journey-rail"
+            >
+              <dl
+                class="journey-context"
+              >
+                <dt>
+                  Objeto
+                </dt>
+                <dd>
+                  Sistema
+                </dd>
+                <dt>
+                  Alcance
+                </dt>
+                <dd>
+                  Fuente generica compartida
+                </dd>
+                <dt>
+                  Necesidad
+                </dt>
+                <dd>
+                  Precio de compra a la red
+                </dd>
+                <dt>
+                  Accion
+                </dt>
+                <dd>
+                  Asociar fuente al objeto
+                </dd>
+              </dl>
+              <ol
+                aria-label="Pasos del recorrido"
+                class="journey-steps"
+              >
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    1
+                  </span>
+                  <span>
+                    Origen y alcance
+                  </span>
+                </li>
+                <li
+                  aria-current="step"
+                >
+                  <span
+                    class="journey-step-number"
+                  >
+                    2
+                  </span>
+                  <span>
+                    Definicion o seleccion
+                  </span>
+                </li>
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    3
+                  </span>
+                  <span>
+                    Datos o revision
+                  </span>
+                </li>
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    4
+                  </span>
+                  <span>
+                    Impacto y confirmacion
+                  </span>
+                </li>
+              </ol>
+            </aside>
+            <div
+              class="journey-step-panel"
+            >
+              <section
+                aria-label="Definicion o seleccion"
+              >
+                <h2>
+                  Definicion o seleccion
+                </h2>
+                <form>
+                  <label
+                    for="candidate-search"
+                  >
+                    Buscar fuentes candidatas
+                  </label>
+                  <input
+                    id="candidate-search"
+                    maxlength="200"
+                    type="search"
+                    value=""
+                  />
+                  <button
+                    type="submit"
+                  >
+                    Buscar fuentes
+                  </button>
+                </form>
+              </section>
+              <nav
+                aria-label="Pasos"
+                class="journey-navigation"
+              >
+                <button
+                  class="secondary-button"
+                  type="button"
+                >
+                  Volver
+                </button>
+                <button
+                  disabled=""
+                  type="button"
+                >
+                  Siguiente
+                </button>
+              </nav>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+    >
+      <header
+        class="topbar"
+      >
+        <a
+          class="brand"
+          data-discover="true"
+          href="/react"
+        >
+          <span
+            aria-hidden="true"
+            class="brand-mark"
+          >
+            Z
+          </span>
+          <span>
+            BESS Workspace
+          </span>
+        </a>
+        <div
+          class="identity"
+        >
+          <strong>
+            Cuenta de verificacion
+          </strong>
+          <span
+            class="role-badge"
+          >
+            admin
+          </span>
+          <button
+            class="secondary-button"
+            type="button"
+          >
+            Salir
+          </button>
+        </div>
+      </header>
+      <nav
+        aria-label="Navegacion principal"
+        class="primary-nav"
+      >
+        <a
+          class=""
+          data-discover="true"
+          href="/react/projects"
+        >
+          Proyectos
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/time-series/catalog"
+        >
+          Catálogo de series
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/admin/users"
+        >
+          Administración
+        </a>
+        <details
+          class="workspace-utilities"
+        >
+          <summary>
+            Utilidades
+          </summary>
+          <a
+            data-discover="true"
+            href="/react/system"
+          >
+            Estado del sistema
+          </a>
+        </details>
+      </nav>
+      <main
+        id="main-content"
+      >
+        <section
+          class="workspace-view journey-surface"
+        >
+          <header
+            class="workspace-heading"
+          >
+            <h1
+              tabindex="-1"
+            >
+              Asociar fuente al objeto
+            </h1>
+            <p>
+              Revisa el origen, elige la fuente y comprueba su revisión. El cuarto paso explica el impacto antes
+de confirmar el cambio.
+            </p>
+          </header>
+          <div
+            class="journey-layout"
+          >
+            <aside
+              aria-label="Contexto del recorrido"
+              class="journey-rail"
+            >
+              <dl
+                class="journey-context"
+              >
+                <dt>
+                  Objeto
+                </dt>
+                <dd>
+                  Sistema
+                </dd>
+                <dt>
+                  Alcance
+                </dt>
+                <dd>
+                  Fuente generica compartida
+                </dd>
+                <dt>
+                  Necesidad
+                </dt>
+                <dd>
+                  Precio de compra a la red
+                </dd>
+                <dt>
+                  Accion
+                </dt>
+                <dd>
+                  Asociar fuente al objeto
+                </dd>
+              </dl>
+              <ol
+                aria-label="Pasos del recorrido"
+                class="journey-steps"
+              >
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    1
+                  </span>
+                  <span>
+                    Origen y alcance
+                  </span>
+                </li>
+                <li
+                  aria-current="step"
+                >
+                  <span
+                    class="journey-step-number"
+                  >
+                    2
+                  </span>
+                  <span>
+                    Definicion o seleccion
+                  </span>
+                </li>
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    3
+                  </span>
+                  <span>
+                    Datos o revision
+                  </span>
+                </li>
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    4
+                  </span>
+                  <span>
+                    Impacto y confirmacion
+                  </span>
+                </li>
+              </ol>
+            </aside>
+            <div
+              class="journey-step-panel"
+            >
+              <section
+                aria-label="Definicion o seleccion"
+              >
+                <h2>
+                  Definicion o seleccion
+                </h2>
+                <form>
+                  <label
+                    for="candidate-search"
+                  >
+                    Buscar fuentes candidatas
+                  </label>
+                  <input
+                    id="candidate-search"
+                    maxlength="200"
+                    type="search"
+                    value=""
+                  />
+                  <button
+                    type="submit"
+                  >
+                    Buscar fuentes
+                  </button>
+                </form>
+              </section>
+              <nav
+                aria-label="Pasos"
+                class="journey-navigation"
+              >
+                <button
+                  class="secondary-button"
+                  type="button"
+                >
+                  Volver
+                </button>
+                <button
+                  disabled=""
+                  type="button"
+                >
+                  Siguiente
+                </button>
+              </nav>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/ProtectedMutationJourney.test.tsx:18:23
+     16|   await user.click(await screen.findByRole("radio", { name: "Reutiliza…
+     17|   await user.click(screen.getByRole("button", { name: "Siguiente" }));
+     18|   expect(await screen.findByRole("alert")).toHaveTextContent("Fuentes …
+       |                       ^
+     19|   expect(screen.getByRole("button", { name: "Siguiente", exact: true }…
+     20|   available = true;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 16 skipped (17)
+   Start at  11:54:17
+   Duration  5.10s (transform 1.11s, setup 319ms, import 1.57s, tests 1.51s, environment 1.40s)

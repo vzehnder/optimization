@@ -54,6 +54,20 @@ Python ni pruebas con participantes o lectores de pantalla. No cambian contratos
 de producción ni semántica de versiones. Tutoriales actualizados y capturas
 locales regenerables excluidas de Git.
 
+## Evidencia posterior: UX-004
+
+La implementación posterior de [UX-004](evidencia/ux-004/README.md), sobre
+`91bb561`, queda **In Review** desde el 2026-09-14. El usuario confirmó F1/F2
+antes de los ciclos de catálogo contextual, filtros/retorno y conflictos.
+Resultado: **491 pruebas aprobadas** (234 frontend, 20 navegador, 237 Python),
+con 82 PostgreSQL omitidas. TypeScript, ESLint, build y contrato generado pasan;
+`check` falla por los mismos 21 archivos previos sin formato. Se registran 19
+capturas, teclado/foco y axe sin serious/critical en las superficies ejercitadas,
+a 1440, 1280 y 320 px y con ampliación CSS 200 %. El recorrido real enlaza
+asociación, reemplazo, vuelta al escenario y ejecución por variante. No cambia
+el escritor, las transacciones ni la materialización; el solver de humo es
+sintético. No se ejecutó Julia real, PostgreSQL ni sesiones con participantes.
+
 ## Evidencia posterior: UX-003
 
 La [implementación sobre `19fc31c`](evidencia/ux-003/README.md) queda In Review:

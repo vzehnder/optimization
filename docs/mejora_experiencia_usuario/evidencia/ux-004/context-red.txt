@@ -1,0 +1,39 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx -t UX-004 opens
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ProtectedMutationJourney.test.tsx (15 tests | 1 failed | 14 skipped) 196ms
+   × UX-004 opens compatible sources with the need and variant from the model 195ms
+npm.cmd :
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/ProtectedMutationJourney.test.tsx -t 'UX-004 open ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ProtectedMutationJourney.test.tsx > UX-004 opens compatible sources with the need and variant from the model
+Error: expect(element).toHaveValue(grid_import_price)
+
+Expected the element to have value:
+  grid_import_price
+Received:
+
+ ❯ src/ProtectedMutationJourney.test.tsx:24:56
+     22|   const user = userEvent.setup();
+     23|   await screen.findByRole("option", { name: "Precio de compra a la red…
+     24|   expect(screen.getByLabelText("Necesidad funcional")).toHaveValue("gr…
+       |                                                        ^
+     25|   await waitFor(() => expect(screen.getByLabelText("Variante")).toHave…
+     26|   await user.click(screen.getByRole("radio", { name: "Reutilizar una f…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 14 skipped (15)
+   Start at  11:36:51
+   Duration  3.69s (transform 1.04s, setup 304ms, import 1.43s, tests 196ms, environment 1.45s)

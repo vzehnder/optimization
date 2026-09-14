@@ -4,6 +4,304 @@ import { describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
 
+it.each([
+  "entry=object&project_id=0&object_id=7",
+  "entry=object&project_id=1&object_id=9007199254740993",
+  "entry=object&project_id=1&object_id=7&intent=update_shared&association_id=bad",
+])(
+  "UX-004 refuses an incomplete or invalid journey destination (%s)",
+  async (query) => {
+    window.history.replaceState({}, "", `/react/time-series/journey?${query}`);
+    vi.stubGlobal("fetch", journeyFetch());
+    render(<App />);
+    expect(
+      await screen.findByRole("heading", { name: "Recorrido no disponible" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Siguiente" }),
+    ).not.toBeInTheDocument();
+  },
+);
+
+it.each([
+  "https://example.com",
+  "//example.com",
+  "/admin/users",
+  "/scenarios/4?return_to=https://example.com",
+])(
+  "UX-004 never offers an arbitrary return destination (%s)",
+  async (returnTo) => {
+    window.history.replaceState(
+      {},
+      "",
+      `/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=associate&${new URLSearchParams({ return_to: returnTo })}`,
+    );
+    vi.stubGlobal("fetch", journeyFetch());
+    render(<App />);
+    await screen.findByRole("heading", {
+      level: 1,
+      name: "Asociar fuente al objeto",
+    });
+    const link = screen.queryByRole("link", { name: "Volver al origen" });
+    if (returnTo.startsWith("/scenarios"))
+      expect(link).toHaveAttribute("href", "/react/scenarios/4");
+    else expect(link).not.toBeInTheDocument();
+  },
+);
+
+it("UX-004 retries a failed prevalidation with the same selected source", async () => {
+  window.history.replaceState(
+    {},
+    "",
+    "/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=associate",
+  );
+  let available = false;
+  vi.stubGlobal(
+    "fetch",
+    journeyFetch((url) => {
+      if (url.pathname === "/api/time-series/catalog/inputs")
+        return json(candidatePage());
+      if (url.pathname === "/api/time-series/catalog/inputs/41")
+        return json(inputDetail());
+      if (url.pathname === "/api/auth/csrf")
+        return json({ csrf_token: "csrf" });
+      if (url.pathname.endsWith("association-prevalidations"))
+        return available
+          ? json(associationPrevalidation())
+          : json(
+              {
+                error: {
+                  code: "TS_REVIEW_UNAVAILABLE",
+                  message: "Revisión temporalmente no disponible",
+                },
+              },
+              503,
+            );
+      return null;
+    }),
+  );
+  render(<App />);
+  const user = userEvent.setup();
+  await reachTheAssociationImpact(user);
+  await user.click(screen.getByRole("button", { name: "Siguiente" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Revisión temporalmente no disponible",
+  );
+  available = true;
+  await user.click(screen.getByRole("button", { name: "Revisar de nuevo" }));
+  expect(
+    await screen.findByRole("button", { name: "Asociar fuente al objeto" }),
+  ).toBeEnabled();
+  expect(
+    screen.getByRole("region", { name: "Impacto y confirmacion" }),
+  ).toHaveTextContent("Precio de energia");
+});
+
+it("UX-004 changing the need discards its candidate and cursor", async () => {
+  window.history.replaceState(
+    {},
+    "",
+    "/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=associate&binding_role_key=grid_import_price&cursor=old-page",
+  );
+  vi.stubGlobal(
+    "fetch",
+    journeyFetch((url) => {
+      if (url.pathname === "/api/time-series/catalog/descriptors")
+        return json(
+          descriptorPage([
+            { key: "grid_import_price", display_name: "Precio de compra" },
+            { key: "grid_export_price", display_name: "Precio de venta" },
+          ]),
+        );
+      if (url.pathname === "/api/time-series/catalog/inputs")
+        return json(candidatePage());
+      return null;
+    }),
+  );
+  render(<App />);
+  const user = userEvent.setup();
+  await user.click(
+    await screen.findByRole("radio", {
+      name: "Reutilizar una fuente generica",
+    }),
+  );
+  await user.click(screen.getByRole("button", { name: "Siguiente" }));
+  await user.click(
+    await screen.findByRole("radio", { name: "Elegir Precio de energia" }),
+  );
+  await user.click(screen.getByRole("button", { name: "Volver" }));
+  await user.selectOptions(
+    screen.getByLabelText("Necesidad funcional"),
+    "grid_export_price",
+  );
+  await user.click(screen.getByRole("button", { name: "Siguiente" }));
+  expect(
+    await screen.findByRole("radio", { name: "Elegir Precio de energia" }),
+  ).not.toBeChecked();
+  expect(screen.getByRole("button", { name: "Siguiente" })).toBeDisabled();
+  expect(screen.getByText("Página 1")).toBeVisible();
+  expect(new URLSearchParams(window.location.search).has("cursor")).toBe(false);
+});
+
+it("UX-004 explains a refused candidate query and retries without losing the need", async () => {
+  window.history.replaceState(
+    {},
+    "",
+    "/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=associate&binding_role_key=grid_import_price",
+  );
+  let available = false;
+  vi.stubGlobal(
+    "fetch",
+    journeyFetch((url) => {
+      if (url.pathname === "/api/time-series/catalog/inputs")
+        return available
+          ? json(candidatePage())
+          : json(
+              {
+                error: {
+                  code: "TS_QUERY_FAILED",
+                  message: "Fuentes temporalmente no disponibles",
+                },
+              },
+              503,
+            );
+      return null;
+    }),
+  );
+  render(<App />);
+  const user = userEvent.setup();
+  await user.click(
+    await screen.findByRole("radio", {
+      name: "Reutilizar una fuente generica",
+    }),
+  );
+  await user.click(screen.getByRole("button", { name: "Siguiente" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Fuentes temporalmente no disponibles",
+  );
+  expect(screen.getByRole("button", { name: "Siguiente" })).toBeDisabled();
+  available = true;
+  await user.click(screen.getByRole("button", { name: "Reintentar fuentes" }));
+  expect(
+    await screen.findByRole("radio", { name: "Elegir Precio de energia" }),
+  ).toBeEnabled();
+  expect(screen.getByRole("complementary")).toHaveTextContent(
+    "Precio de compra a la red",
+  );
+});
+
+it("UX-004 searches and pages candidates on the server before choosing a source", async () => {
+  window.history.replaceState(
+    {},
+    "",
+    "/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=associate&binding_role_key=grid_import_price",
+  );
+  vi.stubGlobal(
+    "fetch",
+    journeyFetch((url) => {
+      if (url.pathname === "/api/time-series/catalog/inputs") {
+        if (url.searchParams.get("cursor") === "second")
+          return json({
+            ...candidatePage(),
+            items: [
+              candidateRow({
+                identity: {
+                  ...candidateRow().identity,
+                  display_name: "Precio nocturno",
+                },
+              }),
+            ],
+          });
+        return json({
+          ...candidatePage(),
+          items:
+            url.searchParams.get("q") === "nocturno"
+              ? []
+              : candidatePage().items,
+          page: { limit: 1, has_more: true, next_cursor: "second" },
+        });
+      }
+      return null;
+    }),
+  );
+  render(<App />);
+  const user = userEvent.setup();
+  await user.click(
+    await screen.findByRole("radio", {
+      name: "Reutilizar una fuente generica",
+    }),
+  );
+  await user.click(screen.getByRole("button", { name: "Siguiente" }));
+  await user.type(
+    screen.getByLabelText("Buscar fuentes candidatas"),
+    "nocturno",
+  );
+  await user.click(screen.getByRole("button", { name: "Buscar fuentes" }));
+  expect(
+    await screen.findByText(/No hay fuentes en esta página/),
+  ).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Más fuentes" }));
+  expect(
+    await screen.findByRole("radio", { name: "Elegir Precio nocturno" }),
+  ).toBeEnabled();
+  await user.click(
+    screen.getByRole("radio", { name: "Elegir Precio nocturno" }),
+  );
+  expect(screen.getByRole("button", { name: "Siguiente" })).toBeEnabled();
+});
+
+it("UX-004 opens compatible sources with the need and variant from the model", async () => {
+  window.history.replaceState(
+    {},
+    "",
+    "/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=use_revision&binding_role_key=grid_import_price&scenario_id=4&variant_id=9",
+  );
+  vi.stubGlobal(
+    "fetch",
+    journeyFetch((url) => {
+      if (url.pathname === "/api/projects/1/scenarios") return json(SCENARIOS);
+      if (url.pathname === "/api/scenarios/4/case/variants")
+        return json(VARIANTS);
+      if (url.pathname.endsWith("/time-series-bindings"))
+        return json(boundBindings());
+      if (url.pathname === "/api/time-series/catalog/inputs") {
+        return url.searchParams.get("context_binding_role_key") ===
+          "grid_import_price" &&
+          url.searchParams.get("context_linkable_object_id") === "7" &&
+          url.searchParams.get("context_variant_id") === "9"
+          ? json(candidatePage())
+          : json({ detail: "Falta contexto" }, 422);
+      }
+      return null;
+    }),
+  );
+  render(<App />);
+  const user = userEvent.setup();
+  await screen.findByRole("option", { name: "Precio de compra a la red" });
+  expect(screen.getByLabelText("Necesidad funcional")).toHaveValue(
+    "grid_import_price",
+  );
+  await waitFor(() =>
+    expect(screen.getByLabelText("Variante")).toHaveValue("9"),
+  );
+  await user.click(
+    screen.getByRole("radio", { name: "Reutilizar una fuente generica" }),
+  );
+  await user.click(screen.getByRole("button", { name: "Siguiente" }));
+  expect(
+    await screen.findByRole("radio", { name: "Elegir Precio de energia" }),
+  ).toBeEnabled();
+  expect(
+    screen.getByRole("radio", { name: "Elegir Afluente medido" }),
+  ).toBeDisabled();
+  expect(
+    screen.getByText("La dimension de la senal no corresponde al rol."),
+  ).toBeVisible();
+  expect(
+    screen.getByRole("complementary", { name: "Contexto del recorrido" }),
+  ).toHaveTextContent("Sistema");
+});
+
 const VERIFICATION_IDENTITY = {
   user: {
     id: 3,
@@ -734,7 +1032,18 @@ describe("single protected mutation journey", () => {
         url.pathname === "/api/time-series/catalog/inputs/41/object-candidates"
       ) {
         candidateSearch = url.search;
-        return json(objectCandidates());
+        const page = objectCandidates();
+        return json({
+          ...page,
+          items: url.searchParams.has("cursor")
+            ? [page.items[1]]
+            : [page.items[0], page.items[2]],
+          page: {
+            has_more: !url.searchParams.has("cursor"),
+            next_cursor: "second-objects",
+            limit: 2,
+          },
+        });
       }
       if (url.pathname === "/api/time-series/catalog/inputs/41")
         return json(inputDetail());
@@ -813,6 +1122,8 @@ describe("single protected mutation journey", () => {
     ).toBeVisible();
 
     await user.click(screen.getByRole("checkbox", { name: "Elegir Sistema" }));
+    await user.click(screen.getByRole("button", { name: "Más objetos" }));
+    await screen.findByRole("checkbox", { name: "Elegir Bateria 1" });
     await user.click(
       screen.getByRole("checkbox", { name: "Elegir Bateria 1" }),
     );
@@ -830,6 +1141,7 @@ describe("single protected mutation journey", () => {
     });
     expect(within(verdicts).getAllByText("Aceptada")).toHaveLength(2);
     expect(within(impact).getByText(/todo o nada/i)).toBeVisible();
+    expect(impact).toHaveTextContent("Sistema, Bateria 1");
 
     await user.click(
       within(impact).getByRole("button", { name: "Asociar fuente al objeto" }),
@@ -898,6 +1210,18 @@ describe("single protected mutation journey", () => {
     expect(alert).toHaveTextContent("TS_LINK_PRECONDITION_CHANGED");
     expect(alert).toHaveTextContent("req_refused");
     expect(alert).toHaveTextContent("No se escribio nada");
+
+    expect(
+      within(impact).getByRole("button", { name: "Asociar fuente al objeto" }),
+    ).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Revisar de nuevo" }));
+    await waitFor(() =>
+      expect(
+        within(impact).getByRole("button", {
+          name: "Asociar fuente al objeto",
+        }),
+      ).toBeEnabled(),
+    );
 
     // The draft is intact: the same source is still chosen two steps back.
     await user.click(screen.getByRole("button", { name: "Volver" }));
@@ -1076,129 +1400,153 @@ describe("single protected mutation journey", () => {
     expect(screen.getByText(/1 objeto distinto/)).toBeVisible();
   });
 
-  it("replaces a binding only after showing the comparison and taking a reason", async () => {
-    window.history.replaceState(
-      {},
-      "",
-      "/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=use_revision",
-    );
-    const commits: { body: Record<string, unknown>; headers: Headers }[] = [];
-    let candidateSearch = "";
-    const fetchMock = journeyFetch((url, init) => {
-      if (url.pathname === "/api/projects/1/scenarios") return json(SCENARIOS);
-      if (url.pathname === "/api/scenarios/4/case/variants")
-        return json(VARIANTS);
-      if (
-        url.pathname === "/api/scenarios/4/case-variants/9/time-series-bindings"
-      )
-        return json(boundBindings());
-      if (url.pathname === "/api/time-series/catalog/inputs") {
-        candidateSearch = url.search;
-        return json(candidatePage());
-      }
-      if (url.pathname === "/api/time-series/catalog/inputs/41")
-        return json(inputDetail());
-      if (url.pathname === "/api/auth/csrf")
-        return json({ csrf_token: "csrf" });
-      if (
-        url.pathname ===
-        "/api/scenarios/4/case-variants/9/time-series-binding-prevalidations"
-      )
-        return json(bindingPrevalidation());
-      if (
-        url.pathname ===
-        "/api/scenarios/4/case-variants/9/time-series-binding-batches"
-      ) {
-        commits.push({
-          body: JSON.parse(String(init?.body)),
-          headers: new Headers(init?.headers),
-        });
-        return json(
-          {
-            outcome: "created",
-            batch_id: "batch-bind",
-            bindings_revision: 4,
-            operations: [],
-            request_id: "req_commit_bind",
+  it.each([
+    { signalId: 41, associationId: 12 },
+    { signalId: 42, associationId: null },
+  ])(
+    "replaces a binding only after showing the comparison and taking a reason ($signalId)",
+    async ({ signalId, associationId }) => {
+      window.history.replaceState(
+        {},
+        "",
+        "/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=use_revision",
+      );
+      const commits: { body: Record<string, unknown>; headers: Headers }[] = [];
+      let candidateSearch = "";
+      const fetchMock = journeyFetch((url, init) => {
+        if (url.pathname === "/api/projects/1/scenarios")
+          return json(SCENARIOS);
+        if (url.pathname === "/api/scenarios/4/case/variants")
+          return json(VARIANTS);
+        if (
+          url.pathname ===
+          "/api/scenarios/4/case-variants/9/time-series-bindings"
+        )
+          return json({
+            ...boundBindings(),
+            items: [
+              {
+                ...boundBindings().items[0],
+                binding_id: 999,
+                object: { ...boundBindings().items[0].object, id: 99 },
+                bound_content_hash: "other-object-hash",
+              },
+              ...boundBindings().items,
+            ],
+          });
+        if (url.pathname === "/api/time-series/catalog/inputs") {
+          candidateSearch = url.search;
+          return json({
+            ...candidatePage(),
+            items: [candidateRow({ signal_id: signalId })],
+          });
+        }
+        if (url.pathname === `/api/time-series/catalog/inputs/${signalId}`)
+          return json(inputDetail());
+        if (url.pathname === "/api/auth/csrf")
+          return json({ csrf_token: "csrf" });
+        if (
+          url.pathname ===
+          "/api/scenarios/4/case-variants/9/time-series-binding-prevalidations"
+        )
+          return json(bindingPrevalidation());
+        if (
+          url.pathname ===
+          "/api/scenarios/4/case-variants/9/time-series-binding-batches"
+        ) {
+          commits.push({
+            body: JSON.parse(String(init?.body)),
+            headers: new Headers(init?.headers),
+          });
+          return json(
+            {
+              outcome: "created",
+              batch_id: "batch-bind",
+              bindings_revision: 4,
+              operations: [],
+              request_id: "req_commit_bind",
+            },
+            201,
+          );
+        }
+        return null;
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      const user = userEvent.setup();
+
+      render(<App />);
+
+      await screen.findByRole("option", { name: "Precio de compra a la red" });
+      await user.selectOptions(
+        screen.getByLabelText("Necesidad funcional"),
+        "grid_import_price",
+      );
+      await user.click(
+        screen.getByRole("radio", { name: "Reutilizar una fuente generica" }),
+      );
+      await screen.findByRole("option", { name: "Plan base" });
+      await user.selectOptions(screen.getByLabelText("Escenario"), "4");
+      await screen.findByRole("option", { name: "Default" });
+      await user.selectOptions(screen.getByLabelText("Variante"), "9");
+      await user.click(screen.getByRole("button", { name: "Siguiente" }));
+
+      await screen.findByRole("table", {
+        name: "Fuentes genericas candidatas",
+      });
+      expect(new URLSearchParams(candidateSearch).get("context_usage")).toBe(
+        "execution",
+      );
+      await user.click(
+        screen.getByRole("radio", { name: "Elegir Precio de energia" }),
+      );
+      await user.click(screen.getByRole("button", { name: "Siguiente" }));
+
+      // AC-BIN-05: the replacement is visible before it can be confirmed.
+      const comparison = await screen.findByRole("table", {
+        name: "Comparacion del reemplazo",
+      });
+      expect(within(comparison).getByText("sha256:price-1")).toBeVisible();
+      expect(within(comparison).getByText("sha256:price-2")).toBeVisible();
+      expect(screen.getByRole("button", { name: "Siguiente" })).toBeDisabled();
+
+      await user.type(
+        screen.getByLabelText("Motivo del reemplazo"),
+        "Revisada la curva nueva y aceptada",
+      );
+      expect(screen.getByRole("button", { name: "Siguiente" })).toBeEnabled();
+      await user.click(screen.getByRole("button", { name: "Siguiente" }));
+
+      const impact = await screen.findByRole("region", {
+        name: "Impacto y confirmacion",
+      });
+      await user.click(
+        within(impact).getByRole("button", {
+          name: "Usar revision en una variante",
+        }),
+      );
+
+      await waitFor(() => expect(commits).toHaveLength(1));
+      expect(commits[0].body.expected_bindings_revision).toBe(3);
+      expect(commits[0].body.operations).toEqual([
+        expect.objectContaining({
+          action: "replace",
+          binding_id: 73,
+          expected_lifecycle_revision: 1,
+          signal_id: signalId,
+          binding_role_key: "grid_import_price",
+          linkable_object_id: 7,
+          catalog_association_id: associationId,
+          revision: {
+            mode: "current",
+            revision_id: 90,
+            content_hash: "sha256:price-2",
           },
-          201,
-        );
-      }
-      return null;
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const user = userEvent.setup();
-
-    render(<App />);
-
-    await screen.findByRole("option", { name: "Precio de compra a la red" });
-    await user.selectOptions(
-      screen.getByLabelText("Necesidad funcional"),
-      "grid_import_price",
-    );
-    await user.click(
-      screen.getByRole("radio", { name: "Reutilizar una fuente generica" }),
-    );
-    await screen.findByRole("option", { name: "Plan base" });
-    await user.selectOptions(screen.getByLabelText("Escenario"), "4");
-    await screen.findByRole("option", { name: "Default" });
-    await user.selectOptions(screen.getByLabelText("Variante"), "9");
-    await user.click(screen.getByRole("button", { name: "Siguiente" }));
-
-    await screen.findByRole("table", { name: "Fuentes genericas candidatas" });
-    expect(new URLSearchParams(candidateSearch).get("context_usage")).toBe(
-      "execution",
-    );
-    await user.click(
-      screen.getByRole("radio", { name: "Elegir Precio de energia" }),
-    );
-    await user.click(screen.getByRole("button", { name: "Siguiente" }));
-
-    // AC-BIN-05: the replacement is visible before it can be confirmed.
-    const comparison = await screen.findByRole("table", {
-      name: "Comparacion del reemplazo",
-    });
-    expect(within(comparison).getByText("sha256:price-1")).toBeVisible();
-    expect(within(comparison).getByText("sha256:price-2")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Siguiente" })).toBeDisabled();
-
-    await user.type(
-      screen.getByLabelText("Motivo del reemplazo"),
-      "Revisada la curva nueva y aceptada",
-    );
-    expect(screen.getByRole("button", { name: "Siguiente" })).toBeEnabled();
-    await user.click(screen.getByRole("button", { name: "Siguiente" }));
-
-    const impact = await screen.findByRole("region", {
-      name: "Impacto y confirmacion",
-    });
-    await user.click(
-      within(impact).getByRole("button", {
-        name: "Usar revision en una variante",
-      }),
-    );
-
-    await waitFor(() => expect(commits).toHaveLength(1));
-    expect(commits[0].body.expected_bindings_revision).toBe(3);
-    expect(commits[0].body.operations).toEqual([
-      expect.objectContaining({
-        action: "replace",
-        binding_id: 73,
-        expected_lifecycle_revision: 1,
-        signal_id: 41,
-        binding_role_key: "grid_import_price",
-        linkable_object_id: 7,
-        catalog_association_id: 12,
-        revision: {
-          mode: "current",
-          revision_id: 90,
-          content_hash: "sha256:price-2",
-        },
-        reason_text: "Revisada la curva nueva y aceptada",
-      }),
-    ]);
-    expect(commits[0].headers.get("If-Match")).toBe('"etag-bind"');
-  });
+          reason_text: "Revisada la curva nueva y aceptada",
+        }),
+      ]);
+      expect(commits[0].headers.get("If-Match")).toBe('"etag-bind"');
+    },
+  );
 
   it("keeps the draft when stepping back and forces a new prevalidation when the source changes", async () => {
     window.history.replaceState(
@@ -1368,12 +1716,27 @@ describe("single protected mutation journey", () => {
     expect(within(impact).getByText("Aceptada")).toBeVisible();
     expect(within(impact).getByText(/2 asociaciones/)).toBeVisible();
     expect(within(impact).getByText(/todo o nada/i)).toBeVisible();
+    expect(
+      screen.getByRole("heading", {
+        level: 1,
+        name: "Asociar fuente al objeto",
+      }),
+    ).toBeVisible();
+    expect(within(impact).getByText("Sistema")).toBeVisible();
+    expect(
+      within(impact).getByText(/Precio de energia · revisión 2/),
+    ).toBeVisible();
 
     await user.click(
       within(impact).getByRole("button", { name: "Asociar fuente al objeto" }),
     );
 
     expect(await screen.findByText(/batch-1/)).toBeVisible();
+    expect(
+      screen.getByText(
+        /La fuente quedó asociada al objeto. Su uso en una variante se confirma por separado/,
+      ),
+    ).toBeVisible();
     expect(commits).toHaveLength(1);
     const body = commits[0].body as Record<string, unknown>;
     expect(body.prevalidation_token).toBe("tok-1");
@@ -1446,7 +1809,10 @@ describe("single protected mutation journey", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "Recorrido protegido" });
+    await screen.findByRole("heading", {
+      name: "Asociar fuente al objeto",
+      level: 1,
+    });
     const rail = screen.getByRole("complementary", {
       name: "Contexto del recorrido",
     });
@@ -1701,7 +2067,10 @@ describe("single protected mutation journey", () => {
 
       render(<App />);
 
-      await screen.findByRole("heading", { name: "Recorrido protegido" });
+      await screen.findByRole("heading", {
+        name: "Asociar fuente al objeto",
+        level: 1,
+      });
       await screen.findByRole("option", { name: "Precio de compra a la red" });
       await user.selectOptions(
         screen.getByLabelText("Necesidad funcional"),
@@ -1871,7 +2240,10 @@ describe("single protected mutation journey", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: "Recorrido protegido" }),
+      await screen.findByRole("heading", {
+        name: "Asociar fuente al objeto",
+        level: 1,
+      }),
     ).toBeVisible();
     const rail = screen.getByRole("complementary", {
       name: "Contexto del recorrido",

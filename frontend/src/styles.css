@@ -1824,8 +1824,14 @@ button:focus-visible {
 }
 
 .catalog-surface {
+  color: #15354b;
   display: grid;
   gap: 1rem;
+}
+
+.catalog-surface .secondary-button,
+.journey-surface .secondary-button {
+  color: #174664;
 }
 
 .catalog-filters {
@@ -1870,6 +1876,7 @@ button:focus-visible {
 
 .catalog-pagination {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.75rem;
   align-items: center;
 }
@@ -2050,6 +2057,27 @@ button:focus-visible {
   display: grid;
   gap: 1.25rem;
   min-width: 0;
+}
+
+.journey-step-panel form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.journey-step-panel > section {
+  min-width: 0;
+}
+
+.journey-surface .catalog-definition-list {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+}
+
+.journey-step-panel form input {
+  min-width: 0;
+  padding: 0.6rem;
+  border: 1px solid #bcccdc;
+  border-radius: 0.4rem;
+  font: inherit;
 }
 
 .journey-origin-choice {

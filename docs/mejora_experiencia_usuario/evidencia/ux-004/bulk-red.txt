@@ -1,0 +1,669 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx -t takes the catalog entry point
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ProtectedMutationJourney.test.tsx (19 tests | 1 failed | 18 skipped) 825ms
+     × takes the catalog entry point through the same review and commits many rows as one atomic batch 822ms
+npm.cmd :
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/ProtectedMutationJourney.test.tsx -t 'takes the c ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ProtectedMutationJourney.test.tsx > single protected mutation journey > takes the catalog entry point
+through the same review and commits many rows as one atomic batch
+TestingLibraryElementError: Unable to find an accessible element with the role "button" and name "Más objetos"
+
+Here are the accessible roles:
+
+  banner:
+
+  Name "":
+  <header
+    class="topbar"
+  />
+
+  Name "":
+  <header
+    class="workspace-heading"
+  />
+
+  --------------------------------------------------
+  link:
+
+  Name "BESS Workspace":
+  <a
+    class="brand"
+    data-discover="true"
+    href="/react"
+  />
+
+  Name "Proyectos":
+  <a
+    class=""
+    data-discover="true"
+    href="/react/projects"
+  />
+
+  Name "Catálogo de series":
+  <a
+    class=""
+    data-discover="true"
+    href="/react/time-series/catalog"
+  />
+
+  Name "Administración":
+  <a
+    class=""
+    data-discover="true"
+    href="/react/admin/users"
+  />
+
+  Name "Estado del sistema":
+  <a
+    data-discover="true"
+    href="/react/system"
+  />
+
+  --------------------------------------------------
+  strong:
+
+  Name "":
+  <strong />
+
+  Name "":
+  <strong
+    class="journey-denied"
+  />
+
+  --------------------------------------------------
+  button:
+
+  Name "Salir":
+  <button
+    class="secondary-button"
+    type="button"
+  />
+
+  Name "Volver":
+  <button
+    class="secondary-button"
+    type="button"
+  />
+
+  Name "Siguiente":
+  <button
+    type="button"
+  />
+
+  --------------------------------------------------
+  navigation:
+
+  Name "Navegacion principal":
+  <nav
+    aria-label="Navegacion principal"
+    class="primary-nav"
+  />
+
+  Name "Pasos":
+  <nav
+    aria-label="Pasos"
+    class="journey-navigation"
+  />
+
+  --------------------------------------------------
+  group:
+
+  Name "":
+  <details
+    class="workspace-utilities"
+  />
+
+  --------------------------------------------------
+  main:
+
+  Name "":
+  <main
+    id="main-content"
+  />
+
+  --------------------------------------------------
+  heading:
+
+  Name "Asociar fuente al objeto":
+  <h1
+    tabindex="-1"
+  />
+
+  Name "Definicion o seleccion":
+  <h2 />
+
+  --------------------------------------------------
+  paragraph:
+
+  Name "":
+  <p />
+
+  --------------------------------------------------
+  complementary:
+
+  Name "Contexto del recorrido":
+  <aside
+    aria-label="Contexto del recorrido"
+    class="journey-rail"
+  />
+
+  --------------------------------------------------
+  term:
+
+  Name "":
+  <dt />
+
+  Name "":
+  <dt />
+
+  Name "":
+  <dt />
+
+  Name "":
+  <dt />
+
+  --------------------------------------------------
+  definition:
+
+  Name "":
+  <dd />
+
+  Name "":
+  <dd />
+
+  Name "":
+  <dd />
+
+  Name "":
+  <dd />
+
+  --------------------------------------------------
+  list:
+
+  Name "Pasos del recorrido":
+  <ol
+    aria-label="Pasos del recorrido"
+    class="journey-steps"
+  />
+
+  --------------------------------------------------
+  listitem:
+
+  Name "":
+  <li />
+
+  Name "":
+  <li
+    aria-current="step"
+  />
+
+  Name "":
+  <li />
+
+  Name "":
+  <li />
+
+  --------------------------------------------------
+  region:
+
+  Name "Definicion o seleccion":
+  <section
+    aria-label="Definicion o seleccion"
+  />
+
+  --------------------------------------------------
+  table:
+
+  Name "Objetos candidatos":
+  <table />
+
+  --------------------------------------------------
+  caption:
+
+  Name "Objetos candidatos":
+  <caption />
+
+  --------------------------------------------------
+  rowgroup:
+
+  Name "":
+  <thead />
+
+  Name "":
+  <tbody />
+
+  --------------------------------------------------
+  row:
+
+  Name "Elegir Objeto Tipo Compatibilidad":
+  <tr />
+
+  Name "Elegir Sistema Sistema global_signal_slot Compatible":
+  <tr />
+
+  Name "Elegir Consumo 1 Consumo 1 load No seleccionableEse tipo de objeto no admite esta
+necesidad.TS_COMPAT_OBJECT_TYPE_NOT_ALLOWED":
+  <tr />
+
+  --------------------------------------------------
+  columnheader:
+
+  Name "Elegir":
+  <th
+    scope="col"
+  />
+
+  Name "Objeto":
+  <th
+    scope="col"
+  />
+
+  Name "Tipo":
+  <th
+    scope="col"
+  />
+
+  Name "Compatibilidad":
+  <th
+    scope="col"
+  />
+
+  --------------------------------------------------
+  cell:
+
+  Name "Elegir Sistema":
+  <td />
+
+  Name "global_signal_slot":
+  <td />
+
+  Name "Compatible":
+  <td />
+
+  Name "Elegir Consumo 1":
+  <td />
+
+  Name "load":
+  <td />
+
+  Name "No seleccionableEse tipo de objeto no admite esta necesidad.TS_COMPAT_OBJECT_TYPE_NOT_ALLOWED":
+  <td />
+
+  --------------------------------------------------
+  checkbox:
+
+  Name "Elegir Sistema":
+  <input
+    aria-label="Elegir Sistema"
+    type="checkbox"
+    value="7"
+  />
+
+  Name "Elegir Consumo 1":
+  <input
+    aria-label="Elegir Consumo 1"
+    disabled=""
+    type="checkbox"
+    value="9"
+  />
+
+  --------------------------------------------------
+  rowheader:
+
+  Name "Sistema":
+  <th
+    scope="row"
+  />
+
+  Name "Consumo 1":
+  <th
+    scope="row"
+  />
+
+  --------------------------------------------------
+  code:
+
+  Name "":
+  <code />
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+    >
+      <header
+        class="topbar"
+      >
+        <a
+          class="brand"
+          data-discover="true"
+          href="/react"
+        >
+          <span
+            aria-hidden="true"
+            class="brand-mark"
+          >
+            Z
+          </span>
+          <span>
+            BESS Workspace
+          </span>
+        </a>
+        <div
+          class="identity"
+        >
+          <strong>
+            Cuenta de verificacion
+          </strong>
+          <span
+            class="role-badge"
+          >
+            admin
+          </span>
+          <button
+            class="secondary-button"
+            type="button"
+          >
+            Salir
+          </button>
+        </div>
+      </header>
+      <nav
+        aria-label="Navegacion principal"
+        class="primary-nav"
+      >
+        <a
+          class=""
+          data-discover="true"
+          href="/react/projects"
+        >
+          Proyectos
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/time-series/catalog"
+        >
+          Catálogo de series
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/admin/users"
+        >
+          Administración
+        </a>
+        <details
+          class="workspace-utilities"
+        >
+          <summary>
+            Utilidades
+          </summary>
+          <a
+            data-discover="true"
+            href="/react/system"
+          >
+            Estado del sistema
+          </a>
+        </details>
+      </nav>
+      <main
+        id="main-content"
+      >
+        <section
+          class="workspace-view journey-surface"
+        >
+          <header
+            class="workspace-heading"
+          >
+            <h1
+              tabindex="-1"
+            >
+              Asociar fuente al objeto
+            </h1>
+            <p>
+              Revisa el origen, elige la fuente y comprueba su revisión. El cuarto paso explica el impacto antes
+de confirmar el cambio.
+            </p>
+          </header>
+          <div
+            class="journey-layout"
+          >
+            <aside
+              aria-label="Contexto del recorrido"
+              class="journey-rail"
+            >
+              <dl
+                class="journey-context"
+              >
+                <dt>
+                  Objeto
+                </dt>
+                <dd>
+                  1 objetos elegidos
+                </dd>
+                <dt>
+                  Alcance
+                </dt>
+                <dd>
+                  Fuente generica compartida
+                </dd>
+                <dt>
+                  Necesidad
+                </dt>
+                <dd>
+                  grid_import_price
+                </dd>
+                <dt>
+                  Accion
+                </dt>
+                <dd>
+                  Asociar fuente al objeto
+                </dd>
+              </dl>
+              <ol
+                aria-label="Pasos del recorrido"
+                class="journey-steps"
+              >
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    1
+                  </span>
+                  <span>
+                    Origen y alcance
+                  </span>
+                </li>
+                <li
+                  aria-current="step"
+                >
+                  <span
+                    class="journey-step-number"
+                  >
+                    2
+                  </span>
+                  <span>
+                    Definicion o seleccion
+                  </span>
+                </li>
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    3
+                  </span>
+                  <span>
+                    Datos o revision
+                  </span>
+                </li>
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    4
+                  </span>
+                  <span>
+                    Impacto y confirmacion
+                  </span>
+                </li>
+              </ol>
+            </aside>
+            <div
+              class="journey-step-panel"
+            >
+              <section
+                aria-label="Definicion o seleccion"
+              >
+                <h2>
+                  Definicion o seleccion
+                </h2>
+                <div
+                  class="time-series-table-scroll"
+                >
+                  <table>
+                    <caption>
+                      Objetos candidatos
+                    </caption>
+                    <thead>
+                      <tr>
+                        <th
+                          scope="col"
+                        >
+                          Elegir
+                        </th>
+                        <th
+                          scope="col"
+                        >
+                          Objeto
+                        </th>
+                        <th
+                          scope="col"
+                        >
+                          Tipo
+                        </th>
+                        <th
+                          scope="col"
+                        >
+                          Compatibilidad
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>
+                          <input
+                            aria-label="Elegir Sistema"
+                            type="checkbox"
+                            value="7"
+                          />
+                        </td>
+                        <th
+                          scope="row"
+                        >
+                          Sistema
+                        </th>
+                        <td>
+                          global_signal_slot
+                        </td>
+                        <td>
+                          <span>
+                            Compatible
+                          </span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>
+                          <input
+                            aria-label="Elegir Consumo 1"
+                            disabled=""
+                            type="checkbox"
+                            value="9"
+                          />
+                        </td>
+                        <th
+                          scope="row"
+                        >
+                          Consumo 1
+                        </th>
+                        <td>
+                          load
+                        </td>
+                        <td>
+                          <strong
+                            class="journey-denied"
+                          >
+                            No seleccionable
+                          </strong>
+                          <span
+                            class="journey-denial"
+                          >
+                            <span>
+                              Ese tipo de objeto no admite esta necesidad.
+                            </span>
+                            <code>
+                              TS_COMPAT_OBJECT_TYPE_NOT_ALLOWED
+                            </code>
+                          </span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+              <nav
+                aria-label="Pasos"
+                class="journey-navigation"
+              >
+                <button
+                  class="secondary-button"
+                  type="button"
+                >
+                  Volver
+                </button>
+                <button
+                  type="button"
+                >
+                  Siguiente
+                </button>
+              </nav>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ Object.getElementError node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/ProtectedMutationJourney.test.tsx:930:29
+    928|
+    929|     await user.click(screen.getByRole("checkbox", { name: "Elegir Sist…
+    930|     await user.click(screen.getByRole("button", { name: "Más objetos" …
+       |                             ^
+    931|     await screen.findByRole("checkbox", { name: "Elegir Bateria 1" });
+    932|     await user.click(
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 18 skipped (19)
+   Start at  12:13:47
+   Duration  4.41s (transform 1.12s, setup 293ms, import 1.58s, tests 825ms, environment 1.43s)

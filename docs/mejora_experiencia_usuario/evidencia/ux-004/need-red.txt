@@ -1,0 +1,42 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/VariantPreparation.test.tsx -t takes a missing canonical
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/VariantPreparation.test.tsx (13 tests | 1 failed | 12 skipped) 567ms
+     × takes a missing canonical need to the existing protected journey 565ms
+npm.cmd :
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/VariantPreparation.test.tsx -t 'takes a missing c ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/VariantPreparation.test.tsx > variant preparation > takes a missing canonical need to the existing
+protected journey
+AssertionError: expected null to be '10' // Object.is equality
+
+- Expected:
+"10"
+
++ Received:
+null
+
+ ❯ src/VariantPreparation.test.tsx:345:57
+    343|     );
+    344|     const destination = new URL(correction.getAttribute("href")!, "htt…
+    345|     expect(destination.searchParams.get("scenario_id")).toBe("10");
+       |                                                         ^
+    346|     expect(destination.searchParams.get("variant_id")).toBe("3");
+    347|     expect(destination.searchParams.get("return_to")).toBe("/scenarios…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 12 skipped (13)
+   Start at  11:38:37
+   Duration  4.53s (transform 1.16s, setup 361ms, import 1.70s, tests 567ms, environment 1.60s)

@@ -9,6 +9,37 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 
+it("UX-004 restores the variant in the return URL over the saved preference", async () => {
+  localStorage.setItem("case-input-variant-selection:10", "3");
+  window.history.replaceState(
+    {},
+    "",
+    "/react/scenarios/10?section=data&variant=4",
+  );
+  serveBoundPreparation((path) =>
+    path.endsWith("/case/variants")
+      ? Response.json({
+          default_variant_id: 3,
+          variants: [
+            boundVariant,
+            {
+              ...boundVariant,
+              variant: {
+                id: 4,
+                display_name: "Precio revisado",
+                is_default: false,
+              },
+            },
+          ],
+        })
+      : undefined,
+  );
+  render(<App />);
+  expect(
+    await screen.findByRole("combobox", { name: "Variante activa" }),
+  ).toHaveValue("4");
+});
+
 const priceSet = {
   id: 5,
   project_id: 1,
@@ -341,6 +372,21 @@ describe("variant preparation", () => {
     expect(correction.getAttribute("href")).toContain(
       "object_id=9&intent=use_revision",
     );
+    const destination = new URL(
+      correction.getAttribute("href")!,
+      "http://localhost",
+    );
+    expect(destination.searchParams.get("scenario_id")).toBe("10");
+    expect(destination.searchParams.get("variant_id")).toBe("3");
+    expect(destination.searchParams.get("return_to")).toBe(
+      "/scenarios/10?section=data&variant=3",
+    );
+    expect(
+      screen.getByRole("link", { name: "Ver fuentes del componente grid_1" }),
+    ).toHaveAttribute(
+      "href",
+      expect.stringContaining("/projects/1/linkable-objects/9/time-series?"),
+    );
     expect(
       screen.getByRole("button", { name: "Ejecutar variante" }),
     ).toBeDisabled();
@@ -665,6 +711,9 @@ describe("variant preparation", () => {
                   {
                     name: "Precio enero",
                     revision_number: 7,
+                    signal_key: "price_usd_per_mwh",
+                    entity_type: "grid",
+                    entity_id: "grid_1",
                     state: "valid_pinned",
                     linkable_object_id: 9,
                     timezone: "America/Santiago",
@@ -695,10 +744,16 @@ describe("variant preparation", () => {
     expect(journey.getAttribute("href")).toContain(
       "/time-series/journey?entry=object&project_id=1&object_id=9&intent=use_revision",
     );
+    expect(journey.getAttribute("href")).toContain(
+      "scenario_id=10&variant_id=3&return_to=",
+    );
+    const need = screen.getByRole("list", { name: "Senales requeridas" });
+    expect(need).toHaveTextContent("Precio de compra a la red");
+    expect(need).toHaveTextContent("Precio enero · revisión 7");
+    expect(need).toHaveTextContent("Revisión fijada");
     expect(
       screen.queryByLabelText("Serie de precio (price_usd_per_mwh)"),
     ).not.toBeInTheDocument();
-    expect(screen.getByText(/Precio enero · revisión 7/)).toBeVisible();
     await user.click(
       screen.getByRole("button", { name: "Revisar preparación" }),
     );

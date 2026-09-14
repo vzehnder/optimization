@@ -163,6 +163,86 @@ function contextualPage() {
 }
 
 describe("contextual object time-series summary", () => {
+  it("UX-004 recovers the object cursor without losing its origin or filters", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/react/projects/1/linkable-objects/7/time-series?q=precio&cursor=expired&return_to=%2Fscenarios%2F4%3Fsection%3Ddata%26variant%3D9",
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input), "http://localhost");
+        if (url.pathname === "/api/auth/me") return json(VERIFICATION_IDENTITY);
+        return url.searchParams.has("cursor")
+          ? json(
+              {
+                error: {
+                  code: "TS_QUERY_CURSOR_EXPIRED",
+                  message: "Cursor vencido",
+                },
+              },
+              409,
+            )
+          : json(contextualPage());
+      }),
+    );
+    render(<App />);
+    const user = userEvent.setup();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Cursor vencido",
+    );
+    await user.click(
+      screen.getByRole("button", {
+        name: "Volver al inicio conservando filtros",
+      }),
+    );
+    expect(
+      await screen.findByRole("table", { name: "Series del objeto Sistema" }),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Buscar")).toHaveValue("precio");
+    expect(
+      screen.getByRole("link", { name: "Volver al escenario" }),
+    ).toHaveAttribute("href", "/react/scenarios/4?section=data&variant=9");
+  });
+  it("UX-004 keeps object filters and scenario context through the source journey", async () => {
+    const origin =
+      "/projects/1/linkable-objects/7/time-series?q=precio&kind=catalog&scenario_id=4&variant_id=9&return_to=%2Fscenarios%2F4%3Fsection%3Ddata%26variant%3D9";
+    window.history.replaceState({}, "", `/react${origin}`);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input), "http://localhost");
+        if (url.pathname === "/api/auth/me") return json(VERIFICATION_IDENTITY);
+        if (url.pathname.endsWith("/time-series"))
+          return json(contextualPage());
+        return json({ items: [], scenarios: [], variants: [] });
+      }),
+    );
+    render(<App />);
+    const user = userEvent.setup();
+    await screen.findByRole("table", { name: "Series del objeto Sistema" });
+    expect(screen.getByLabelText("Buscar")).toHaveValue("precio");
+    expect(screen.getByLabelText("Origen")).toHaveValue("catalog");
+    expect(
+      screen.getByRole("link", { name: "Explorar catálogo general" }),
+    ).toHaveAttribute(
+      "href",
+      expect.stringContaining("/react/time-series/catalog?return_to="),
+    );
+    expect(
+      screen.getByRole("link", { name: "Volver al escenario" }),
+    ).toHaveAttribute("href", "/react/scenarios/4?section=data&variant=9");
+    await user.click(
+      screen.getByRole("link", { name: "Asociar fuente al objeto" }),
+    );
+    await user.click(
+      await screen.findByRole("link", { name: "Volver al origen" }),
+    );
+    await screen.findByRole("table", { name: "Series del objeto Sistema" });
+    expect(screen.getByLabelText("Buscar")).toHaveValue("precio");
+    expect(screen.getByLabelText("Origen")).toHaveValue("catalog");
+  });
   it("shows both source kinds, separate association and usage states, and blocked staleness", async () => {
     window.history.replaceState(
       {},
@@ -214,13 +294,17 @@ describe("contextual object time-series summary", () => {
       screen.getByRole("link", { name: "Asociar fuente al objeto" }),
     ).toHaveAttribute(
       "href",
-      "/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=associate",
+      expect.stringContaining(
+        "/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=associate&return_to=",
+      ),
     );
     expect(
       screen.getByRole("link", { name: "Usar revision en una variante" }),
     ).toHaveAttribute(
       "href",
-      "/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=use_revision",
+      expect.stringContaining(
+        "/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=use_revision&return_to=",
+      ),
     );
     for (const [, init] of fetchMock.mock.calls) {
       expect((init?.method ?? "GET").toUpperCase()).toBe("GET");

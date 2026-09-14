@@ -1,0 +1,40 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx -t states that nothing was written
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ProtectedMutationJourney.test.tsx (15 tests | 1 failed | 14 skipped) 956ms
+     × keeps the draft and states that nothing was written when the commit is refused 954ms
+npm.cmd :
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/ProtectedMutationJourney.test.tsx -t 'states that ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ProtectedMutationJourney.test.tsx > single protected mutation journey > keeps the draft and states that
+nothing was written when the commit is refused
+Error: expect(element).toBeDisabled()
+
+Received element is not disabled:
+  <button
+  type="button"
+/>
+ ❯ src/ProtectedMutationJourney.test.tsx:929:86
+    927|     expect(alert).toHaveTextContent("No se escribio nada");
+    928|
+    929|     expect(within(impact).getByRole("button", { name: "Asociar fuente …
+       |                                                                                      ^
+    930|     await user.click(screen.getByRole("button", { name: "Revisar de nu…
+    931|     await waitFor(() => expect(within(impact).getByRole("button", { na…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 14 skipped (15)
+   Start at  11:45:23
+   Duration  4.75s (transform 1.13s, setup 367ms, import 1.61s, tests 956ms, environment 1.49s)

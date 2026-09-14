@@ -1,0 +1,11 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx -t states that nothing was written
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 14 skipped (15)
+   Start at  11:46:22
+   Duration  4.75s (transform 1.15s, setup 319ms, import 1.64s, tests 1.08s, environment 1.41s)

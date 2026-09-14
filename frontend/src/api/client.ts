@@ -2037,6 +2037,9 @@ export interface CaseInputVariantDetail {
     bindings_revision: number;
     required_signals: RequiredSignalStatus[];
     sources: {
+      signal_key?: string;
+      entity_type?: string | null;
+      entity_id?: string | null;
       name: string;
       revision_number: number;
       content_hash: string;
@@ -4238,6 +4241,7 @@ export async function commitObjectSeriesDerivation(
 }
 
 export interface CaseBindingRow {
+  object: { id: number; display_name: string };
   binding_id: number;
   scenario_id: number;
   case_input_variant_id: number;

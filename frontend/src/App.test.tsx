@@ -1715,7 +1715,11 @@ describe("application shell", () => {
 
   it("clones variants, switches them from dropdown, and persists active selection", async () => {
     window.localStorage.clear();
-    window.history.replaceState({}, "", "/react/scenarios/10?section=data");
+    window.history.replaceState(
+      {},
+      "",
+      "/react/scenarios/10?section=data&variant=3",
+    );
     const scenario = {
       id: 10,
       project_id: 1,

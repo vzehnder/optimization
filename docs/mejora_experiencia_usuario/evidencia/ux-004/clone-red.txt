@@ -1,0 +1,423 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/App.test.tsx -t clones variants, switches
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/App.test.tsx (57 tests | 1 failed | 56 skipped) 2086ms
+     × clones variants, switches them from dropdown, and persists active selection 2082ms
+npm.cmd :
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/App.test.tsx -t 'clones variants, switches' *> .. ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/App.test.tsx > application shell > clones variants, switches them from dropdown, and persists active
+selection
+TestingLibraryElementError: Unable to find role="heading" and name "Variante de entrada: Stress prices"
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+    >
+      <header
+        class="topbar"
+      >
+        <a
+          class="brand"
+          data-discover="true"
+          href="/react"
+        >
+          <span
+            aria-hidden="true"
+            class="brand-mark"
+          >
+            Z
+          </span>
+          <span>
+            BESS Workspace
+          </span>
+        </a>
+        <div
+          class="identity"
+        >
+          <strong>
+            Ada Analyst
+          </strong>
+          <span
+            class="role-badge"
+          >
+            analyst
+          </span>
+          <button
+            class="secondary-button"
+            type="button"
+          >
+            Salir
+          </button>
+        </div>
+      </header>
+      <nav
+        aria-label="Navegacion principal"
+        class="primary-nav"
+      >
+        <a
+          class=""
+          data-discover="true"
+          href="/react/projects"
+        >
+          Proyectos
+        </a>
+        <details
+          class="workspace-utilities"
+        >
+          <summary>
+            Utilidades
+          </summary>
+          <a
+            data-discover="true"
+            href="/react/system"
+          >
+            Estado del sistema
+          </a>
+        </details>
+      </nav>
+      <main
+        id="main-content"
+      >
+        <section
+          class="workspace-view"
+        >
+          <nav
+            aria-label="Ruta"
+            class="breadcrumbs"
+          >
+            <a
+              data-discover="true"
+              href="/react/projects"
+            >
+              Proyectos
+            </a>
+            <span
+              aria-hidden="true"
+            >
+              /
+            </span>
+            <a
+              data-discover="true"
+              href="/react/projects/1"
+            >
+              Hybrid PMGD
+            </a>
+            <span
+              aria-hidden="true"
+            >
+              /
+            </span>
+            <span>
+              Base case
+            </span>
+          </nav>
+          <header
+            class="workspace-heading"
+          >
+            <h1
+              tabindex="-1"
+            >
+              Base case
+            </h1>
+            <p>
+              Initial modeling branch
+            </p>
+          </header>
+          <nav
+            aria-label="Secciones del escenario"
+            class="workspace-nav"
+          >
+            <a
+              data-discover="true"
+              href="/react/scenarios/10?section=summary&variant=3"
+            >
+              Resumen
+            </a>
+            <a
+              data-discover="true"
+              href="/react/scenarios/10/draft?section=data&variant=3"
+            >
+              Modelo
+            </a>
+            <a
+              aria-current="page"
+              data-discover="true"
+              href="/react/scenarios/10?section=data&variant=3"
+            >
+              Datos
+            </a>
+            <a
+              data-discover="true"
+              href="/react/scenarios/10?section=runs&variant=3"
+            >
+              Ejecuciones
+            </a>
+            <a
+              data-discover="true"
+              href="/react/scenarios/10?section=advanced&variant=3"
+            >
+              Avanzado
+            </a>
+          </nav>
+          <div
+            class="workspace-stack"
+          >
+            <div
+              class="workspace-section"
+              hidden=""
+            >
+              <h2>
+                Preparación del escenario
+              </h2>
+              <div
+                role="alert"
+              >
+                <p>
+                  No pudimos comprobar el modelo.
+                </p>
+                <button
+                  type="button"
+                >
+                  Reintentar consulta del modelo
+                </button>
+              </div>
+              <p>
+                Define el modelo, conecta sus datos y revisa el período antes de ejecutar.
+              </p>
+            </div>
+            <div
+              class="workspace-stack"
+            >
+              <section
+                aria-labelledby="scenario-data"
+                class="workspace-section"
+              >
+                <h2
+                  id="scenario-data"
+                >
+                  Datos y período
+                </h2>
+                <p>
+                  Selecciona la variante, sus fuentes y el período de ejecución.
+                </p>
+                <a
+                  data-discover="true"
+                  hr...
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div>
+      <div
+        class="app-frame"
+      >
+        <header
+          class="topbar"
+        >
+          <a
+            class="brand"
+            data-discover="true"
+            href="/react"
+          >
+            <span
+              aria-hidden="true"
+              class="brand-mark"
+            >
+              Z
+            </span>
+            <span>
+              BESS Workspace
+            </span>
+          </a>
+          <div
+            class="identity"
+          >
+            <strong>
+              Ada Analyst
+            </strong>
+            <span
+              class="role-badge"
+            >
+              analyst
+            </span>
+            <button
+              class="secondary-button"
+              type="button"
+            >
+              Salir
+            </button>
+          </div>
+        </header>
+        <nav
+          aria-label="Navegacion principal"
+          class="primary-nav"
+        >
+          <a
+            class=""
+            data-discover="true"
+            href="/react/projects"
+          >
+            Proyectos
+          </a>
+          <details
+            class="workspace-utilities"
+          >
+            <summary>
+              Utilidades
+            </summary>
+            <a
+              data-discover="true"
+              href="/react/system"
+            >
+              Estado del sistema
+            </a>
+          </details>
+        </nav>
+        <main
+          id="main-content"
+        >
+          <section
+            class="workspace-view"
+          >
+            <nav
+              aria-label="Ruta"
+              class="breadcrumbs"
+            >
+              <a
+                data-discover="true"
+                href="/react/projects"
+              >
+                Proyectos
+              </a>
+              <span
+                aria-hidden="true"
+              >
+                /
+              </span>
+              <a
+                data-discover="true"
+                href="/react/projects/1"
+              >
+                Hybrid PMGD
+              </a>
+              <span
+
+                aria-hidden="true"
+              >
+                /
+              </span>
+              <span>
+                Base case
+              </span>
+            </nav>
+            <header
+              class="workspace-heading"
+            >
+              <h1
+                tabindex="-1"
+              >
+                Base case
+              </h1>
+              <p>
+                Initial modeling branch
+              </p>
+            </header>
+            <nav
+              aria-label="Secciones del escenario"
+              class="workspace-nav"
+            >
+              <a
+                data-discover="true"
+                href="/react/scenarios/10?section=summary&variant=3"
+              >
+                Resumen
+              </a>
+              <a
+                data-discover="true"
+                href="/react/scenarios/10/draft?section=data&variant=3"
+              >
+                Modelo
+              </a>
+              <a
+                aria-current="page"
+                data-discover="true"
+                href="/react/scenarios/10?section=data&variant=3"
+              >
+                Datos
+              </a>
+              <a
+                data-discover="true"
+                href="/react/scenarios/10?section=runs&variant=3"
+              >
+                Ejecuciones
+              </a>
+              <a
+                data-discover="true"
+                href="/react/scenarios/10?section=advanced&variant=3"
+              >
+                Avanzado
+              </a>
+            </nav>
+            <div
+              class="workspace-stack"
+            >
+              <div
+                class="workspace-section"
+                hidden=""
+              >
+                <h2>
+                  Preparación del escenario
+                </h2>
+                <div
+ Test Files  1 failed (1)
+      Tests  1 failed | 56 skipped (57)
+   Start at  12:26:29
+   Duration  6.75s (transform 1.62s, setup 391ms, import 2.22s, tests 2.09s, environment 1.66s)
+
+                  role="alert"
+                >
+                  <p>
+                    No pudimos comprobar el modelo.
+                  </p>
+                  <button
+                    type="button"
+                  >
+                    Reintentar consulta del modelo
+                  </button>
+                </div>
+                <p>
+                  Define el modelo, conecta sus datos y revisa el período antes de ejecutar.
+                </p>
+              </div>
+              <div
+                class="workspace-stack"
+              >
+                <section
+                  aria-labelledby="scenario-data"
+                  class="workspace-section"
+                >
+                  <h2
+              ...
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ src/App.test.tsx:2065:11
+    2063|     );
+    2064|
+    2065|     await waitFor(() =>
+       |           ^
+    2066|       expect(
+    2067|         screen.getByRole("heading", {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯

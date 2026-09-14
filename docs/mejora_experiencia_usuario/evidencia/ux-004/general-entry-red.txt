@@ -1,0 +1,784 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/ObjectTimeSeriesSummary.test.tsx -t UX-004 keeps object
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ObjectTimeSeriesSummary.test.tsx (5 tests | 1 failed | 4 skipped) 522ms
+     × UX-004 keeps object filters and scenario context through the source journey 520ms
+npm.cmd :
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/ObjectTimeSeriesSummary.test.tsx -t 'UX-004 keeps ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ObjectTimeSeriesSummary.test.tsx > contextual object time-series summary > UX-004 keeps object filters and
+scenario context through the source journey
+TestingLibraryElementError: Unable to find an accessible element with the role "link" and name "Explorar catálogo
+general"
+
+Here are the accessible roles:
+
+  banner:
+
+  Name "":
+  <header
+    class="topbar"
+  />
+
+  Name "":
+  <header />
+
+  --------------------------------------------------
+  link:
+
+  Name "BESS Workspace":
+  <a
+    class="brand"
+    data-discover="true"
+    href="/react"
+  />
+
+  Name "Proyectos":
+  <a
+    aria-current="page"
+    class="active"
+    data-discover="true"
+    href="/react/projects"
+  />
+
+  Name "Catálogo de series":
+  <a
+    class=""
+    data-discover="true"
+    href="/react/time-series/catalog"
+  />
+
+  Name "Administración":
+  <a
+    class=""
+    data-discover="true"
+    href="/react/admin/users"
+  />
+
+  Name "Estado del sistema":
+  <a
+    data-discover="true"
+    href="/react/system"
+  />
+
+  Name "Proyecto":
+  <a
+    data-discover="true"
+    href="/react/projects/1"
+  />
+
+  Name "Volver al escenario":
+  <a
+    data-discover="true"
+    href="/react/scenarios/4?section=data&variant=9"
+  />
+
+  Name "Asociar fuente al objeto":
+  <a
+    class="journey-entry-link"
+    data-discover="true"
+    href="/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=associate&scenario_id=
+4&variant_id=9&return_to=%2Fprojects%2F1%2Flinkable-objects%2F7%2Ftime-series%3Fq%3Dprecio%26kind%3Dcatalog%26scenario_
+id%3D4%26variant_id%3D9%26return_to%3D%252Fscenarios%252F4%253Fsection%253Ddata%2526variant%253D9"
+  />
+
+  Name "Usar revision en una variante":
+  <a
+    class="journey-entry-link"
+    data-discover="true"
+    href="/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=use_revision&scenario_
+id=4&variant_id=9&return_to=%2Fprojects%2F1%2Flinkable-objects%2F7%2Ftime-series%3Fq%3Dprecio%26kind%3Dcatalog%26scenar
+io_id%3D4%26variant_id%3D9%26return_to%3D%252Fscenarios%252F4%253Fsection%253Ddata%2526variant%253D9"
+  />
+
+  --------------------------------------------------
+  strong:
+
+  Name "":
+  <strong />
+
+  Name "":
+  <strong />
+
+  Name "":
+  <strong
+    class="object-summary-stale"
+  />
+
+  Name "":
+  <strong
+    class="object-summary-blocked"
+  />
+
+  Name "":
+  <strong
+    class="object-summary-local"
+  />
+
+  --------------------------------------------------
+  button:
+
+  Name "Salir":
+  <button
+    class="secondary-button"
+    type="button"
+  />
+
+  Name "Filtrar":
+  <button
+    type="submit"
+  />
+
+  Name "Anterior":
+  <button
+    class="secondary-button"
+    disabled=""
+    type="button"
+  />
+
+  Name "Siguiente":
+  <button
+    class="secondary-button"
+    disabled=""
+    type="button"
+  />
+
+  --------------------------------------------------
+  navigation:
+
+  Name "Navegacion principal":
+  <nav
+    aria-label="Navegacion principal"
+    class="primary-nav"
+  />
+
+  Name "Ruta del resumen":
+  <nav
+    aria-label="Ruta del resumen"
+  />
+
+  Name "Paginacion de las series del objeto":
+  <nav
+    aria-label="Paginacion de las series del objeto"
+    class="catalog-pagination"
+  />
+
+  --------------------------------------------------
+  group:
+
+  Name "":
+  <details
+    class="workspace-utilities"
+  />
+
+  --------------------------------------------------
+  main:
+
+  Name "":
+  <main
+    id="main-content"
+  />
+
+  --------------------------------------------------
+  paragraph:
+
+  Name "":
+  <p
+    class="eyebrow"
+  />
+
+  Name "":
+  <p />
+
+  --------------------------------------------------
+  heading:
+
+  Name "Sistema":
+  <h1 />
+
+  --------------------------------------------------
+  searchbox:
+
+  Name "Buscar":
+  <input
+    id="object-summary-search"
+    maxlength="200"
+    type="search"
+    value="precio"
+  />
+
+  --------------------------------------------------
+  combobox:
+
+  Name "Origen":
+  <select
+    id="object-summary-kind"
+  />
+
+  --------------------------------------------------
+  option:
+
+  Name "Todos":
+  <option
+    value="all"
+  />
+
+  Name "Fuentes genericas":
+  <option
+    value="catalog"
+  />
+
+  Name "Series especificas":
+  <option
+    value="object_specific"
+  />
+
+  --------------------------------------------------
+  table:
+
+  Name "Series del objeto Sistema":
+  <table />
+
+  --------------------------------------------------
+  caption:
+
+  Name "Series del objeto Sistema":
+  <caption />
+
+  --------------------------------------------------
+  rowgroup:
+
+  Name "":
+  <thead />
+
+  Name "":
+  <tbody />
+
+  --------------------------------------------------
+  row:
+
+  Name "Serie Necesidad Contrato Asociacion Uso en variantes":
+  <tr />
+
+  Name "Precio de energiaenergy_priceFuente generica grid_import_price energy_price · real · usd_per_mwh Asociada al
+objeto Usada en Default · revision 1 · hash bound-hash-71Plan base · grid_import_priceObsoletaEjecucion bloqueada":
+  <tr />
+
+  Name "Afluente previstonatural_inflow_forecastSerie especificaSolo este objeto natural_inflow natural_inflow ·
+forecast · m3_per_s Sin asociacion de catalogo Aun no usada en una variante":
+  <tr />
+
+  --------------------------------------------------
+  columnheader:
+
+  Name "Serie":
+  <th
+    scope="col"
+  />
+
+  Name "Necesidad":
+  <th
+    scope="col"
+  />
+
+  Name "Contrato":
+  <th
+    scope="col"
+  />
+
+  Name "Asociacion":
+  <th
+    scope="col"
+  />
+
+  Name "Uso en variantes":
+  <th
+    scope="col"
+  />
+
+  --------------------------------------------------
+  rowheader:
+
+  Name "Precio de energiaenergy_priceFuente generica":
+  <th
+    scope="row"
+  />
+
+  Name "Afluente previstonatural_inflow_forecastSerie especificaSolo este objeto":
+  <th
+    scope="row"
+  />
+
+  --------------------------------------------------
+  cell:
+
+  Name "grid_import_price":
+  <td />
+
+  Name "energy_price · real · usd_per_mwh":
+  <td />
+
+  Name "Asociada al objeto":
+  <td />
+
+  Name "Usada en Default · revision 1 · hash bound-hash-71Plan base · grid_import_priceObsoletaEjecucion bloqueada":
+  <td />
+
+  Name "natural_inflow":
+  <td />
+
+  Name "natural_inflow · forecast · m3_per_s":
+  <td />
+
+  Name "Sin asociacion de catalogo":
+  <td />
+
+  Name "Aun no usada en una variante":
+  <td />
+
+  --------------------------------------------------
+  list:
+
+  Name "":
+  <ul
+    class="object-summary-usages"
+  />
+
+  --------------------------------------------------
+  listitem:
+
+  Name "":
+  <li />
+
+  --------------------------------------------------
+  code:
+
+  Name "":
+  <code />
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+    >
+      <header
+        class="topbar"
+      >
+        <a
+          class="brand"
+          data-discover="true"
+          href="/react"
+        >
+          <span
+            aria-hidden="true"
+            class="brand-mark"
+          >
+            Z
+          </span>
+          <span>
+            BESS Workspace
+          </span>
+        </a>
+        <div
+          class="identity"
+        >
+          <strong>
+            Cuenta de verificacion
+          </strong>
+          <span
+            class="role-badge"
+          >
+            admin
+          </span>
+          <button
+            class="secondary-button"
+            type="button"
+          >
+            Salir
+          </button>
+        </div>
+      </header>
+      <nav
+        aria-label="Navegacion principal"
+        class="primary-nav"
+      >
+        <a
+          aria-current="page"
+          class="active"
+          data-discover="true"
+          href="/react/projects"
+        >
+          Proyectos
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/time-series/catalog"
+        >
+          Catálogo de series
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/admin/users"
+        >
+          Administración
+        </a>
+        <details
+          class="workspace-utilities"
+        >
+          <summary>
+            Utilidades
+          </summary>
+          <a
+            data-discover="true"
+            href="/react/system"
+          >
+            Estado del sistema
+          </a>
+        </details>
+      </nav>
+      <main
+        id="main-content"
+      >
+        <section
+          class="content-panel catalog-surface object-summary-surface"
+        >
+          <nav
+            aria-label="Ruta del resumen"
+          >
+            <a
+              data-discover="true"
+              href="/react/projects/1"
+            >
+              Proyecto
+            </a>
+             / Series del objeto
+             ·
+            <a
+              data-discover="true"
+              href="/react/scenarios/4?section=data&variant=9"
+            >
+              Volver al escenario
+            </a>
+          </nav>
+          <header>
+            <p
+              class="eyebrow"
+            >
+              Resumen contextual
+            </p>
+            <h1>
+              Sistema
+            </h1>
+            <p>
+              Fuentes disponibles, necesidad cubierta y uso exacto en variantes.
+            </p>
+          </header>
+          <form
+            class="catalog-filters"
+          >
+            <div
+              class="field-row"
+            >
+              <label
+                for="object-summary-search"
+              >
+                Buscar
+              </label>
+              <input
+                id="object-summary-search"
+                maxlength="200"
+                type="search"
+                value="precio"
+              />
+            </div>
+            <div
+              class="field-row"
+            >
+              <label
+                for="object-summary-kind"
+              >
+                Origen
+              </label>
+              <select
+                id="object-summary-kind"
+              >
+                <option
+                  value="all"
+                >
+                  Todos
+                </option>
+                <option
+                  value="catalog"
+                >
+                  Fuentes genericas
+                </option>
+                <option
+                  value="object_specific"
+                >
+                  Series especificas
+                </option>
+              </select>
+            </div>
+            <div
+              class="inline-actions"
+            >
+              <button
+                type="submit"
+              >
+                Filtrar
+              </button>
+            </div>
+          </form>
+          <div
+            aria-label="Acciones protegidas"
+            class="object-summary-actions"
+          >
+            <a
+              class="journey-entry-link"
+              data-discover="true"
+              href="/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=associate&sc
+enario_id=4&variant_id=9&return_to=%2Fprojects%2F1%2Flinkable-objects%2F7%2Ftime-series%3Fq%3Dprecio%26kind%3Dcatalog%2
+6scenario_id%3D4%26variant_id%3D9%26return_to%3D%252Fscenarios%252F4%253Fsection%253Ddata%2526variant%253D9"
+            >
+              Asociar fuente al objeto
+            </a>
+            <a
+              class="journey-entry-link"
+              data-discover="true"
+              href="/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=use_revision
+&scenario_id=4&variant_id=9&return_to=%2Fprojects%2F1%2Flinkable-objects%2F7%2Ftime-series%3Fq%3Dprecio%26kind%3Dcatalo
+g%26scenario_id%3D4%26variant_id%3D9%26return_to%3D%252Fscenarios%252F4%253Fsection%253Ddata%2526variant%253D9"
+            >
+              Usar revision en una variante
+            </a>
+            <small>
+              Ambas acciones abren el recorrido protegido. “Binding de ejecucion” es el nombre tecnico del segundo
+paso.
+            </small>
+          </div>
+          <div
+            class="time-series-table-scroll"
+          >
+            <table>
+              <caption>
+                Series del objeto
+                Sistema
+              </caption>
+              <thead>
+                <tr>
+                  <th
+                    scope="col"
+                  >
+                    Serie
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Necesidad
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Contrato
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Asociacion
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Uso en variantes
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th
+                    scope="row"
+                  >
+                    <span
+                      class="catalog-signal-name"
+                    >
+                      Precio de energia
+                    </span>
+                    <span
+                      class="catalog-series-key"
+                    >
+                      energy_price
+                    </span>
+                    <span
+                      class="object-summary-kind"
+                    >
+                      Fuente generica
+                    </span>
+                  </th>
+                  <td>
+                    grid_import_price
+                  </td>
+                  <td>
+                    energy_price
+                     ·
+                    real
+                     ·
+
+                    usd_per_mwh
+                  </td>
+                  <td>
+                    <strong>
+                      Asociada al objeto
+                    </strong>
+                  </td>
+                  <td>
+                    <ul
+                      class="object-summary-usages"
+                    >
+                      <li>
+                        <span>
+                          Usada en
+                          Default
+                           · revision
+                          1
+                           · hash
+
+                          <code>
+                            bound-hash-71
+                          </code>
+                        </span>
+                        <span
+                          class="object-summary-secondary"
+                        >
+                          Plan base
+                           ·
+                          grid_import_price
+                        </span>
+                        <strong
+                          class="object-summary-stale"
+                        >
+                          Obsoleta
+                        </strong>
+                        <strong
+                          class="object-summary-blocked"
+                        >
+                          Ejecucion bloqueada
+                        </strong>
+                      </li>
+                    </ul>
+                  </td>
+                </tr>
+                <tr>
+                  <th
+                    scope="row"
+                  >
+                    <span
+                      class="catalog-signal-name"
+                    >
+                      Afluente previsto
+                    </span>
+                    <span
+                      class="catalog-series-key"
+                    >
+                      natural_inflow_forecast
+                    </span>
+                    <span
+                      class="object-summary-kind"
+                    >
+                      Serie especifica
+                    </span>
+                    <strong
+                      class="object-summary-local"
+                    >
+                      Solo este objeto
+                    </strong>
+                  </th>
+                  <td>
+                    natural_inflow
+                  </td>
+                  <td>
+                    natural_inflow
+                     ·
+                    forecast
+                     ·
+
+                    m3_per_s
+                  </td>
+                  <td>
+                    <span>
+                      Sin asociacion de catalogo
+                    </span>
+                  </td>
+                  <td>
+                    <span>
+                      Aun no usada en una variante
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <nav
+            aria-label="Paginacion de las series del objeto"
+            class="catalog-pagination"
+          >
+            <button
+              class="secondary-button"
+              disabled=""
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 4 skipped (5)
+   Start at  12:12:05
+   Duration  4.01s (transform 1.08s, setup 309ms, import 1.55s, tests 522ms, environment 1.33s)
+
+              type="button"
+            >
+              Anterior
+            </button>
+            <span>
+              Pagina
+              1
+               ·
+              2
+               series en esta pagina de
+              2
+            </span>
+            <button
+              class="secondary-button"
+              disabled=""
+              type="button"
+            >
+              Siguiente
+            </button>
+          </nav>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ Object.getElementError node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/ObjectTimeSeriesSummary.test.tsx:180:19
+    178|     expect(screen.getByLabelText("Buscar")).toHaveValue("precio");
+    179|     expect(screen.getByLabelText("Origen")).toHaveValue("catalog");
+    180|     expect(screen.getByRole("link", { name: "Explorar catálogo general…
+       |                   ^
+    181|     expect(screen.getByRole("link", { name: "Volver al escenario" })).…
+    182|     await user.click(screen.getByRole("link", { name: "Asociar fuente …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯

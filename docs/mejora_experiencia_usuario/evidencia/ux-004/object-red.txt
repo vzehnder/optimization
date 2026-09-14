@@ -1,0 +1,40 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/ObjectTimeSeriesSummary.test.tsx -t UX-004 keeps
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ObjectTimeSeriesSummary.test.tsx (5 tests | 1 failed | 4 skipped) 338ms
+     × UX-004 keeps object filters and scenario context through the source journey 336ms
+npm.cmd :
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/ObjectTimeSeriesSummary.test.tsx -t 'UX-004 keeps ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ObjectTimeSeriesSummary.test.tsx > contextual object time-series summary > UX-004 keeps object filters and
+scenario context through the source journey
+Error: expect(element).toHaveValue(precio)
+
+Expected the element to have value:
+  precio
+Received:
+
+ ❯ src/ObjectTimeSeriesSummary.test.tsx:178:45
+    176|     const user = userEvent.setup();
+    177|     await screen.findByRole("table", { name: "Series del objeto Sistem…
+    178|     expect(screen.getByLabelText("Buscar")).toHaveValue("precio");
+       |                                             ^
+    179|     expect(screen.getByLabelText("Origen")).toHaveValue("catalog");
+    180|     expect(screen.getByRole("link", { name: "Volver al escenario" })).…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 4 skipped (5)
+   Start at  11:50:14
+   Duration  3.90s (transform 1.10s, setup 323ms, import 1.57s, tests 338ms, environment 1.36s)

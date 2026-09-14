@@ -1,6 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { FormEvent, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import {
+  Link,
+  useLocation,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 
 import {
   ApiError,
@@ -9,7 +14,7 @@ import {
   type ObjectTimeSeriesContextQuery,
   type ObjectTimeSeriesContextRow,
 } from "./api/client";
-import { objectJourneyPath } from "./journeyRoutes";
+import { objectJourneyPath, safeReturnPath } from "./journeyRoutes";
 
 function numericParam(value: string | undefined): number | null {
   if (!value || !/^\d+$/.test(value)) return null;
@@ -88,15 +93,50 @@ function ReadRefusal({ error }: { error: unknown }) {
 }
 
 export function ObjectTimeSeriesSummaryView() {
+  const location = useLocation();
+  return <ObjectSummaryContent key={location.pathname + location.search} />;
+}
+
+function ObjectSummaryContent() {
+  const [search, setSearch] = useSearchParams();
+  const location = useLocation();
   const params = useParams();
   const projectId = numericParam(params.projectId);
   const linkableObjectId = numericParam(params.linkableObjectId);
-  const [draft, setDraft] = useState<ObjectTimeSeriesContextQuery>({
-    q: "",
-    kind: "all",
-  });
-  const [applied, setApplied] = useState<ObjectTimeSeriesContextQuery>(draft);
-  const [cursorTrail, setCursorTrail] = useState<(string | null)[]>([null]);
+  const applied: ObjectTimeSeriesContextQuery = {
+    q: (search.get("q") ?? "").slice(0, 200),
+    kind:
+      search.get("kind") === "catalog"
+        ? "catalog"
+        : search.get("kind") === "object_specific"
+          ? "object_specific"
+          : "all",
+  };
+  const [draft, setDraft] = useState<ObjectTimeSeriesContextQuery>(applied);
+  const cursorTrail: (string | null)[] = [
+    null,
+    ...search
+      .getAll("cursor")
+      .filter((entry) => entry.length > 0 && entry.length <= 4096)
+      .slice(0, 50),
+  ];
+  const returnTo = safeReturnPath(search.get("return_to"));
+  const currentPath = safeReturnPath(location.pathname + location.search)!;
+  const scenarioId =
+    numericParam(search.get("scenario_id") ?? undefined) ?? undefined;
+  const variantId =
+    numericParam(search.get("variant_id") ?? undefined) ?? undefined;
+  function navigate(
+    filters: ObjectTimeSeriesContextQuery,
+    trail: (string | null)[],
+  ) {
+    const next = new URLSearchParams(currentPath.split("?")[1]);
+    next.set("q", filters.q ?? "");
+    next.set("kind", filters.kind ?? "all");
+    next.delete("cursor");
+    for (const entry of trail) if (entry) next.append("cursor", entry);
+    setSearch(next);
+  }
   const cursor = cursorTrail[cursorTrail.length - 1];
   const summary = useQuery({
     queryKey: [
@@ -130,12 +170,37 @@ export function ObjectTimeSeriesSummaryView() {
     <section className="content-panel catalog-surface object-summary-surface">
       <nav aria-label="Ruta del resumen">
         <Link to={`/projects/${projectId}`}>Proyecto</Link> / Series del objeto
+        {returnTo && (
+          <>
+            {" "}
+            · <Link to={returnTo}>Volver al escenario</Link>
+          </>
+        )}
+        {" · "}
+        <Link
+          to={`/time-series/catalog?${new URLSearchParams({ return_to: currentPath })}`}
+        >
+          Explorar catálogo general
+        </Link>
       </nav>
       {summary.isPending ? (
         <p role="status">Cargando series del objeto</p>
       ) : null}
-      {summary.isError ? <ReadRefusal error={summary.error} /> : null}
-      {summary.data ? (
+      {summary.isError ? (
+        <>
+          <ReadRefusal error={summary.error} />
+          {cursor ? (
+            <button type="button" onClick={() => navigate(applied, [null])}>
+              Volver al inicio conservando filtros
+            </button>
+          ) : (
+            <button type="button" onClick={() => void summary.refetch()}>
+              Reintentar resumen
+            </button>
+          )}
+        </>
+      ) : null}
+      {summary.data && !summary.isError ? (
         <>
           <header>
             <p className="eyebrow">Resumen contextual</p>
@@ -148,8 +213,7 @@ export function ObjectTimeSeriesSummaryView() {
             className="catalog-filters"
             onSubmit={(event: FormEvent<HTMLFormElement>) => {
               event.preventDefault();
-              setApplied({ ...draft });
-              setCursorTrail([null]);
+              navigate(draft, [null]);
             }}
           >
             <div className="field-row">
@@ -157,6 +221,7 @@ export function ObjectTimeSeriesSummaryView() {
               <input
                 id="object-summary-search"
                 type="search"
+                maxLength={200}
                 value={draft.q ?? ""}
                 onChange={(event) =>
                   setDraft((current) => ({
@@ -198,6 +263,9 @@ export function ObjectTimeSeriesSummaryView() {
                 projectId,
                 linkableObjectId,
                 intent: "associate",
+                scenarioId,
+                variantId,
+                returnTo: currentPath,
               })}
             >
               Asociar fuente al objeto
@@ -208,6 +276,9 @@ export function ObjectTimeSeriesSummaryView() {
                 projectId,
                 linkableObjectId,
                 intent: "use_revision",
+                scenarioId,
+                variantId,
+                returnTo: currentPath,
               })}
             >
               Usar revision en una variante
@@ -217,7 +288,12 @@ export function ObjectTimeSeriesSummaryView() {
               ejecucion” es el nombre tecnico del segundo paso.
             </small>
           </div>
-          <div className="time-series-table-scroll">
+          <div
+            className="time-series-table-scroll"
+            tabIndex={0}
+            role="region"
+            aria-label="Tabla con desplazamiento horizontal"
+          >
             <table>
               <caption>
                 Series del objeto {summary.data.meta.object.display_name}
@@ -276,7 +352,7 @@ export function ObjectTimeSeriesSummaryView() {
               className="secondary-button"
               type="button"
               disabled={cursorTrail.length === 1}
-              onClick={() => setCursorTrail((trail) => trail.slice(0, -1))}
+              onClick={() => navigate(applied, cursorTrail.slice(0, -1))}
             >
               Anterior
             </button>
@@ -289,8 +365,8 @@ export function ObjectTimeSeriesSummaryView() {
               type="button"
               disabled={!summary.data.page.has_more}
               onClick={() =>
-                setCursorTrail((trail) => [
-                  ...trail,
+                navigate(applied, [
+                  ...cursorTrail,
                   summary.data.page.next_cursor,
                 ])
               }

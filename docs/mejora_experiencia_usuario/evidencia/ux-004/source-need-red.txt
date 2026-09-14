@@ -1,0 +1,39 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/VariantPreparation.test.tsx -t uses the protected source journey
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/VariantPreparation.test.tsx (14 tests | 1 failed | 13 skipped) 496ms
+     × uses the protected source journey and reviews the exact canonical revision before running 493ms
+npm.cmd :
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/VariantPreparation.test.tsx -t 'uses the protecte ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/VariantPreparation.test.tsx > variant preparation > uses the protected source journey and reviews the exact
+canonical revision before running
+AssertionError: expected '/react/time-series/journey?entry=obje…' to contain 'scenario_id=10&variant_id=3&return_to='
+
+Expected: "scenario_id=10&variant_id=3&return_to="
+Received: "/react/time-series/journey?entry=object&project_id=1&object_id=9&intent=use_revision"
+
+ ❯ src/VariantPreparation.test.tsx:716:42
+    714|       "/time-series/journey?entry=object&project_id=1&object_id=9&inte…
+    715|     );
+    716|     expect(journey.getAttribute("href")).toContain("scenario_id=10&var…
+       |                                          ^
+    717|     const need = screen.getByRole("list", { name: "Senales requeridas"…
+    718|     expect(need).toHaveTextContent("Precio de compra a la red");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 13 skipped (14)
+   Start at  12:09:33
+   Duration  4.33s (transform 1.13s, setup 338ms, import 1.65s, tests 496ms, environment 1.55s)

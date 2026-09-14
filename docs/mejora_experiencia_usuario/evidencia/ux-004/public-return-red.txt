@@ -1,0 +1,902 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/GlobalCatalog.test.tsx -t retains only public origin
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/GlobalCatalog.test.tsx (15 tests | 1 failed | 14 skipped) 861ms
+     × UX-004 retains only public origin context while filtering the general catalog 857ms
+npm.cmd :
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/GlobalCatalog.test.tsx -t 'retains only public or ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/GlobalCatalog.test.tsx > layered catalog read surface > UX-004 retains only public origin context while
+filtering the general catalog
+TestingLibraryElementError: Unable to find an accessible element with the role "link" and name "Volver al origen"
+
+Here are the accessible roles:
+
+  banner:
+
+  Name "":
+  <header
+    class="topbar"
+  />
+
+  Name "":
+  <header
+    class="workspace-heading"
+  />
+
+  --------------------------------------------------
+  link:
+
+  Name "BESS Workspace":
+  <a
+    class="brand"
+    data-discover="true"
+    href="/react"
+  />
+
+  Name "Proyectos":
+  <a
+    class=""
+    data-discover="true"
+    href="/react/projects"
+  />
+
+  Name "Catálogo de series":
+  <a
+    aria-current="page"
+    class="active"
+    data-discover="true"
+    href="/react/time-series/catalog"
+  />
+
+  Name "Administración":
+  <a
+    class=""
+    data-discover="true"
+    href="/react/admin/users"
+  />
+
+  Name "Estado del sistema":
+  <a
+    data-discover="true"
+    href="/react/system"
+  />
+
+  --------------------------------------------------
+  strong:
+
+  Name "":
+  <strong />
+
+  --------------------------------------------------
+  button:
+
+  Name "Salir":
+  <button
+    class="secondary-button"
+    type="button"
+  />
+
+  Name "Filtrar":
+  <button
+    type="submit"
+  />
+
+  Name "Limpiar":
+  <button
+    class="secondary-button"
+    type="button"
+  />
+
+  Name "Inspeccionar":
+  <button
+    aria-pressed="false"
+    class="secondary-button"
+    type="button"
+  />
+
+  Name "Anterior":
+  <button
+    class="secondary-button"
+    disabled=""
+    type="button"
+  />
+
+  Name "Siguiente":
+  <button
+    class="secondary-button"
+    disabled=""
+    type="button"
+  />
+
+  --------------------------------------------------
+  navigation:
+
+  Name "Navegacion principal":
+  <nav
+    aria-label="Navegacion principal"
+    class="primary-nav"
+  />
+
+  Name "Paginacion del catalogo":
+  <nav
+    aria-label="Paginacion del catalogo"
+    class="catalog-pagination"
+  />
+
+  --------------------------------------------------
+  group:
+
+  Name "":
+  <details
+    class="workspace-utilities"
+  />
+
+  Name "":
+  <details
+    class="catalog-more-filters"
+  />
+
+  --------------------------------------------------
+  main:
+
+  Name "":
+  <main
+    id="main-content"
+  />
+
+  --------------------------------------------------
+  heading:
+
+  Name "Catalogo de series genericas":
+  <h1
+    tabindex="-1"
+  />
+
+  --------------------------------------------------
+  paragraph:
+
+  Name "":
+  <p />
+
+  --------------------------------------------------
+  searchbox:
+
+  Name "Buscar":
+  <input
+    id="catalog-q"
+    maxlength="200"
+    type="search"
+    value="precio"
+  />
+
+  --------------------------------------------------
+  combobox:
+
+  Name "Tipo semantico":
+  <select
+    id="catalog-semantic-type"
+  />
+
+  Name "Unidad":
+  <select
+    id="catalog-unit"
+  />
+
+  Name "Clase":
+  <select
+    id="catalog-data-class"
+  />
+
+  Name "Alcance":
+  <select
+    id="catalog-scope"
+  />
+
+  Name "Estado":
+  <select
+    id="catalog-status"
+  />
+
+  Name "Orden":
+  <select
+    id="catalog-order"
+  />
+
+  --------------------------------------------------
+  option:
+
+  Name "Todos":
+  <option
+    value=""
+  />
+
+  Name "Precio de energia":
+  <option
+    value="energy_price"
+  />
+
+  Name "Caudal afluente":
+  <option
+    value="hydro_inflow"
+  />
+
+  Name "Todos":
+  <option
+    value=""
+  />
+
+  Name "USD por MWh":
+  <option
+    value="usd_per_mwh"
+  />
+
+  Name "Metros cubicos por segundo":
+  <option
+    value="m3_per_s"
+  />
+
+  Name "Todos":
+  <option
+    value=""
+  />
+
+  Name "Real":
+  <option
+    value="real"
+  />
+
+  Name "Pronostico":
+  <option
+    value="forecast"
+  />
+
+  Name "Todos":
+  <option
+    value=""
+  />
+
+  Name "Proyecto":
+  <option
+    value="project"
+  />
+
+  Name "Global":
+  <option
+    value="global"
+  />
+
+  Name "Activas":
+  <option
+    value="active"
+  />
+
+  Name "Archivadas":
+  <option
+    value="archived"
+  />
+
+  Name "Actualizacion reciente":
+  <option
+    value="-updated_at,display_name"
+  />
+
+  Name "Nombre":
+  <option
+    value="display_name"
+  />
+
+  Name "Proyecto propietario":
+  <option
+    value="owner_project_name"
+  />
+
+  Name "Fin de cobertura":
+  <option
+    value="-coverage_end"
+  />
+
+  Name "Asociaciones":
+  <option
+    value="-association_count"
+  />
+
+  --------------------------------------------------
+  table:
+
+  Name "Senales genericas del catalogo":
+  <table />
+
+  --------------------------------------------------
+  caption:
+
+  Name "Senales genericas del catalogo":
+  <caption />
+
+  --------------------------------------------------
+  rowgroup:
+
+  Name "":
+  <thead />
+
+  Name "":
+  <tbody />
+
+  --------------------------------------------------
+  row:
+
+  Name "Senal Propietario Alcance Tipo Clase Unidad Cobertura Resolucion Detalle":
+  <tr />
+
+  Name "Precio de energiaenergy_price Cuenca Norte global energy_price real usd_per_mwh 2026-01-01T00:00:00 -
+2026-01-02T00:00:00 1 h Inspeccionar":
+  <tr />
+
+  --------------------------------------------------
+  columnheader:
+
+  Name "Senal":
+  <th
+    scope="col"
+  />
+
+  Name "Propietario":
+  <th
+    scope="col"
+  />
+
+  Name "Alcance":
+  <th
+    scope="col"
+  />
+
+  Name "Tipo":
+  <th
+    scope="col"
+  />
+
+  Name "Clase":
+  <th
+    scope="col"
+  />
+
+  Name "Unidad":
+  <th
+    scope="col"
+  />
+
+  Name "Cobertura":
+  <th
+    scope="col"
+  />
+
+  Name "Resolucion":
+  <th
+    scope="col"
+  />
+
+  Name "Detalle":
+  <th
+    scope="col"
+  />
+
+  --------------------------------------------------
+  rowheader:
+
+  Name "Precio de energiaenergy_price":
+  <th
+    scope="row"
+  />
+
+  --------------------------------------------------
+  cell:
+
+  Name "Cuenca Norte":
+  <td />
+
+  Name "global":
+  <td />
+
+  Name "energy_price":
+  <td />
+
+  Name "real":
+  <td />
+
+  Name "usd_per_mwh":
+  <td />
+
+  Name "2026-01-01T00:00:00 - 2026-01-02T00:00:00":
+  <td />
+
+  Name "1 h":
+  <td />
+
+  Name "Inspeccionar":
+  <td />
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+    >
+      <header
+        class="topbar"
+      >
+        <a
+          class="brand"
+          data-discover="true"
+          href="/react"
+        >
+          <span
+            aria-hidden="true"
+            class="brand-mark"
+          >
+            Z
+          </span>
+          <span>
+            BESS Workspace
+          </span>
+        </a>
+        <div
+          class="identity"
+        >
+          <strong>
+            Cuenta de verificacion
+          </strong>
+          <span
+            class="role-badge"
+          >
+            admin
+          </span>
+          <button
+            class="secondary-button"
+            type="button"
+          >
+            Salir
+          </button>
+        </div>
+      </header>
+      <nav
+        aria-label="Navegacion principal"
+        class="primary-nav"
+      >
+        <a
+          class=""
+          data-discover="true"
+          href="/react/projects"
+        >
+          Proyectos
+        </a>
+        <a
+          aria-current="page"
+          class="active"
+          data-discover="true"
+          href="/react/time-series/catalog"
+        >
+          Catálogo de series
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/admin/users"
+        >
+          Administración
+        </a>
+        <details
+          class="workspace-utilities"
+        >
+          <summary>
+            Utilidades
+          </summary>
+          <a
+            data-discover="true"
+            href="/react/system"
+          >
+            Estado del sistema
+          </a>
+        </details>
+      </nav>
+      <main
+        id="main-content"
+      >
+        <section
+          class="workspace-view catalog-surface"
+        >
+          <header
+            class="workspace-heading"
+          >
+            <h1
+              tabindex="-1"
+            >
+              Catalogo de series genericas
+            </h1>
+            <p>
+              Superficie de solo lectura: explorar, inspeccionar procedencia y consultar historia no modifica
+ninguna fuente.
+            </p>
+          </header>
+          <form
+            class="workspace-form catalog-filters"
+          >
+            <div
+              class="field-row"
+            >
+              <label
+                for="catalog-q"
+              >
+                Buscar
+              </label>
+              <input
+                id="catalog-q"
+                maxlength="200"
+                type="search"
+                value="precio"
+              />
+            </div>
+            <div
+              class="field-row"
+            >
+              <label
+                for="catalog-semantic-type"
+              >
+                Tipo semantico
+              </label>
+              <select
+                id="catalog-semantic-type"
+              >
+                <option
+                  value=""
+                >
+                  Todos
+                </option>
+                <option
+                  value="energy_price"
+                >
+                  Precio de energia
+                </option>
+                <option
+                  value="hydro_inflow"
+                >
+                  Caudal afluente
+                </option>
+              </select>
+            </div>
+            <div
+              class="field-row"
+            >
+              <label
+                for="catalog-unit"
+              >
+                Unidad
+              </label>
+              <select
+                id="catalog-unit"
+              >
+                <option
+                  value=""
+                >
+                  Todos
+                </option>
+                <option
+                  value="usd_per_mwh"
+                >
+                  USD por MWh
+                </option>
+                <option
+                  value="m3_per_s"
+                >
+                  Metros cubicos por segundo
+                </option>
+              </select>
+            </div>
+            <details
+              class="catalog-more-filters"
+            >
+              <summary>
+                Más filtros (
+                0
+                 activos)
+              </summary>
+              <div
+                class="field-row"
+              >
+                <label
+                  for="catalog-data-class"
+                >
+                  Clase
+                </label>
+                <select
+                  id="catalog-data-class"
+                >
+                  <option
+                    value=""
+                  >
+                    Todos
+                  </option>
+                  <option
+                    value="real"
+                  >
+                    Real
+                  </option>
+                  <option
+                    value="forecast"
+                  >
+                    Pronostico
+                  </option>
+                </select>
+              </div>
+              <div
+                class="field-row"
+              >
+                <label
+                  for="catalog-scope"
+                >
+                  Alcance
+                </label>
+                <select
+                  id="catalog-scope"
+                >
+                  <option
+                    value=""
+                  >
+                    Todos
+                  </option>
+                  <option
+                    value="project"
+                  >
+                    Proyecto
+                  </option>
+                  <option
+                    value="global"
+                  >
+                    Global
+                  </option>
+                </select>
+              </div>
+              <div
+                class="field-row"
+              >
+                <label
+                  for="catalog-status"
+                >
+                  Estado
+                </label>
+                <select
+                  id="catalog-status"
+                >
+                  <option
+                    value="active"
+                  >
+                    Activas
+                  </option>
+                  <option
+                    value="archived"
+                  >
+                    Archivadas
+                  </option>
+                </select>
+              </div>
+              <div
+                class="field-row"
+              >
+                <label
+                  for="catalog-order"
+                >
+                  Orden
+                </label>
+                <select
+                  id="catalog-order"
+                >
+                  <option
+                    value="-updated_at,display_name"
+                  >
+                    Actualizacion reciente
+                  </option>
+                  <option
+                    value="display_name"
+                  >
+                    Nombre
+                  </option>
+                  <option
+                    value="owner_project_name"
+                  >
+                    Proyecto propietario
+                  </option>
+                  <option
+                    value="-coverage_end"
+                  >
+                    Fin de cobertura
+                  </option>
+                  <option
+                    value="-association_count"
+                  >
+                    Asociaciones
+                  </option>
+                </select>
+              </div>
+            </details>
+            <div
+              class="inline-actions"
+            >
+              <button
+                type="submit"
+              >
+                Filtrar
+              </button>
+              <button
+                class="secondary-button"
+                type="button"
+              >
+                Limpiar
+              </button>
+            </div>
+          </form>
+          <div
+            class="time-series-table-scroll"
+          >
+            <table>
+              <caption>
+                Senales genericas del catalogo
+              </caption>
+              <thead>
+                <tr>
+                  <th
+                    scope="col"
+                  >
+                    Senal
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Propietario
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Alcance
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Tipo
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Clase
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Unidad
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Cobertura
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Resolucion
+                  </th>
+                  <th
+                    scope="col"
+                  >
+                    Detalle
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th
+                    scope="row"
+                  >
+                    <span
+                      class="catalog-signal-name"
+                    >
+                      Precio de energia
+                    </span>
+                    <span
+                      class="catalog-series-key"
+                    >
+                      energy_price
+                    </span>
+                  </th>
+                  <td>
+                    Cuenca Norte
+                  </td>
+                  <td>
+                    global
+                  </td>
+                  <td>
+                    energy_price
+                  </td>
+                  <td>
+                    real
+                  </td>
+                  <td>
+                    usd_per_mwh
+                  </td>
+                  <td>
+                    2026-01-01T00:00:00 - 2026-01-02T00:00:00
+                  </td>
+                  <td>
+                    1 h
+                  </td>
+                  <td>
+                    <button
+                      aria-pressed="false"
+                      class="secondary-button"
+                      type="button"
+                    >
+                      Inspeccionar
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <nav
+            aria-label="Paginacion del catalogo"
+            class="catalog-pagination"
+          >
+            <button
+              class="secondary-button"
+              disabled=""
+              type="button"
+            >
+              Anterior
+            </button>
+            <span>
+              Pagina
+              1
+               -
+              1
+               senales en esta pagina
+            </span>
+            <button
+              class="secondary-button"
+              disabled=""
+              type="button"
+
+            >
+              Siguiente
+            </button>
+          </nav>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ Object.getElementError node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/GlobalCatalog.test.tsx:255:19
+    253|     await user.type(await screen.findByLabelText("Buscar"), "precio");
+    254|     await user.click(screen.getByRole("button", { name: "Filtrar" }));
+    255|     expect(screen.getByRole("link", { name: "Volver al origen" })).toH…
+       |                   ^
+    256|     expect(window.location.search).not.toContain("token");
+    257|     expect(window.location.search).not.toContain("unknown");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 14 skipped (15)
+   Start at  12:11:23
+   Duration  4.82s (transform 1.39s, setup 310ms, import 1.99s, tests 861ms, environment 1.36s)

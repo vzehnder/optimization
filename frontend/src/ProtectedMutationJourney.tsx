@@ -1,8 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
-import { Fragment, ReactNode, useState } from "react";
+import {
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
+import { Fragment, ReactNode, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { ObjectSeriesFileImport } from "./ObjectSeriesFileImport";
+import { safeReturnPath } from "./journeyRoutes";
 import {
   ApiError,
   commitCaseBindings,
@@ -83,6 +88,25 @@ function numericParam(value: string | null): number | null {
   if (!value || !/^\d+$/.test(value)) return null;
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function refreshJourneyReads(client: QueryClient) {
+  // Refresh the read surfaces on return without rerunning a confirmed mutation review.
+  return client.invalidateQueries({
+    predicate: (query) =>
+      [
+        "object-time-series-summary",
+        "catalog-inputs",
+        "catalog-input-detail",
+        "catalog-input-revisions",
+        "journey-object",
+        "journey-candidates",
+        "journey-object-candidates",
+        "journey-bindings",
+        "case-input-variants",
+      ].includes(String(query.queryKey[0])),
+    refetchType: "none",
+  });
 }
 
 // Chapter 8.5: the local label is not decoration. It travels with the draft so
@@ -169,18 +193,31 @@ function JourneyShell({
   children: ReactNode;
 }) {
   const stepIndex = STEPS.findIndex((entry) => entry.id === step);
+  const panel = useRef<HTMLDivElement>(null);
+  const focusedStep = useRef<StepId | null>(null);
+  useEffect(() => {
+    if (focusedStep.current === step) return;
+    const heading = panel.current?.querySelector("h2");
+    if (!heading) return;
+    heading.tabIndex = -1;
+    heading.focus();
+    focusedStep.current = step;
+  }, [step, children]);
+  const [params] = useSearchParams();
+  const returnTo = safeReturnPath(params.get("return_to"));
   return (
     <section className="workspace-view journey-surface">
       <header className="workspace-heading">
-        <h1>Recorrido protegido</h1>
+        {returnTo && <Link to={returnTo}>Volver al origen</Link>}
+        <h1>{rail.action}</h1>
         <p>
-          Toda mutacion pasa por estos cuatro pasos: no hay atajos desde el
-          catalogo ni desde el objeto.
+          Revisa el origen, elige la fuente y comprueba su revisión. El cuarto
+          paso explica el impacto antes de confirmar el cambio.
         </p>
       </header>
       <div className="journey-layout">
         <JourneyRail step={step} rail={rail} />
-        <div className="journey-step-panel">
+        <div className="journey-step-panel" ref={panel}>
           {children}
           <nav className="journey-navigation" aria-label="Pasos">
             <button
@@ -372,7 +409,12 @@ function CandidateSelection({
   onSelect: (signalId: number) => void;
 }) {
   return (
-    <div className="time-series-table-scroll">
+    <div
+      className="time-series-table-scroll"
+      tabIndex={0}
+      role="region"
+      aria-label="Tabla con desplazamiento horizontal"
+    >
       <table>
         <caption>Fuentes genericas candidatas</caption>
         <thead>
@@ -459,7 +501,12 @@ function ReplacementComparison({
   return (
     <section aria-label="Reemplazo de un uso vigente">
       <h3>Reemplazo de un uso vigente</h3>
-      <div className="time-series-table-scroll">
+      <div
+        className="time-series-table-scroll"
+        tabIndex={0}
+        role="region"
+        aria-label="Tabla con desplazamiento horizontal"
+      >
         <table>
           <caption>Comparacion del reemplazo</caption>
           <thead>
@@ -555,6 +602,8 @@ function DataStep({
         <dd>{detail.identity.display_name}</dd>
         <dt>Revision observada</dt>
         <dd>Revision {detail.current_revision.number}</dd>
+        <dt>Unidad</dt>
+        <dd>{detail.contract.unit.symbol}</dd>
         <dt>Hash de contenido</dt>
         <dd className="catalog-hash">{detail.current_revision.content_hash}</dd>
         <dt>Cobertura</dt>
@@ -591,6 +640,7 @@ function BatchReview({
   commitError,
   commitResult,
   commitPending,
+  onReview,
 }: {
   facts: { term: string; value: ReactNode }[];
   prevalidation: BatchPrevalidation | undefined;
@@ -601,15 +651,26 @@ function BatchReview({
   commitError: unknown;
   commitResult: BatchCommitResult | null;
   commitPending: boolean;
+  onReview: () => void;
 }) {
   return (
     <section aria-label="Impacto y confirmacion">
       <h2>Impacto y confirmacion</h2>
       {isFetching ? <p role="status">Recalculando la prevalidacion</p> : null}
       {error ? <MutationRefusal error={error} /> : null}
+      {(commitError || error) && !isFetching ? (
+        <button type="button" onClick={onReview}>
+          Revisar de nuevo
+        </button>
+      ) : null}
       {prevalidation && !isFetching ? (
         <>
-          <div className="time-series-table-scroll">
+          <div
+            className="time-series-table-scroll"
+            tabIndex={0}
+            role="region"
+            aria-label="Tabla con desplazamiento horizontal"
+          >
             <table>
               <caption>Prevalidacion por fila</caption>
               <thead>
@@ -665,12 +726,20 @@ function BatchReview({
           {commitResult ? (
             <p role="status" className="journey-committed">
               Guardado atomico completo ({commitResult.outcome}) en el lote{" "}
-              {commitResult.batch_id}.
+              {commitResult.batch_id}.{" "}
+              {commitLabel === INTENT_ACTIONS.associate
+                ? "La fuente quedó asociada al objeto. Su uso en una variante se confirma por separado; después revisa la variante y el período antes de ejecutar."
+                : "La revisión quedó fijada en la variante. Revisa su preparación y el período antes de ejecutar."}
             </p>
           ) : (
             <button
               type="button"
-              disabled={!prevalidation.can_commit || commitPending}
+              disabled={
+                !prevalidation.can_commit ||
+                commitPending ||
+                Boolean(commitError) ||
+                Boolean(error)
+              }
               onClick={onCommit}
             >
               {commitLabel}
@@ -688,6 +757,14 @@ function linkReviewFacts(
   intent: LinkIntent,
 ): { term: string; value: ReactNode }[] {
   return [
+    {
+      term: "Fuente y revisión",
+      value: `${detail.identity.display_name} · revisión ${detail.current_revision.number} · ${detail.contract.unit.symbol}`,
+    },
+    {
+      term: "Alcance de la fuente",
+      value: `${detail.set.visibility_scope} · ${detail.owner.project_name}`,
+    },
     {
       term: "Consumidores actuales",
       value: `${detail.link_summary.association_count} asociaciones y ${detail.link_summary.binding_count} bindings de ejecucion`,
@@ -1077,7 +1154,35 @@ function LinkFlow({
   step: StepId;
   onStep: (step: StepId) => void;
 }) {
-  const [draft, setDraft] = useState<LinkDraft>(EMPTY_LINK_DRAFT);
+  const queryClient = useQueryClient();
+  const [params, setParams] = useSearchParams();
+  const [candidateSearch, setCandidateSearch] = useState(
+    (params.get("q") ?? "").slice(0, 200),
+  );
+  const appliedSearch = (params.get("q") ?? "").slice(0, 200);
+  const candidateCursors = params
+    .getAll("cursor")
+    .filter((value) => value.length > 0 && value.length <= 4096)
+    .slice(0, 50);
+  const candidateCursor = candidateCursors.at(-1) ?? null;
+  function browseCandidates(q: string, cursors: string[]) {
+    const next = new URLSearchParams(params);
+    next.set("q", q);
+    next.delete("cursor");
+    for (const cursor of cursors) next.append("cursor", cursor);
+    setParams(next);
+  }
+  const [draft, setDraft] = useState<LinkDraft>(() => ({
+    ...EMPTY_LINK_DRAFT,
+    bindingRoleKey: /^[a-z][a-z0-9_]{0,99}$/.test(
+      params.get("binding_role_key") ?? "",
+    )
+      ? params.get("binding_role_key")!
+      : "",
+    scenarioId: numericParam(params.get("scenario_id")),
+    variantId: numericParam(params.get("variant_id")),
+  }));
+  const [reviewAttempt, setReviewAttempt] = useState(0);
   const [commitResult, setCommitResult] = useState<BatchCommitResult | null>(
     null,
   );
@@ -1140,6 +1245,8 @@ function LinkFlow({
   const candidates = useQuery({
     queryKey: [
       "journey-candidates",
+      appliedSearch,
+      candidateCursor,
       linkableObjectId,
       draft.bindingRoleKey,
       intent,
@@ -1154,6 +1261,8 @@ function LinkFlow({
           usage: intent === "use_revision" ? "execution" : "association",
           scenarioId: draft.scenarioId,
           variantId: draft.variantId,
+          q: appliedSearch,
+          cursor: candidateCursor,
         },
         signal,
       ),
@@ -1310,6 +1419,7 @@ function LinkFlow({
       ? (bindings.data?.items.find(
           (row) =>
             row.binding_role.key === draft.bindingRoleKey &&
+            row.object.id === linkableObjectId &&
             row.status === "active",
         ) ?? null)
       : null;
@@ -1319,6 +1429,7 @@ function LinkFlow({
   // the object, the source and the revision, so changing any of them discards
   // the earlier answer instead of confirming against it.
   const prevalidationSignature = [
+    reviewAttempt,
     projectId,
     linkableObjectId,
     intent,
@@ -1379,7 +1490,10 @@ function LinkFlow({
                   binding_role_key: draft.bindingRoleKey,
                   signal_id: draft.signalId,
                   revision,
-                  catalog_association_id: replacing.catalog_association_id,
+                  catalog_association_id:
+                    replacing.signal_id === draft.signalId
+                      ? replacing.catalog_association_id
+                      : null,
                   reason_code: "new_source_revision_accepted",
                   reason_text: draft.reasonText.trim(),
                 }
@@ -1420,7 +1534,13 @@ function LinkFlow({
   });
 
   async function commit() {
-    if (!prevalidation.data) return;
+    if (
+      !prevalidation.data?.can_commit ||
+      prevalidation.isFetching ||
+      commitError ||
+      commitPending
+    )
+      return;
     const guards = {
       prevalidationToken: prevalidation.data.prevalidation_token,
       commitEtag: prevalidation.data.commit_etag,
@@ -1442,6 +1562,7 @@ function LinkFlow({
               guards,
             ),
       );
+      await refreshJourneyReads(queryClient);
     } catch (error) {
       setCommitError(error);
     } finally {
@@ -1450,16 +1571,32 @@ function LinkFlow({
   }
 
   function update(patch: Partial<LinkDraft>) {
-    setDraft((current) => ({ ...current, ...patch }));
+    const changesOrigin =
+      patch.bindingRoleKey !== undefined ||
+      patch.scenarioId !== undefined ||
+      patch.variantId !== undefined ||
+      patch.sourceChoice !== undefined;
+    if (changesOrigin) browseCandidates(appliedSearch, []);
+    setDraft((current) => ({
+      ...current,
+      ...patch,
+      ...(changesOrigin ? { signalId: null, reasonText: "" } : {}),
+    }));
     // A changed draft can never keep an answer computed for the old one.
     setCommitResult(null);
     setCommitError(null);
   }
 
   const originComplete =
-    Boolean(draft.bindingRoleKey && draft.sourceChoice) &&
+    Boolean(
+      roles.data?.items.some((role) => role.key === draft.bindingRoleKey) &&
+      draft.sourceChoice,
+    ) &&
     (intent === "associate" ||
-      (draft.scenarioId !== null && draft.variantId !== null));
+      (scenarios.data?.some((scenario) => scenario.id === draft.scenarioId) &&
+        variants.data?.variants.some(
+          (entry) => entry.variant.id === draft.variantId,
+        )));
   const objectDefinitionComplete =
     objectDraft.objectSeriesKey.trim().length > 0 &&
     objectDraft.displayName.trim().length > 0 &&
@@ -1472,15 +1609,23 @@ function LinkFlow({
   // to be true to leave steps 2 and 3 differs between them.
   const readyToLeave: Record<StepId, boolean> = definingLocally
     ? {
-        origin: originComplete,
+        origin: Boolean(originComplete),
         selection: objectDefinitionComplete,
         data:
           objectSeries !== null && Boolean(objectIngestion?.validation.valid),
         impact: false,
       }
     : {
-        origin: originComplete,
-        selection: draft.signalId !== null,
+        origin: Boolean(originComplete),
+        selection:
+          !candidates.isError &&
+          Boolean(
+            candidates.data?.items.some(
+              (row) =>
+                row.signal_id === draft.signalId &&
+                row.compatibility_decision.allowed,
+            ),
+          ),
         data:
           detail.data !== undefined &&
           (!reasonRequired || draft.reasonText.trim().length > 0),
@@ -1496,8 +1641,13 @@ function LinkFlow({
       rail={{
         objectName,
         scope: scopeLabel(draft.sourceChoice),
-        need: draft.bindingRoleKey || "Sin declarar",
-        action: INTENT_ACTIONS[intent],
+        need:
+          roles.data?.items.find((role) => role.key === draft.bindingRoleKey)
+            ?.display_name ??
+          (draft.bindingRoleKey || "Sin declarar"),
+        action: definingLocally
+          ? "Crear serie específica para este objeto"
+          : INTENT_ACTIONS[intent],
       }}
     >
       {step === "origin" ? (
@@ -1526,15 +1676,87 @@ function LinkFlow({
       {step === "selection" && !definingLocally ? (
         <section aria-label="Definicion o seleccion">
           <h2>Definicion o seleccion</h2>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              browseCandidates(candidateSearch, []);
+              update({ signalId: null });
+            }}
+          >
+            <label htmlFor="candidate-search">Buscar fuentes candidatas</label>
+            <input
+              id="candidate-search"
+              type="search"
+              maxLength={200}
+              value={candidateSearch}
+              onChange={(event) => setCandidateSearch(event.target.value)}
+            />
+            <button type="submit">Buscar fuentes</button>
+          </form>
           {candidates.isPending ? (
             <p role="status">Buscando fuentes compatibles</p>
           ) : null}
-          {candidates.data ? (
-            <CandidateSelection
-              rows={candidates.data.items}
-              selectedSignalId={draft.signalId}
-              onSelect={(signalId) => update({ signalId })}
-            />
+          {candidates.isError && (
+            <>
+              <MutationRefusal error={candidates.error} />
+              {candidateCursor ? (
+                <button
+                  type="button"
+                  onClick={() => browseCandidates(appliedSearch, [])}
+                >
+                  Volver al inicio conservando filtros
+                </button>
+              ) : (
+                <button type="button" onClick={() => void candidates.refetch()}>
+                  Reintentar fuentes
+                </button>
+              )}
+            </>
+          )}
+          {candidates.data && !candidates.isError ? (
+            <>
+              <CandidateSelection
+                rows={candidates.data.items}
+                selectedSignalId={draft.signalId}
+                onSelect={(signalId) => update({ signalId })}
+              />
+              {candidates.data.items.length === 0 && (
+                <p>
+                  No hay fuentes en esta página para la necesidad y los filtros
+                  indicados. Prueba otra búsqueda o crea una serie específica.
+                </p>
+              )}
+              <nav
+                aria-label="Páginas de fuentes candidatas"
+                className="catalog-pagination"
+              >
+                <button
+                  type="button"
+                  disabled={!candidateCursor}
+                  onClick={() =>
+                    browseCandidates(
+                      appliedSearch,
+                      candidateCursors.slice(0, -1),
+                    )
+                  }
+                >
+                  Fuentes anteriores
+                </button>
+                <span>Página {candidateCursors.length + 1}</span>
+                <button
+                  type="button"
+                  disabled={!candidates.data.page.has_more}
+                  onClick={() =>
+                    browseCandidates(appliedSearch, [
+                      ...candidateCursors,
+                      candidates.data!.page.next_cursor!,
+                    ])
+                  }
+                >
+                  Más fuentes
+                </button>
+              </nav>
+            </>
           ) : null}
         </section>
       ) : null}
@@ -1623,7 +1845,17 @@ function LinkFlow({
       ) : null}
       {step === "impact" && !definingLocally && detail.data ? (
         <BatchReview
-          facts={linkReviewFacts(detail.data, intent)}
+          facts={[
+            { term: "Objeto", value: objectName },
+            ...linkReviewFacts(detail.data, intent),
+            {
+              term: "Cambio que confirmas",
+              value:
+                intent === "associate"
+                  ? "Asociar esta fuente al objeto; no fija su uso en ninguna variante."
+                  : `Fijar esta revisión para ${variants.data?.variants.find((entry) => entry.variant.id === draft.variantId)?.variant.display_name ?? "la variante seleccionada"}.`,
+            },
+          ]}
           prevalidation={prevalidation.data}
           isFetching={prevalidation.isFetching}
           error={prevalidation.isError ? prevalidation.error : null}
@@ -1632,6 +1864,17 @@ function LinkFlow({
           commitError={commitError}
           commitResult={commitResult}
           commitPending={commitPending}
+          onReview={async () => {
+            const refreshedDetail = await detail.refetch();
+            const refreshedBindings =
+              intent === "use_revision" ? await bindings.refetch() : null;
+            if (refreshedDetail.isError || refreshedBindings?.isError) {
+              setCommitError(refreshedDetail.error ?? refreshedBindings?.error);
+              return;
+            }
+            setCommitError(null);
+            setReviewAttempt((attempt) => attempt + 1);
+          }}
         />
       ) : null}
     </JourneyShell>
@@ -1687,7 +1930,12 @@ function SharedImpactSummary({ impact }: { impact: SharedSourceImpact }) {
           despues.
         </dd>
       </dl>
-      <div className="time-series-table-scroll">
+      <div
+        className="time-series-table-scroll"
+        tabIndex={0}
+        role="region"
+        aria-label="Tabla con desplazamiento horizontal"
+      >
         <table>
           <caption>Muestra de consumidores</caption>
           <thead>
@@ -2218,7 +2466,12 @@ function ObjectCandidateSelection({
   onToggle: (objectId: number) => void;
 }) {
   return (
-    <div className="time-series-table-scroll">
+    <div
+      className="time-series-table-scroll"
+      tabIndex={0}
+      role="region"
+      aria-label="Tabla con desplazamiento horizontal"
+    >
       <table>
         <caption>Objetos candidatos</caption>
         <thead>
@@ -2283,7 +2536,13 @@ function CatalogFlow({
   step: StepId;
   onStep: (step: StepId) => void;
 }) {
+  const queryClient = useQueryClient();
+  const [objectCursors, setObjectCursors] = useState<string[]>([]);
+  const [selectedNames, setSelectedNames] = useState<Record<number, string>>(
+    {},
+  );
   const [bindingRoleKey, setBindingRoleKey] = useState("");
+  const [reviewAttempt, setReviewAttempt] = useState(0);
   const [selected, setSelected] = useState<number[]>([]);
   const [commitResult, setCommitResult] = useState<BatchCommitResult | null>(
     null,
@@ -2304,6 +2563,7 @@ function CatalogFlow({
   const candidates = useQuery({
     queryKey: [
       "journey-object-candidates",
+      objectCursors.at(-1),
       signalId,
       projectId,
       bindingRoleKey,
@@ -2315,6 +2575,7 @@ function CatalogFlow({
           targetProjectId: projectId,
           bindingRoleKey,
           usage: "association",
+          cursor: objectCursors.at(-1),
         },
         signal,
       ),
@@ -2341,6 +2602,7 @@ function CatalogFlow({
   const prevalidationSignature = [
     projectId,
     signalId,
+    reviewAttempt,
     bindingRoleKey,
     selected.join(","),
     detail.data?.current_revision.id ?? null,
@@ -2357,7 +2619,14 @@ function CatalogFlow({
   });
 
   async function commit() {
-    if (!request || !prevalidation.data) return;
+    if (
+      !request ||
+      !prevalidation.data?.can_commit ||
+      prevalidation.isFetching ||
+      commitError ||
+      commitPending
+    )
+      return;
     setCommitPending(true);
     setCommitError(null);
     try {
@@ -2368,6 +2637,7 @@ function CatalogFlow({
           idempotencyKey: idempotencyKey(),
         }),
       );
+      await refreshJourneyReads(queryClient);
     } catch (error) {
       setCommitError(error);
     } finally {
@@ -2376,6 +2646,14 @@ function CatalogFlow({
   }
 
   function toggle(objectId: number) {
+    const row = candidates.data?.items.find(
+      (entry) => entry.object.id === objectId,
+    );
+    if (!row?.selectable) return;
+    setSelectedNames((current) => ({
+      ...current,
+      [objectId]: row.object.display_name,
+    }));
     setSelected((current) =>
       current.includes(objectId)
         ? current.filter((id) => id !== objectId)
@@ -2405,7 +2683,9 @@ function CatalogFlow({
             ? "Sin objetos elegidos"
             : `${selected.length} objetos elegidos`,
         scope: "Fuente generica compartida",
-        need: bindingRoleKey || "Sin declarar",
+        need:
+          roles.data?.items.find((role) => role.key === bindingRoleKey)
+            ?.display_name ?? "Sin declarar",
         action: INTENT_ACTIONS.associate,
       }}
     >
@@ -2430,6 +2710,8 @@ function CatalogFlow({
               onChange={(event) => {
                 setBindingRoleKey(event.target.value);
                 setSelected([]);
+                setSelectedNames({});
+                setObjectCursors([]);
               }}
             >
               <option value="">Elegir necesidad</option>
@@ -2451,12 +2733,43 @@ function CatalogFlow({
           {candidates.isError ? (
             <MutationRefusal error={candidates.error} />
           ) : null}
-          {candidates.data ? (
-            <ObjectCandidateSelection
-              rows={candidates.data.items}
-              selected={selected}
-              onToggle={toggle}
-            />
+          {candidates.data && !candidates.isError ? (
+            <>
+              <ObjectCandidateSelection
+                rows={candidates.data.items}
+                selected={selected}
+                onToggle={toggle}
+              />
+              <nav
+                className="catalog-pagination"
+                aria-label="Páginas de objetos candidatos"
+              >
+                <button
+                  type="button"
+                  disabled={!objectCursors.length}
+                  onClick={() =>
+                    setObjectCursors((trail) => trail.slice(0, -1))
+                  }
+                >
+                  Objetos anteriores
+                </button>
+                <span>
+                  Página {objectCursors.length + 1} · {selected.length} elegidos
+                </span>
+                <button
+                  type="button"
+                  disabled={!candidates.data.page.has_more}
+                  onClick={() =>
+                    setObjectCursors((trail) => [
+                      ...trail,
+                      candidates.data!.page.next_cursor!,
+                    ])
+                  }
+                >
+                  Más objetos
+                </button>
+              </nav>
+            </>
           ) : null}
         </section>
       ) : null}
@@ -2477,6 +2790,15 @@ function CatalogFlow({
               term: "Filas del lote",
               value: `${selected.length} objetos en una sola transaccion`,
             },
+            {
+              term: "Objetos afectados",
+              value: selected.map((id) => selectedNames[id]).join(", "),
+            },
+            {
+              term: "Cambio a confirmar",
+              value:
+                "Asociar esta fuente a los objetos elegidos; no cambia los usos fijados en variantes.",
+            },
           ]}
           prevalidation={prevalidation.data}
           isFetching={prevalidation.isFetching}
@@ -2486,6 +2808,15 @@ function CatalogFlow({
           commitError={commitError}
           commitResult={commitResult}
           commitPending={commitPending}
+          onReview={async () => {
+            const refreshed = await detail.refetch();
+            if (refreshed.isError) {
+              setCommitError(refreshed.error);
+              return;
+            }
+            setCommitError(null);
+            setReviewAttempt((attempt) => attempt + 1);
+          }}
         />
       ) : null}
     </JourneyShell>
@@ -2501,6 +2832,24 @@ export function ProtectedMutationJourneyView() {
   const [step, setStep] = useState<StepId>("origin");
 
   const signalId = numericParam(params.get("signal_id"));
+  if (
+    projectId === null ||
+    (params.get("entry") === "catalog"
+      ? signalId === null
+      : linkableObjectId === null) ||
+    (rawIntent === "update_shared" && associationId === null)
+  ) {
+    return (
+      <section className="workspace-view">
+        <h1>Recorrido no disponible</h1>
+        <p>
+          El enlace no identifica un proyecto, objeto y acción válidos. Vuelve a
+          abrirlo desde el catálogo o el modelo.
+        </p>
+        <Link to="/projects">Ver proyectos</Link>
+      </section>
+    );
+  }
   if (
     params.get("entry") === "catalog" &&
     signalId !== null &&

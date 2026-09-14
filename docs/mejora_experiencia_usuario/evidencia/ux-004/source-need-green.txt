@@ -1,0 +1,11 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/VariantPreparation.test.tsx -t uses the protected source journey
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 13 skipped (14)
+   Start at  12:10:37
+   Duration  4.15s (transform 1.04s, setup 309ms, import 1.53s, tests 652ms, environment 1.34s)

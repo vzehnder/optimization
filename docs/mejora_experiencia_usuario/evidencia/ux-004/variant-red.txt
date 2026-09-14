@@ -1,0 +1,34 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/VariantPreparation.test.tsx -t restores the variant
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/VariantPreparation.test.tsx (14 tests | 1 failed | 13 skipped) 548ms
+   × UX-004 restores the variant in the return URL over the saved preference 545ms
+npm.cmd :
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/VariantPreparation.test.tsx -t 'restores the vari ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/VariantPreparation.test.tsx > UX-004 restores the variant in the return URL over the saved preference
+Error: expect(element).toHaveValue(4)
+
+Expected the element to have value:
+  4
+Received:
+  3
+ ❯ src/VariantPreparation.test.tsx:17:76
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 13 skipped (14)
+   Start at  12:08:14
+   Duration  4.22s (transform 1.14s, setup 303ms, import 1.65s, tests 548ms, environment 1.43s)

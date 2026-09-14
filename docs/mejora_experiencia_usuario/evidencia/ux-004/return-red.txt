@@ -1,0 +1,551 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/GlobalCatalog.test.tsx -t UX-004 returns
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/GlobalCatalog.test.tsx (13 tests | 1 failed | 12 skipped) 1525ms
+     × UX-004 returns from the protected journey to the same catalog page and inspector 1522ms
+npm.cmd :
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/GlobalCatalog.test.tsx -t 'UX-004 returns' *> ../ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/GlobalCatalog.test.tsx > layered catalog read surface > UX-004 returns from the protected journey to the
+same catalog page and inspector
+TestingLibraryElementError: Unable to find role="link" and name "Volver al origen"
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+    >
+      <header
+        class="topbar"
+      >
+        <a
+          class="brand"
+          data-discover="true"
+          href="/react"
+        >
+          <span
+            aria-hidden="true"
+            class="brand-mark"
+          >
+            Z
+          </span>
+          <span>
+            BESS Workspace
+          </span>
+        </a>
+        <div
+          class="identity"
+        >
+          <strong>
+            Cuenta de verificacion
+          </strong>
+          <span
+            class="role-badge"
+          >
+            admin
+          </span>
+          <button
+            class="secondary-button"
+            type="button"
+          >
+            Salir
+          </button>
+        </div>
+      </header>
+      <nav
+        aria-label="Navegacion principal"
+        class="primary-nav"
+      >
+        <a
+          class=""
+          data-discover="true"
+          href="/react/projects"
+        >
+          Proyectos
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/time-series/catalog"
+        >
+          Catálogo de series
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/admin/users"
+        >
+          Administración
+        </a>
+        <details
+          class="workspace-utilities"
+        >
+          <summary>
+            Utilidades
+          </summary>
+          <a
+            data-discover="true"
+            href="/react/system"
+          >
+            Estado del sistema
+          </a>
+        </details>
+      </nav>
+      <main
+        id="main-content"
+      >
+        <section
+          class="workspace-view journey-surface"
+        >
+          <header
+            class="workspace-heading"
+          >
+            <h1
+              tabindex="-1"
+            >
+              Recorrido protegido
+            </h1>
+            <p>
+              Toda mutacion pasa por estos cuatro pasos: no hay atajos desde el catalogo ni desde el objeto.
+            </p>
+          </header>
+          <div
+            class="journey-layout"
+          >
+            <aside
+              aria-label="Contexto del recorrido"
+              class="journey-rail"
+            >
+              <dl
+                class="journey-context"
+              >
+                <dt>
+                  Objeto
+                </dt>
+                <dd>
+                  Sin objetos elegidos
+                </dd>
+                <dt>
+                  Alcance
+                </dt>
+                <dd>
+                  Fuente generica compartida
+                </dd>
+                <dt>
+                  Necesidad
+                </dt>
+                <dd>
+                  Sin declarar
+                </dd>
+                <dt>
+                  Accion
+                </dt>
+                <dd>
+                  Asociar fuente al objeto
+                </dd>
+              </dl>
+              <ol
+                aria-label="Pasos del recorrido"
+                class="journey-steps"
+              >
+                <li
+                  aria-current="step"
+                >
+                  <span
+                    class="journey-step-number"
+                  >
+                    1
+                  </span>
+                  <span>
+                    Origen y alcance
+                  </span>
+                </li>
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    2
+                  </span>
+                  <span>
+                    Definicion o seleccion
+                  </span>
+                </li>
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    3
+                  </span>
+                  <span>
+                    Datos o revision
+                  </span>
+                </li>
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    4
+                  </span>
+                  <span>
+                    Impacto y confirmacion
+                  </span>
+                </li>
+              </ol>
+            </aside>
+            <div
+              class="journey-step-panel"
+            >
+              <section
+                aria-label="Origen y alcance"
+              >
+                <h2>
+                  Origen y alcance
+                </h2>
+                <p>
+                  Vienes del catalogo con una fuente generica ya elegida. Declara la necesidad que cubrira en los
+objetos del proyecto.
+                </p>
+                <dl
+                  class="catalog-definition-list"
+                >
+                  <dt>
+                    Fuente
+                  </dt>
+                  <dd>
+                    Precio de energia
+                  </dd>
+                  <dt>
+                    Alcance
+                  </dt>
+                  <dd>
+                    Fuente generica compartida
+                  </dd>
+                </dl>
+                <div
+                  class="field-row"
+                >
+                  <label
+                    for="journey-role"
+                  >
+                    Necesidad funcional
+                  </label>
+                  <select
+                    id="journey-role"
+                  >
+                    <option
+                      value=""
+                    >
+                      Elegir necesidad
+                    </option>
+                  </select>
+                </div>
+              </section>
+              <nav
+                aria-label="Pasos"
+                class="journey-navigation"
+              >
+                <button
+                  class="secondary-button"
+                  disabled=""
+                  type="button"
+                >
+                  Volver
+                </button>
+                <button
+                  disabled=""
+                  type="button"
+                >
+                  Siguiente
+                </button>
+              </nav>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+    >
+      <header
+        class="topbar"
+      >
+        <a
+          class="brand"
+          data-discover="true"
+          href="/react"
+        >
+          <span
+            aria-hidden="true"
+            class="brand-mark"
+          >
+            Z
+          </span>
+          <span>
+            BESS Workspace
+          </span>
+        </a>
+        <div
+          class="identity"
+        >
+          <strong>
+            Cuenta de verificacion
+          </strong>
+          <span
+            class="role-badge"
+          >
+            admin
+          </span>
+          <button
+            class="secondary-button"
+            type="button"
+          >
+            Salir
+          </button>
+        </div>
+      </header>
+      <nav
+        aria-label="Navegacion principal"
+        class="primary-nav"
+      >
+        <a
+          class=""
+          data-discover="true"
+          href="/react/projects"
+        >
+          Proyectos
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/time-series/catalog"
+        >
+          Catálogo de series
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/admin/users"
+        >
+          Administración
+        </a>
+        <details
+          class="workspace-utilities"
+        >
+          <summary>
+            Utilidades
+          </summary>
+          <a
+            data-discover="true"
+            href="/react/system"
+          >
+            Estado del sistema
+          </a>
+        </details>
+      </nav>
+      <main
+        id="main-content"
+      >
+        <section
+          class="workspace-view journey-surface"
+        >
+          <header
+            class="workspace-heading"
+          >
+            <h1
+              tabindex="-1"
+            >
+              Recorrido protegido
+            </h1>
+            <p>
+              Toda mutacion pasa por estos cuatro pasos: no hay atajos desde el catalogo ni desde el objeto.
+            </p>
+          </header>
+          <div
+            class="journey-layout"
+          >
+            <aside
+              aria-label="Contexto del recorrido"
+              class="journey-rail"
+            >
+              <dl
+                class="journey-context"
+              >
+                <dt>
+                  Objeto
+                </dt>
+                <dd>
+                  Sin objetos elegidos
+                </dd>
+                <dt>
+                  Alcance
+                </dt>
+                <dd>
+                  Fuente generica compartida
+                </dd>
+                <dt>
+                  Necesidad
+                </dt>
+                <dd>
+                  Sin declarar
+                </dd>
+                <dt>
+                  Accion
+                </dt>
+                <dd>
+                  Asociar fuente al objeto
+                </dd>
+              </dl>
+              <ol
+                aria-label="Pasos del recorrido"
+                class="journey-steps"
+              >
+                <li
+                  aria-current="step"
+                >
+                  <span
+                    class="journey-step-number"
+                  >
+                    1
+                  </span>
+                  <span>
+                    Origen y alcance
+                  </span>
+                </li>
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    2
+                  </span>
+                  <span>
+                    Definicion o seleccion
+                  </span>
+                </li>
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    3
+                  </span>
+                  <span>
+                    Datos o revision
+                  </span>
+                </li>
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    4
+                  </span>
+                  <span>
+                    Impacto y confirmacion
+                  </span>
+                </li>
+              </ol>
+            </aside>
+            <div
+              class="journey-step-panel"
+            >
+              <section
+                aria-label="Origen y alcance"
+              >
+                <h2>
+                  Origen y alcance
+                </h2>
+                <p>
+                  Vienes del catalogo con una fuente generica ya elegida. Declara la necesidad que cubrira en los
+objetos del proyecto.
+                </p>
+                <dl
+                  class="catalog-definition-list"
+                >
+                  <dt>
+                    Fuente
+                  </dt>
+                  <dd>
+                    Precio de energia
+                  </dd>
+                  <dt>
+                    Alcance
+                  </dt>
+                  <dd>
+                    Fuente generica compartida
+                  </dd>
+                </dl>
+                <div
+                  class="field-row"
+                >
+                  <label
+                    for="journey-role"
+                  >
+                    Necesidad funcional
+                  </label>
+                  <select
+
+                    id="journey-role"
+                  >
+                    <option
+                      value=""
+                    >
+                      Elegir necesidad
+                    </option>
+                  </select>
+                </div>
+              </section>
+              <nav
+                aria-label="Pasos"
+                class="journey-navigation"
+              >
+                <button
+                  class="secondary-button"
+                  disabled=""
+                  type="button"
+ Test Files  1 failed (1)
+      Tests  1 failed | 12 skipped (13)
+   Start at  11:42:11
+   Duration  5.09s (transform 1.08s, setup 313ms, import 1.56s, tests 1.52s, environment 1.39s)
+
+                >
+                  Volver
+                </button>
+                <button
+                  disabled=""
+                  type="button"
+                >
+                  Siguiente
+                </button>
+              </nav>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/GlobalCatalog.test.tsx:261:35
+    259|     const user = userEvent.setup();
+    260|     await user.click(await screen.findByRole("link", { name: "Abrir el…
+    261|     await user.click(await screen.findByRole("link", { name: "Volver a…
+       |                                   ^
+    262|     expect(await screen.findByRole("row", { name: /Precio de energia/ …
+    263|     expect(screen.getByLabelText("Buscar")).toHaveValue("precio");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯

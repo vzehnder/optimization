@@ -1,6 +1,6 @@
 # UX-004 · Encontrar y usar datos desde la necesidad del modelo
 
-Estado: Todo. Prioridad: P1. Dependencias: UX-001. Tamaño: M.
+Estado: In Review. Prioridad: P1. Dependencias: UX-001. Tamaño: M.
 
 ## Problema y resultado
 
@@ -46,3 +46,14 @@ Reusar las pruebas de no-mutación al explorar, cursores y límites de preview; 
 - Todas las funciones de Datos avanzado de la matriz permanecen alcanzables.
 
 No eliminar adaptadores legacy bajo este ticket. La revisión posterior puede compartir utilidades de URL pequeñas; no crear un router paralelo.
+
+Responsable: Codex. Base: `91bb561`. Implementación: 2026-09-14. El usuario confirmó
+«Confirmo F1 y F2 para UX-004» antes de la primera prueba nueva.
+
+[Implementación, ciclos TDD y evidencia](../evidencia/ux-004/README.md): 491 pruebas
+aprobadas (234 frontend, 20 navegador, 237 Python); 82 PostgreSQL omitidas.
+TypeScript, ESLint, build y contrato generado pasan. `check` conserva el fallo de
+formato previo en 21 archivos sin cambios de este ticket. Capturas locales,
+teclado, foco, tamaños y axe comprobados. Aceptación pendiente.
+Commit solicitado por el usuario: `feat(ux): connect catalog sources to model needs`.
+Sin PR nuevo.

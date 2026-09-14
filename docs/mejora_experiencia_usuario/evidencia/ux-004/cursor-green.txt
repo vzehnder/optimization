@@ -1,0 +1,11 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/GlobalCatalog.test.tsx -t UX-004 recovers
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 13 skipped (14)
+   Start at  11:44:46
+   Duration  4.08s (transform 1.07s, setup 304ms, import 1.55s, tests 538ms, environment 1.39s)

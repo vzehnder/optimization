@@ -1,0 +1,440 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx -t UX-004 searches
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ProtectedMutationJourney.test.tsx (16 tests | 1 failed | 15 skipped) 566ms
+   × UX-004 searches and pages candidates on the server before choosing a source 564ms
+npm.cmd :
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/ProtectedMutationJourney.test.tsx -t 'UX-004 sear ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ProtectedMutationJourney.test.tsx > UX-004 searches and pages candidates on the server before choosing a
+source
+TestingLibraryElementError: Unable to find a label with the text of: Buscar fuentes candidatas
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+    >
+      <header
+        class="topbar"
+      >
+        <a
+          class="brand"
+          data-discover="true"
+          href="/react"
+        >
+          <span
+            aria-hidden="true"
+            class="brand-mark"
+          >
+            Z
+          </span>
+          <span>
+            BESS Workspace
+          </span>
+        </a>
+        <div
+          class="identity"
+        >
+          <strong>
+            Cuenta de verificacion
+          </strong>
+          <span
+            class="role-badge"
+          >
+            admin
+          </span>
+          <button
+            class="secondary-button"
+            type="button"
+          >
+            Salir
+          </button>
+        </div>
+      </header>
+      <nav
+        aria-label="Navegacion principal"
+        class="primary-nav"
+      >
+        <a
+          class=""
+          data-discover="true"
+          href="/react/projects"
+        >
+          Proyectos
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/time-series/catalog"
+        >
+          Catálogo de series
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/admin/users"
+        >
+          Administración
+        </a>
+        <details
+          class="workspace-utilities"
+        >
+          <summary>
+            Utilidades
+          </summary>
+          <a
+            data-discover="true"
+            href="/react/system"
+          >
+            Estado del sistema
+          </a>
+        </details>
+      </nav>
+      <main
+        id="main-content"
+      >
+        <section
+          class="workspace-view journey-surface"
+        >
+          <header
+            class="workspace-heading"
+          >
+            <h1
+              tabindex="-1"
+            >
+              Asociar fuente al objeto
+            </h1>
+            <p>
+              Revisa el origen, elige la fuente y comprueba su revisión. El cuarto paso explica el impacto antes
+de confirmar el cambio.
+            </p>
+          </header>
+          <div
+            class="journey-layout"
+          >
+            <aside
+              aria-label="Contexto del recorrido"
+              class="journey-rail"
+            >
+              <dl
+                class="journey-context"
+              >
+                <dt>
+                  Objeto
+                </dt>
+                <dd>
+                  Sistema
+                </dd>
+                <dt>
+                  Alcance
+                </dt>
+                <dd>
+                  Fuente generica compartida
+                </dd>
+                <dt>
+                  Necesidad
+                </dt>
+                <dd>
+                  Precio de compra a la red
+                </dd>
+                <dt>
+                  Accion
+                </dt>
+                <dd>
+                  Asociar fuente al objeto
+                </dd>
+              </dl>
+              <ol
+                aria-label="Pasos del recorrido"
+                class="journey-steps"
+              >
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    1
+                  </span>
+                  <span>
+                    Origen y alcance
+                  </span>
+                </li>
+                <li
+                  aria-current="step"
+                >
+                  <span
+                    class="journey-step-number"
+                  >
+                    2
+                  </span>
+                  <span>
+                    Definicion o seleccion
+                  </span>
+                </li>
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    3
+                  </span>
+                  <span>
+                    Datos o revision
+                  </span>
+                </li>
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    4
+                  </span>
+                  <span>
+                    Impacto y confirmacion
+                  </span>
+                </li>
+              </ol>
+            </aside>
+            <div
+              class="journey-step-panel"
+            >
+              <section
+                aria-label="Definicion o seleccion"
+              >
+                <h2>
+                  Definicion o seleccion
+                </h2>
+                <div
+                  class="time-series-table-scroll"
+                >
+                  <table>
+                    <caption>
+                      Fuentes genericas candidatas
+                    </caption>
+                    <thead>
+                      <tr>
+                        <th
+                          scope="col"
+                        >
+                          Elegir
+                        </th>
+                        <th
+                          scope="col"
+                        >
+                          Senal
+                        </th>
+                        <th
+                          scope="col"
+                        >
+                          Propietario
+                        </th>
+                        <th
+                          scope="col"
+                        >
+                          Contrato
+                        </th>
+                        <th
+                          scope="col"
+                        >
+                          Compatibilidad
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>
+                          <input
+                            aria-label="Elegir Precio de energia"
+                            name="journey-candidate"
+                            type="radio"
+                            value="41"
+                          />
+                        </td>
+                        <th
+                          scope="row"
+                        >
+                          <span
+                            class="catalog-signal-name"
+                          >
+                            Precio de energia
+                          </span>
+                          <span
+                            class="catalog-series-key"
+                          >
+                            energy_price
+                          </span>
+                        </th>
+                        <td>
+                          Cuenca Norte
+                           -
+                          global
+                        </td>
+                        <td>
+                          energy_price
+                           -
+
+                          real
+                           -
+
+                          usd_per_mwh
+                        </td>
+                        <td>
+                          <span>
+                            Compatible
+                          </span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>
+                          <input
+                            aria-label="Elegir Precio spot"
+                            name="journey-candidate"
+                            type="radio"
+                            value="43"
+                          />
+                        </td>
+                        <th
+                          scope="row"
+                        >
+                          <span
+                            class="catalog-signal-name"
+                          >
+                            Precio spot
+                          </span>
+                          <span
+                            class="catalog-series-key"
+                          >
+                            spot_price
+                          </span>
+                        </th>
+                        <td>
+                          Cuenca Norte
+                           -
+                          global
+                        </td>
+                        <td>
+                          energy_price
+                           -
+
+                          real
+                           -
+
+                          usd_per_mwh
+                        </td>
+                        <td>
+                          <span>
+                            Compatible
+                          </span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>
+                          <input
+                            aria-label="Elegir Afluente medido"
+                            disabled=""
+                            name="journey-candidate"
+                            type="radio"
+                            value="42"
+                          />
+                        </td>
+                        <th
+                          scope="row"
+                        >
+                          <span
+                            class="catalog-signal-name"
+                          >
+                            Afluente medido
+                          </span>
+                          <span
+                            class="catalog-series-key"
+                          >
+                            measured_inflow
+                          </span>
+                        </th>
+                        <td>
+                          Cuenca Norte
+                           -
+                          global
+                        </td>
+                        <td>
+                          natural_inflow
+                           -
+
+                          real
+                           -
+
+                          m3_per_s
+                        </td>
+                        <td>
+                          <strong
+                            class="journey-denied"
+                          >
+                            No seleccionable
+                          </strong>
+                          <span
+                            class="journey-denial"
+                          >
+                            <span>
+                              La dimension de la senal no corresponde al rol.
+                            </span>
+                            <code>
+                              TS_COMPAT_DIMENSION_MISMATCH
+                            </code>
+                          </span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+              <nav
+                aria-label="Pasos"
+                class="journey-navigation"
+              >
+                <button
+                  class="secondary-button"
+                  type="button"
+                >
+                  Volver
+                </button>
+                <button
+                  disabled=""
+                  type="button"
+                >
+                  Siguiente
+                </button>
+              </nav>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ Object.getElementError node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ getAllByLabelText node_modules/@testing-library/dom/dist/queries/label-text.js:111:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/ProtectedMutationJourney.test.tsx:20:26
+     18|   await user.click(await screen.findByRole("radio", { name: "Reutiliza…
+     19|   await user.click(screen.getByRole("button", { name: "Siguiente" }));
+     20|   await user.type(screen.getByLabelText("Buscar fuentes candidatas"), …
+       |                          ^
+     21|   await user.click(screen.getByRole("button", { name: "Buscar fuentes"…
+     22|   expect(await screen.findByText(/No hay fuentes en esta página/)).toB…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 15 skipped (16)
+   Start at  11:52:00
+   Duration  4.43s (transform 1.26s, setup 329ms, import 1.79s, tests 566ms, environment 1.45s)

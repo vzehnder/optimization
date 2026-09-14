@@ -164,6 +164,9 @@ def main() -> None:
         failed["id"], exit_code=1, stdout="", stderr="Diagnóstico de referencia: modelo inviable.",
         error_payload={"message": "No existe una solución factible para el período."},
     )
+    from scripts.ux004_smoke_fixture import seed_catalog_fixture
+    catalog_fixture = seed_catalog_fixture(store)
+    os.environ["TS_NEXT_CANONICAL_READ_ACCOUNTS"] = "ux004@example.local"
     app = create_app(
         store=store,
         auth_enabled=True,
@@ -175,6 +178,10 @@ def main() -> None:
     @app.get("/api/auth/smoke-token", include_in_schema=False)
     async def smoke_token():
         return {"token": os.environ.get("REACT_SMOKE_TOKEN", "")}
+
+    @app.get("/api/auth/ux004-fixture", include_in_schema=False)
+    async def ux004_fixture():
+        return catalog_fixture
 
     uvicorn.run(
         app,

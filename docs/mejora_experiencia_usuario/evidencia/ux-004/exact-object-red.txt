@@ -1,0 +1,156 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx -t replaces a binding only
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ProtectedMutationJourney.test.tsx (19 tests | 1 failed | 18 skipped) 1070ms
+     × replaces a binding only after showing the comparison and taking a reason 1067ms
+npm.cmd :
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/ProtectedMutationJourney.test.tsx -t 'replaces a  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ProtectedMutationJourney.test.tsx > single protected mutation journey > replaces a binding only after
+showing the comparison and taking a reason
+TestingLibraryElementError: Unable to find an element with the text: sha256:price-1. This could be because the text is
+broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher
+more flexible.
+
+Ignored nodes: comments, script, style
+<table>
+  <caption>
+    Comparacion del reemplazo
+  </caption>
+  <thead>
+    <tr>
+      <th
+        scope="col"
+      >
+        Dato
+      </th>
+      <th
+        scope="col"
+      >
+        Antes
+      </th>
+      <th
+        scope="col"
+      >
+        Despues
+      </th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th
+        scope="row"
+      >
+        Fuente
+      </th>
+      <td>
+        Precio de energia
+      </td>
+      <td>
+        Precio de energia
+      </td>
+    </tr>
+    <tr>
+      <th
+        scope="row"
+      >
+        Revision
+      </th>
+      <td>
+        Revision fijada
+        71
+      </td>
+      <td>
+        Revision
+        2
+      </td>
+    </tr>
+    <tr>
+      <th
+        scope="row"
+      >
+        Hash
+      </th>
+      <td
+        class="catalog-hash"
+      >
+        other-object-hash
+      </td>
+      <td
+        class="catalog-hash"
+      >
+        sha256:price-2
+      </td>
+    </tr>
+    <tr>
+      <th
+        scope="row"
+      >
+        Estado
+      </th>
+      <td>
+        stale
+      </td>
+      <td>
+        Vigente al confirmar
+      </td>
+    </tr>
+    <tr>
+      <th
+        scope="row"
+      >
+        Cobertura
+      </th>
+      <td>
+        La revision fijada conserva la cobertura que sello
+      </td>
+      <td>
+        2026-01-01T00:00:00
+         -
+
+        2026-01-02T00:00:00
+      </td>
+    </tr>
+    <tr>
+      <th
+        scope="row"
+      >
+        Resolucion
+      </th>
+      <td>
+        current
+      </td>
+      <td>
+        1 h
+      </td>
+    </tr>
+  </tbody>
+</table>
+ ❯ Object.getElementError node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/ProtectedMutationJourney.test.tsx:1285:31
+    1283|       name: "Comparacion del reemplazo",
+    1284|     });
+    1285|     expect(within(comparison).getByText("sha256:price-1")).toBeVisible…
+       |                               ^
+    1286|     expect(within(comparison).getByText("sha256:price-2")).toBeVisible…
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 18 skipped (19)
+   Start at  12:15:17
+   Duration  4.68s (transform 1.09s, setup 343ms, import 1.56s, tests 1.07s, environment 1.40s)
+
+    1287|     expect(screen.getByRole("button", { name: "Siguiente" })).toBeDisa…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯

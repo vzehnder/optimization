@@ -930,14 +930,15 @@ todos** en el recorrido de la sección 15.9, con los permisos correspondientes.
 
 1. Abrir **Catálogo** en la navegación principal. El título es **Catálogo de
    series genéricas**.
-2. Completar **Buscar** y, si corresponde, combinar **Tipo semántico**,
-   **Clase**, **Unidad**, **Alcance** y **Estado**.
-3. Elegir **Orden**: actualización reciente, nombre, proyecto propietario,
+2. Completar **Buscar**, **Tipo semántico** y **Unidad**. Abrir **Más filtros**
+   para **Clase**, **Alcance** y **Estado**; su contador indica los filtros adicionales aplicados.
+3. Dentro de **Más filtros**, elegir **Orden**: actualización reciente, nombre, proyecto propietario,
    fin de cobertura o asociaciones.
 4. Presionar **Filtrar**. **Limpiar** restaura los filtros iniciales.
 5. Recorrer **Anterior** y **Siguiente**. Cambiar filtros vuelve a la primera
-   página; si el catálogo cambió mientras se paginaba, volver a aplicar los
-   filtros para iniciar una lectura coherente.
+   página. Si vence el cursor o cambia el catálogo, usar **Volver al inicio
+   conservando filtros**. Los filtros aplicados, la página y el inspector se
+   conservan al recargar y al usar **Volver al origen** desde el recorrido.
 
 Cada fila representa una señal, con nombre, `series_key`, propietario, alcance,
 tipo, clase, unidad, cobertura y resolución. Un set con varias señales puede
@@ -984,10 +985,15 @@ Abrir el resumen contextual del objeto en:
 /react/projects/{projectId}/linkable-objects/{linkableObjectId}/time-series
 ```
 
-Usar un ID real del registro de objetos. La pantalla de proyecto actual no
-incluye un listado navegable de estos objetos; para una sesión guiada, el
-experto debe preparar el enlace del objeto ya registrado. No sustituir ese ID
-por el del escenario ni por el nombre de un asset.
+En **Datos** del escenario, cada necesidad muestra el componente, la señal,
+el estado y la fuente/revisión cuando existe. **Ver fuentes del componente**
+abre este resumen usando el objeto registrado. **Corregir** o **Revisar fuente**
+abre el recorrido para el escenario y la variante actuales. Estos accesos
+dependen de la lectura canónica habilitada por el servidor. No sustituir el ID
+del objeto por el del escenario ni por el nombre de un asset.
+
+**Volver al escenario** conserva la variante de origen. **Explorar catálogo
+general** permite ampliar la búsqueda y regresar al objeto con sus filtros.
 
 El resumen identifica el objeto y permite filtrar por **Buscar** y **Origen**:
 **Todos**, **Fuentes genéricas** o **Series específicas**. Presionar **Filtrar**
@@ -1014,8 +1020,10 @@ no ofrece edición de celdas ni un botón de archivo de series.
 
 ### 15.6 Entender los cuatro pasos del recorrido protegido
 
-El recorrido se abre desde el inspector del catálogo o desde el objeto. Su
-franja de contexto mantiene visibles objeto, alcance, necesidad y acción.
+El recorrido se abre desde el inspector del catálogo, el objeto o una necesidad
+del modelo. El título nombra la acción y la franja de contexto mantiene visibles
+objeto, alcance, necesidad y acción. Las candidatas se buscan y paginan en el
+servidor; una fila incompatible conserva su explicación y no se puede elegir.
 
 | Paso | Decisión y evidencia |
 | --- | --- |
@@ -1032,7 +1040,11 @@ estado al confirmar.
 La prevalidación de asociaciones y bindings no los modifica. El lote se guarda
 completo o no se guarda; una fila rechazada bloquea todo el lote. Registrar el
 mensaje **Guardado atómico completo**, su resultado y el ID del lote. Si venció
-la prevalidación o cambió una dependencia, obtener una nueva antes de confirmar.
+la prevalidación o cambió una dependencia, **Revisar de nuevo** actualiza la
+fuente y los usos y obtiene una nueva revisión del cambio. El borrador se
+conserva y la confirmación anterior queda bloqueada. Asociar no fija un uso de
+ejecución: después de usar la revisión en una variante hay que revisar su
+preparación y el período antes de ejecutar.
 
 En la rama específica, **Guardar definición** sí persiste la identidad durante
 el paso 3; **Validar datos** prepara un lote sin publicarlo. El paso 4 sella la

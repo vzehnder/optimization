@@ -1,7 +1,8 @@
 # Plan de simplificación de la experiencia de BESS Workspace
 
-Fecha de revisión: 2026-09-12. Base: commit `58cf602` y árbol de trabajo local.
-Estado: UX-000 completado; UX-001, UX-002, UX-003, UX-005 y UX-006 implementados y en revisión.
+Fecha de revisión del plan: 2026-09-12. Base del plan: `58cf602`.
+Última implementación: UX-004 sobre `91bb561`, 2026-09-14.
+Estado: UX-000 completado; UX-001 a UX-006 implementados y en revisión.
 [Evidencia UX-001](evidencia/ux-001/README.md), [UX-005](evidencia/ux-005/README.md)
 y [UX-006](evidencia/ux-006/README.md), este último sobre `61dc87a`.
 [UX-002](evidencia/ux-002/README.md) está implementado sobre `9c24c1b`.
@@ -26,10 +27,11 @@ bloqueos, PR/commit y evidencia de cierre. UX-000 está Done; UX-001, UX-002,
 UX-005 y UX-006 están In Review. UX-002 permite editar por componente, conserva
 los campos avanzados y protege los cambios pendientes, con 243 pruebas
 funcionales aprobadas. UX-003 está In Review y comprueba CSV/XLSX y continuidad
-hasta ejecución. El siguiente ticket recomendado es UX-004.
-UX-004 y UX-007/008/009 siguen pendientes.
-El chequeo global conserva fallos de formato previos en 23 archivos no
-modificados, documentados en la evidencia de UX-002.
+hasta ejecución. [UX-004](evidencia/ux-004/README.md) está implementado sobre
+`91bb561`: catálogo contextual, filtros y retorno conservados, recuperación de
+conflictos y 491 pruebas aprobadas. El siguiente ticket recomendado es UX-007;
+UX-007/008/009 siguen pendientes. El chequeo global conserva fallos de formato
+previos en 21 archivos no modificados, enumerados en la evidencia de UX-004.
 
 ## Orden recomendado
 

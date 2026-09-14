@@ -1,0 +1,481 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx -t retries a failed prevalidation
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ProtectedMutationJourney.test.tsx (19 tests | 1 failed | 18 skipped) 1238ms
+   × UX-004 retries a failed prevalidation with the same selected source 1235ms
+npm.cmd :
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/ProtectedMutationJourney.test.tsx -t 'retries a f ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ProtectedMutationJourney.test.tsx > UX-004 retries a failed prevalidation with the same selected source
+TestingLibraryElementError: Unable to find an accessible element with the role "button" and name "Revisar de nuevo"
+
+Here are the accessible roles:
+
+  banner:
+
+  Name "":
+  <header
+    class="topbar"
+  />
+
+  Name "":
+  <header
+    class="workspace-heading"
+  />
+
+  --------------------------------------------------
+  link:
+
+  Name "BESS Workspace":
+  <a
+    class="brand"
+    data-discover="true"
+    href="/react"
+  />
+
+  Name "Proyectos":
+  <a
+    class=""
+    data-discover="true"
+    href="/react/projects"
+  />
+
+  Name "Catálogo de series":
+  <a
+    class=""
+    data-discover="true"
+    href="/react/time-series/catalog"
+  />
+
+  Name "Administración":
+  <a
+    class=""
+    data-discover="true"
+    href="/react/admin/users"
+  />
+
+  Name "Estado del sistema":
+  <a
+    data-discover="true"
+    href="/react/system"
+  />
+
+  --------------------------------------------------
+  strong:
+
+  Name "":
+  <strong />
+
+  Name "":
+  <strong />
+
+  --------------------------------------------------
+  button:
+
+  Name "Salir":
+  <button
+    class="secondary-button"
+    type="button"
+  />
+
+  Name "Volver":
+  <button
+    class="secondary-button"
+    type="button"
+  />
+
+  Name "Siguiente":
+  <button
+    disabled=""
+    type="button"
+  />
+
+  --------------------------------------------------
+  navigation:
+
+  Name "Navegacion principal":
+  <nav
+    aria-label="Navegacion principal"
+    class="primary-nav"
+  />
+
+  Name "Pasos":
+  <nav
+    aria-label="Pasos"
+    class="journey-navigation"
+  />
+
+  --------------------------------------------------
+  group:
+
+  Name "":
+  <details
+    class="workspace-utilities"
+  />
+
+  --------------------------------------------------
+  main:
+
+  Name "":
+  <main
+    id="main-content"
+  />
+
+  --------------------------------------------------
+  heading:
+
+  Name "Asociar fuente al objeto":
+  <h1
+    tabindex="-1"
+  />
+
+  Name "Impacto y confirmacion":
+  <h2 />
+
+  --------------------------------------------------
+  paragraph:
+
+  Name "":
+  <p />
+
+  --------------------------------------------------
+  complementary:
+
+  Name "Contexto del recorrido":
+  <aside
+    aria-label="Contexto del recorrido"
+    class="journey-rail"
+  />
+
+  --------------------------------------------------
+  term:
+
+  Name "":
+  <dt />
+
+  Name "":
+  <dt />
+
+  Name "":
+  <dt />
+
+  Name "":
+  <dt />
+
+  --------------------------------------------------
+  definition:
+
+  Name "":
+  <dd />
+
+  Name "":
+  <dd />
+
+  Name "":
+  <dd />
+
+  Name "":
+  <dd />
+
+  --------------------------------------------------
+  list:
+
+  Name "Pasos del recorrido":
+  <ol
+    aria-label="Pasos del recorrido"
+    class="journey-steps"
+  />
+
+  --------------------------------------------------
+  listitem:
+
+  Name "":
+  <li />
+
+  Name "":
+  <li />
+
+  Name "":
+  <li />
+
+  Name "":
+  <li
+    aria-current="step"
+  />
+
+  --------------------------------------------------
+  region:
+
+  Name "Impacto y confirmacion":
+  <section
+    aria-label="Impacto y confirmacion"
+  />
+
+  --------------------------------------------------
+  alert:
+
+  Name "":
+  <p
+    class="result-alert"
+    role="alert"
+  />
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+    >
+      <header
+        class="topbar"
+      >
+        <a
+          class="brand"
+          data-discover="true"
+          href="/react"
+        >
+          <span
+            aria-hidden="true"
+            class="brand-mark"
+          >
+            Z
+          </span>
+          <span>
+            BESS Workspace
+          </span>
+        </a>
+        <div
+          class="identity"
+        >
+          <strong>
+            Cuenta de verificacion
+          </strong>
+          <span
+            class="role-badge"
+          >
+            admin
+          </span>
+          <button
+            class="secondary-button"
+            type="button"
+          >
+            Salir
+          </button>
+        </div>
+      </header>
+      <nav
+        aria-label="Navegacion principal"
+        class="primary-nav"
+      >
+        <a
+          class=""
+          data-discover="true"
+          href="/react/projects"
+        >
+          Proyectos
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/time-series/catalog"
+        >
+          Catálogo de series
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/admin/users"
+        >
+          Administración
+        </a>
+        <details
+          class="workspace-utilities"
+        >
+          <summary>
+            Utilidades
+          </summary>
+          <a
+            data-discover="true"
+            href="/react/system"
+          >
+            Estado del sistema
+          </a>
+        </details>
+      </nav>
+      <main
+        id="main-content"
+      >
+        <section
+          class="workspace-view journey-surface"
+        >
+          <header
+            class="workspace-heading"
+          >
+            <h1
+              tabindex="-1"
+            >
+              Asociar fuente al objeto
+            </h1>
+            <p>
+              Revisa el origen, elige la fuente y comprueba su revisión. El cuarto paso explica el impacto antes
+de confirmar el cambio.
+            </p>
+          </header>
+          <div
+            class="journey-layout"
+          >
+            <aside
+              aria-label="Contexto del recorrido"
+              class="journey-rail"
+            >
+              <dl
+                class="journey-context"
+              >
+                <dt>
+                  Objeto
+                </dt>
+                <dd>
+                  Sistema
+                </dd>
+                <dt>
+                  Alcance
+                </dt>
+                <dd>
+                  Fuente generica compartida
+                </dd>
+                <dt>
+                  Necesidad
+                </dt>
+                <dd>
+                  Precio de compra a la red
+                </dd>
+                <dt>
+                  Accion
+                </dt>
+                <dd>
+                  Asociar fuente al objeto
+                </dd>
+              </dl>
+              <ol
+                aria-label="Pasos del recorrido"
+                class="journey-steps"
+              >
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    1
+                  </span>
+                  <span>
+                    Origen y alcance
+                  </span>
+                </li>
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    2
+                  </span>
+                  <span>
+                    Definicion o seleccion
+                  </span>
+                </li>
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    3
+                  </span>
+                  <span>
+                    Datos o revision
+                  </span>
+                </li>
+                <li
+                  aria-current="step"
+                >
+                  <span
+                    class="journey-step-number"
+                  >
+                    4
+                  </span>
+                  <span>
+                    Impacto y confirmacion
+                  </span>
+                </li>
+              </ol>
+            </aside>
+            <div
+              class="journey-step-panel"
+            >
+              <section
+                aria-label="Impacto y confirmacion"
+              >
+                <h2>
+                  Impacto y confirmacion
+                </h2>
+                <p
+                  class="result-alert"
+                  role="alert"
+                >
+                  <strong>
+                    TS_REVIEW_UNAVAILABLE
+                  </strong>
+
+                  Revisión temporalmente no disponible
+                   No se escribio nada y el borrador se conserva.
+                </p>
+              </section>
+              <nav
+                aria-label="Pasos"
+                class="journey-navigation"
+              >
+                <button
+                  class="secondary-button"
+                  type="button"
+                >
+                  Volver
+                </button>
+                <button
+                  disabled=""
+                  type="button"
+                >
+                  Siguiente
+                </button>
+              </nav>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ Object.getElementError node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/ProtectedMutationJourney.test.tsx:23:27
+     21|   expect(await screen.findByRole("alert")).toHaveTextContent("Revisión…
+     22|   available = true;
+     23|   await user.click(screen.getByRole("button", { name: "Revisar de nuev…
+       |                           ^
+     24|   expect(await screen.findByRole("button", { name: "Asociar fuente al …
+     25|   expect(screen.getByRole("region", { name: "Impacto y confirmacion" }…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 18 skipped (19)
+   Start at  12:06:48
+   Duration  5.21s (transform 1.22s, setup 331ms, import 1.76s, tests 1.24s, environment 1.56s)

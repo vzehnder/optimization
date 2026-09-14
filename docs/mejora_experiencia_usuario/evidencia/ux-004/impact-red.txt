@@ -1,0 +1,352 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx -t pins the observed revision
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ProtectedMutationJourney.test.tsx (15 tests | 1 failed | 14 skipped) 1006ms
+     × pins the observed revision, prevalidates once and commits with token, ETag and idempotency key 1002ms
+npm.cmd :
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/ProtectedMutationJourney.test.tsx -t 'pins the ob ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ProtectedMutationJourney.test.tsx > single protected mutation journey > pins the observed revision,
+prevalidates once and commits with token, ETag and idempotency key
+TestingLibraryElementError: Unable to find an element with the text: /La fuente quedó asociada al objeto. Su uso en
+una variante se confirma por separado/. This could be because the text is broken up by multiple elements. In this
+case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+    >
+      <header
+        class="topbar"
+      >
+        <a
+          class="brand"
+          data-discover="true"
+          href="/react"
+        >
+          <span
+            aria-hidden="true"
+            class="brand-mark"
+          >
+            Z
+          </span>
+          <span>
+            BESS Workspace
+          </span>
+        </a>
+        <div
+          class="identity"
+        >
+          <strong>
+            Cuenta de verificacion
+          </strong>
+          <span
+            class="role-badge"
+          >
+            admin
+          </span>
+          <button
+            class="secondary-button"
+            type="button"
+          >
+            Salir
+          </button>
+        </div>
+      </header>
+      <nav
+        aria-label="Navegacion principal"
+        class="primary-nav"
+      >
+        <a
+          class=""
+          data-discover="true"
+          href="/react/projects"
+        >
+          Proyectos
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/time-series/catalog"
+        >
+          Catálogo de series
+        </a>
+        <a
+          class=""
+          data-discover="true"
+          href="/react/admin/users"
+        >
+          Administración
+        </a>
+        <details
+          class="workspace-utilities"
+        >
+          <summary>
+            Utilidades
+          </summary>
+          <a
+            data-discover="true"
+            href="/react/system"
+          >
+            Estado del sistema
+          </a>
+        </details>
+      </nav>
+      <main
+        id="main-content"
+      >
+        <section
+          class="workspace-view journey-surface"
+        >
+          <header
+            class="workspace-heading"
+          >
+            <h1
+              tabindex="-1"
+            >
+              Recorrido protegido
+            </h1>
+            <p>
+              Toda mutacion pasa por estos cuatro pasos: no hay atajos desde el catalogo ni desde el objeto.
+            </p>
+          </header>
+          <div
+            class="journey-layout"
+          >
+            <aside
+              aria-label="Contexto del recorrido"
+              class="journey-rail"
+            >
+              <dl
+                class="journey-context"
+              >
+                <dt>
+                  Objeto
+                </dt>
+                <dd>
+                  Sistema
+                </dd>
+                <dt>
+                  Alcance
+                </dt>
+                <dd>
+                  Fuente generica compartida
+                </dd>
+                <dt>
+                  Necesidad
+                </dt>
+                <dd>
+                  grid_import_price
+                </dd>
+                <dt>
+                  Accion
+                </dt>
+                <dd>
+                  Asociar fuente al objeto
+                </dd>
+              </dl>
+              <ol
+                aria-label="Pasos del recorrido"
+                class="journey-steps"
+              >
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    1
+                  </span>
+                  <span>
+                    Origen y alcance
+                  </span>
+                </li>
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    2
+                  </span>
+                  <span>
+                    Definicion o seleccion
+                  </span>
+                </li>
+                <li>
+                  <span
+                    class="journey-step-number"
+                  >
+                    3
+                  </span>
+                  <span>
+                    Datos o revision
+                  </span>
+                </li>
+                <li
+                  aria-current="step"
+                >
+                  <span
+                    class="journey-step-number"
+                  >
+                    4
+                  </span>
+                  <span>
+                    Impacto y confirmacion
+                  </span>
+                </li>
+              </ol>
+            </aside>
+            <div
+              class="journey-step-panel"
+            >
+              <section
+                aria-label="Impacto y confirmacion"
+              >
+                <h2>
+                  Impacto y confirmacion
+                </h2>
+                <div
+                  class="time-series-table-scroll"
+                >
+                  <table>
+                    <caption>
+                      Prevalidacion por fila
+                    </caption>
+                    <thead>
+                      <tr>
+                        <th
+                          scope="col"
+                        >
+                          Operacion
+                        </th>
+                        <th
+                          scope="col"
+                        >
+                          Veredicto
+                        </th>
+                        <th
+                          scope="col"
+                        >
+                          Razones
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <th
+                          scope="row"
+                        >
+                          op-1
+                        </th>
+                        <td>
+                          <strong>
+                            Aceptada
+                          </strong>
+                        </td>
+                        <td>
+                          Sin observaciones
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <dl
+                  class="catalog-definition-list"
+                >
+                  <dt>
+                    Consumidores actuales
+                  </dt>
+                  <dd>
+                    2 asociaciones y 1 bindings de ejecucion
+                  </dd>
+                  <dt>
+                    Permisos
+                  </dt>
+                  <dd>
+                    El servidor reautoriza al confirmar; el alcance observado es global.
+                  </dd>
+                  <dt>
+                    Staleness
+                  </dt>
+                  <dd>
+                    Asociar no mueve ningun binding: los usos vigentes conservan su revision fijada.
+                  </dd>
+                  <dt>
+                    Atomicidad
+                  </dt>
+                  <dd>
+                    El guardado es todo o nada: una fila incompatible bloquea el lote completo y no deja exitos
+parciales.
+                  </dd>
+                  <dt>
+                    Historia
+                  </dt>
+                  <dd>
+                    La operacion queda registrada con su lote, actor y motivo, y la prevalidacion vence el
+                    2026-02-01T10:05:00+00:00
+                    .
+                  </dd>
+                </dl>
+                <p
+                  class="journey-committed"
+                  role="status"
+                >
+                  Guardado atomico completo (
+                  created
+                  ) en el lote
+
+                  batch-1
+                  .
+                </p>
+              </section>
+              <nav
+                aria-label="Pasos"
+                class="journey-navigation"
+              >
+                <button
+                  class="secondary-button"
+                  type="button"
+                >
+                  Volver
+                </button>
+                <button
+                  disabled=""
+                  type="button"
+                >
+                  Siguiente
+                </button>
+              </nav>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ Object.getElementError node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/ProtectedMutationJourney.test.tsx:1411:19
+    1409|
+    1410|     expect(await screen.findByText(/batch-1/)).toBeVisible();
+    1411|     expect(screen.getByText(/La fuente quedó asociada al objeto. Su us…
+       |                   ^
+    1412|     expect(commits).toHaveLength(1);
+    1413|     const body = commits[0].body as Record<string, unknown>;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 14 skipped (15)
+   Start at  11:47:01
+   Duration  4.62s (transform 1.08s, setup 327ms, import 1.55s, tests 1.01s, environment 1.43s)

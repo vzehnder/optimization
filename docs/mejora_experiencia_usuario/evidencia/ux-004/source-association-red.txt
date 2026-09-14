@@ -1,0 +1,57 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx -t replaces a binding only
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ProtectedMutationJourney.test.tsx (20 tests | 1 failed | 18 skipped) 4650ms
+     × replaces a binding only after showing the comparison and taking a reason (42) 2171ms
+npm.cmd :
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/ProtectedMutationJourney.test.tsx -t 'replaces a  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ProtectedMutationJourney.test.tsx > single protected mutation journey > replaces a binding only after
+showing the comparison and taking a reason (42)
+AssertionError: expected [ { …(11) } ] to deeply equal [ ObjectContaining{…} ]
+
+- Expected
++ Received
+
+@@ -1,13 +1,15 @@
+  [
+    {
+      "action": "replace",
+      "binding_id": 73,
+      "binding_role_key": "grid_import_price",
+-     "catalog_association_id": null,
++     "catalog_association_id": 12,
++     "client_operation_id": "bind-42-grid_import_price",
+      "expected_lifecycle_revision": 1,
+      "linkable_object_id": 7,
++     "reason_code": "new_source_revision_accepted",
+      "reason_text": "Revisada la curva nueva y aceptada",
+      "revision": {
+        "content_hash": "sha256:price-2",
+        "mode": "current",
+        "revision_id": 90,
+
+ ❯ src/ProtectedMutationJourney.test.tsx:1473:40
+    1471|     await waitFor(() => expect(commits).toHaveLength(1));
+    1472|     expect(commits[0].body.expected_bindings_revision).toBe(3);
+    1473|     expect(commits[0].body.operations).toEqual([
+       |                                        ^
+    1474|       expect.objectContaining({
+    1475|         action: "replace",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 18 skipped (20)
+   Start at  12:21:02
+   Duration  9.98s (transform 2.22s, setup 424ms, import 3.02s, tests 4.65s, environment 1.57s)

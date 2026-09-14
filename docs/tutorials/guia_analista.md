@@ -300,6 +300,24 @@ su deprecacion y su sucesor, y las escrituras exigen `If-Match` e
 `Idempotency-Key`, de modo que un reintento no puede crear una segunda
 revision.
 
+Para reutilizar fuentes existentes, comienza en **Datos** del escenario. Cada
+necesidad muestra el componente, la señal y su fuente/revisión. **Ver fuentes
+del componente** abre el resumen contextual; **Corregir** y **Revisar fuente**
+conservan el escenario y la variante en el recorrido protegido, cuando la
+lectura canónica está habilitada para la cuenta.
+
+En el catálogo general, **Buscar**, **Tipo semántico** y **Unidad** están a la
+vista. **Más filtros** contiene clase, alcance, estado y orden, con un contador
+de filtros activos. Filtrar vuelve a la primera página; recargar y volver del
+recorrido conservan filtros e inspector. Un cursor vencido ofrece **Volver al
+inicio conservando filtros**.
+
+En el recorrido, busca y pagina las fuentes compatibles, revisa objeto,
+alcance, fuente/revisión y usos afectados, y confirma el cuarto paso. Asociar
+una fuente no crea su uso en una variante. **Volver al origen** permite
+continuar donde estabas; **Revisar de nuevo** recupera un conflicto conservando
+la selección. Revisa la preparación y el período antes de ejecutar.
+
 ### 6.1 Transformaciones y combinacion
 
 En el detalle de un set, el panel **Transformaciones** ofrece un allowlist

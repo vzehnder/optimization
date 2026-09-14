@@ -10,12 +10,57 @@ import {
   test,
   type APIRequestContext,
   type Page,
+  type TestInfo,
 } from "@playwright/test";
 
 async function csrfToken(api: APIRequestContext): Promise<string> {
   const response = await api.get("/api/auth/csrf");
   expect(response.ok()).toBeTruthy();
   return ((await response.json()) as { csrf_token: string }).csrf_token;
+}
+
+async function verifyCatalogLayout(
+  page: Page,
+  testInfo: TestInfo,
+  surface: string,
+) {
+  for (const width of [1440, 1280, 320]) {
+    await page.setViewportSize({ width, height: width === 1280 ? 720 : 900 });
+    await page.screenshot({
+      path: testInfo.outputPath(`${surface}-${width}.png`),
+      fullPage: true,
+    });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBeTruthy();
+  }
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.evaluate(() => {
+    document.documentElement.style.zoom = "2";
+  });
+  expect(
+    await page.evaluate(
+      () =>
+        document.documentElement.getBoundingClientRect().width <=
+        window.innerWidth,
+    ),
+  ).toBeTruthy();
+  await page.screenshot({
+    path: testInfo.outputPath(`${surface}-zoom200.png`),
+    fullPage: true,
+  });
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(
+    accessibility.violations.filter((entry) =>
+      ["serious", "critical"].includes(entry.impact ?? ""),
+    ),
+  ).toEqual([]);
+  await page.evaluate(() => {
+    document.documentElement.style.zoom = "1";
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
 }
 
 async function postWithCsrf(
@@ -2567,6 +2612,181 @@ test("UX-006 reads results, audits the snapshot and compares the chosen executio
   expect(
     (await new AxeBuilder({ page }).analyze()).violations.filter(
       (item) => item.impact === "serious" || item.impact === "critical",
+    ),
+  ).toEqual([]);
+});
+
+test("UX-004 follows a model source through association, exact variant use and execution", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(60_000);
+  await ensureAdminSession(page);
+  const created = await postWithCsrf(page.request, "/api/admin/users", {
+    email: "ux004@example.local",
+    display_name: "Analista de fuentes",
+    role: "analyst",
+    password: "ux004-test-only",
+  });
+  expect(created.status()).toBe(201);
+  await page.getByRole("button", { name: "Salir" }).click();
+  await page.getByLabel("Email").fill("ux004@example.local");
+  await page.getByLabel("Password").fill("ux004-test-only");
+  await page.getByRole("button", { name: "Entrar" }).click();
+  await expect(page).toHaveURL(/\/react\/projects$/);
+  const fixture = await (
+    await page.request.get("/api/auth/ux004-fixture")
+  ).json();
+  const scenarioPath = `/react/scenarios/${fixture.scenario_id}?section=data&variant=${fixture.variant_id}`;
+  await page.goto(scenarioPath);
+  await page
+    .getByRole("link", { name: "Ver fuentes del componente grid_1" })
+    .first()
+    .click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Red del modelo" }),
+  ).toBeVisible();
+  await verifyCatalogLayout(page, testInfo, "objeto");
+  await page
+    .getByRole("link", { name: "Asociar fuente al objeto", exact: true })
+    .click();
+  await page
+    .getByLabel("Necesidad funcional")
+    .selectOption("grid_import_price");
+  await page
+    .getByRole("radio", { name: "Reutilizar una fuente generica" })
+    .check();
+  await page.getByRole("button", { name: "Siguiente", exact: true }).click();
+  await page.getByLabel("Buscar fuentes candidatas").fill("alternativo");
+  await page
+    .getByRole("button", { name: "Buscar fuentes", exact: true })
+    .click();
+  await verifyCatalogLayout(page, testInfo, "candidatos");
+  await page
+    .getByRole("radio", { name: "Elegir Precio alternativo", exact: true })
+    .check();
+  await page.getByRole("button", { name: "Siguiente", exact: true }).click();
+  await expect(page.getByText("USD/MWh", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Datos o revision ejecutable" }),
+  ).toBeFocused();
+  await page.getByRole("button", { name: "Siguiente", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Asociar fuente al objeto", exact: true }),
+  ).toBeEnabled();
+  await verifyCatalogLayout(page, testInfo, "confirmacion");
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page
+    .getByRole("heading", { name: "Impacto y confirmacion", exact: true })
+    .focus();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(
+    page.getByRole("button", { name: "Asociar fuente al objeto", exact: true }),
+  ).toBeFocused();
+  expect(
+    await page
+      .getByRole("button", { name: "Asociar fuente al objeto", exact: true })
+      .evaluate((node) => {
+        const box = node.getBoundingClientRect();
+        return (
+          document.elementFromPoint(
+            box.x + box.width / 2,
+            box.y + box.height / 2,
+          ) === node
+        );
+      }),
+  ).toBeTruthy();
+  await page
+    .getByRole("button", { name: "Asociar fuente al objeto", exact: true })
+    .click();
+  await expect(
+    page.getByText(/La fuente quedó asociada al objeto/),
+  ).toBeVisible();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole("link", { name: "Volver al origen" }).click();
+  await expect(
+    page.getByRole("row", { name: /Precio alternativo/ }),
+  ).toContainText("Aun no usada en una variante");
+  await page.reload();
+  await page
+    .getByRole("link", { name: "Usar revision en una variante", exact: true })
+    .click();
+  await page
+    .getByLabel("Necesidad funcional")
+    .selectOption("grid_import_price");
+  await expect(page.getByLabel("Variante", { exact: true })).toHaveValue(
+    String(fixture.variant_id),
+  );
+  await page
+    .getByRole("radio", { name: "Reutilizar una fuente generica" })
+    .check();
+  await page.getByRole("button", { name: "Siguiente", exact: true }).click();
+  await page
+    .getByRole("radio", { name: "Elegir Precio alternativo", exact: true })
+    .check();
+  await page.getByRole("button", { name: "Siguiente", exact: true }).click();
+  await page
+    .getByLabel("Motivo del reemplazo")
+    .fill("Usar el precio revisado para enero");
+  await page.getByRole("button", { name: "Siguiente", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Usar revision en una variante", exact: true })
+    .click();
+  await expect(
+    page.getByText(/La revisión quedó fijada en la variante/),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Volver al origen" }).click();
+  await expect(
+    page.getByRole("row", { name: /Precio alternativo/ }),
+  ).toContainText("Usada en Default");
+  await verifyCatalogLayout(page, testInfo, "objeto-con-fuente");
+  await page.getByRole("link", { name: "Volver al escenario" }).click();
+  await expect(page).toHaveURL(
+    new RegExp(
+      `/react/scenarios/${fixture.scenario_id}\\?section=data&variant=${fixture.variant_id}$`,
+    ),
+  );
+  await page.getByRole("button", { name: "Usar cobertura disponible" }).click();
+  await page.getByRole("button", { name: "Revisar preparación" }).click();
+  await expect(
+    page.getByText("Preparado para ejecutar este período", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Ejecutar variante", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/react\/runs\/\d+$/);
+  await expect(page.getByText("Finalizada", { exact: true })).toBeVisible();
+  await page.goto(
+    `/react/time-series/catalog?q=alternativo&visibility_scope=project`,
+  );
+  await page.getByRole("button", { name: "Inspeccionar", exact: true }).click();
+  await page.reload();
+  await expect(
+    page.getByRole("region", { name: "Inspector de senal" }),
+  ).toContainText("Precio alternativo");
+  await page
+    .getByRole("link", { name: "Abrir el recorrido protegido" })
+    .click();
+  await page.getByRole("link", { name: "Volver al origen" }).click();
+  await expect(page.getByLabel("Buscar", { exact: true })).toHaveValue(
+    "alternativo",
+  );
+  for (const width of [1440, 1280, 320]) {
+    await page.setViewportSize({ width, height: width === 1280 ? 720 : 900 });
+    await page.screenshot({
+      path: testInfo.outputPath(`catalogo-${width}.png`),
+      fullPage: true,
+    });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBeTruthy();
+  }
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(
+    accessibility.violations.filter((entry) =>
+      ["serious", "critical"].includes(entry.impact ?? ""),
     ),
   ).toEqual([]);
 });
