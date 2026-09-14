@@ -54,6 +54,26 @@ Python ni pruebas con participantes o lectores de pantalla. No cambian contratos
 de producción ni semántica de versiones. Tutoriales actualizados y capturas
 locales regenerables excluidas de Git.
 
+## Evidencia posterior: UX-003
+
+La [implementación sobre `19fc31c`](evidencia/ux-003/README.md) queda In Review:
+asistente CSV/XLSX, revisión previa sin crear conjuntos, error con ubicación,
+correcciones paginadas y conservadas al retroceder, confirmación contra el
+contenido revisado y entrada a la ingesta específica TS-7 existente. F1/F2/F3
+se confirmaron antes de las pruebas. Se conserva reemplazo, historial,
+extracción, transformaciones, series hidráulicas y API.
+
+Resultado: **367 pruebas funcionales aprobadas** (214 frontend, 19 navegador,
+134 Python), con 56 PostgreSQL omitidas por falta de una base de prueba dedicada.
+El recorrido CSV importa dos señales, abre el recurso tras recarga y prepara una
+ejecución; XLSX localiza y corrige un número ambiguo conservando la hoja y sus
+decisiones. C6 se comprueba por API antes/después del corte aislado, separado del
+flag de lectura. Las capturas y axe cubren el asistente en escritorio, 320 píxeles
+y ampliación CSS al 200 %, con desplazamiento propio de tablas y foco de teclado.
+El chequeo global conserva fallos de Prettier previos; la lista y los comandos
+figuran en la evidencia. No se ejecutaron Julia real, toda la suite Python,
+pruebas con participantes ni una auditoría completa con lectores de pantalla.
+
 ## Evidencia histórica de la revisión del plan
 
 El 2026-09-12 se ejecutó desde `frontend/`:

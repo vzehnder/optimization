@@ -1,6 +1,16 @@
 # UX-003 · Importación guiada de series de tiempo
 
-Estado: Todo. Prioridad: P1. Dependencias: UX-002. Tamaño: L.
+Estado: In Review. Prioridad: P1. Dependencias: UX-002 (integrado en `19fc31c`). Tamaño: L.
+
+Responsable: Codex. F1/F2 y F3 condicional confirmadas por el usuario antes de
+la primera prueba. [Acuerdo y ciclos](../evidencia/ux-003/README.md).
+
+Implementación local sobre `19fc31c`: asistente CSV/XLSX, correcciones paginadas,
+conservación de decisiones, revisión sin escritura y confirmación contra el hash
+revisado. El servidor decide la ruta según C6. La carga específica reutiliza
+la ingesta de archivos y publicación protegida TS-7. 214 pruebas frontend,
+19 navegador y 134 Python aprobadas; 56 PostgreSQL omitidas. Tutoriales y
+evidencia actualizados. Pendiente de aceptación del resultado.
 
 ## Problema y resultado
 

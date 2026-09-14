@@ -48,6 +48,7 @@ import {
   type TimeSeriesSource,
 } from "./api/client";
 import { CaseHierarchyProvenanceSummary } from "./CaseHierarchyProvenance";
+import { GuidedImport } from "./GuidedImport";
 import {
   findSuggestedCatalogColumn,
   isRecord,
@@ -2589,9 +2590,11 @@ function DraftEditor({
     [document, jsonTexts],
   );
   const dirty = currentSignature !== persistedSignature;
+  const [importNotice, setImportNotice] = useState("");
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
-      currentSignatureRef.current !== persistedSignatureRef.current &&
+      (currentSignatureRef.current !== persistedSignatureRef.current ||
+        Boolean(importNotice)) &&
       (currentLocation.pathname !== nextLocation.pathname ||
         currentLocation.search !== nextLocation.search),
   );
@@ -2632,12 +2635,12 @@ function DraftEditor({
 
   useEffect(() => {
     function handleBeforeUnload(event: BeforeUnloadEvent) {
-      if (!dirty) return;
+      if (!dirty && !importNotice) return;
       event.preventDefault();
     }
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [dirty]);
+  }, [dirty, importNotice]);
   const saveMutation = useMutation({
     mutationFn: (variables: {
       candidate: ScenarioDraftDocument;
@@ -2873,6 +2876,7 @@ function DraftEditor({
           >
             <h2 id="leave-draft-title">Cambios sin guardar</h2>
             <p>Guarda o descarta cambios antes de salir del editor.</p>
+            {importNotice && <p>{importNotice}</p>}
             <button
               type="button"
               ref={continueEditingRef}
@@ -3191,13 +3195,25 @@ function DraftEditor({
           className="workspace-section"
           aria-labelledby="time-series-metadata"
         >
-          <h2 id="time-series-metadata">Time-series metadata</h2>
-          <TimeSeriesWorkflow
+          <h2 id="time-series-metadata">Series de tiempo</h2>
+          <GuidedImport
             scenarioId={scenario.id}
-            document={document}
-            dirty={dirty}
+            projectId={scenario.project_id}
+            disabled={dirty}
             onSourcePersisted={persistTimeSeriesSource}
+            onPendingChange={setImportNotice}
           />
+          <details>
+            <summary>
+              Herramientas de compatibilidad: fuente del modelo y extracción
+            </summary>
+            <TimeSeriesWorkflow
+              scenarioId={scenario.id}
+              document={document}
+              dirty={dirty}
+              onSourcePersisted={persistTimeSeriesSource}
+            />
+          </details>
         </section>
         <GeneratedSystemCasePanel
           scenario={scenario}

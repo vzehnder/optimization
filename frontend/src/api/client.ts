@@ -866,6 +866,7 @@ export interface TimeSeriesSource {
 }
 
 export interface TimeSeriesCatalogImportPayload {
+  expected_preview_hash?: string;
   set_name: string;
   version_label: string;
   data_kind: string;
@@ -1474,6 +1475,8 @@ export interface HydraulicDiagramValidation extends CaseHierarchyProvenance {
 }
 
 interface StructuredErrorBody {
+  context?: Record<string, unknown>;
+  location?: ImportErrorLocation;
   error?: {
     category?: string;
     code?: string;
@@ -1509,6 +1512,8 @@ export class ApiError extends Error {
     // surface that only had the prose could not name either of them.
     readonly code?: string,
     readonly requestId?: string,
+    readonly location?: ImportErrorLocation,
+    readonly context?: Record<string, unknown>,
   ) {
     super(message);
     this.name = "ApiError";
@@ -1549,6 +1554,8 @@ async function errorFromResponse(response: Response): Promise<ApiError> {
     structured?.details ?? body.detail ?? body,
     structured?.code,
     body.request_id,
+    body.location,
+    body.context,
   );
 }
 
@@ -3048,6 +3055,44 @@ export async function importTimeSeriesSourceToCatalog(
   return response.time_series_set;
 }
 
+export interface CatalogImportPreview {
+  content_hash: string;
+  period_count: number;
+  coverage_start: string;
+  coverage_end: string;
+  resolution_hours: number | null;
+  signals: { signal_key: string; unit: string; source_column: string }[];
+  rows: Record<string, unknown>[];
+}
+
+export function getTimeSeriesImportOptions(
+  scenarioId: number,
+  signal?: AbortSignal,
+) {
+  return requestJson<{ mode: "project_catalog" | "protected" }>(
+    `/api/scenarios/${scenarioId}/draft/time-series-import-options`,
+    { signal },
+  );
+}
+
+export interface ImportErrorLocation {
+  sheet?: string | null;
+  row?: number | null;
+  column?: string | null;
+}
+
+export async function previewTimeSeriesCatalogImport(
+  scenarioId: number,
+  sourceId: string,
+  payload: TimeSeriesCatalogImportPayload,
+): Promise<CatalogImportPreview> {
+  const response = await postJsonWithCsrf<{ preview: CatalogImportPreview }>(
+    `/api/scenarios/${scenarioId}/draft/time-series-sources/${encodeURIComponent(sourceId)}/catalog-preview`,
+    payload,
+  );
+  return response.preview;
+}
+
 export async function extractDraftTimeSeriesSourceToCatalog(
   scenarioId: number,
   sourceId: string,
@@ -3869,6 +3914,13 @@ export interface SharedSeriesIngestionRequest {
 }
 
 export interface IngestionReceipt {
+  file?: {
+    original_filename: string;
+    columns: string[];
+    available_sheets: string[];
+    selected_sheet: string | null;
+    preview_rows: Record<string, unknown>[];
+  };
   ingestion_id: string;
   channel: string;
   state: string;
@@ -3885,7 +3937,15 @@ export interface IngestionReceipt {
   validation: {
     valid: boolean;
     error_count: number;
-    errors: { code: string; message?: string }[];
+    errors: {
+      code: string;
+      message?: string;
+      location?: {
+        sheet?: string;
+        source_row_number?: number;
+        column?: string;
+      };
+    }[];
     errors_truncated: boolean;
   };
   impact: Record<string, unknown>;
@@ -4033,6 +4093,62 @@ export async function prepareObjectSeriesIngestion(
     request,
   );
   return response.ingestion;
+}
+
+export async function uploadObjectSeriesFile(
+  target: ObjectSeriesTarget,
+  signalId: number,
+  file: File,
+  idempotencyKey: string,
+): Promise<IngestionReceipt> {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await requestJson<{ ingestion: IngestionReceipt }>(
+    `${objectSeriesRoot(target)}/${signalId}/revision-ingestions/files`,
+    {
+      method: "POST",
+      headers: {
+        "X-CSRF-Token": await getCsrfToken(),
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: form,
+    },
+  );
+  return response.ingestion;
+}
+
+export async function mapObjectSeriesFile(
+  target: ObjectSeriesTarget,
+  signalId: number,
+  ingestionId: string,
+  mapping: Record<string, unknown>,
+): Promise<IngestionReceipt> {
+  const response = await requestJson<{ ingestion: IngestionReceipt }>(
+    `${objectSeriesRoot(target)}/${signalId}/revision-ingestions/${encodeURIComponent(ingestionId)}/mapping`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": await getCsrfToken(),
+      },
+      body: JSON.stringify(mapping),
+    },
+  );
+  return response.ingestion;
+}
+
+export function previewObjectSeriesFile(
+  target: ObjectSeriesTarget,
+  signalId: number,
+  ingestionId: string,
+) {
+  return requestJson<{
+    source_row_count: number;
+    returned_row_count: number;
+    rows: Record<string, unknown>[];
+  }>(
+    `${objectSeriesRoot(target)}/${signalId}/revision-ingestions/${encodeURIComponent(ingestionId)}/preview?max_rows=5`,
+  );
 }
 
 export interface ObjectSeriesPublicationRequest {

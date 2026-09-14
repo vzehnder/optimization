@@ -254,11 +254,13 @@ periodos con resolucion homogenea y zona horaria explicita.
 
 Caminos de entrada de datos:
 
-1. **CSV desde el draft** (el camino principal): en el editor de draft, la
-   seccion *Time-series source* permite subir un CSV, previsualizarlo,
-   mapear columnas a senales del catalogo canonico (*Column mapping*),
-   corregir filas puntuales (*Editable rows*) e importarlo al catalogo
-   (*Import mapped columns to catalog*).
+1. **CSV o XLSX desde el modelo**: guarda el modelo y abre **Series de tiempo →
+   Importar series de tiempo**. Sigue Archivo → Columnas → Revisión → Importación.
+   Elige la hoja solo para XLSX, revisa ejemplos y unidades y confirma las columnas.
+   **Comprobar datos** revisa todas las filas; un error localizado lleva a la celda.
+   Guarda las correcciones en la fuente temporal y comprueba de nuevo antes de
+   **Confirmar importación**. El destino indicado por el servidor puede ser un
+   conjunto nuevo del proyecto o el recorrido protegido desde una necesidad del modelo.
 2. **Conector externo** (panel *Ingesta de pronostico* en el catalogo):
    trae datos de una API HTTP JSON configurable. El resultado entra igual
    que un archivo: un set `forecast` o, si lo marcas como **Programa
@@ -269,6 +271,17 @@ Caminos de entrada de datos:
 5. **Migracion de series hidraulicas legacy** (solo si vienes de datos
    creados con el editor hidraulico antiguo). El adaptador sigue vigente y su
    migracion bajo demanda ahora publica en el modelo canonico.
+
+Retroceder conserva archivo, hoja, mapeo y correcciones. La tabla se recorre en
+páginas de 50 filas; la vista previa muestra hasta cinco. Al salir se informa qué
+fuente temporal está guardada y qué decisiones locales se perderán. Si una
+confirmación queda incierta por un fallo de red, comprueba el catálogo antes de
+reenviar. El enlace final abre el conjunto guardado; **importar no confirma su uso**:
+vuelve a Datos del escenario para elegir la fuente y revisar la variante.
+
+**Herramientas de compatibilidad: fuente del modelo y extracción** conserva
+el mapeo y extracción de drafts antiguos. Transformaciones, reemplazo de archivos,
+conectores y series hidráulicas conservan sus entradas propias.
 
 Las senales canonicas que un caso puede requerir son, entre otras:
 `import_price_usd_per_mwh` / `export_price_usd_per_mwh` (precios de red),

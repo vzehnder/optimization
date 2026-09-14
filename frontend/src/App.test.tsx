@@ -717,6 +717,8 @@ describe("application shell", () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const path = String(input);
+        if (path.endsWith("/time-series-import-options"))
+          return Response.json({ mode: "project_catalog" });
         const method = init?.method || "GET";
         if (path === "/api/auth/me") {
           return new Response(
@@ -5952,6 +5954,8 @@ describe("application shell", () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const path = String(input);
+        if (path.endsWith("/time-series-import-options"))
+          return Response.json({ mode: "project_catalog" });
         const method = init?.method || "GET";
         if (path === "/api/auth/me") {
           return new Response(
@@ -6154,6 +6158,11 @@ describe("application shell", () => {
     expect(
       await screen.findByRole("heading", { name: "Modelo en edición" }),
     ).toBeVisible();
+    await user.click(
+      screen.getByText(
+        "Herramientas de compatibilidad: fuente del modelo y extracción",
+      ),
+    );
     expect(
       screen.getByText(/embedded time series is this draft's legacy storage/),
     ).toBeVisible();
@@ -6318,6 +6327,8 @@ describe("application shell", () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const path = String(input);
+        if (path.endsWith("/time-series-import-options"))
+          return Response.json({ mode: "project_catalog" });
         const method = init?.method || "GET";
         if (path === "/api/auth/me") {
           return new Response(
@@ -6394,6 +6405,11 @@ describe("application shell", () => {
     expect(
       await screen.findByRole("heading", { name: "Modelo en edición" }),
     ).toBeVisible();
+    await user.click(
+      screen.getByText(
+        "Herramientas de compatibilidad: fuente del modelo y extracción",
+      ),
+    );
     await user.upload(
       screen.getByLabelText("Source file"),
       new File(["xlsx-bytes"], "prices.xlsx", {

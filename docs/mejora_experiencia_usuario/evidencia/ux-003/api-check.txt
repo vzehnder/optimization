@@ -1,0 +1,6 @@
+
+> bess-react-ui@0.1.0 api:check
+> node scripts/export-openapi.mjs openapi.check.json && openapi-typescript openapi.check.json -o src/api/schema.check.ts && node scripts/check-generated.mjs
+
+✨ openapi-typescript 7.13.0
+🚀 openapi.check.json → src/api/schema.check.ts [404ms]

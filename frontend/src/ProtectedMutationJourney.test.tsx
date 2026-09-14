@@ -131,7 +131,12 @@ const OBJECT_INGESTION = {
     coverage_end: "2026-01-01T01:00:00Z",
     content_hash: "sha256:local-first-revision",
   },
-  validation: { valid: true, error_count: 0, errors: [], errors_truncated: false },
+  validation: {
+    valid: true,
+    error_count: 0,
+    errors: [],
+    errors_truncated: false,
+  },
   impact: {},
   requires_confirmation: false,
   validation_token: "validation-local-01",
@@ -1471,144 +1476,375 @@ describe("single protected mutation journey", () => {
     expect(within(rail).getByText("Solo este objeto")).toBeVisible();
   });
 
-  it("defines an object-specific series, stages its data and seals it in the same four steps", async () => {
-    window.history.replaceState(
-      {},
-      "",
-      "/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=associate",
-    );
-    const seen: string[] = [];
-    const fetchMock = journeyFetch((url, init) => {
-      if (url.pathname === "/api/auth/csrf") return json({ csrf_token: "csrf" });
-      if (url.pathname === "/api/time-series/catalog/descriptors") {
-        const kind = url.searchParams.get("kind");
-        if (kind === "semantic_type") return json(SEMANTIC_TYPES);
-        if (kind === "unit") return json(UNITS);
-        if (kind === "data_class") return json(DATA_CLASSES);
-        return json(BINDING_ROLES);
-      }
-      if (
-        url.pathname ===
-        "/api/projects/1/linkable-objects/7/time-series/object-series"
-      ) {
-        seen.push("definition");
-        return new Response(JSON.stringify({ object_series: OBJECT_SERIES }), {
-          status: 201,
-          headers: {
-            "Content-Type": "application/json",
-            ETag: '"object-series-41-1"',
-          },
-        });
-      }
-      if (url.pathname.endsWith("/revision-ingestions/points")) {
-        seen.push("staging");
-        return json({ ingestion: OBJECT_INGESTION }, 201);
-      }
-      if (url.pathname.endsWith("/publications")) {
-        seen.push("publication");
-        // The seal has to travel with the definition ETag and its own key.
-        const headers = new Headers(init?.headers);
-        expect(headers.get("If-Match")).toBe('"object-series-41-1"');
-        expect(headers.get("Idempotency-Key")).toBeTruthy();
-        return json(
-          {
-            publication: {
-              outcome: "new_revision",
-              revision_id: 501,
-              content_hash: "sha256:local-first-revision",
+  it.each(["puntos", "CSV", "XLSX", "CSV corregido"])(
+    "defines an object-specific series, stages %s and seals it in the same four steps",
+    async (channel) => {
+      window.history.replaceState(
+        {},
+        "",
+        "/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=associate",
+      );
+      const seen: string[] = [];
+      const fetchMock = journeyFetch((url, init) => {
+        if (url.pathname === "/api/auth/csrf")
+          return json({ csrf_token: "csrf" });
+        if (url.pathname === "/api/time-series/catalog/descriptors") {
+          const kind = url.searchParams.get("kind");
+          if (kind === "semantic_type") return json(SEMANTIC_TYPES);
+          if (kind === "unit") return json(UNITS);
+          if (kind === "data_class") return json(DATA_CLASSES);
+          return json(BINDING_ROLES);
+        }
+        if (
+          url.pathname ===
+          "/api/projects/1/linkable-objects/7/time-series/object-series"
+        ) {
+          seen.push("definition");
+          return new Response(
+            JSON.stringify({ object_series: OBJECT_SERIES }),
+            {
+              status: 201,
+              headers: {
+                "Content-Type": "application/json",
+                ETag: '"object-series-41-1"',
+              },
             },
-          },
-          201,
+          );
+        }
+        if (url.pathname.endsWith("/revision-ingestions/points")) {
+          seen.push("staging");
+          return json({ ingestion: OBJECT_INGESTION }, 201);
+        }
+        if (url.pathname.endsWith("/revision-ingestions/files")) {
+          if (channel === "CSV corregido")
+            return json(
+              {
+                ingestion: {
+                  ...OBJECT_INGESTION,
+                  state: "awaiting_mapping",
+                  validation_token: null,
+                  file: {
+                    original_filename: "precios.csv",
+                    columns: [
+                      "timestamp",
+                      "duration_hours",
+                      "price",
+                      "corrected_price",
+                    ],
+                    available_sheets: [],
+                    selected_sheet: null,
+                    preview_rows: [],
+                  },
+                },
+              },
+              202,
+            );
+          if (channel === "XLSX")
+            return json(
+              {
+                ingestion: {
+                  ...OBJECT_INGESTION,
+                  state: "awaiting_mapping",
+                  validation_token: null,
+                  file: {
+                    original_filename: "precios.xlsx",
+                    columns: [],
+                    available_sheets: ["Notas", "Precios"],
+                    selected_sheet: null,
+                    preview_rows: [],
+                  },
+                },
+              },
+              202,
+            );
+          return json(
+            {
+              ingestion: {
+                ...OBJECT_INGESTION,
+                state: "awaiting_mapping",
+                validation_token: null,
+                file: {
+                  original_filename: "precios.csv",
+                  columns: ["timestamp", "duration_hours", "price"],
+                  available_sheets: [],
+                  selected_sheet: null,
+                  preview_rows: [
+                    {
+                      timestamp: "2026-01-01T00:00:00Z",
+                      duration_hours: "1",
+                      price: "18.4",
+                    },
+                  ],
+                },
+              },
+            },
+            202,
+          );
+        }
+        if (url.pathname.endsWith("/mapping")) {
+          if (
+            channel === "CSV corregido" &&
+            JSON.parse(String(init?.body)).columns.signals[0].value === "price"
+          )
+            return json(
+              {
+                detail: "Valor inválido",
+                context: {
+                  ingestion: {
+                    ...OBJECT_INGESTION,
+                    state: "invalid",
+                    validation_token: null,
+                    capabilities: { publish: false },
+                    validation: {
+                      valid: false,
+                      error_count: 1,
+                      errors: [
+                        {
+                          code: "TS_INGEST_VALUE_INVALID",
+                          message: "Número ambiguo",
+                          location: { source_row_number: 2, column: "price" },
+                        },
+                      ],
+                    },
+                    file: {
+                      original_filename: "precios.csv",
+                      columns: [
+                        "timestamp",
+                        "duration_hours",
+                        "price",
+                        "corrected_price",
+                      ],
+                      available_sheets: [],
+                      selected_sheet: null,
+                      preview_rows: [],
+                    },
+                  },
+                },
+              },
+              422,
+            );
+          if (channel === "XLSX" && !JSON.parse(String(init?.body)).columns)
+            return json(
+              {
+                detail: "Choose the file columns",
+                code: "TS_INGEST_MAPPING_INVALID",
+                context: {
+                  ingestion: {
+                    ...OBJECT_INGESTION,
+                    state: "awaiting_mapping",
+                    validation_token: null,
+                    validation: {
+                      valid: false,
+                      errors: [
+                        {
+                          code: "TS_INGEST_MAPPING_INVALID",
+                          message: "Elegir columnas",
+                        },
+                      ],
+                      error_count: 1,
+                    },
+                    file: {
+                      original_filename: "precios.xlsx",
+                      columns: ["timestamp", "duration_hours", "price"],
+                      available_sheets: ["Notas", "Precios"],
+                      selected_sheet: "Precios",
+                      preview_rows: [],
+                    },
+                  },
+                },
+              },
+              422,
+            );
+          seen.push("staging");
+          return json({
+            ingestion: {
+              ...OBJECT_INGESTION,
+              channel: "file_csv",
+              capabilities: { publish: true },
+              file: {
+                original_filename: "precios.csv",
+                columns: ["timestamp", "duration_hours", "price"],
+                available_sheets: [],
+                selected_sheet: null,
+                preview_rows: [],
+              },
+            },
+          });
+        }
+        if (url.pathname.endsWith("/preview"))
+          return json({
+            source_row_count: 1,
+            returned_row_count: 1,
+            rows: [{ timestamp_start: "2026-01-01T00:00:00Z", value: 18.4 }],
+          });
+        if (url.pathname.endsWith("/publications")) {
+          seen.push("publication");
+          // The seal has to travel with the definition ETag and its own key.
+          const headers = new Headers(init?.headers);
+          expect(headers.get("If-Match")).toBe('"object-series-41-1"');
+          expect(headers.get("Idempotency-Key")).toBeTruthy();
+          return json(
+            {
+              publication: {
+                outcome: "new_revision",
+                revision_id: 501,
+                content_hash: "sha256:local-first-revision",
+              },
+            },
+            201,
+          );
+        }
+        return null;
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      const user = userEvent.setup();
+
+      render(<App />);
+
+      await screen.findByRole("heading", { name: "Recorrido protegido" });
+      await screen.findByRole("option", { name: "Precio de compra a la red" });
+      await user.selectOptions(
+        screen.getByLabelText("Necesidad funcional"),
+        "grid_import_price",
+      );
+      await user.click(
+        screen.getByRole("radio", {
+          name: "Crear especifica para este objeto",
+        }),
+      );
+      await user.click(screen.getByRole("button", { name: "Siguiente" }));
+
+      // Step 2 is the definition, and it says out loud that the series belongs
+      // to this object only.
+      expect(
+        await screen.findByText(/Solo este objeto\. La serie pertenece a/),
+      ).toBeVisible();
+      await user.type(screen.getByLabelText("Clave local"), "precio_local");
+      await user.type(screen.getByLabelText("Nombre visible"), "Precio local");
+      await user.selectOptions(
+        screen.getByLabelText("Tipo semantico"),
+        "energy_price",
+      );
+      await user.selectOptions(screen.getByLabelText("Unidad"), "usd_per_mwh");
+      await user.selectOptions(
+        screen.getByLabelText("Clase de dato"),
+        "forecast",
+      );
+      await user.click(screen.getByRole("button", { name: "Siguiente" }));
+
+      // Step 3: saving only the definition is already valid, and it leaves the
+      // series explicitly not selectable.
+      await user.click(
+        await screen.findByRole("button", { name: "Guardar definicion" }),
+      );
+      expect(await screen.findByText("awaiting_data")).toBeVisible();
+      expect(screen.getByText("No, aun sin revision sellada")).toBeVisible();
+
+      if (channel !== "puntos") {
+        await user.upload(
+          screen.getByLabelText("Archivo para esta serie"),
+          new File(
+            ["timestamp,duration_hours,price\n2026-01-01T00:00:00Z,1,18.4\n"],
+            channel === "XLSX" ? "precios.xlsx" : "precios.csv",
+            {
+              type:
+                channel === "XLSX"
+                  ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  : "text/csv",
+            },
+          ),
         );
+        await user.click(
+          screen.getByRole("button", { name: "Subir archivo temporal" }),
+        );
+        if (channel === "XLSX")
+          await user.selectOptions(
+            await screen.findByLabelText("Hoja del archivo"),
+            "Precios",
+          );
+        await user.selectOptions(
+          await screen.findByLabelText("Columna de valor"),
+          "price",
+        );
+        await user.selectOptions(
+          screen.getByLabelText("Columna de inicio"),
+          "timestamp",
+        );
+        await user.selectOptions(
+          screen.getByLabelText("Columna de duración en horas"),
+          "duration_hours",
+        );
+        await user.click(
+          screen.getByRole("button", {
+            name: "Confirmar columnas y validar archivo",
+          }),
+        );
+        if (channel === "CSV corregido") {
+          expect(
+            await screen.findByText(/fila 2, columna price: Número ambiguo/),
+          ).toBeVisible();
+          expect(
+            screen.queryByRole("table", { name: "Revisión del archivo" }),
+          ).not.toBeInTheDocument();
+          await user.selectOptions(
+            screen.getByLabelText("Columna de valor"),
+            "corrected_price",
+          );
+          await user.click(
+            screen.getByRole("button", {
+              name: "Confirmar columnas y validar archivo",
+            }),
+          );
+        }
+        expect(
+          await screen.findByRole("table", { name: "Revisión del archivo" }),
+        ).toHaveTextContent("18.4");
+      } else {
+        await user.type(
+          screen.getByLabelText(
+            "Puntos (instante ISO, duracion en segundos, valor)",
+          ),
+          "2026-01-01T00:00:00+00:00,3600,18.4",
+        );
+        await user.click(screen.getByRole("button", { name: "Validar datos" }));
       }
-      return null;
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const user = userEvent.setup();
+      expect(await screen.findByText("ready_to_publish")).toBeVisible();
 
-    render(<App />);
+      await user.click(screen.getByRole("button", { name: "Siguiente" }));
 
-    await screen.findByRole("heading", { name: "Recorrido protegido" });
-    await screen.findByRole("option", { name: "Precio de compra a la red" });
-    await user.selectOptions(
-      screen.getByLabelText("Necesidad funcional"),
-      "grid_import_price",
-    );
-    await user.click(
-      screen.getByRole("radio", { name: "Crear especifica para este objeto" }),
-    );
-    await user.click(screen.getByRole("button", { name: "Siguiente" }));
+      // Step 4 states the scope, the absence of any catalog association and the
+      // all-or-nothing publication before it can be confirmed.
+      expect(
+        await screen.findByText("Solo este objeto: Sistema."),
+      ).toBeVisible();
+      expect(screen.getByText(/Ninguna asociacion de catalogo/)).toBeVisible();
+      const seal = screen.getByRole("button", {
+        name: "Publicar revision de esta serie",
+      });
+      expect(seal).toBeDisabled();
 
-    // Step 2 is the definition, and it says out loud that the series belongs
-    // to this object only.
-    expect(
-      await screen.findByText(/Solo este objeto\. La serie pertenece a/),
-    ).toBeVisible();
-    await user.type(
-      screen.getByLabelText("Clave local"),
-      "precio_local",
-    );
-    await user.type(
-      screen.getByLabelText("Nombre visible"),
-      "Precio local",
-    );
-    await user.selectOptions(
-      screen.getByLabelText("Tipo semantico"),
-      "energy_price",
-    );
-    await user.selectOptions(screen.getByLabelText("Unidad"), "usd_per_mwh");
-    await user.selectOptions(
-      screen.getByLabelText("Clase de dato"),
-      "forecast",
-    );
-    await user.click(screen.getByRole("button", { name: "Siguiente" }));
+      await user.type(
+        screen.getByLabelText("Motivo"),
+        "Primera carga de la curva local",
+      );
+      await user.click(seal);
 
-    // Step 3: saving only the definition is already valid, and it leaves the
-    // series explicitly not selectable.
-    await user.click(
-      await screen.findByRole("button", { name: "Guardar definicion" }),
-    );
-    expect(await screen.findByText("awaiting_data")).toBeVisible();
-    expect(
-      screen.getByText("No, aun sin revision sellada"),
-    ).toBeVisible();
-
-    await user.type(
-      screen.getByLabelText(
-        "Puntos (instante ISO, duracion en segundos, valor)",
-      ),
-      "2026-01-01T00:00:00+00:00,3600,18.4",
-    );
-    await user.click(screen.getByRole("button", { name: "Validar datos" }));
-    expect(await screen.findByText("ready_to_publish")).toBeVisible();
-
-    await user.click(screen.getByRole("button", { name: "Siguiente" }));
-
-    // Step 4 states the scope, the absence of any catalog association and the
-    // all-or-nothing publication before it can be confirmed.
-    expect(
-      await screen.findByText("Solo este objeto: Sistema."),
-    ).toBeVisible();
-    expect(
-      screen.getByText(/Ninguna asociacion de catalogo/),
-    ).toBeVisible();
-    const seal = screen.getByRole("button", {
-      name: "Publicar revision de esta serie",
-    });
-    expect(seal).toBeDisabled();
-
-    await user.type(
-      screen.getByLabelText("Motivo"),
-      "Primera carga de la curva local",
-    );
-    await user.click(seal);
-
-    expect(
-      await screen.findByText(/Revision sellada \(new_revision\)/),
-    ).toBeVisible();
-    // Define, stage, seal: three server moves, in that order, once each.
-    expect(seen).toEqual(["definition", "staging", "publication"]);
-  });
+      expect(
+        await screen.findByText(/Revision sellada \(new_revision\)/),
+      ).toBeVisible();
+      expect(
+        screen.getByRole("link", { name: "Abrir series del objeto" }),
+      ).toHaveAttribute(
+        "href",
+        "/react/projects/1/linkable-objects/7/time-series",
+      );
+      expect(
+        screen.getByText(/La revisión importada todavía debe elegirse/),
+      ).toBeVisible();
+      // Define, stage, seal: three server moves, in that order, once each.
+      expect(seen).toEqual(["definition", "staging", "publication"]);
+    },
+  );
 
   it("takes the object entry point into the four steps and keeps object and scope in the rail", async () => {
     window.history.replaceState(

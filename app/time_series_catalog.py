@@ -95,7 +95,10 @@ def signal_catalog_entries() -> list[dict[str, Any]]:
 
 
 class TimeSeriesCatalogError(ValueError):
-    pass
+    def __init__(self, message: str, *, row: int | None = None, column: str | None = None):
+        super().__init__(message)
+        self.row = row
+        self.column = column
 
 
 @dataclass(frozen=True)
@@ -251,13 +254,16 @@ def prepare_time_series_catalog_import(
         source_row_number = period_index + 2
         timestamp_text = str(row.get(request.timestamp_column) or "").strip()
         if not timestamp_text:
-            raise TimeSeriesCatalogError(f"row {source_row_number}: timestamp is required")
-        timestamp_start = parse_catalog_timestamp(timestamp_text, timezone, source_row_number)
+            raise TimeSeriesCatalogError(f"row {source_row_number}: timestamp is required", row=source_row_number, column=request.timestamp_column)
+        try:
+            timestamp_start = parse_catalog_timestamp(timestamp_text, timezone, source_row_number)
+        except TimeSeriesCatalogError as error:
+            raise TimeSeriesCatalogError(str(error), row=source_row_number, column=request.timestamp_column) from error
         duplicate_row_number = seen_timestamp_rows.get(timestamp_start)
         if duplicate_row_number is not None:
             raise TimeSeriesCatalogError(
                 f"row {source_row_number}: duplicate timestamp {timestamp_text!r} "
-                f"(already used by row {duplicate_row_number})"
+                f"(already used by row {duplicate_row_number})", row=source_row_number, column=request.timestamp_column,
             )
         seen_timestamp_rows[timestamp_start] = source_row_number
         if periods:
@@ -267,13 +273,13 @@ def prepare_time_series_catalog_import(
                 raise TimeSeriesCatalogError(
                     f"row {source_row_number}: timestamp {timestamp_text!r} must come "
                     f"after row {previous_row_number} ({previous_period.timestamp_start!r}); "
-                    "periods must be ordered"
+                    "periods must be ordered", row=source_row_number, column=request.timestamp_column,
                 )
             if timestamp_start < datetime.fromisoformat(previous_period.timestamp_end):
                 raise TimeSeriesCatalogError(
                     f"row {source_row_number}: period starts before row "
                     f"{previous_row_number} ends ({previous_period.timestamp_end!r}); "
-                    f"row {previous_row_number} duration is incoherent"
+                    f"row {previous_row_number} duration is incoherent", row=source_row_number, column=request.timestamp_column,
                 )
 
         duration_text = str(row.get(request.duration_hours_column) or "").strip()
@@ -284,7 +290,7 @@ def prepare_time_series_catalog_import(
         )
         if duration_hours <= 0:
             raise TimeSeriesCatalogError(
-                f"row {source_row_number}: {request.duration_hours_column} must be positive"
+                f"row {source_row_number}: {request.duration_hours_column} must be positive", row=source_row_number, column=request.duration_hours_column,
             )
         timestamp_end = timestamp_start + timedelta(hours=duration_hours)
 
@@ -307,7 +313,7 @@ def prepare_time_series_catalog_import(
             if definition.nonnegative and value_numeric < 0:
                 raise TimeSeriesCatalogError(
                     f"row {source_row_number}: column {signal.source_column!r} mapped to "
-                    f"{signal.signal_key} must be nonnegative"
+                    f"{signal.signal_key} must be nonnegative", row=source_row_number, column=signal.source_column,
                 )
             values.append(
                 CatalogValue(
@@ -420,9 +426,9 @@ def parse_catalog_float(value: str, row_number: int, column_name: str) -> float:
     try:
         number = float(value)
     except ValueError as error:
-        raise TimeSeriesCatalogError(f"row {row_number}: {column_name} must be numeric") from error
+        raise TimeSeriesCatalogError(f"row {row_number}: {column_name} must be numeric", row=row_number, column=column_name) from error
     if not math.isfinite(number):
-        raise TimeSeriesCatalogError(f"row {row_number}: {column_name} must be finite")
+        raise TimeSeriesCatalogError(f"row {row_number}: {column_name} must be finite", row=row_number, column=column_name)
     return number
 
 

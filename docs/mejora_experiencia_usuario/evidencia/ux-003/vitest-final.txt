@@ -1,0 +1,12 @@
+
+> bess-react-ui@0.1.0 test
+> vitest run --maxWorkers=2
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  19 passed (19)
+      Tests  214 passed (214)
+   Start at  21:49:11
+   Duration  83.15s (transform 3.60s, setup 5.23s, import 11.43s, tests 115.63s, environment 26.89s)

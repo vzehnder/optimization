@@ -1496,6 +1496,12 @@ test("React draft editor uploads, maps, edits, and validates time-series sources
   await page.getByRole("button", { name: "Guardar modelo" }).click();
   await expect(page.getByText("Guardado", { exact: true })).toBeVisible();
 
+  await page
+    .getByText(
+      "Herramientas de compatibilidad: fuente del modelo y extracción",
+      { exact: true },
+    )
+    .click();
   const csvText = [
     "period_start,hours,buy_cost,sell_revenue,solar_1_available_mw,load_1_demand_mw,hydro_inflow_m3s",
     "2026-01-01T00:00:00,1.0,55.0,42.0,3.5,2.0,25.0",
@@ -1591,6 +1597,12 @@ test("React case validation and versioning covers generated and expert paths", a
     mimeType: "text/csv",
     buffer: Buffer.from(csvText),
   });
+  await page
+    .getByText(
+      "Herramientas de compatibilidad: fuente del modelo y extracción",
+      { exact: true },
+    )
+    .click();
   await page.getByRole("button", { name: "Upload source" }).click();
   await expect(page.getByText("validation-source.csv")).toBeVisible();
   await page.getByLabel("Import price column").selectOption("buy_cost");

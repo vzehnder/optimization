@@ -1925,6 +1925,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scenarios/{scenario_id}/draft/time-series-import-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Draft Time Series Import Options */
+        get: operations["draft_time_series_import_options_api_scenarios__scenario_id__draft_time_series_import_options_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scenarios/{scenario_id}/draft/time-series-sources/upload": {
         parameters: {
             query?: never;
@@ -1953,6 +1970,23 @@ export interface paths {
         put?: never;
         /** Import Draft Time Series Source To Catalog */
         post: operations["import_draft_time_series_source_to_catalog_api_scenarios__scenario_id__draft_time_series_sources__source_id__catalog_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/draft/time-series-sources/{source_id}/catalog-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import Draft Time Series Source To Catalog */
+        post: operations["import_draft_time_series_source_to_catalog_api_scenarios__scenario_id__draft_time_series_sources__source_id__catalog_preview_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3674,6 +3708,8 @@ export interface components {
             data_kind: string;
             /** Duration Hours Column */
             duration_hours_column: string;
+            /** Expected Preview Hash */
+            expected_preview_hash?: string | null;
             /** Set Name */
             set_name: string;
             /** Signal Key */
@@ -8349,6 +8385,37 @@ export interface operations {
             };
         };
     };
+    draft_time_series_import_options_api_scenarios__scenario_id__draft_time_series_import_options_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     upload_draft_time_series_source_api_scenarios__scenario_id__draft_time_series_sources_upload_post: {
         parameters: {
             query?: never;
@@ -8402,6 +8469,42 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_draft_time_series_source_to_catalog_api_scenarios__scenario_id__draft_time_series_sources__source_id__catalog_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TimeSeriesCatalogImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

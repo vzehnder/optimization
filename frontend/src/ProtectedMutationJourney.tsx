@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { Fragment, ReactNode, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
+import { ObjectSeriesFileImport } from "./ObjectSeriesFileImport";
 import {
   ApiError,
   commitCaseBindings,
@@ -871,6 +872,7 @@ function ObjectSeriesDefinitionStep({
 }
 
 function ObjectSeriesDataStep({
+  fileEditor,
   draft,
   series,
   ingestion,
@@ -883,6 +885,7 @@ function ObjectSeriesDataStep({
   onSaveDefinition,
   onStage,
 }: {
+  fileEditor?: ReactNode;
   draft: ObjectSeriesDraft;
   series: ObjectSeriesDefinition | null;
   ingestion: IngestionReceipt | null;
@@ -898,6 +901,7 @@ function ObjectSeriesDataStep({
   return (
     <section aria-label="Datos o revision">
       <h2>Datos o revision ejecutable</h2>
+      {fileEditor}
       <p>
         Solo este objeto. Guardar la definicion ya es valido: la serie queda
         creada y no seleccionable hasta que una revision quede sellada.
@@ -911,7 +915,9 @@ function ObjectSeriesDataStep({
           <dt>Estado</dt>
           <dd>{series.availability}</dd>
           <dt>Seleccionable</dt>
-          <dd>{series.binding_ready ? "Si" : "No, aun sin revision sellada"}</dd>
+          <dd>
+            {series.binding_ready ? "Si" : "No, aun sin revision sellada"}
+          </dd>
         </dl>
       ) : (
         <>
@@ -1234,7 +1240,8 @@ function LinkFlow({
   }
 
   async function stageObjectPoints() {
-    if (projectId === null || linkableObjectId === null || !objectSeries) return;
+    if (projectId === null || linkableObjectId === null || !objectSeries)
+      return;
     setStagingPending(true);
     setStagingError(null);
     try {
@@ -1467,7 +1474,8 @@ function LinkFlow({
     ? {
         origin: originComplete,
         selection: objectDefinitionComplete,
-        data: objectSeries !== null && Boolean(objectIngestion?.validation.valid),
+        data:
+          objectSeries !== null && Boolean(objectIngestion?.validation.valid),
         impact: false,
       }
     : {
@@ -1530,20 +1538,43 @@ function LinkFlow({
           ) : null}
         </section>
       ) : null}
-      {step === "data" && definingLocally ? (
-        <ObjectSeriesDataStep
-          draft={objectDraft}
-          series={objectSeries}
-          ingestion={objectIngestion}
-          parseErrors={parsedLocalPoints.errors}
-          definitionError={definitionError}
-          stagingError={stagingError}
-          definitionPending={definitionPending}
-          stagingPending={stagingPending}
-          onChange={updateObject}
-          onSaveDefinition={saveObjectDefinition}
-          onStage={stageObjectPoints}
-        />
+      {definingLocally ? (
+        <div hidden={step !== "data"}>
+          <ObjectSeriesDataStep
+            fileEditor={
+              objectSeries &&
+              projectId !== null &&
+              linkableObjectId !== null ? (
+                <ObjectSeriesFileImport
+                  target={{ projectId, linkableObjectId }}
+                  signalId={objectSeries.signal_id}
+                  seriesKey={objectDraft.objectSeriesKey}
+                  revisionContract={{
+                    data_class_key: objectDraft.dataClassKey,
+                    timezone: objectDraft.timezone,
+                    regularity: "regular",
+                    nominal_resolution_seconds: objectDraft.resolutionSeconds,
+                  }}
+                  onReady={(receipt) => {
+                    setObjectIngestion(receipt);
+                    setObjectPublication(null);
+                  }}
+                />
+              ) : null
+            }
+            draft={objectDraft}
+            series={objectSeries}
+            ingestion={objectIngestion}
+            parseErrors={parsedLocalPoints.errors}
+            definitionError={definitionError}
+            stagingError={stagingError}
+            definitionPending={definitionPending}
+            stagingPending={stagingPending}
+            onChange={updateObject}
+            onSaveDefinition={saveObjectDefinition}
+            onStage={stageObjectPoints}
+          />
+        </div>
       ) : null}
       {step === "impact" &&
       definingLocally &&
@@ -1563,6 +1594,24 @@ function LinkFlow({
           onPublish={publishObjectRevision}
         />
       ) : null}
+      {definingLocally && objectPublication && (
+        <div role="status">
+          <Link
+            to={`/projects/${projectId}/linkable-objects/${linkableObjectId}/time-series`}
+          >
+            Abrir series del objeto
+          </Link>
+          <p>
+            La revisión importada todavía debe elegirse para la necesidad de una
+            variante; publicarla no confirma su uso en el caso.
+          </p>
+          {draft.scenarioId !== null && (
+            <Link to={`/scenarios/${draft.scenarioId}?section=data`}>
+              Volver a los datos del escenario
+            </Link>
+          )}
+        </div>
+      )}
       {step === "data" && !definingLocally && detail.data ? (
         <DataStep
           detail={detail.data}

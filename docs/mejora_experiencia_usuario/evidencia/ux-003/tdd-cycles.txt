@@ -1,0 +1,1570 @@
+EXTRACTO: .tmp/ux003-preview-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+.venv/Scripts/python.exe : C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\.venv\Lib\sit
+e-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is
+deprecated; install `httpx2` instead.
+En línea: 2 Carácter: 43
++ ... /:memory:'; .venv/Scripts/python.exe -m unittest tests.test_ux003_imp ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\vicen\...ttpx2` instead.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+[...]
+======================================================================
+FAIL: test_reviews_known_values_and_coverage_without_creating_a_catalog_set (tests.test_ux003_import_preview.GuidedImpo
+rtPreviewTests.test_reviews_known_values_and_coverage_without_creating_a_catalog_set)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File
+"C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\tests\test_ux003_import_preview.py",
+line 38, in test_reviews_known_values_and_coverage_without_creating_a_catalog_set
+    self.assertEqual(response.status_code, 200, response.text)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 404 != 200 : {"detail":"Not Found"}
+
+----------------------------------------------------------------------
+Ran 1 test in 0.706s
+
+FAILED (failures=1)
+
+EXTRACTO: .tmp/ux003-preview-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+.venv/Scripts/python.exe : C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\.venv\Lib\sit
+e-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is
+deprecated; install `httpx2` instead.
+En línea: 2 Carácter: 43
++ ... /:memory:'; .venv/Scripts/python.exe -m unittest tests.test_ux003_imp ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\vicen\...ttpx2` instead.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+  from starlette.testclient import TestClient as TestClient  # noqa
+test_reviews_known_values_and_coverage_without_creating_a_catalog_set (tests.test_ux003_import_preview.GuidedImportPrev
+iewTests.test_reviews_known_values_and_coverage_without_creating_a_catalog_set) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.723s
+
+OK
+
+EXTRACTO: .tmp/ux003-location-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+.venv/Scripts/python.exe : C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\.venv\Lib\sit
+e-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is
+deprecated; install `httpx2` instead.
+En línea: 2 Carácter: 43
++ ... /:memory:'; .venv/Scripts/python.exe -m unittest tests.test_ux003_imp ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\vicen\...ttpx2` instead.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+[...]
+======================================================================
+FAIL: test_invalid_xlsx_value_identifies_sheet_row_and_column_before_import (tests.test_ux003_import_preview.GuidedImpo
+rtPreviewTests.test_invalid_xlsx_value_identifies_sheet_row_and_column_before_import)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File
+"C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\tests\test_ux003_import_preview.py",
+line 65, in test_invalid_xlsx_value_identifies_sheet_row_and_column_before_import
+    self.assertEqual(response.json().get("location"), {"sheet": "Precios", "row": 2, "column": "price"})
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: None != {'sheet': 'Precios', 'row': 2, 'column': 'price'}
+
+----------------------------------------------------------------------
+Ran 1 test in 0.791s
+
+FAILED (failures=1)
+
+EXTRACTO: .tmp/ux003-location-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+.venv/Scripts/python.exe : C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\.venv\Lib\sit
+e-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is
+deprecated; install `httpx2` instead.
+En línea: 2 Carácter: 43
++ ... /:memory:'; .venv/Scripts/python.exe -m unittest tests.test_ux003_imp ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\vicen\...ttpx2` instead.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+  from starlette.testclient import TestClient as TestClient  # noqa
+test_invalid_xlsx_value_identifies_sheet_row_and_column_before_import (tests.test_ux003_import_preview.GuidedImportPrev
+iewTests.test_invalid_xlsx_value_identifies_sheet_row_and_column_before_import) ... ok
+test_reviews_known_values_and_coverage_without_creating_a_catalog_set (tests.test_ux003_import_preview.GuidedImportPrev
+iewTests.test_reviews_known_values_and_coverage_without_creating_a_catalog_set) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 1.235s
+
+OK
+
+EXTRACTO: .tmp/ux003-csv-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/GuidedImport.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/GuidedImport.test.tsx (1 test | 1 failed) 1109ms
+[...]
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/GuidedImport.test.tsx > guided time-series import > reviews a CSV and explicitly imports it with a link to
+its resource and original scenario
+TestingLibraryElementError: Unable to find role="region" and name "Importar series de tiempo"
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+    >
+      <header
+        class="topbar"
+[...]
+                    Generar preview
+                  </button>
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  20:57:49
+   Duration  5.04s (transform 1.24s, setup 321ms, import 1.87s, tests 1.11s, environment 1.44s)
+
+                  <button
+                    type="button"
+                  >
+                    Validar con Julia
+                  </button>
+                  <button
+[...]
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/GuidedImport.test.tsx:35:33
+     33|     const user = userEvent.setup();
+     34|     render(<App />);
+     35|     const wizard = await screen.findByRole("region", { name: "Importar…
+       |                                 ^
+     36|     await user.upload(within(wizard).getByLabelText("Archivo CSV o XLS…
+     37|     await user.click(within(wizard).getByRole("button", { name: "Conti…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+EXTRACTO: .tmp/ux003-csv-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/GuidedImport.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  21:00:02
+   Duration  5.08s (transform 1.05s, setup 291ms, import 1.52s, tests 1.64s, environment 1.33s)
+
+
+EXTRACTO: .tmp/ux003-back-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/GuidedImport.test.tsx -t keeps column
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/GuidedImport.test.tsx (2 tests | 1 failed | 1 skipped) 2006ms
+[...]
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/GuidedImport.test.tsx > guided time-series import > keeps column choices and edited values when going back
+before saving and checking
+TestingLibraryElementError: Unable to find a label with the text of: Fila 2, price
+
+Ignored nodes: comments, script, style
+<section
+  aria-labelledby="guided-import-title"
+  class="guided-import"
+>
+  <h3
+    id="guided-import-title"
+  >
+[...]
+ ❯ src/GuidedImport.test.tsx:45:43
+     43|     await user.selectOptions(within(wizard).getByLabelText("Señal 1"),…
+     44|     await user.click(within(wizard).getByRole("button", { name: "Confi…
+     45|     await user.clear(await within(wizard).findByLabelText("Fila 2, pri…
+       |                                           ^
+     46|     await user.type(within(wizard).getByLabelText("Fila 2, price"), "7…
+     47|     expect(within(wizard).getByRole("button", { name: "Comprobar datos…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 skipped (2)
+   Start at  21:01:03
+   Duration  5.46s (transform 1.07s, setup 277ms, import 1.57s, tests 2.01s, environment 1.33s)
+
+
+EXTRACTO: .tmp/ux003-back-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/GuidedImport.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  21:01:55
+   Duration  6.20s (transform 1.05s, setup 297ms, import 1.52s, tests 2.75s, environment 1.33s)
+
+
+EXTRACTO: .tmp/ux003-xlsx-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/GuidedImport.test.tsx -t selects an XLSX
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/GuidedImport.test.tsx (3 tests | 1 failed | 2 skipped) 1721ms
+[...]
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/GuidedImport.test.tsx > guided time-series import > selects an XLSX sheet and focuses the invalid cell so
+it can be corrected
+TestingLibraryElementError: Unable to find role="combobox" and name "Hoja"
+
+Ignored nodes: comments, script, style
+<section
+  aria-labelledby="guided-import-title"
+  class="guided-import"
+>
+  <h3
+    id="guided-import-title"
+  >
+[...]
+          >
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 skipped (3)
+   Start at  21:03:38
+   Duration  5.25s (transform 1.13s, setup 310ms, import 1.59s, tests 1.72s, environment 1.35s)
+
+            Elegir señal
+          </option>
+          <option
+            value="price_usd_per_mwh"
+          >
+            price_usd_per_mwh
+[...]
+      Confirmar columnas y revisar
+    </button>
+  </fieldset>
+</section>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/GuidedImport.test.tsx:46:51
+     44|     await user.upload(within(wizard).getByLabelText("Archivo CSV o XLS…
+     45|     await user.click(within(wizard).getByRole("button", { name: "Conti…
+     46|     await user.selectOptions(await within(wizard).findByRole("combobox…
+       |                                                   ^
+     47|     await user.selectOptions(within(wizard).getByLabelText("Columna de…
+     48|     await user.selectOptions(within(wizard).getByLabelText("Señal 1"),…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+EXTRACTO: .tmp/ux003-xlsx-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/GuidedImport.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  21:04:37
+   Duration  7.28s (transform 1.07s, setup 302ms, import 1.56s, tests 3.81s, environment 1.33s)
+
+
+EXTRACTO: .tmp/ux003-c6-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+.venv/Scripts/python.exe : C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\.venv\Lib\sit
+e-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is
+deprecated; install `httpx2` instead.
+En línea: 2 Carácter: 43
++ ... /:memory:'; .venv/Scripts/python.exe -m unittest tests.test_ux003_imp ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\vicen\...ttpx2` instead.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+[...]
+======================================================================
+FAIL: test_import_route_is_selected_by_server_cutover_state
+(tests.test_ux003_import_preview.GuidedImportPreviewTests.test_import_route_is_selected_by_server_cutover_state)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File
+"C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\tests\test_ux003_import_preview.py",
+line 75, in test_import_route_is_selected_by_server_cutover_state
+    self.assertEqual(response.status_code, 200, response.text)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 404 != 200 : {"detail":"Not Found"}
+
+----------------------------------------------------------------------
+Ran 1 test in 0.623s
+
+FAILED (failures=1)
+
+EXTRACTO: .tmp/ux003-c6-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+.venv/Scripts/python.exe : C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\.venv\Lib\sit
+e-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is
+deprecated; install `httpx2` instead.
+En línea: 2 Carácter: 43
++ ... /:memory:'; .venv/Scripts/python.exe -m unittest tests.test_ux003_imp ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\vicen\...ttpx2` instead.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+  from starlette.testclient import TestClient as TestClient  # noqa
+test_import_route_is_selected_by_server_cutover_state
+(tests.test_ux003_import_preview.GuidedImportPreviewTests.test_import_route_is_selected_by_server_cutover_state) ... ok
+test_invalid_xlsx_value_identifies_sheet_row_and_column_before_import (tests.test_ux003_import_preview.GuidedImportPrev
+iewTests.test_invalid_xlsx_value_identifies_sheet_row_and_column_before_import) ... ok
+test_reviews_known_values_and_coverage_without_creating_a_catalog_set (tests.test_ux003_import_preview.GuidedImportPrev
+iewTests.test_reviews_known_values_and_coverage_without_creating_a_catalog_set) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 3.119s
+
+OK
+
+EXTRACTO: .tmp/ux003-routing-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/GuidedImport.test.tsx -t directs canonical
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/GuidedImport.test.tsx (4 tests | 1 failed | 3 skipped) 1102ms
+[...]
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/GuidedImport.test.tsx > guided time-series import > directs canonical imports to the model need instead of
+offering a legacy writer
+TestingLibraryElementError: Unable to find role="link" and name "Elegir la necesidad del modelo para importar"
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+    >
+      <header
+        class="topbar"
+[...]
+                class="field-row field-row-wide"
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 skipped (4)
+   Start at  21:06:04
+   Duration  4.66s (transform 1.16s, setup 288ms, import 1.67s, tests 1.10s, environment 1.30s)
+
+                for="generated_case_json"
+              >
+                <span>
+                  Generated system_case
+                </span>
+                <textarea
+[...]
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/GuidedImport.test.tsx:43:25
+     41|     serveImport({ protected: true });
+     42|     render(<App />);
+     43|     expect(await screen.findByRole("link", { name: "Elegir la necesida…
+       |                         ^
+     44|     expect(screen.queryByLabelText("Archivo CSV o XLSX")).not.toBeInTh…
+     45|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+EXTRACTO: .tmp/ux003-routing-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/GuidedImport.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  21:06:39
+   Duration  7.56s (transform 1.09s, setup 283ms, import 1.55s, tests 4.10s, environment 1.34s)
+
+
+EXTRACTO: .tmp/ux003-gap-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+.venv/Scripts/python.exe : C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\.venv\Lib\sit
+e-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is
+deprecated; install `httpx2` instead.
+En línea: 2 Carácter: 43
++ ... /:memory:'; .venv/Scripts/python.exe -m unittest tests.test_ux003_imp ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\vicen\...ttpx2` instead.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+[...]
+Traceback (most recent call last):
+  File
+"C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\tests\test_ux003_import_preview.py",
+line 91, in test_a_gap_is_located_before_confirming_a_continuous_file_import
+    self.assertEqual(response.status_code, 400, response.text)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 200 != 400 : {"preview":{"period_count":2,"coverage_start":"2026-01-01T00:00:00+00:00","coverage_end":"
+2026-01-01T03:00:00+00:00","resolution_hours":1.0,"signals":[{"signal_key":"price_usd_per_mwh","unit":"USD/MWh","source
+_column":"price","source_unit":"USD/MWh","entity_type":null,"entity_key":null}],"rows":[{"timestamp_start":"2026-01-01T
+00:00:00+00:00","duration_hours":1.0,"price_usd_per_mwh":55.0},{"timestamp_start":"2026-01-01T02:00:00+00:00","duration
+_hours":1.0,"price_usd_per_mwh":60.0}]}}
+
+----------------------------------------------------------------------
+Ran 1 test in 0.696s
+
+FAILED (failures=1)
+
+EXTRACTO: .tmp/ux003-gap-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+.venv/Scripts/python.exe : C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\.venv\Lib\sit
+e-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is
+deprecated; install `httpx2` instead.
+En línea: 2 Carácter: 43
++ ... /:memory:'; .venv/Scripts/python.exe -m unittest tests.test_ux003_imp ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\vicen\...ttpx2` instead.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+  from starlette.testclient import TestClient as TestClient  # noqa
+test_a_gap_is_located_before_confirming_a_continuous_file_import (tests.test_ux003_import_preview.GuidedImportPreviewTe
+sts.test_a_gap_is_located_before_confirming_a_continuous_file_import) ... ok
+test_import_route_is_selected_by_server_cutover_state
+(tests.test_ux003_import_preview.GuidedImportPreviewTests.test_import_route_is_selected_by_server_cutover_state) ... ok
+test_invalid_xlsx_value_identifies_sheet_row_and_column_before_import (tests.test_ux003_import_preview.GuidedImportPrev
+iewTests.test_invalid_xlsx_value_identifies_sheet_row_and_column_before_import) ... ok
+test_reviews_known_values_and_coverage_without_creating_a_catalog_set (tests.test_ux003_import_preview.GuidedImportPrev
+iewTests.test_reviews_known_values_and_coverage_without_creating_a_catalog_set) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 3.407s
+
+OK
+
+EXTRACTO: .tmp/ux003-protected-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx -t stages CSV
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ProtectedMutationJourney.test.tsx (12 tests | 1 failed | 11 skipped) 1775ms
+[...]
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ProtectedMutationJourney.test.tsx > single protected mutation journey > defines an object-specific series,
+stages CSV and seals it in the same four steps
+TestingLibraryElementError: Unable to find a label with the text of: Archivo para esta serie
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+    >
+      <header
+        class="topbar"
+[...]
+                  Necesidad
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 11 skipped (12)
+   Start at  21:09:19
+   Duration  5.47s (transform 1.13s, setup 296ms, import 1.64s, tests 1.77s, environment 1.43s)
+
+                </dt>
+                <dd>
+                  grid_import_price
+                </dd>
+                <dt>
+                  Accion
+[...]
+  </div>
+</body>
+ ❯ Object.getElementError node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ getAllByLabelText node_modules/@testing-library/dom/dist/queries/label-text.js:111:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/ProtectedMutationJourney.test.tsx:1585:32
+    1583|
+    1584|     if (channel === "CSV") {
+    1585|       await user.upload(screen.getByLabelText("Archivo para esta serie…
+       |                                ^
+    1586|       await user.click(screen.getByRole("button", { name: "Subir archi…
+    1587|       await user.selectOptions(await screen.findByLabelText("Columna d…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+EXTRACTO: .tmp/ux003-protected-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx -t defines an object-specific
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 10 skipped (12)
+   Start at  21:10:54
+   Duration  9.31s (transform 1.20s, setup 292ms, import 1.74s, tests 5.71s, environment 1.29s)
+
+
+EXTRACTO: .tmp/ux003-network-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/GuidedImport.test.tsx -t uncertain import
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/GuidedImport.test.tsx (5 tests | 1 failed | 4 skipped) 2417ms
+[...]
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/GuidedImport.test.tsx > guided time-series import > preserves an uncertain import and requires checking the
+catalog before another attempt
+TestingLibraryElementError: Unable to find an element with the text: /No pudimos confirmar si se importó/. This could
+be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher
+to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+<section
+  aria-labelledby="guided-import-title"
+  class="guided-import"
+>
+  <h3
+[...]
+    </button>
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 4 skipped (5)
+   Start at  21:12:20
+   Duration  6.05s (transform 1.14s, setup 304ms, import 1.63s, tests 2.42s, environment 1.40s)
+
+  </fieldset>
+</section>
+
+Ignored nodes: comments, script, style
+<section
+  aria-labelledby="guided-import-title"
+[...]
+      Confirmar importación
+    </button>
+  </fieldset>
+</section>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/GuidedImport.test.tsx:160:33
+    158|     await user.click(await within(wizard).findByRole("button", { name:…
+    159|     await user.click(within(wizard).getByRole("button", { name: "Confi…
+    160|     expect(await within(wizard).findByText(/No pudimos confirmar si se…
+       |                                 ^
+    161|     expect(within(wizard).getByRole("button", { name: "Confirmar impor…
+    162|     expect(within(wizard).getByRole("link", { name: "Comprobar el catá…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+EXTRACTO: .tmp/ux003-network-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/GuidedImport.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  5 passed (5)
+   Start at  21:12:49
+   Duration  8.47s (transform 1.15s, setup 275ms, import 1.62s, tests 4.99s, environment 1.29s)
+
+
+EXTRACTO: .tmp/ux003-leave-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/GuidedImport.test.tsx -t explains staging
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/GuidedImport.test.tsx (6 tests | 1 failed | 5 skipped) 1925ms
+[...]
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/GuidedImport.test.tsx > guided time-series import > explains staging and preserves the import when
+cancelling navigation away
+TestingLibraryElementError: Unable to find role="dialog" and name "Cambios sin guardar"
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+    >
+      <header
+        class="topbar"
+[...]
+          <strong>
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 skipped (6)
+   Start at  21:13:54
+   Duration  5.53s (transform 1.15s, setup 278ms, import 1.68s, tests 1.92s, environment 1.34s)
+
+            test@example.local
+          </strong>
+          <span
+            class="role-badge"
+          >
+            analyst
+[...]
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/GuidedImport.test.tsx:156:33
+    154|     await within(wizard).findByLabelText("Columna de valores 1");
+    155|     await user.click(screen.getAllByRole("link", { name: "Proyectos" }…
+    156|     const dialog = await screen.findByRole("dialog", { name: "Cambios …
+       |                                 ^
+    157|     expect(dialog).toHaveTextContent("La fuente temporal permanece gua…
+    158|     expect(dialog).toHaveTextContent("El mapeo y las correcciones pend…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+EXTRACTO: .tmp/ux003-leave-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/GuidedImport.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  21:14:33
+   Duration  8.84s (transform 1.11s, setup 284ms, import 1.57s, tests 5.41s, environment 1.29s)
+
+
+EXTRACTO: .tmp/ux003-window-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/GuidedImport.test.tsx -t beyond the first
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/GuidedImport.test.tsx (7 tests | 1 failed | 6 skipped) 3294ms
+[...]
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/GuidedImport.test.tsx > guided time-series import > lets the analyst correct rows beyond the first window
+without losing earlier edits
+TestingLibraryElementError: Unable to find an accessible element with the role "button" and name "Filas siguientes"
+
+Here are the accessible roles:
+
+  heading:
+
+  Name "Importar series de tiempo":
+  <h3
+    id="guided-import-title"
+  />
+[...]
+                aria-label="Fila 6, price"
+                value="55"
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 skipped (7)
+   Start at  21:15:35
+   Duration  6.68s (transform 1.06s, setup 271ms, import 1.51s, tests 3.29s, environment 1.31s)
+
+              />
+            </td>
+          </tr>
+          <tr>
+            <th
+              scope="row"
+[...]
+            <td>
+  ...
+ ❯ Object.getElementError node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/GuidedImport.test.tsx:160:37
+    158|     await user.clear(await within(wizard).findByLabelText("Fila 2, pri…
+    159|     await user.type(within(wizard).getByLabelText("Fila 2, price"), "7…
+    160|     await user.click(within(wizard).getByRole("button", { name: "Filas…
+       |                                     ^
+    161|     expect(within(wizard).getByLabelText("Fila 52, price")).toHaveValu…
+    162|     await user.click(within(wizard).getByRole("button", { name: "Filas…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+EXTRACTO: .tmp/ux003-window-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/GuidedImport.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  7 passed (7)
+   Start at  21:16:03
+   Duration  10.91s (transform 1.12s, setup 290ms, import 1.59s, tests 7.37s, environment 1.36s)
+
+
+EXTRACTO: .tmp/ux003-browser-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+Running 1 test using 1 worker
+
+
+
+npm.cmd : (node:60296) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+En línea: 2 Carácter: 43
++ ... /:memory:'; npm.cmd exec playwright test -- --grep 'UX-003 imports a  ...
+[...]
+    Test timeout of 30000ms exceeded.
+
+    Error: locator.click: Test timeout of 30000ms exceeded.
+    Call log:
+      - waiting for getByRole('region', { name: 'Importar series de tiempo' }).getByRole('button', { name: 'Agregar señal' })
+
+
+      27 |   await wizard.getByLabel("Columna de valores 1").selectOption("price");
+      28 |   await wizard.getByRole("combobox", { name: /^Señal 1/ }).selectOption("price_usd_per_mwh");
+    > 29 |   await wizard.getByRole("button", { name: "Agregar señal" }).click();
+         |                                                               ^
+      30 |   await wizard.getByLabel("Columna de valores 2").selectOption("demand");
+[...]
+      32 |   await wizard.getByRole("button", { name: "Confirmar columnas y revisar" }).click();
+        at C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\frontend\e2e\ux003-import.spec.ts:29:63
+
+    Error Context: test-results\ux003-import-UX-003-import-390e7--and-prepares-one-execution\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\ux003-import-UX-003-import-390e7--and-prepares-one-execution\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\ux003-import-UX-003-import-390e7--and-prepares-one-execution\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+  1 failed
+    e2e\ux003-import.spec.ts:22:1 › UX-003 imports a CSV with two signals, opens its values and prepares one execution
+
+EXTRACTO: .tmp/ux003-browser-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+Running 1 test using 1 worker
+
+
+npx.cmd : (node:14492) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+En línea: 2 Carácter: 41
++ ... /:memory:'; npx.cmd playwright test --grep 'UX-003 imports a CSV' *>  ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ((node:14492) Wa... env being set.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1/1] e2e\ux003-import.spec.ts:22:1 › UX-003 imports a CSV with two signals, opens its values and prepares one execution
+  1 passed (8.8s)
+
+EXTRACTO: .tmp/ux003-xlsx-browser-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+Running 1 test using 1 worker
+
+
+npx.cmd : (node:63244) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+En línea: 2 Carácter: 41
++ ... /:memory:'; npx.cmd playwright test --grep 'UX-003 corrects' *> ../.t ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[...]
+  1) e2e\ux003-import.spec.ts:68:1 › UX-003 corrects an XLSX cell and keeps the selected sheet and edits when returning
+
+    Error: expect(locator).toHaveValue(expected) failed
+
+    Locator:  getByRole('region', { name: 'Importar series de tiempo' }).getByLabel('Fila 2, price', { exact: true })
+    Expected: "70"
+    Received: "1,234"
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toHaveValue" with timeout 5000ms
+      - waiting for getByRole('region', { name: 'Importar series de tiempo' }).getByLabel('Fila 2, price', { exact: true })
+[...]
+      90 |   await wizard.getByRole("button", { name: "Continuar a importación" }).click();
+        at C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\frontend\e2e\ux003-import.spec.ts:87:69
+
+    Error Context: test-results\ux003-import-UX-003-correc-00330-et-and-edits-when-returning\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\ux003-import-UX-003-correc-00330-et-and-edits-when-returning\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\ux003-import-UX-003-correc-00330-et-and-edits-when-returning\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+  1 failed
+    e2e\ux003-import.spec.ts:68:1 › UX-003 corrects an XLSX cell and keeps the selected sheet and edits when returning
+
+EXTRACTO: .tmp/ux003-xlsx-browser-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test:browser
+> npm run build && playwright test --grep UX-003 corrects
+
+
+> bess-react-ui@0.1.0 build
+> tsc -b && vite build
+
+[...]
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking:
+https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+
+Running 1 test using 1 worker
+
+
+(node:58136) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1/1] e2e\ux003-import.spec.ts:68:1 › UX-003 corrects an XLSX cell and keeps the selected sheet and edits when returning
+
+e2e\ux003-import.spec.ts:68:1 › UX-003 corrects an XLSX cell and keeps the selected sheet and edits when returning
+
+  1 passed (7.4s)
+
+EXTRACTO: .tmp/ux003-examples-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/GuidedImport.test.tsx -t labels proposed
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/GuidedImport.test.tsx (8 tests | 1 failed | 7 skipped) 1789ms
+[...]
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/GuidedImport.test.tsx > guided time-series import > labels proposed columns and shows source examples,
+units and scope before explicit confirmation
+TestingLibraryElementError: Unable to find an element with the text: /Propuestas por coincidencia exacta/. This could
+be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher
+to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+<section
+  aria-labelledby="guided-import-title"
+  class="guided-import"
+>
+  <h3
+[...]
+            value=""
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 7 skipped (8)
+   Start at  21:32:03
+   Duration  5.27s (transform 1.12s, setup 277ms, import 1.60s, tests 1.79s, environment 1.30s)
+
+          >
+            Elegir señal
+          </option>
+          <option
+            value="price_usd_per_mwh"
+          >
+[...]
+      Confirmar columnas y revisar
+    </button>
+  </fieldset>
+</section>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/GuidedImport.test.tsx:155:33
+    153|     await user.upload(within(wizard).getByLabelText("Archivo CSV o XLS…
+    154|     await user.click(within(wizard).getByRole("button", { name: "Conti…
+    155|     expect(await within(wizard).findByText(/Propuestas por coincidenci…
+       |                                 ^
+    156|     await user.selectOptions(within(wizard).getByLabelText("Columna de…
+    157|     await user.selectOptions(within(wizard).getByLabelText("Señal 1"),…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+EXTRACTO: .tmp/ux003-examples-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/GuidedImport.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  21:32:49
+   Duration  11.43s (transform 1.11s, setup 304ms, import 1.56s, tests 7.99s, environment 1.30s)
+
+
+EXTRACTO: .tmp/ux003-stale-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+.venv/Scripts/python.exe : C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\.venv\Lib\sit
+e-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is
+deprecated; install `httpx2` instead.
+En línea: 2 Carácter: 41
++ ... /:memory:'; .venv/Scripts/python.exe -m unittest tests.test_ux003_imp ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\vicen\...ttpx2` instead.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+[...]
+    self.assertEqual(response.status_code, 409, response.text)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 201 != 409 : {"time_series_set":{"id":1,"project_id":1,"name":"Precios enero","version_number":1,"versi
+on_label":"v1","revision_number":1,"data_kind":"real","timezone":"UTC","status":"validated","content_hash":"sha256:773c
+40487b07487675c5a3b11896b5a40045206d1e9a45805da79e8e1d21a828","source_checksum":"sha256:8c8784478125ac401a40034c086a6ed
+950626dc093c37e8ca817afeab07e82ec","signal_count":1,"period_count":1,"created_at":"2026-09-13T00:33:39+00:00","updated_
+at":"2026-09-13T00:33:39+00:00","source":{"source_key":"csv_4dee1a30bdc1","kind":"csv","original_filename":"precios.csv
+","media_type":"text/csv","checksum":"sha256:8c8784478125ac401a40034c086a6ed950626dc093c37e8ca817afeab07e82ec","selecte
+d_sheet":null,"created_at":"2026-09-13T00:33:39+00:00","metadata":{}},"horizon":{"period_count":1,"start":"2026-01-01T0
+0:00:00+00:00","end":"2026-01-01T01:00:00+00:00"},"revision_metadata":{"mapping":{"duration_hours_column":"hours","sign
+als":[{"canonical_unit":"USD/MWh","signal_key":"price_usd_per_mwh","source_column":"price","source_unit":"USD/MWh"}],"t
+imestamp_column":"timestamp"},"source_key":"csv_4dee1a30bdc1"},"signals":[{"signal_key":"price_usd_per_mwh","unit":"USD
+/MWh","source_column":"price","source_unit":"USD/MWh","entity_type":null,"entity_key":null}],"periods":[{"period_index"
+:0,"timestamp_start":"2026-01-01T00:00:00+00:00","timestamp_end":"2026-01-01T01:00:00+00:00","duration_hours":1.0}],"va
+lues":[{"period_index":0,"signal_key":"price_usd_per_mwh","value_numeric":70.0}]}}
+
+----------------------------------------------------------------------
+Ran 1 test in 0.777s
+
+FAILED (failures=1)
+
+EXTRACTO: .tmp/ux003-stale-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+.venv/Scripts/python.exe : C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\.venv\Lib\sit
+e-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is
+deprecated; install `httpx2` instead.
+En línea: 2 Carácter: 41
++ ... /:memory:'; .venv/Scripts/python.exe -m unittest tests.test_ux003_imp ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\vicen\...ttpx2` instead.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+[...]
+  from starlette.testclient import TestClient as TestClient  # noqa
+test_a_gap_is_located_before_confirming_a_continuous_file_import (tests.test_ux003_import_preview.GuidedImportPreviewTe
+sts.test_a_gap_is_located_before_confirming_a_continuous_file_import) ... ok
+test_confirming_a_changed_source_requires_review_again_and_creates_nothing (tests.test_ux003_import_preview.GuidedImpor
+tPreviewTests.test_confirming_a_changed_source_requires_review_again_and_creates_nothing) ... ok
+test_import_route_is_selected_by_server_cutover_state
+(tests.test_ux003_import_preview.GuidedImportPreviewTests.test_import_route_is_selected_by_server_cutover_state) ... ok
+test_invalid_xlsx_value_identifies_sheet_row_and_column_before_import (tests.test_ux003_import_preview.GuidedImportPrev
+iewTests.test_invalid_xlsx_value_identifies_sheet_row_and_column_before_import) ... ok
+test_reviews_known_values_and_coverage_without_creating_a_catalog_set (tests.test_ux003_import_preview.GuidedImportPrev
+iewTests.test_reviews_known_values_and_coverage_without_creating_a_catalog_set) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 4.082s
+
+OK
+
+EXTRACTO: .tmp/ux003-protected-xlsx-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx -t stages XLSX
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ProtectedMutationJourney.test.tsx (13 tests | 1 failed | 12 skipped) 1932ms
+[...]
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ProtectedMutationJourney.test.tsx > single protected mutation journey > defines an object-specific series,
+stages XLSX and seals it in the same four steps
+TestingLibraryElementError: Value "price" not found in options
+
+Ignored nodes: comments, script, style
+<select>
+  <option
+    value=""
+  >
+    Elegir columna
+  </option>
+</select>
+[...]
+ ❯ src/ProtectedMutationJourney.test.tsx:1590:18
+    1588|       await user.click(screen.getByRole("button", { name: "Subir archi…
+    1589|       if (channel === "XLSX") await user.selectOptions(await screen.fi…
+    1590|       await user.selectOptions(await screen.findByLabelText("Columna d…
+       |                  ^
+    1591|       await user.selectOptions(screen.getByLabelText("Columna de inici…
+    1592|       await user.selectOptions(screen.getByLabelText("Columna de durac…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 12 skipped (13)
+   Start at  21:35:10
+   Duration  5.42s (transform 1.17s, setup 276ms, import 1.65s, tests 1.93s, environment 1.27s)
+
+
+EXTRACTO: .tmp/ux003-protected-xlsx-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx -t defines an object-specific
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed | 10 skipped (13)
+   Start at  21:36:06
+   Duration  11.28s (transform 1.14s, setup 287ms, import 1.63s, tests 7.75s, environment 1.33s)
+
+
+EXTRACTO: .tmp/ux003-problem-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx -t stages XLSX
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ProtectedMutationJourney.test.tsx (13 tests | 1 failed | 12 skipped) 1910ms
+[...]
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ProtectedMutationJourney.test.tsx > single protected mutation journey > defines an object-specific series,
+stages XLSX and seals it in the same four steps
+TestingLibraryElementError: Value "price" not found in options
+
+Ignored nodes: comments, script, style
+<select>
+  <option
+    value=""
+  >
+    Elegir columna
+  </option>
+</select>
+[...]
+ ❯ src/ProtectedMutationJourney.test.tsx:1590:18
+    1588|       await user.click(screen.getByRole("button", { name: "Subir archi…
+    1589|       if (channel === "XLSX") await user.selectOptions(await screen.fi…
+    1590|       await user.selectOptions(await screen.findByLabelText("Columna d…
+       |                  ^
+    1591|       await user.selectOptions(screen.getByLabelText("Columna de inici…
+    1592|       await user.selectOptions(screen.getByLabelText("Columna de durac…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 12 skipped (13)
+   Start at  21:37:06
+   Duration  5.51s (transform 1.19s, setup 284ms, import 1.69s, tests 1.91s, environment 1.33s)
+
+
+EXTRACTO: .tmp/ux003-problem-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx -t defines an object-specific
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed | 10 skipped (13)
+   Start at  21:37:36
+   Duration  11.33s (transform 1.13s, setup 295ms, import 1.59s, tests 7.85s, environment 1.32s)
+
+
+EXTRACTO: .tmp/ux003-temporal-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+.venv/Scripts/python.exe : C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\.venv\Lib\sit
+e-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is
+deprecated; install `httpx2` instead.
+En línea: 2 Carácter: 41
++ ... /:memory:'; .venv/Scripts/python.exe -m unittest tests.test_ux003_imp ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\vicen\...ttpx2` instead.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+[...]
+    self.assertEqual(response.json()["location"], {"sheet": None, "row": 2, "column": column})
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: {'sheet': None, 'row': None, 'column': None} != {'sheet': None, 'row': 2, 'column': 'timestamp'}
+- {'column': None, 'row': None, 'sheet': None}
+?            ^^^          ^^^^
+
++ {'column': 'timestamp', 'row': 2, 'sheet': None}
+?            ^^^^ ++++++         ^
+
+
+======================================================================
+FAIL: test_temporal_errors_identify_the_cell_that_requires_correction (tests.test_ux003_import_preview.GuidedImportPrev
+[...]
+"C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\tests\test_ux003_import_preview.py",
+line 110, in test_temporal_errors_identify_the_cell_that_requires_correction
+    self.assertEqual(response.json()["location"], {"sheet": None, "row": 2, "column": column})
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: {'sheet': None, 'row': None, 'column': None} != {'sheet': None, 'row': 2, 'column': 'hours'}
+- {'column': None, 'row': None, 'sheet': None}
+?            ^ ^^         ^^^^
+
++ {'column': 'hours', 'row': 2, 'sheet': None}
+?            ^^ ^^^^         ^
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.779s
+
+FAILED (failures=2)
+
+EXTRACTO: .tmp/ux003-temporal-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+.venv/Scripts/python.exe : C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\.venv\Lib\sit
+e-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is
+deprecated; install `httpx2` instead.
+En línea: 2 Carácter: 41
++ ... /:memory:'; .venv/Scripts/python.exe -m unittest tests.test_ux003_imp ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\vicen\...ttpx2` instead.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+[...]
+sts.test_a_gap_is_located_before_confirming_a_continuous_file_import) ... ok
+test_confirming_a_changed_source_requires_review_again_and_creates_nothing (tests.test_ux003_import_preview.GuidedImpor
+tPreviewTests.test_confirming_a_changed_source_requires_review_again_and_creates_nothing) ... ok
+test_import_route_is_selected_by_server_cutover_state
+(tests.test_ux003_import_preview.GuidedImportPreviewTests.test_import_route_is_selected_by_server_cutover_state) ... ok
+test_invalid_xlsx_value_identifies_sheet_row_and_column_before_import (tests.test_ux003_import_preview.GuidedImportPrev
+iewTests.test_invalid_xlsx_value_identifies_sheet_row_and_column_before_import) ... ok
+test_reviews_known_values_and_coverage_without_creating_a_catalog_set (tests.test_ux003_import_preview.GuidedImportPrev
+iewTests.test_reviews_known_values_and_coverage_without_creating_a_catalog_set) ... ok
+test_temporal_errors_identify_the_cell_that_requires_correction (tests.test_ux003_import_preview.GuidedImportPreviewTes
+ts.test_temporal_errors_identify_the_cell_that_requires_correction) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 4.637s
+
+OK
+
+EXTRACTO: .tmp/ux003-focus-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/GuidedImport.test.tsx -t opens the page
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/GuidedImport.test.tsx (9 tests | 1 failed | 8 skipped) 1951ms
+[...]
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/GuidedImport.test.tsx > guided time-series import > opens the page containing a reported error and focuses
+that cell
+TestingLibraryElementError: Unable to find a label with the text of: Fila 52, price
+
+Ignored nodes: comments, script, style
+<section
+  aria-labelledby="guided-import-title"
+  class="guided-import"
+>
+  <h3
+    id="guided-import-title"
+  >
+[...]
+            >
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 skipped (9)
+   Start at  21:39:58
+   Duration  5.40s (transform 1.10s, setup 282ms, import 1.57s, tests 1.95s, environment 1.31s)
+
+              3
+            </th>
+            <td>
+              <input
+                aria-label="Fila 3, timestamp"
+                value="2026-01-01T00:00:00+00:00"
+[...]
+            </td>
+ ...
+ ❯ Object.getElementError node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ getAllByLabelText node_modules/@testing-library/dom/dist/queries/label-text.js:111:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/GuidedImport.test.tsx:161:27
+    159|     await user.click(await within(wizard).findByRole("button", { name:…
+    160|     await user.click(await within(wizard).findByRole("button", { name:…
+    161|     expect(within(wizard).getByLabelText("Fila 52, price")).toHaveFocu…
+       |                           ^
+    162|   });
+    163|   it("labels proposed columns and shows source examples, units and sco…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+EXTRACTO: .tmp/ux003-focus-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/GuidedImport.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  21:40:28
+   Duration  13.39s (transform 1.12s, setup 291ms, import 1.59s, tests 9.95s, environment 1.27s)
+
+
+EXTRACTO: .tmp/ux003-protected-location-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx -t stages CSV corregido
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ProtectedMutationJourney.test.tsx (14 tests | 1 failed | 13 skipped) 3082ms
+[...]
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ProtectedMutationJourney.test.tsx > single protected mutation journey > defines an object-specific series,
+stages CSV corregido and seals it in the same four steps
+TestingLibraryElementError: Unable to find an element with the text: /fila 2, columna price: Número ambiguo/. This
+could be because the text is broken up by multiple elements. In this case, you can provide a function for your text
+matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+    >
+[...]
+ ❯ src/ProtectedMutationJourney.test.tsx:1597:29
+    1595|       await user.click(screen.getByRole("button", { name: "Confirmar c…
+    1596|       if (channel === "CSV corregido") {
+    1597|         expect(await screen.findByText(/fila 2, columna price: Número …
+       |                             ^
+    1598|         expect(screen.queryByRole("table", { name: "Revisión del archi…
+    1599|         await user.selectOptions(screen.getByLabelText("Columna de val…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 13 skipped (14)
+   Start at  21:42:20
+   Duration  6.65s (transform 1.21s, setup 281ms, import 1.70s, tests 3.08s, environment 1.29s)
+
+
+EXTRACTO: .tmp/ux003-protected-location-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx -t defines an object-specific
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  4 passed | 10 skipped (14)
+   Start at  21:43:00
+   Duration  13.22s (transform 1.09s, setup 272ms, import 1.54s, tests 9.84s, environment 1.29s)
+
+
+EXTRACTO: .tmp/ux003-reupload-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/GuidedImport.test.tsx -t keeps column choices
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/GuidedImport.test.tsx (9 tests | 1 failed | 8 skipped) 2570ms
+[...]
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/GuidedImport.test.tsx > guided time-series import > keeps column choices and edited values when going back
+before saving and checking
+TestingLibraryElementError: Unable to find a label with the text of: Fila 2, price
+
+Ignored nodes: comments, script, style
+<section
+  aria-labelledby="guided-import-title"
+  class="guided-import"
+>
+  <h3
+    id="guided-import-title"
+  >
+[...]
+      type="button"
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 skipped (9)
+   Start at  21:43:51
+   Duration  5.96s (transform 1.08s, setup 277ms, import 1.55s, tests 2.57s, environment 1.28s)
+
+    >
+      Volver a archivo
+    </button>
+    <button
+      disabled=""
+      type="button"
+[...]
+      Confirmar columnas y revisar
+    </button>
+  </fieldset>
+</section>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/GuidedImport.test.tsx:365:33
+    363|       }),
+    364|     );
+    365|     expect(await within(wizard).findByLabelText("Fila 2, price")).toHa…
+       |                                 ^
+    366|       "70",
+    367|     );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+EXTRACTO: .tmp/ux003-reupload-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/GuidedImport.test.tsx -t keeps column choices
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 8 skipped (9)
+   Start at  21:44:14
+   Duration  5.56s (transform 1.22s, setup 297ms, import 1.74s, tests 1.86s, environment 1.38s)
+
+
+EXTRACTO: .tmp/ux003-protected-link-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx -t stages CSV and
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ProtectedMutationJourney.test.tsx (14 tests | 1 failed | 13 skipped) 3293ms
+[...]
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ProtectedMutationJourney.test.tsx > single protected mutation journey > defines an object-specific series,
+stages CSV and seals it in the same four steps
+TestingLibraryElementError: Unable to find an accessible element with the role "link" and name "Abrir series del
+objeto"
+
+Here are the accessible roles:
+
+  banner:
+
+  Name "":
+  <header
+    class="topbar"
+[...]
+ ❯ src/ProtectedMutationJourney.test.tsx:1835:19
+    1833|       await screen.findByText(/Revision sellada \(new_revision\)/),
+    1834|     ).toBeVisible();
+    1835|     expect(screen.getByRole("link", { name: "Abrir series del objeto" …
+       |                   ^
+    1836|     expect(screen.getByText(/La revisión importada todavía debe elegir…
+    1837|       // Define, stage, seal: three server moves, in that order, once …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 13 skipped (14)
+   Start at  21:53:03
+   Duration  7.12s (transform 1.26s, setup 346ms, import 1.80s, tests 3.29s, environment 1.37s)
+
+
+EXTRACTO: .tmp/ux003-protected-link-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ProtectedMutationJourney.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  14 passed (14)
+   Start at  21:53:51
+   Duration  20.49s (transform 1.10s, setup 278ms, import 1.58s, tests 17.06s, environment 1.28s)
+
+
+EXTRACTO: .tmp/ux003-failed-file-red.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/GuidedImport.test.tsx -t selects an XLSX sheet
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/GuidedImport.test.tsx (10 tests | 1 failed | 9 skipped) 2087ms
+[...]
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/GuidedImport.test.tsx > guided time-series import > selects an XLSX sheet and focuses the invalid cell so
+it can be corrected
+Error: expect(element).toHaveValue(Notas)
+
+Expected the element to have value:
+  Notas
+Received:
+  Precios
+ ❯ src/GuidedImport.test.tsx:514:68
+    512|     await user.click(within(wizard).getByRole("button", { name: "Conti…
+    513|     await user.selectOptions(within(wizard).getByRole("combobox", { na…
+    514|     expect(within(wizard).getByRole("combobox", { name: "Hoja" })).toH…
+       |                                                                    ^
+    515|     await user.selectOptions(within(wizard).getByRole("combobox", { na…
+    516|     await user.click(within(wizard).getByRole("button", { name: "Confi…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 9 skipped (10)
+   Start at  21:58:22
+   Duration  5.56s (transform 1.10s, setup 283ms, import 1.57s, tests 2.09s, environment 1.32s)
+
+
+EXTRACTO: .tmp/ux003-failed-file-green.txt
+(ANSI y DOM extenso omitidos; las salidas completas permanecen en .tmp.)
+
+> bess-react-ui@0.1.0 test
+> vitest run src/GuidedImport.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  10 passed (10)
+   Start at  21:58:58
+   Duration  14.05s (transform 1.10s, setup 313ms, import 1.58s, tests 10.59s, environment 1.27s)

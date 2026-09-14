@@ -354,7 +354,38 @@ Antes de abrir la aplicación, confirma:
 La UI de carga vive en el editor del draft, aunque el resultado recomendado
 para trabajo nuevo es un set reutilizable del catálogo del proyecto.
 
-### 6.1 Subir la fuente
+### 6.0 Asistente de importación
+
+En **Modelo → Series de tiempo → Importar series de tiempo**, sigue Archivo →
+Columnas → Revisión → Importación. Guarda primero el modelo. Sube un CSV o XLSX,
+elige hoja cuando corresponde y confirma columnas, zona, señales y unidades tras
+revisar sus ejemplos. Los metadatos de versión y clase están en un desplegable.
+
+**Comprobar datos** valida todas las filas. Los errores con ubicación llevan a la
+hoja/fila/columna; corrige la celda, **Guardar correcciones en la fuente temporal**
+y vuelve a comprobar. La tabla muestra 50 filas por página y conserva cambios al
+retroceder, cambiar de página y volver a una hoja ya visitada. El resumen muestra
+cobertura, resolución, señales, destino y hasta cinco filas normalizadas.
+
+**Confirmar importación** crea un conjunto nuevo cuando el servidor permite esa
+ruta. El enlace final abre el recurso persistido. Después debes elegir la fuente
+en Datos del escenario y revisar su uso en la variante. Si el servidor indica el
+recorrido protegido, elige primero la necesidad del modelo. La ingesta de archivo
+de una serie específica conserva el lote temporal y las garantías de publicación
+y revisión de impacto TS-7; los valores del archivo se corrigen subiendo un archivo
+corregido, mientras el mapeo puede corregirse en el mismo lote.
+
+Al salir se explica qué fuente está guardada y qué decisiones locales se pierden.
+Una respuesta de importación incierta requiere comprobar el catálogo antes de
+reenviar; una fuente cambiada tras la revisión exige comprobarla nuevamente.
+No hay conversiones de unidades ni relleno de huecos implícitos.
+
+Las secciones 6.1–6.3 y 6.5 siguientes describen los controles conservados en
+**Herramientas de compatibilidad: fuente del modelo y extracción**. No es necesario
+abrirlos para una importación habitual. Transformaciones, reemplazo e ingesta por
+API mantienen sus accesos independientes.
+
+### 6.1 Subir la fuente con las herramientas de compatibilidad
 
 1. Entra al proyecto y abre el escenario.
 2. Presiona **Abrir draft**.

@@ -736,21 +736,26 @@ tutorial__pronostico__solar_1__1h
 
 ## 13. Subir una fuente desde el draft
 
-En el draft, la sección **Time-series metadata** contiene el workflow de
-fuentes.
+En el modelo, la sección **Series de tiempo → Importar series de tiempo** guía
+la carga. El destino se consulta al servidor: conjunto nuevo del proyecto o
+recorrido protegido desde una necesidad del modelo.
 
-1. Guardar el draft.
-2. En **Source file**, elegir CSV o XLSX.
-3. Iniciar el upload.
-4. Si el XLSX tiene varias hojas, elegir **Sheet**.
-5. Revisar **Time-series source**:
-   - archivo;
-   - tipo;
-   - Source ID;
-   - hoja seleccionada;
-   - columnas detectadas;
-   - preview de filas.
-6. Corregir el archivo si el encabezado o preview no coincide con lo esperado.
+1. **Guardar modelo** y elegir **Archivo CSV o XLSX**.
+2. **Continuar a columnas** guarda una fuente temporal; todavía no crea un conjunto.
+3. En XLSX, elegir **Hoja**. CSV pasa directamente a las columnas.
+4. Revisar nombre, zona horaria, columnas de fecha y duración, señales y unidades.
+   Las coincidencias exactas de cabeceras se presentan como propuestas. Los ejemplos
+   permiten comprobar la elección. **Metadatos del conjunto** conserva versión y clase.
+5. **Confirmar columnas y revisar** abre las filas editables; **Comprobar datos**
+   valida el archivo completo y muestra cobertura, resolución y hasta cinco filas.
+6. **Continuar a importación** resume el destino y el efecto sobre revisiones.
+   **Confirmar importación** crea el conjunto y ofrece el enlace para abrirlo.
+
+Retroceder conserva archivo, identificador temporal, hoja, columnas y cambios en
+celdas; cambiar de hoja y regresar conserva las decisiones de cada hoja. La salida
+advierte qué quedó guardado y qué trabajo local se pierde. Si la respuesta de
+importación es incierta, comprobar el catálogo antes de habilitar otro intento.
+Si la fuente cambió después de comprobarla, se exige una nueva revisión.
 
 La aplicación conserva el archivo bajo `INPUT_SOURCE_ROOT` y expone
 identificadores seguros. El usuario no debería depender de una ruta absoluta
@@ -758,27 +763,29 @@ local para reproducir una corrida.
 
 ### 13.1 Editar filas antes de importar
 
-La sección **Editable rows** permite corregir celdas de la fuente.
+El paso **Revisión** permite corregir celdas de la fuente.
 
-1. Localizar fila y columna.
+1. Localizar fila y columna; el botón del error lleva a la celda, también en otra página.
 2. Editar únicamente los valores necesarios.
-3. Presionar **Save rows**.
-4. Esperar **Rows saved**.
-5. Revisar nuevamente validación y preview.
+3. Presionar **Guardar correcciones en la fuente temporal**.
+4. Esperar que termine el guardado.
+5. Usar **Comprobar datos** nuevamente. No se convierten unidades ni se rellenan huecos.
 
-La interfaz puede mostrar solo las primeras filas de archivos grandes. Eso no
-implica que el resto se haya eliminado. Para cambios masivos, corregir y volver
+La interfaz muestra páginas de 50 filas con **Filas anteriores/siguientes** y
+conserva los cambios entre páginas. Para cambios masivos, corregir y volver
 a subir el archivo suele ser más seguro que editar muchas celdas manualmente.
 
 ## 14. Importar la fuente al catálogo
 
-Para importar un archivo desde el draft, usar **Import mapped columns to
-catalog**. El camino **Column mapping** + **Extract legacy series to catalog**
-existe para compatibilidad con drafts antiguos. Ambos desembocan en el catálogo
-de sets del proyecto. Para una serie propia de un objeto, consultar el recorrido
-de la sección 15.8.
+El asistente de la sección 13 es la entrada habitual. Al finalizar, abre el recurso
+importado o vuelve a Datos del escenario: la importación no confirma un binding.
+Los controles técnicos descritos a continuación siguen en **Herramientas de
+compatibilidad: fuente del modelo y extracción**, para fuentes y drafts antiguos.
+Para una serie propia de un objeto, consultar el recorrido de la sección 15.8:
+su paso de datos admite archivo temporal, elección de hoja/columnas y revisión,
+antes de publicar mediante la confirmación de impacto existente.
 
-### 14.1 Camino recomendado: mapeo directo al catálogo
+### 14.1 Herramienta de compatibilidad: mapeo directo al catálogo
 
 Completar:
 

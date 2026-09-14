@@ -3280,6 +3280,17 @@
             "title": "Duration Hours Column",
             "type": "string"
           },
+          "expected_preview_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Preview Hash"
+          },
           "set_name": {
             "minLength": 1,
             "title": "Set Name",
@@ -10400,6 +10411,43 @@
         "summary": "Validate Generated System Case"
       }
     },
+    "/api/scenarios/{scenario_id}/draft/time-series-import-options": {
+      "get": {
+        "operationId": "draft_time_series_import_options_api_scenarios__scenario_id__draft_time_series_import_options_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Draft Time Series Import Options"
+      }
+    },
     "/api/scenarios/{scenario_id}/draft/time-series-sources/upload": {
       "post": {
         "operationId": "upload_draft_time_series_source_api_scenarios__scenario_id__draft_time_series_sources_upload_post",
@@ -10482,6 +10530,62 @@
         },
         "responses": {
           "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Draft Time Series Source To Catalog"
+      }
+    },
+    "/api/scenarios/{scenario_id}/draft/time-series-sources/{source_id}/catalog-preview": {
+      "post": {
+        "operationId": "import_draft_time_series_source_to_catalog_api_scenarios__scenario_id__draft_time_series_sources__source_id__catalog_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TimeSeriesCatalogImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {}

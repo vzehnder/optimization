@@ -815,6 +815,7 @@ class TimeSeriesCatalogSignalMappingRequest(BaseModel):
 
 
 class TimeSeriesCatalogImportRequest(BaseModel):
+    expected_preview_hash: str | None = None
     set_name: str = Field(min_length=1)
     version_label: str = Field(min_length=1)
     data_kind: str = Field(min_length=1)
@@ -4247,6 +4248,14 @@ def create_app(
             return JSONResponse(validation_response_body(error), status_code=400)
         return scenario_version
 
+    @app.get("/api/scenarios/{scenario_id}/draft/time-series-import-options")
+    async def draft_time_series_import_options(scenario_id: int):
+        try:
+            analyst_store.get_scenario(scenario_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"mode": "protected" if analyst_store.read_time_series_c6_state()["cutover_active"] else "project_catalog"}
+
     @app.post("/api/scenarios/{scenario_id}/draft/time-series-sources/upload", status_code=201)
     async def upload_draft_time_series_source(
         scenario_id: int,
@@ -4340,6 +4349,7 @@ def create_app(
             return JSONResponse(error_response_body("source_file", str(error)), status_code=400)
         return {"source": source}
 
+    @app.post("/api/scenarios/{scenario_id}/draft/time-series-sources/{source_id}/catalog-preview")
     @app.post(
         "/api/scenarios/{scenario_id}/draft/time-series-sources/{source_id}/catalog-import",
         status_code=201,
@@ -4348,6 +4358,7 @@ def create_app(
         scenario_id: int,
         source_id: str,
         payload: TimeSeriesCatalogImportRequest,
+        request: Request,
     ):
         try:
             draft = analyst_store.get_scenario_draft(scenario_id)
@@ -4390,6 +4401,33 @@ def create_app(
                     ],
                 ),
             )
+            if request.url.path.endswith("/catalog-preview"):
+                periods = prepared_import.periods
+                for previous, period in zip(periods, periods[1:]):
+                    if datetime.fromisoformat(previous.timestamp_end) != datetime.fromisoformat(period.timestamp_start):
+                        raise TimeSeriesCatalogError(
+                            "Hay un hueco entre períodos. Corrige la fuente o utiliza una transformación explícita.",
+                            row=period.period_index + 2, column=payload.timestamp_column,
+                        )
+                durations = {period.duration_hours for period in periods}
+                preview_rows = [
+                    {"timestamp_start": period.timestamp_start, "duration_hours": period.duration_hours}
+                    for period in periods[:5]
+                ]
+                for value in prepared_import.values:
+                    if value.period_index < len(preview_rows):
+                        preview_rows[value.period_index][value.signal_key] = value.value_numeric
+                return {"preview": {
+                    "content_hash": prepared_import.content_hash,
+                    "period_count": len(periods),
+                    "coverage_start": periods[0].timestamp_start,
+                    "coverage_end": periods[-1].timestamp_end,
+                    "resolution_hours": next(iter(durations)) if len(durations) == 1 else None,
+                    "signals": [signal.__dict__ for signal in prepared_import.signals],
+                    "rows": preview_rows,
+                }}
+            if payload.expected_preview_hash is not None and payload.expected_preview_hash != prepared_import.content_hash:
+                return JSONResponse(error_response_body("catalog_import", "La fuente cambió después de la revisión. Vuelve a comprobar los datos antes de importar."), status_code=409)
             created_set = analyst_store.import_time_series_catalog_set(
                 scenario_id=scenario_id,
                 source=source,
@@ -4400,14 +4438,13 @@ def create_app(
         except TimeSeriesIngestionError as error:
             return JSONResponse(error_response_body("source_file", str(error)), status_code=400)
         except (TimeSeriesCatalogError, ValueError) as error:
-            return JSONResponse(
-                error_response_body(
-                    "catalog_import",
-                    time_series_source_error_detail(source, str(error)),
-                    phase="python_validation",
-                ),
-                status_code=400,
+            body = error_response_body(
+                "catalog_import", time_series_source_error_detail(source, str(error)),
+                phase="python_validation",
             )
+            if isinstance(error, TimeSeriesCatalogError):
+                body["location"] = {"sheet": source.get("selected_sheet"), "row": error.row, "column": error.column}
+            return JSONResponse(body, status_code=400)
         return {"time_series_set": created_set}
 
     @app.post(

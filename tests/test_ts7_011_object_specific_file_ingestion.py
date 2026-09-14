@@ -627,6 +627,14 @@ class ObjectSpecificFileIngestionApiTests(unittest.TestCase):
             f"{self.target}/revision-ingestions/{ingestion['ingestion_id']}/mapping"
         )
 
+        sheet_only = put_json_with_csrf(self.client, mapping_url, {
+            "sheet_name": "Afluentes", "revision_contract": CSV_MAPPING["revision_contract"],
+        })
+        self.assertEqual(sheet_only.status_code, 422, sheet_only.text)
+        selected_file = sheet_only.json()["context"]["ingestion"]["file"]
+        self.assertEqual(selected_file["selected_sheet"], "Afluentes")
+        self.assertIn("value_mwh", selected_file["columns"])
+
         missing_sheet = put_json_with_csrf(
             self.client,
             mapping_url,
