@@ -1794,6 +1794,114 @@ button:focus-visible {
   font-family: var(--mono-font, monospace);
 }
 
+.console-experience {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.console-experience .secondary-button {
+  color: #174664;
+}
+
+.console-experience button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.console-experience [role="status"],
+.console-experience [role="alert"] {
+  width: 100%;
+  margin: 0.75rem 0;
+  box-shadow: none;
+}
+
+.console-config-fields,
+.console-config-fields section,
+.console-config-fields label {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.console-config-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.console-config-fields section {
+  margin: 1rem 0;
+}
+
+.console-group-fieldset {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr));
+  gap: 1rem;
+  min-width: 0;
+  margin: 0.5rem 0;
+  padding: 1rem;
+  border: 1px solid #bcccdc;
+  border-radius: 0.5rem;
+}
+
+.console-group-fieldset legend {
+  font-weight: 700;
+}
+
+.console-config-fields .checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.console-config-fields input[type="checkbox"] {
+  width: 1.15rem;
+  height: 1.15rem;
+  flex-shrink: 0;
+}
+
+.console-parameter-grid,
+.console-period-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr));
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.console-parameter-grid label {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.console-period-fields {
+  grid-template-columns: max-content minmax(0, 1fr);
+}
+
+.console-parameter-grid input,
+.console-parameter-grid select,
+.console-period-fields input {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  padding: 0.65rem;
+  color: #102a43;
+  border: 1px solid #b8c7d6;
+  border-radius: 0.5rem;
+}
+
+.console-preparation-links {
+  display: grid;
+  gap: 0.6rem;
+}
+
+@media (max-width: 600px) {
+  .console-experience .console-detail-list,
+  .console-period-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .console-detail-list {
   display: grid;
   grid-template-columns: max-content 1fr;

@@ -1973,18 +1973,26 @@ Editar:
 - **Nombre público**;
 - **Descripción pública**;
 - columnas existentes de grupos: etiqueta, señal canónica y entidad;
-- **Parámetros y resultados (JSON)**;
+- **Parámetros**: elegir componente y campo numérico del modelo, agregar el
+  parámetro y ajustar etiqueta, unidad, mínimo, máximo y valor inicial;
+- **Resultados**: agregar indicadores, gráficos y tablas; elegir sus series o
+  columnas y ajustar etiquetas, unidades y presentación;
 - guardar con **Guardar configuración**.
 
 La señal debe existir en el catálogo canónico. La pantalla informa unidad y si
 admite negativos.
 
-La UI actual edita grupos y columnas ya presentes, pero no ofrece un botón para
-crear grupos o columnas desde cero. Si una consola recién creada necesita una
-estructura compleja, el experto debe partir de una configuración ya
-provisionada por el flujo/API autorizado; no inventar JSON de grupos en el campo
-**Parámetros y resultados**, porque ese campo solo cubre `parameters` y
-`results`.
+**Editar JSON avanzado** abre el documento completo, incluidos los grupos y sus
+fuentes. Permite preparar estructuras que no tienen un botón de creación en el
+formulario. **Volver al formulario** conserva las propiedades soportadas sin
+modificarlas. Un JSON inválido mantiene el texto para corregirlo e impide guardar
+o salir del modo experto; el servidor conserva la validación final.
+
+**Guardar configuración** no activa la consola. Activar o desactivar requiere
+terminar el guardado. Si otra sesión modifica la revisión, la pantalla conserva
+tu edición y explica que no se guardó. Puedes conservarla para revisarla o usar
+**Descartar mis cambios y cargar la configuración vigente** para reemplazarla
+explícitamente. Una consulta fallida permite reintentar sin borrar la edición.
 
 ### 27.3 Activar y probar
 
@@ -2021,6 +2029,12 @@ La cuenta necesita `operate` y una consola activa del proyecto.
 
 ### 28.1 Periodo y parámetros
 
+**Preparación de la ejecución** muestra el período (inicio incluido y fin
+excluido) y enlaza a cada parámetro o grupo pendiente. Los parámetros y cada grupo
+se guardan por separado. **Ejecutar** requiere guardados aceptados y autorización
+del servidor. **Actualizar preparación** consulta nuevamente los bloqueos; si
+falla, conserva los cambios y mantiene cerrada la ejecución hasta recuperarse.
+
 En **Periodo y parámetros**:
 
 1. revisar el mensaje del run gate;
@@ -2032,6 +2046,11 @@ En **Periodo y parámetros**:
 Si aparece un bloqueo de ingeniería, usar **Solicitar revisión**. Un lock de
 otro operador no se resuelve con esa acción: hay que esperar o coordinar la
 liberación.
+
+Si se pierde la sesión de edición de un grupo, los valores pendientes permanecen
+visibles. Volver a obtener edición permite intentar guardarlos; un conflicto de
+valores sigue sujeto a la revisión del servidor. Esta recuperación no solicita
+revisión de ingeniería ni permite forzar la edición de otra persona.
 
 ### 28.2 Elegir fuentes
 

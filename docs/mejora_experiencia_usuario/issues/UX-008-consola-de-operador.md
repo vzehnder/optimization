@@ -1,6 +1,14 @@
 # UX-008 · Simplificar configuración y preparación de la consola
 
-Estado: Todo. Prioridad: P1. Dependencias: UX-001. Tamaño: L.
+Estado: In Review. Prioridad: P1. Dependencias: UX-001. Tamaño: L.
+
+Responsable: Codex. Implementación: 2026-09-14 sobre `a1b47e1`.
+F1/F2 confirmadas por el usuario antes de escribir pruebas nuevas. Formularios
+de parámetros/resultados, JSON completo, conflictos recuperables y preparación
+con enlaces a pendientes implementados; activación y guardados separados.
+[Ciclos TDD, pruebas y evidencia](../evidencia/ux-008/README.md).
+Resolución: `feat(ux): simplify console configuration and execution preparation`,
+sobre `a1b47e1`; pendiente de aceptación del resultado.
 
 ## Problema y resultado
 

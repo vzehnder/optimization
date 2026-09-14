@@ -166,6 +166,8 @@ def main() -> None:
     )
     from scripts.ux004_smoke_fixture import seed_catalog_fixture
     catalog_fixture = seed_catalog_fixture(store)
+    from scripts.ux008_smoke_fixture import seed_console_fixture
+    console_fixture = seed_console_fixture(store)
     os.environ["TS_NEXT_CANONICAL_READ_ACCOUNTS"] = "ux004@example.local"
     app = create_app(
         store=store,
@@ -182,6 +184,10 @@ def main() -> None:
     @app.get("/api/auth/ux004-fixture", include_in_schema=False)
     async def ux004_fixture():
         return catalog_fixture
+
+    @app.get("/api/auth/ux008-fixture", include_in_schema=False)
+    async def ux008_fixture():
+        return console_fixture
 
     uvicorn.run(
         app,

@@ -1,5 +1,22 @@
 # Validación, medición y entrega
 
+## Evidencia posterior: UX-008
+
+La [implementación sobre `a1b47e1`](evidencia/ux-008/README.md) queda **In Review**
+el 2026-09-14. F1/F2 confirmadas antes de las pruebas, 14 ciclos de comportamiento
+y corrección de contraste detectada en navegador. Parámetros y resultados
+mediante formularios, JSON completo conservado, revisión de partida y conflictos
+recuperables; preparación por parámetro/grupo con enlaces y guardados separados.
+
+Resultado: **443 pruebas funcionales aprobadas** (258 React, 22 navegador y
+163 API). El recorrido real comprueba persistencia, identidad interna, operación
+externa, resultados y revocación. Nueve capturas locales regenerables incluyen
+1440, 1280 y 320 px y ampliación CSS 200 %, con teclado/foco y axe sin
+serious/critical en configuración y preparación. TypeScript, ESLint, build,
+formato de archivos modificados y diff pasan; `check` conserva únicamente los
+21 archivos previos sin formato. El solver smoke es sintético; no se ejecutó
+Julia real, PostgreSQL, toda la suite Python ni sesiones con participantes.
+
 ## Evidencia posterior: UX-000
 
 La [línea base del 2026-09-12](evidencia/ux-000/README.md) registra la base `428b6ad`, cinco identidades en SQLite aislado, estado C6 separado de lectura canónica, siete recorridos automatizados, 17 capturas y **86 pruebas existentes aprobadas** (62 componentes, 6 navegador, 18 Python). Incluye límites del servidor smoke, errores corregidos en el registrador y comandos para repetir la tarea. No es un estudio con participantes ni una prueba de Julia real. UX-000 quedó Done tras confirmar el usuario las fronteras F1/F2 y F3 condicional para UX-001 el 2026-09-12.

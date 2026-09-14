@@ -1,0 +1,24 @@
+git : warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+En línea: 2 Carácter: 161
++ ... l.txt -Tail 10; git diff --check *> .tmp/ux008-diff-check.txt; exit $ ...
++                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (warning: in the... Git touches it:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+warning: in the working copy of 'docs/mejora_experiencia_usuario/README.md', LF will be replaced by CRLF the next time
+Git touches it
+warning: in the working copy of 'docs/mejora_experiencia_usuario/issues/UX-008-consola-de-operador.md', LF will be
+replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/mejora_experiencia_usuario/issues/tracker_ux.md', LF will be replaced by CRLF
+the next time Git touches it
+warning: in the working copy of 'docs/tutorials/manual_completo_uso_pagina_web.md', LF will be replaced by CRLF the
+next time Git touches it
+warning: in the working copy of 'frontend/e2e/react-foundation.spec.ts', LF will be replaced by CRLF the next time Git
+touches it
+warning: in the working copy of 'frontend/src/OperatorConsole.test.tsx', LF will be replaced by CRLF the next time Git
+touches it
+warning: in the working copy of 'frontend/src/OperatorConsole.tsx', LF will be replaced by CRLF the next time Git
+touches it
+warning: in the working copy of 'frontend/src/styles.css', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'scripts/run_react_smoke_app.py', LF will be replaced by CRLF the next time Git
+touches it

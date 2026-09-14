@@ -1,0 +1,12 @@
+
+> bess-react-ui@0.1.0 test
+> vitest run src/OperatorConsole.test.tsx src/ConsoleExperience.test.tsx src/PortalResults.test.tsx --maxWorkers=2
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  3 passed (3)
+      Tests  63 passed (63)
+   Start at  19:20:01
+   Duration  16.07s (transform 2.81s, setup 898ms, import 4.48s, tests 19.39s, environment 4.46s)

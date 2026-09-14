@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import AxeBuilder from "@axe-core/playwright";
+import type { OperatorConsole } from "../src/api/client";
 
 import {
   expect,
@@ -3107,4 +3108,189 @@ test("UX-004 follows a model source through association, exact variant use and e
       ["serious", "critical"].includes(entry.impact ?? ""),
     ),
   ).toEqual([]);
+});
+
+test("UX-008 configures a console and prepares an authorized external execution", async ({
+  page,
+  browser,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await ensureAdminSession(page);
+  const api = page.context().request;
+  const fixture = (await (await api.get("/api/auth/ux008-fixture")).json()) as {
+    project_id: number;
+    scenario_id: number;
+    variant_id: number;
+    horizon: { start: string; end: string };
+  };
+  const response = await postWithCsrf(
+    api,
+    `/api/scenarios/${fixture.scenario_id}/consoles`,
+    {
+      source_variant_id: fixture.variant_id,
+      document: {
+        schema_version: "operator_console_config.v1",
+        public_identity: {
+          name: "Plan Norte UX-008",
+          description: "Preparación diaria",
+        },
+        parameters: [],
+        groups: [],
+        results: { kpis: [], charts: [], tables: [] },
+      },
+    },
+  );
+  expect(response.status()).toBe(201);
+  const created = (await response.json()).operator_console as OperatorConsole;
+  const configUrl = `/react/scenarios/${fixture.scenario_id}/consoles/${created.id}`;
+  await page.goto(configUrl);
+  await page.getByLabel("Componente del parámetro").selectOption("battery_1");
+  await page.getByLabel("Campo del modelo").selectOption("charge_power_max_mw");
+  await page
+    .getByRole("button", { name: "Agregar parámetro", exact: true })
+    .click();
+  const parameter = page.getByRole("group", {
+    name: "Parámetro 1",
+    exact: true,
+  });
+  await parameter.getByLabel("Etiqueta", { exact: true }).fill("Carga máxima");
+  await parameter.getByLabel("Unidad", { exact: true }).fill("MW");
+  await parameter
+    .getByRole("spinbutton", { name: "Máximo de Carga máxima" })
+    .fill("6");
+  await page.getByRole("button", { name: "Resultados", exact: true }).click();
+  await page.getByRole("button", { name: "Agregar indicador" }).click();
+  await page.getByRole("button", { name: "Agregar gráfico" }).click();
+  await page.getByRole("button", { name: "Agregar tabla" }).click();
+  const table = page.getByRole("group", { name: "Tabla 1", exact: true });
+  await table.getByRole("checkbox").first().check();
+  await expect(
+    page.getByRole("button", { name: "Activar", exact: true }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "Guardar configuracion" }).click();
+  await expect(page.getByText("Revision 2", { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("spinbutton", { name: "Máximo de Carga máxima" }),
+  ).toHaveValue("6");
+  await page.getByRole("button", { name: "Resultados", exact: true }).click();
+  await expect(
+    page
+      .getByRole("group", { name: "Indicador 1", exact: true })
+      .getByLabel("Etiqueta", { exact: true }),
+  ).toHaveValue("Beneficio total");
+  await verifyCatalogLayout(page, testInfo, "ux008-configuracion");
+  await page.getByRole("button", { name: "Activar", exact: true }).click();
+  await expect(page.getByText("Activa", { exact: true })).toBeVisible();
+  const validation = await postWithCsrf(
+    api,
+    `/api/scenarios/${fixture.scenario_id}/case/variants/${created.owned_variant.id}/validate`,
+    { range_start: fixture.horizon.start, range_end: fixture.horizon.end },
+  );
+  expect(validation.ok(), await validation.text()).toBeTruthy();
+  await page.getByRole("link", { name: "Probar consola", exact: true }).click();
+  await expect(
+    page.getByRole("status", { name: "Prueba interna" }),
+  ).toContainText("admin@example.local");
+  await expect(page.getByLabel("Carga máxima (MW)")).toHaveAttribute(
+    "max",
+    "6",
+  );
+  const userResponse = await postWithCsrf(api, "/api/admin/users", {
+    email: `ux008-${Date.now()}@example.local`,
+    display_name: "Operadora Norte",
+    role: "external",
+    password: "operator-pass",
+  });
+  expect(userResponse.status()).toBe(201);
+  const operator = (await userResponse.json()).user as {
+    id: number;
+    email: string;
+  };
+  expect(
+    (
+      await putWithCsrf(
+        api,
+        `/api/admin/projects/${fixture.project_id}/external-access/${operator.id}`,
+        { portal_view: false, operate: true },
+      )
+    ).ok(),
+  ).toBeTruthy();
+  const external = await browser.newContext({
+    baseURL: "http://127.0.0.1:8123",
+  });
+  try {
+    await apiLogin(external.request, operator.email, "operator-pass");
+    const operatorPage = await external.newPage();
+    await operatorPage.goto(`/react/console/${created.id}`);
+    await expect(operatorPage.getByLabel("Carga máxima (MW)")).toHaveValue("4");
+    await expect(
+      operatorPage.getByRole("status", { name: "Prueba interna" }),
+    ).toHaveCount(0);
+    await operatorPage.getByLabel("Carga máxima (MW)").fill("5");
+    const preparation = operatorPage.getByRole("region", {
+      name: "Preparación de la ejecución",
+    });
+    await preparation
+      .getByRole("link", { name: "Guardar cambios de Carga máxima" })
+      .focus();
+    await operatorPage.keyboard.press("Enter");
+    await expect(operatorPage.getByLabel("Carga máxima (MW)")).toBeFocused();
+    await expect(
+      operatorPage.getByRole("button", { name: "Ejecutar", exact: true }),
+    ).toBeDisabled();
+    await verifyCatalogLayout(operatorPage, testInfo, "ux008-preparacion");
+    await operatorPage
+      .getByRole("button", { name: "Guardar parametros" })
+      .click();
+    await expect(preparation).toContainText("Preparado para ejecutar");
+    await operatorPage.reload();
+    await expect(operatorPage.getByLabel("Carga máxima (MW)")).toHaveValue("5");
+    await operatorPage
+      .getByRole("button", { name: "Ejecutar", exact: true })
+      .click();
+    await expect(
+      operatorPage.getByText("Beneficio total", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(
+      operatorPage.getByText("1250.50", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      operatorPage.getByRole("region", { name: "Historial reciente" }),
+    ).toContainText("Lista");
+    await expect(operatorPage.locator(".js-plotly-plot").first()).toBeVisible();
+    await operatorPage.screenshot({
+      path: testInfo.outputPath("ux008-resultado-1440.png"),
+      fullPage: true,
+    });
+    const shellResponse = await external.request.get(
+      `/api/console/${created.id}`,
+    );
+    const publicPayload = await shellResponse.text();
+    expect(publicPayload).not.toMatch(
+      /"(?:draft|bindings|content_hash|stdout|stderr|owned_variant|pointer)"/,
+    );
+    await expect(
+      operatorPage.getByText(/battery_1|charge_power_max_mw|expected_revision/),
+    ).toHaveCount(0);
+    const denied = await external.request.get(
+      `/api/scenarios/${fixture.scenario_id}/consoles/${created.id}`,
+    );
+    expect([403, 404]).toContain(denied.status());
+    expect(
+      (
+        await deleteWithCsrf(
+          api,
+          `/api/admin/projects/${fixture.project_id}/external-access/${operator.id}`,
+        )
+      ).ok(),
+    ).toBeTruthy();
+    await operatorPage.reload();
+    await expect(
+      operatorPage.getByRole("heading", { name: "No encontrado" }),
+    ).toBeVisible();
+    await expect(operatorPage.getByLabel("Carga máxima (MW)")).toHaveCount(0);
+  } finally {
+    await external.close();
+  }
 });

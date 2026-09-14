@@ -24,6 +24,7 @@ import {
   listCaseInputVariants,
   getConsoleShell,
   getOperatorConsole,
+  getScenarioDraft,
   heartbeatConsoleGroupLease,
   listOperableConsoles,
   listConsoleRuns,
@@ -52,6 +53,7 @@ import {
 } from "./api/client";
 import { loadPlotly, type PlotlyTrace } from "./plotly";
 import { PortalResultsBlock } from "./PortalResults";
+import { ConsoleResultsConfiguration } from "./ConsoleResultsConfiguration";
 import {
   signalCatalogEntry,
   signalCatalogOptions,
@@ -363,6 +365,8 @@ export function OperatorConsoleEditorView() {
   const consoleId = numericParam(params.consoleId);
   const queryClient = useQueryClient();
   const [error, setError] = useState("");
+  const [formGeneration, setFormGeneration] = useState(0);
+  const [configurationDirty, setConfigurationDirty] = useState(false);
 
   const consoleQuery = useQuery({
     queryKey: operatorConsoleQueryKey(scenarioId || 0, consoleId || 0),
@@ -386,11 +390,17 @@ export function OperatorConsoleEditorView() {
         operatorConsoleQueryKey(scenarioId || 0, consoleId || 0),
         saved,
       );
+      setFormGeneration((current) => current + 1);
       void queryClient.invalidateQueries({
         queryKey: operatorConsolesQueryKey(scenarioId || 0),
       });
     },
-    onError: (mutationError) => setError(errorMessage(mutationError)),
+    onError: (mutationError) =>
+      setError(
+        mutationError instanceof ApiError && mutationError.status === 409
+          ? "La configuración cambió en otra sesión. Tus cambios siguen aquí y no se han guardado."
+          : errorMessage(mutationError),
+      ),
   });
   const forceRelease = useMutation({
     mutationFn: (groupId: string) =>
@@ -447,16 +457,22 @@ export function OperatorConsoleEditorView() {
   if (consoleQuery.isPending) {
     return <p role="status">Cargando consola</p>;
   }
-  if (consoleQuery.isError) {
+  const inaccessible =
+    consoleQuery.error instanceof ApiError &&
+    [401, 403, 404].includes(consoleQuery.error.status);
+  if (consoleQuery.isError && (!consoleQuery.data || inaccessible)) {
     return (
       <section className="content-panel">
         <h1>No se pudo cargar</h1>
         <p role="alert">{errorMessage(consoleQuery.error)}</p>
+        <button type="button" onClick={() => void consoleQuery.refetch()}>
+          Reintentar configuración
+        </button>
       </section>
     );
   }
 
-  const console = consoleQuery.data;
+  const console = consoleQuery.data!;
   const identity = console.document.public_identity;
   const repairTarget =
     console.blocking.action?.kind === "edit_configuration"
@@ -466,25 +482,57 @@ export function OperatorConsoleEditorView() {
   function save(
     document: OperatorConsoleDocument,
     status: OperatorConsoleStatus,
+    expectedRevision = console.revision,
   ) {
     saveMutation.mutate({
       document,
       status,
-      expected_revision: console.revision,
+      expected_revision: expectedRevision,
     });
   }
 
   return (
     <section
-      className="workspace-view"
+      className="workspace-view console-experience"
       aria-labelledby="operator-console-editor"
     >
       <h1 id="operator-console-editor">Configuracion de la consola</h1>
+      {consoleQuery.isError ? (
+        <p role="alert">
+          No se pudo actualizar la configuración. Conservamos tu edición.{" "}
+          <button type="button" onClick={() => void consoleQuery.refetch()}>
+            Reintentar configuración
+          </button>
+        </p>
+      ) : null}
       <p>
         <span className="role-badge">{STATUS_LABELS[console.status]}</span>{" "}
         <span>Revision {console.revision}</span>
       </p>
       {error ? <p role="alert">{error}</p> : null}
+      {saveMutation.error instanceof ApiError &&
+      saveMutation.error.status === 409 ? (
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={async () => {
+            try {
+              const latest = await getOperatorConsole(scenarioId, consoleId);
+              queryClient.setQueryData(
+                operatorConsoleQueryKey(scenarioId, consoleId),
+                latest,
+              );
+              setFormGeneration((current) => current + 1);
+              setError("");
+              saveMutation.reset();
+            } catch (readError) {
+              setError(errorMessage(readError));
+            }
+          }}
+        >
+          Descartar mis cambios y cargar la configuración vigente
+        </button>
+      ) : null}
       <dl className="console-detail-list">
         <dt>Identidad publica</dt>
         <dd>{identity.name}</dd>
@@ -507,14 +555,18 @@ export function OperatorConsoleEditorView() {
         </p>
       ) : null}
       <ConsoleDocumentForm
-        key={console.revision}
+        key={`${console.id}:${formGeneration}`}
         document={console.document}
+        revision={console.revision}
         catalog={signalCatalog.data ?? []}
         catalogError={
           signalCatalog.isError ? errorMessage(signalCatalog.error) : ""
         }
         disabled={saveMutation.isPending}
-        onSave={(document) => save(document, console.status)}
+        onDirtyChange={setConfigurationDirty}
+        onSave={(document, revision) =>
+          save(document, console.status, revision)
+        }
       />
       <section
         className="content-panel console-series-coordination"
@@ -589,7 +641,7 @@ export function OperatorConsoleEditorView() {
         {console.status === "draft" ? (
           <button
             type="button"
-            disabled={saveMutation.isPending}
+            disabled={saveMutation.isPending || configurationDirty}
             onClick={() => save(console.document, "active")}
           >
             Activar
@@ -597,7 +649,7 @@ export function OperatorConsoleEditorView() {
         ) : (
           <button
             type="button"
-            disabled={saveMutation.isPending}
+            disabled={saveMutation.isPending || configurationDirty}
             onClick={() => save(console.document, "draft")}
           >
             Desactivar
@@ -614,40 +666,172 @@ export function OperatorConsoleEditorView() {
   );
 }
 
+function editableConsoleDocument(
+  value: unknown,
+): value is OperatorConsoleDocument {
+  const record = (item: unknown): item is Record<string, unknown> =>
+    item !== null && typeof item === "object" && !Array.isArray(item);
+  const texts = (item: Record<string, unknown>, keys: string[]) =>
+    keys.every((key) => typeof item[key] === "string");
+  const list = (
+    items: unknown,
+    check: (item: Record<string, unknown>) => boolean,
+  ): boolean =>
+    Array.isArray(items) && items.every((item) => record(item) && check(item));
+  const unit = (item: Record<string, unknown>) =>
+    item.unit === null || typeof item.unit === "string";
+  if (
+    !record(value) ||
+    value.schema_version !== "operator_console_config.v1" ||
+    !record(value.public_identity) ||
+    !texts(value.public_identity, ["name", "description"]) ||
+    !record(value.results)
+  )
+    return false;
+  // This is a rendering guard, not a replacement for backend schema/semantic validation.
+  return (
+    list(
+      value.parameters,
+      (item) =>
+        texts(item, ["id", "label"]) &&
+        unit(item) &&
+        record(item.pointer) &&
+        texts(item.pointer, ["asset_id", "field"]) &&
+        ["min", "max", "default"].every(
+          (key) => typeof item[key] === "number" && Number.isFinite(item[key]),
+        ),
+    ) &&
+    list(
+      value.groups,
+      (group) =>
+        texts(group, ["id", "label"]) &&
+        Array.isArray(group.granularities) &&
+        group.granularities.every((item) => typeof item === "string") &&
+        list(
+          group.columns,
+          (column) =>
+            texts(column, ["id", "label", "default_source_option_id"]) &&
+            typeof column.editable === "boolean" &&
+            record(column.signal) &&
+            texts(column.signal, ["entity_type", "entity_id", "signal_key"]) &&
+            list(
+              column.source_options,
+              (option) =>
+                texts(option, ["id", "label"]) &&
+                typeof option.time_series_set_id === "number",
+            ),
+        ),
+    ) &&
+    list(
+      value.results.kpis,
+      (item) =>
+        texts(item, ["id", "path", "label", "sign", "emphasis"]) &&
+        unit(item) &&
+        typeof item.decimals === "number",
+    ) &&
+    list(
+      value.results.charts,
+      (item) =>
+        texts(item, ["id", "chart_key", "label"]) &&
+        list(item.series, (series) => texts(series, ["key", "label"])),
+    ) &&
+    list(
+      value.results.tables,
+      (item) =>
+        texts(item, ["id", "table_key", "label"]) &&
+        typeof item.row_limit === "number" &&
+        list(
+          item.columns,
+          (column) => texts(column, ["id", "key", "label"]) && unit(column),
+        ),
+    )
+  );
+}
+
 function ConsoleDocumentForm({
   document,
+  revision,
   catalog,
   catalogError,
   disabled,
+  onDirtyChange,
   onSave,
 }: {
   document: OperatorConsoleDocument;
+  revision: number;
   catalog: SignalCatalogEntry[];
   catalogError: string;
   disabled: boolean;
-  onSave: (document: OperatorConsoleDocument) => void;
+  onDirtyChange: (dirty: boolean) => void;
+  onSave: (document: OperatorConsoleDocument, revision: number) => void;
 }) {
-  const [name, setName] = useState(document.public_identity.name);
-  const [description, setDescription] = useState(
-    document.public_identity.description,
-  );
-  const [groups, setGroups] = useState<OperatorConsoleGroup[]>(document.groups);
-  const [documentText, setDocumentText] = useState(() =>
-    JSON.stringify(
-      { parameters: document.parameters, results: document.results },
-      null,
-      2,
-    ),
-  );
+  const [value, setValue] = useState(document);
+  const [baseDocument] = useState(document);
+  const [baseRevision] = useState(revision);
+  const [expertText, setExpertText] = useState<string | null>(null);
+  const [showResults, setShowResults] = useState(false);
   const [formError, setFormError] = useState("");
+  const dirty =
+    JSON.stringify(value) !== JSON.stringify(baseDocument) ||
+    (expertText !== null &&
+      expertText !== JSON.stringify(baseDocument, null, 2));
+  useEffect(() => {
+    onDirtyChange(dirty);
+  }, [dirty, onDirtyChange]);
+  const { scenarioId } = useParams();
+  const model = useQuery({
+    queryKey: ["console-parameter-model", scenarioId],
+    queryFn: ({ signal }) => getScenarioDraft(Number(scenarioId), signal),
+    retry: false,
+  });
+  const assets = [
+    ...(model.data?.document.grid ? [model.data.document.grid] : []),
+    ...(model.data?.document.assets ?? []),
+  ].filter((asset) => typeof asset.id === "string");
+  const [chosenAsset, setChosenAsset] = useState("");
+  const [chosenField, setChosenField] = useState("");
+  const fieldsFor = (assetId: string) =>
+    Object.entries(assets.find((asset) => asset.id === assetId) ?? {})
+      .filter(
+        ([, fieldValue]) =>
+          typeof fieldValue === "number" && Number.isFinite(fieldValue),
+      )
+      .map(([field, fieldValue]) => ({ field, value: fieldValue as number }));
+  const availableFields = fieldsFor(chosenAsset).filter(
+    ({ field }) =>
+      !value.parameters.some(
+        (parameter) =>
+          parameter.pointer.asset_id === chosenAsset &&
+          parameter.pointer.field === field,
+      ),
+  );
+
+  function readExpert(): OperatorConsoleDocument | null {
+    try {
+      const parsed = JSON.parse(expertText || "");
+      if (!editableConsoleDocument(parsed)) {
+        setFormError(
+          "Revisa la estructura de la configuración completa. Conservamos el texto para corregirlo.",
+        );
+        return null;
+      }
+      return parsed;
+    } catch {
+      setFormError(
+        "El documento no es JSON válido. Corrígelo antes de guardar o volver al formulario.",
+      );
+      return null;
+    }
+  }
 
   function patchColumn(
     groupId: string,
     columnId: string,
     patch: (column: OperatorConsoleColumn) => OperatorConsoleColumn,
   ) {
-    setGroups((current) =>
-      current.map((group) =>
+    setValue((current) => ({
+      ...current,
+      groups: current.groups.map((group) =>
         group.id !== groupId
           ? group
           : {
@@ -657,116 +841,421 @@ function ConsoleDocumentForm({
               ),
             },
       ),
-    );
-  }
-
-  function chooseSignal(groupId: string, columnId: string, signalKey: string) {
-    const entry = signalCatalogEntry(catalog, signalKey);
-    patchColumn(groupId, columnId, (column) => ({
-      ...column,
-      signal: {
-        ...column.signal,
-        signal_key: signalKey,
-        // The registry owns the entity type; a signal declared without one
-        // keeps the entity the analyst already chose for the column.
-        entity_type: entry?.entity_type || column.signal.entity_type,
-      },
     }));
-  }
-
-  function undeclaredSignalKey(): string {
-    for (const group of groups) {
-      for (const column of group.columns) {
-        if (!signalCatalogEntry(catalog, column.signal.signal_key)) {
-          return column.signal.signal_key;
-        }
-      }
-    }
-    return "";
   }
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    let parsed: Pick<OperatorConsoleDocument, "parameters" | "results">;
-    try {
-      parsed = JSON.parse(documentText);
-    } catch {
-      setFormError("El documento no es JSON valido.");
-      return;
-    }
-    const undeclared = undeclaredSignalKey();
-    if (undeclared) {
-      setFormError(
-        `La senal ${undeclared} no esta en el catalogo canonico de senales.`,
-      );
-      return;
+    const next = expertText === null ? value : readExpert();
+    if (!next) return;
+    for (const group of next.groups) {
+      for (const column of group.columns) {
+        if (!signalCatalogEntry(catalog, column.signal.signal_key)) {
+          setFormError(
+            `La senal ${column.signal.signal_key} no esta en el catalogo canonico de senales.`,
+          );
+          return;
+        }
+      }
     }
     setFormError("");
-    onSave({
-      schema_version: "operator_console_config.v1",
-      public_identity: { name: name.trim(), description: description.trim() },
-      parameters: parsed.parameters,
-      groups,
-      results: parsed.results,
-    });
+    onSave(
+      {
+        ...next,
+        public_identity: {
+          ...next.public_identity,
+          name: next.public_identity.name.trim(),
+          description: next.public_identity.description.trim(),
+        },
+      },
+      baseRevision,
+    );
   }
 
   return (
-    <form className="workspace-form console-document-form" onSubmit={submit}>
+    <form
+      className="workspace-form console-document-form"
+      onSubmit={submit}
+      onInvalidCapture={(event) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        setShowResults(true);
+        setFormError(
+          "Completa los campos obligatorios y revisa sus límites antes de guardar.",
+        );
+        requestAnimationFrame(() =>
+          form
+            .querySelector<HTMLElement>(
+              "input:invalid, select:invalid, textarea:invalid",
+            )
+            ?.focus(),
+        );
+      }}
+    >
+      <p role="status">
+        {disabled
+          ? "Guardando configuración"
+          : dirty
+            ? "Cambios sin guardar. Guarda antes de activar o probar."
+            : "Configuración guardada"}
+      </p>
       {formError ? <p role="alert">{formError}</p> : null}
       {catalogError ? <p role="alert">{catalogError}</p> : null}
-      <label htmlFor="console-identity-name">Nombre publico</label>
-      <input
-        id="console-identity-name"
-        type="text"
-        value={name}
-        onChange={(event) => setName(event.target.value)}
-      />
-      <label htmlFor="console-identity-description">Descripcion publica</label>
-      <input
-        id="console-identity-description"
-        type="text"
-        value={description}
-        onChange={(event) => setDescription(event.target.value)}
-      />
-      {groups.map((group) => (
-        <fieldset key={group.id} className="console-group-fieldset">
-          <legend>Grupo {group.label}</legend>
-          {group.columns.map((column) => (
-            <ConsoleColumnFields
-              key={column.id}
-              group={group}
-              column={column}
-              catalog={catalog}
-              onChooseSignal={(signalKey) =>
-                chooseSignal(group.id, column.id, signalKey)
+      <fieldset disabled={disabled} className="console-config-fields">
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={(event) => {
+            if (expertText === null) {
+              const form = event.currentTarget.form;
+              if (form && !form.checkValidity()) {
+                setShowResults(true);
+                setFormError(
+                  "Completa los campos del formulario antes de abrir el JSON avanzado.",
+                );
+                requestAnimationFrame(() => {
+                  form
+                    .querySelector<HTMLElement>(
+                      "input:invalid, select:invalid, textarea:invalid",
+                    )
+                    ?.focus();
+                  form.reportValidity();
+                });
+                return;
               }
-              onChangeLabel={(label) =>
-                patchColumn(group.id, column.id, (current) => ({
-                  ...current,
-                  label,
-                }))
+              setExpertText(JSON.stringify(value, null, 2));
+              setFormError("");
+            } else {
+              const next = readExpert();
+              if (next) {
+                setValue(next);
+                setExpertText(null);
+                setFormError("");
               }
-              onChangeEntityId={(entityId) =>
-                patchColumn(group.id, column.id, (current) => ({
-                  ...current,
-                  signal: { ...current.signal, entity_id: entityId },
-                }))
+            }
+          }}
+        >
+          {expertText === null
+            ? "Editar JSON avanzado"
+            : "Volver al formulario"}
+        </button>
+        {expertText !== null ? (
+          <label>
+            Configuración completa (JSON)
+            <textarea
+              rows={16}
+              value={expertText}
+              onChange={(event) => setExpertText(event.target.value)}
+            />
+          </label>
+        ) : (
+          <>
+            <label htmlFor="console-identity-name">Nombre publico</label>
+            <input
+              id="console-identity-name"
+              type="text"
+              required
+              value={value.public_identity.name}
+              onChange={(event) =>
+                setValue({
+                  ...value,
+                  public_identity: {
+                    ...value.public_identity,
+                    name: event.target.value,
+                  },
+                })
               }
             />
-          ))}
-        </fieldset>
-      ))}
-      <label htmlFor="console-document">Parametros y resultados (JSON)</label>
-      <textarea
-        id="console-document"
-        rows={12}
-        value={documentText}
-        onChange={(event) => setDocumentText(event.target.value)}
-      />
-      <button type="submit" disabled={disabled}>
-        Guardar configuracion
-      </button>
+            <label htmlFor="console-identity-description">
+              Descripcion publica
+            </label>
+            <input
+              id="console-identity-description"
+              type="text"
+              value={value.public_identity.description}
+              onChange={(event) =>
+                setValue({
+                  ...value,
+                  public_identity: {
+                    ...value.public_identity,
+                    description: event.target.value,
+                  },
+                })
+              }
+            />
+            <section aria-label="Parámetros expuestos">
+              <h2>Parámetros</h2>
+              <p>
+                Expón campos numéricos del modelo. Los límites y el valor
+                inicial configuran el control; no modifican el modelo guardado.
+              </p>
+              {model.isError ? (
+                <p className="source-note">
+                  No se pudieron consultar los campos del modelo.{" "}
+                  <button type="button" onClick={() => void model.refetch()}>
+                    Reintentar campos
+                  </button>
+                </p>
+              ) : null}
+              <label>
+                Componente del parámetro
+                <select
+                  value={chosenAsset}
+                  onChange={(event) => {
+                    setChosenAsset(event.target.value);
+                    setChosenField("");
+                  }}
+                >
+                  <option value="">Elegir componente</option>
+                  {assets.map((asset) => (
+                    <option key={asset.id} value={asset.id}>
+                      {String(asset.name || asset.id)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Campo del modelo
+                <select
+                  value={chosenField}
+                  onChange={(event) => setChosenField(event.target.value)}
+                >
+                  <option value="">Elegir campo numérico</option>
+                  {availableFields.map(({ field }) => (
+                    <option key={field} value={field}>
+                      {field}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                disabled={
+                  !availableFields.some((item) => item.field === chosenField)
+                }
+                onClick={() => {
+                  const field = availableFields.find(
+                    (item) => item.field === chosenField,
+                  );
+                  if (!field) return;
+                  let number = value.parameters.length + 1;
+                  while (
+                    value.parameters.some(
+                      (item) => item.id === `parametro_${number}`,
+                    )
+                  )
+                    number++;
+                  setValue({
+                    ...value,
+                    parameters: [
+                      ...value.parameters,
+                      {
+                        id: `parametro_${number}`,
+                        pointer: { asset_id: chosenAsset, field: chosenField },
+                        label: chosenField,
+                        unit: null,
+                        min: Math.min(0, field.value),
+                        max: Math.max(0, field.value),
+                        default: field.value,
+                      },
+                    ],
+                  });
+                  setChosenField("");
+                }}
+              >
+                Agregar parámetro
+              </button>
+              {value.parameters.map((parameter, index) => {
+                const patch = (changes: Partial<typeof parameter>) =>
+                  setValue({
+                    ...value,
+                    parameters: value.parameters.map((item, position) =>
+                      position !== index ? item : { ...item, ...changes },
+                    ),
+                  });
+                return (
+                  <fieldset
+                    key={parameter.id}
+                    className="console-group-fieldset"
+                  >
+                    <legend>Parámetro {index + 1}</legend>
+                    <label>
+                      Etiqueta
+                      <input
+                        required
+                        value={parameter.label}
+                        onChange={(event) =>
+                          patch({ label: event.target.value })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Unidad
+                      <input
+                        value={parameter.unit ?? ""}
+                        onChange={(event) =>
+                          patch({ unit: event.target.value || null })
+                        }
+                      />
+                    </label>
+                    {(
+                      [
+                        ["min", "Mínimo"],
+                        ["max", "Máximo"],
+                        ["default", "Valor inicial"],
+                      ] as const
+                    ).map(([field, label]) => (
+                      <label key={field}>
+                        {label} de {parameter.label}
+                        <input
+                          type="number"
+                          step="any"
+                          required
+                          value={
+                            Number.isFinite(parameter[field])
+                              ? parameter[field]
+                              : ""
+                          }
+                          min={field === "default" ? parameter.min : undefined}
+                          max={field === "default" ? parameter.max : undefined}
+                          onChange={(event) =>
+                            patch({ [field]: event.target.valueAsNumber })
+                          }
+                        />
+                      </label>
+                    ))}
+                    <label>
+                      Componente de {parameter.label}
+                      <select
+                        value={parameter.pointer.asset_id}
+                        onChange={(event) =>
+                          patch({
+                            pointer: {
+                              ...parameter.pointer,
+                              asset_id: event.target.value,
+                            },
+                          })
+                        }
+                      >
+                        {!assets.some(
+                          (asset) => asset.id === parameter.pointer.asset_id,
+                        ) ? (
+                          <option value={parameter.pointer.asset_id}>
+                            {parameter.pointer.asset_id} (no disponible)
+                          </option>
+                        ) : null}
+                        {assets.map((asset) => (
+                          <option key={asset.id} value={asset.id}>
+                            {String(asset.name || asset.id)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Campo de {parameter.label}
+                      <select
+                        value={parameter.pointer.field}
+                        onChange={(event) =>
+                          patch({
+                            pointer: {
+                              ...parameter.pointer,
+                              field: event.target.value,
+                            },
+                          })
+                        }
+                      >
+                        {!fieldsFor(parameter.pointer.asset_id).some(
+                          (item) => item.field === parameter.pointer.field,
+                        ) ? (
+                          <option value={parameter.pointer.field}>
+                            {parameter.pointer.field} (no disponible)
+                          </option>
+                        ) : null}
+                        {fieldsFor(parameter.pointer.asset_id).map(
+                          ({ field }) => (
+                            <option key={field} value={field}>
+                              {field}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() =>
+                        setValue({
+                          ...value,
+                          parameters: value.parameters.filter(
+                            (_, position) => position !== index,
+                          ),
+                        })
+                      }
+                    >
+                      Quitar parámetro {index + 1}
+                    </button>
+                  </fieldset>
+                );
+              })}
+            </section>
+            <button
+              type="button"
+              className="secondary-button"
+              aria-expanded={showResults}
+              aria-controls="console-results-configuration"
+              onClick={() => setShowResults(!showResults)}
+            >
+              Resultados
+            </button>
+            <div id="console-results-configuration" hidden={!showResults}>
+              <ConsoleResultsConfiguration
+                value={value.results}
+                onChange={(results) => setValue({ ...value, results })}
+              />
+            </div>
+            {value.groups.map((group) => (
+              <fieldset key={group.id} className="console-group-fieldset">
+                <legend>Grupo {group.label}</legend>
+                {group.columns.map((column) => (
+                  <ConsoleColumnFields
+                    key={column.id}
+                    group={group}
+                    column={column}
+                    catalog={catalog}
+                    onChooseSignal={(signalKey) => {
+                      const entry = signalCatalogEntry(catalog, signalKey);
+                      patchColumn(group.id, column.id, (current) => ({
+                        ...current,
+                        signal: {
+                          ...current.signal,
+                          signal_key: signalKey,
+                          entity_type:
+                            entry?.entity_type || current.signal.entity_type,
+                        },
+                      }));
+                    }}
+                    onChangeLabel={(label) =>
+                      patchColumn(group.id, column.id, (current) => ({
+                        ...current,
+                        label,
+                      }))
+                    }
+                    onChangeEntityId={(entityId) =>
+                      patchColumn(group.id, column.id, (current) => ({
+                        ...current,
+                        signal: { ...current.signal, entity_id: entityId },
+                      }))
+                    }
+                  />
+                ))}
+              </fieldset>
+            ))}
+          </>
+        )}
+        <button type="submit" disabled={disabled}>
+          Guardar configuracion
+        </button>
+      </fieldset>
     </form>
   );
 }
@@ -1296,7 +1785,15 @@ export function ConsoleGroupEditor({
       className="content-panel console-group"
       aria-labelledby={`console-group-${group.id}`}
     >
-      <h2 id={`console-group-${group.id}`}>{group.label}</h2>
+      <h2 id={`console-group-${group.id}`} tabIndex={-1}>
+        {group.label}
+      </h2>
+      {dirty && !lease && saveError ? (
+        <p role="status">
+          Se perdió la sesión de edición. Tus cambios siguen aquí; vuelve a
+          obtener la edición antes de guardar.
+        </p>
+      ) : null}
       {lockedBy ? (
         <p className="source-note">
           Solo lectura: {lockedBy} tiene la edicion de este grupo.
@@ -1827,11 +2324,19 @@ export function ConsoleShellView() {
     );
   }
   if (shell.isPending) return <p role="status">Cargando consola</p>;
-  if (shell.isError) {
+  if (
+    shell.isError &&
+    (!shell.data ||
+      (shell.error instanceof ApiError &&
+        [401, 403, 404].includes(shell.error.status)))
+  ) {
     return (
       <section className="content-panel">
         <h1>No encontrado</h1>
         <p role="alert">{errorMessage(shell.error)}</p>
+        <button type="button" onClick={() => void shell.refetch()}>
+          Actualizar preparación
+        </button>
       </section>
     );
   }
@@ -1843,7 +2348,7 @@ export function ConsoleShellView() {
     parameters = [],
     groups = [],
     run_gate: runGate,
-  } = shell.data;
+  } = shell.data!;
   const effectiveSelectedStart = selectedStart ?? period?.selected_start ?? "";
   const effectiveSelectedEnd = selectedEnd ?? period?.selected_end ?? "";
   const displayedSelectedStart = datetimeLocalInputValue(
@@ -1873,6 +2378,8 @@ export function ConsoleShellView() {
   const seriesDirty = Object.values(dirtyGroups).some(Boolean);
   const canRun = Boolean(
     runGate?.can_run &&
+    !shell.isError &&
+    !shell.isFetching &&
     !parametersDirty &&
     !seriesDirty &&
     parameterValuesValid &&
@@ -1891,7 +2398,7 @@ export function ConsoleShellView() {
   };
 
   return (
-    <>
+    <div className="console-experience">
       {internalTest ? (
         <p
           className="internal-test-strip"
@@ -1912,9 +2419,142 @@ export function ConsoleShellView() {
       </section>
       <section
         className="content-panel"
+        aria-labelledby="console-preparation-title"
+      >
+        <h2 id="console-preparation-title">Preparación de la ejecución</h2>
+        {shell.isError ? (
+          <p role="alert">
+            No se pudo actualizar la preparación. Tus cambios siguen aquí.
+            Actualiza antes de ejecutar.
+          </p>
+        ) : null}
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={
+            shell.isFetching ||
+            saveParameters.isPending ||
+            selectSeriesSource.isPending ||
+            enqueueRun.isPending
+          }
+          onClick={() => void shell.refetch()}
+        >
+          Actualizar preparación
+        </button>
+        <p>
+          Período:{" "}
+          {rangeRequestValue(selectedStart, period?.selected_start) ||
+            "Inicio pendiente"}{" "}
+          →{" "}
+          {rangeRequestValue(selectedEnd, period?.selected_end) ||
+            "Fin pendiente"}
+          . Inicio incluido; fin excluido.
+        </p>
+        <p role="status">
+          {enqueueRun.isPending
+            ? "Enviando ejecución"
+            : saveParameters.isPending
+              ? "Guardando parámetros"
+              : canRun
+                ? "Preparado para ejecutar"
+                : parametersDirty || seriesDirty
+                  ? "Hay cambios sin guardar"
+                  : runGate?.can_run === false
+                    ? "La ejecución está bloqueada"
+                    : "Revisa la preparación antes de ejecutar"}
+        </p>
+        <ul className="console-preparation-links">
+          {parameters
+            .filter((parameter) => {
+              const raw =
+                parameterValues[parameter.id] ?? parameter.value ?? "";
+              const value = Number(raw);
+              return (
+                raw === "" ||
+                !Number.isFinite(value) ||
+                value < parameter.min ||
+                value > parameter.max ||
+                value !== parameter.value
+              );
+            })
+            .map((parameter) => (
+              <li key={parameter.id}>
+                <a
+                  href={`#console-parameter-${parameter.id}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    window.document
+                      .getElementById(`console-parameter-${parameter.id}`)
+                      ?.focus();
+                  }}
+                >
+                  Guardar cambios de {parameter.label}
+                </a>
+                {parameter.unit ? ` (${parameter.unit})` : ""}
+              </li>
+            ))}
+          {groups
+            .filter((group) => dirtyGroups[group.id])
+            .map((group) => (
+              <li key={group.id}>
+                <a
+                  href={`#console-group-${group.id}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    window.document
+                      .getElementById(`console-group-${group.id}`)
+                      ?.focus();
+                  }}
+                >
+                  Guardar cambios de {group.label}
+                </a>
+              </li>
+            ))}
+          {!effectiveSelectedStart || !effectiveSelectedEnd ? (
+            <li>
+              <a
+                href="#console-period-start"
+                onClick={(event) => {
+                  event.preventDefault();
+                  window.document
+                    .getElementById("console-period-start")
+                    ?.focus();
+                }}
+              >
+                Completar período
+              </a>
+            </li>
+          ) : null}
+          {!runGate || !runGate.can_run ? (
+            <li>
+              <a
+                href="#console-parameters-title"
+                onClick={(event) => {
+                  event.preventDefault();
+                  window.document
+                    .getElementById("console-parameters-title")
+                    ?.focus();
+                }}
+              >
+                Consultar bloqueo y acciones disponibles
+              </a>
+            </li>
+          ) : null}
+        </ul>
+        {parametersDirty && seriesDirty ? (
+          <p>
+            Los parámetros y cada grupo se guardan por separado. Completa los
+            guardados pendientes antes de ejecutar.
+          </p>
+        ) : null}
+      </section>
+      <section
+        className="content-panel"
         aria-labelledby="console-parameters-title"
       >
-        <h2 id="console-parameters-title">Periodo y parametros</h2>
+        <h2 id="console-parameters-title" tabIndex={-1}>
+          Periodo y parametros
+        </h2>
         {actionError ? <p role="alert">{actionError}</p> : null}
         {runGate && !runGate.can_run ? (
           <p role="alert">
@@ -2104,7 +2744,15 @@ export function ConsoleShellView() {
                       }
                     />
                   </label>
-                  <strong>{runLabels[run.state]}</strong>{" "}
+                  <strong>
+                    {
+                      runLabels[
+                        runDetail.data?.run.id === run.id
+                          ? runDetail.data.run.state
+                          : run.state
+                      ]
+                    }
+                  </strong>{" "}
                   <span>{run.started_at}</span> <span>{run.triggered_by}</span>
                   <button
                     type="button"
@@ -2154,7 +2802,7 @@ export function ConsoleShellView() {
         />
       ) : null}
       <PortalResultsBlock block={runDetail.data?.results_block} />
-    </>
+    </div>
   );
 }
 

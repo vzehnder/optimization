@@ -1,0 +1,52 @@
+
+Running 1 test using 1 worker
+
+
+npx.cmd : (node:15916) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+En línea: 2 Carácter: 41
++ ... /:memory:'; npx.cmd playwright test --grep 'UX-008' *> ..\.tmp\ux008- ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ((node:15916) Wa... env being set.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1/1] e2e\react-foundation.spec.ts:3113:1 › UX-008 configures a console and prepares an authorized external execution
+  1) e2e\react-foundation.spec.ts:3113:1 › UX-008 configures a console and prepares an authorized external execution
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByRole('region', { name: 'Historial reciente' })
+    Expected substring: "Lista"
+    Received string:    "Historial recienteEn espera 2026-09-14T22:19:07+00:00 Operadora NorteAbrirComparar corridas"
+    Timeout: 5000ms
+
+    Call log:
+      - Expect "toContainText" with timeout 5000ms
+      - waiting for getByRole('region', { name: 'Historial reciente' })
+        10 × locator resolved to <section class="content-panel" aria-labelledby="console-history-title">…</section>
+           - unexpected value "Historial recienteEn espera 2026-09-14T22:19:07+00:00 Operadora NorteAbrirComparar corridas"
+
+
+      3256 |       operatorPage.getByText("1250.50", { exact: true }),
+      3257 |     ).toBeVisible();
+    > 3258 |     await expect(operatorPage.getByRole("region", { name: "Historial reciente" })).toContainText("Lista");
+           |                                                                                    ^
+      3259 |     await expect(operatorPage.locator(".js-plotly-plot").first()).toBeVisible();
+      3260 |     await operatorPage.screenshot({
+      3261 |       path: testInfo.outputPath("ux008-resultado-1440.png"),
+        at C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\frontend\e2e\react-foundation.spec.ts:3258:84
+
+    Error Context: test-results\react-foundation-UX-008-co-362cc-thorized-external-execution\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\react-foundation-UX-008-co-362cc-thorized-external-execution\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\react-foundation-UX-008-co-362cc-thorized-external-execution\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+  1 failed
+    e2e\react-foundation.spec.ts:3113:1 › UX-008 configures a console and prepares an authorized external execution

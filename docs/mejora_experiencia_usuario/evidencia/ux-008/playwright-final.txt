@@ -1,0 +1,66 @@
+
+> bess-react-ui@0.1.0 test:browser
+> npm run build && playwright test
+
+
+> bess-react-ui@0.1.0 build
+> tsc -b && vite build
+
+vite v8.0.16 building client environment for production...
+
+transforming...✓ 96 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                     0.47 kB │ gzip:   0.30 kB
+dist/assets/index-Ccy05_e5.css     30.93 kB │ gzip:   6.85 kB
+dist/assets/index-DhkO3Wn_.js   1,112.53 kB │ gzip: 319.00 kB
+
+✓ built in 849ms
+npm.cmd : [plugin builtin:vite-reporter]
+En línea: 2 Carácter: 96
++ ... /:memory:'; npm.cmd run test:browser *> ..\.tmp\ux008-browser-final.t ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([plugin builtin:vite-reporter] :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking:
+https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+
+Running 22 tests using 1 worker
+
+
+(node:5276) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1/22] e2e\react-foundation.spec.ts:200:1 › React auth handles bootstrap, login, refresh, roles, logout, and deactivation
+[2/22] e2e\react-foundation.spec.ts:297:1 › React hydraulic diagram persists reservoir parameters curves junction and plant nodes across reload
+[3/22] e2e\react-foundation.spec.ts:472:1 › React admin users and project access cover assignment, removal, deactivation, and denials
+[4/22] e2e\react-foundation.spec.ts:594:1 › React client portal reviews published results, downloads allowlisted artifacts, and honors revocation
+[5/22] e2e\react-foundation.spec.ts:825:1 › UX-005 confirms sources, reloads, reviews an explicit period and submits one variant run
+[6/22] e2e\react-foundation.spec.ts:981:1 › UX-001 keeps task context and pending model edits through navigation and reload
+[7/22] e2e\react-foundation.spec.ts:1128:1 › React analyst workspace creates a project and scenario, then preserves direct scenario refresh
+[8/22] e2e\react-foundation.spec.ts:1179:1 › UX-002 preserves omitted fields null curves zero limits and false flags after saving a basic edit
+[9/22] e2e\react-foundation.spec.ts:1258:1 › UX-002 protects pending model edits through browser back and forward
+[10/22] e2e\react-foundation.spec.ts:1421:1 › React structured draft editor saves multi-asset edits, recovers from one failed save, and reopens persisted state
+[11/22] e2e\react-foundation.spec.ts:1518:1 › React draft editor uploads, maps, edits, and validates time-series sources
+
+e2e\react-foundation.spec.ts:1518:1 › React draft editor uploads, maps, edits, and validates time-series sources
+
+[12/22] e2e\react-foundation.spec.ts:1602:1 › React case validation and versioning covers generated and expert paths
+[13/22] e2e\react-foundation.spec.ts:1742:1 › React manual run lifecycle launches, polls success, and exposes failure logs
+[14/22] e2e\react-foundation.spec.ts:1930:1 › React run results renders Plotly charts, tables, missing legacy columns, and artifact downloads
+[15/22] e2e\react-foundation.spec.ts:2266:1 › UX-007 preserves report configuration and explicitly publishes the chosen result to an authorized client
+[16/22] e2e\react-foundation.spec.ts:2571:1 › React dashboard templates and publications cover draft preview publish and unpublish
+[17/22] e2e\react-foundation.spec.ts:2781:1 › UX-006 reads results, audits the snapshot and compares the chosen execution through the real API
+[18/22] e2e\react-foundation.spec.ts:2938:1 › UX-004 follows a model source through association, exact variant use and execution
+[19/22] e2e\react-foundation.spec.ts:3113:1 › UX-008 configures a console and prepares an authorized external execution
+[20/22] e2e\smoke-accessibility.spec.ts:103:1 › representative React pages pass automated accessibility and keyboard smoke checks
+[21/22] e2e\ux003-import.spec.ts:53:1 › UX-003 imports a CSV with two signals, opens its values and prepares one execution
+[22/22] e2e\ux003-import.spec.ts:187:1 › UX-003 corrects an XLSX cell and keeps the selected sheet and edits when returning
+
+e2e\ux003-import.spec.ts:187:1 › UX-003 corrects an XLSX cell and keeps the selected sheet and edits when returning
+
+  22 passed (2.4m)

@@ -1,0 +1,654 @@
+UX-008: excerpts from actual sequential RED/GREEN command output.
+Full temporary logs remain in .tmp/ux008-NN-{red,green}.txt.
+
+
+=== ux008-01-red.txt ===
+ FAIL  src/ConsoleExperience.test.tsx > console configuration experience > persists a battery limit edited without
+TestingLibraryElementError: Unable to find role="spinbutton" and name "Máximo de Carga máxima"
+              data-discover="true"
+              href="/react/console/4"
+            >
+              Probar consola
+            </a>
+            <a
+              class="button-link"
+              data-discover="true"
+              href="/react/scenarios/10"
+            >
+              Volver al escenario
+            </a>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/ConsoleExperience.test.tsx:58:34
+     56|     const user = userEvent.setup();
+     57|     const view = render(<App />);
+     58|     const maximum = await screen.findByRole("spinbutton", { name: "Máx…
+       |                                  ^
+     59|     await user.clear(maximum);
+     60|     await user.type(maximum, "6");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+=== ux008-01-green.txt ===
+
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ConsoleExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  18:32:47
+   Duration  4.13s (transform 1.13s, setup 282ms, import 1.59s, tests 665ms, environment 1.31s)
+
+
+=== ux008-02-red.txt ===
+ FAIL  src/ConsoleExperience.test.tsx > console configuration experience > round trips expert settings while changing
+TestingLibraryElementError: Unable to find role="button" and name "Editar JSON avanzado"
+              data-discover="true"
+              href="/react/console/4"
+            >
+              Probar consola
+            </a>
+            <a
+              class="button-link"
+              data-discover="true"
+              href="/react/scenarios/10"
+            >
+              Volver al escenario
+            </a>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/ConsoleExperience.test.tsx:58:35
+     56|     const user = userEvent.setup();
+     57|     const view = render(<App />);
+     58|     await user.click(await screen.findByRole("button", { name: "Editar…
+       |                                   ^
+     59|     const expert = { ...structuredClone(document), results: { ...docum…
+     60|       charts: [{ id: "red", chart_key: "grid_import_export", label: "I…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+=== ux008-02-green.txt ===
+
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ConsoleExperience.test.tsx src/OperatorConsole.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  2 passed (2)
+      Tests  36 passed (36)
+   Start at  18:35:31
+   Duration  11.59s (transform 2.35s, setup 574ms, import 3.41s, tests 9.37s, environment 2.63s)
+
+
+=== ux008-03-red.txt ===
+ FAIL  src/ConsoleExperience.test.tsx > console configuration experience > adds a direct numeric model field and
+TestingLibraryElementError: Unable to find role="combobox" and name "Componente del parámetro"
+            >
+              Activar
+            </button>
+            <a
+              class="button-link"
+              data-discover="true"
+              href="/react/console/4"
+            >
+              Probar consola
+            </a>
+            <a
+              class="button-link"
+              data-discover="true"
+              href="/react/scenarios/10"
+            >
+              Volver al escenario
+            </a>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/ConsoleExperience.test.tsx:58:43
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+=== ux008-03-green.txt ===
+
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ConsoleExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  18:38:50
+   Duration  7.01s (transform 1.40s, setup 305ms, import 1.96s, tests 2.92s, environment 1.45s)
+
+
+=== ux008-04-red.txt ===
+ FAIL  src/ConsoleExperience.test.tsx > console configuration experience > configures KPI chart and table content from
+TestingLibraryElementError: Unable to find role="button" and name "Resultados"
+              data-discover="true"
+              href="/react/console/4"
+            >
+              Probar consola
+            </a>
+            <a
+              class="button-link"
+              data-discover="true"
+              href="/react/scenarios/10"
+            >
+              Volver al escenario
+            </a>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/ConsoleExperience.test.tsx:60:35
+     58|   it("configures KPI chart and table content from forms and the server…
+     59|     setupConsole(); const user = userEvent.setup(); const view = rende…
+     60|     await user.click(await screen.findByRole("button", { name: "Result…
+       |                                   ^
+     61|     const kpi = screen.getByRole("group", { name: "Indicador 1" });
+     62|     await user.clear(within(kpi).getByLabelText("Etiqueta")); await us…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+=== ux008-04-green.txt ===
+
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ConsoleExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  18:41:38
+   Duration  8.54s (transform 1.34s, setup 308ms, import 1.86s, tests 4.60s, environment 1.46s)
+
+
+=== ux008-05-red.txt ===
+ FAIL  src/ConsoleExperience.test.tsx > console configuration experience > preserves local work and its starting
+TestingLibraryElementError: Unable to find role="alert"
+              class="button-link"
+              data-discover="true"
+              href="/react/scenarios/10"
+            >
+              Volver al escenario
+            </a>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/ConsoleExperience.test.tsx:66:25
+
+     64|     await act(async () => { window.dispatchEvent(new Event("visibility…
+     65|     await user.click(screen.getByRole("button", { name: "Guardar confi…
+     66|     expect(await screen.findByRole("alert")).toHaveTextContent("La con…
+       |                         ^
+     67|     expect(screen.getByLabelText("Nombre publico")).toHaveValue("Mi pl…
+     68|     await user.click(screen.getByRole("button", { name: "Descartar mis…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 4 skipped (5)
+   Start at  18:42:54
+   Duration  5.71s (transform 1.15s, setup 329ms, import 1.67s, tests 1.94s, environment 1.43s)
+
+
+=== ux008-05-green.txt ===
+
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ConsoleExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  5 passed (5)
+   Start at  18:43:39
+   Duration  8.20s (transform 1.14s, setup 296ms, import 1.62s, tests 4.57s, environment 1.40s)
+
+
+=== ux008-06-red.txt ===
+Error handled by React Router default ErrorBoundary: TypeError: Cannot read properties of null (reading 'label')
+Error handled by React Router default ErrorBoundary: TypeError: Cannot read properties of null (reading 'label')
+TypeError: Cannot read properties of null (reading 'label')
+React Router caught the following error during render TypeError: Cannot read properties of null (reading 'label')
+
+      <code
+        style="padding: 2px 4px; background-color: rgba(200, 200, 200, 0.5);"
+      >
+        errorElement
+      </code>
+       prop on your route.
+    </p>
+  </div>
+</body>
+ ❯ src/OperatorConsole.tsx:763:63
+    761|             return <fieldset key={parameter.id} className="console-gro…
+    762|               <legend>Parámetro {index + 1}</legend>
+    763|               <label>Etiqueta<input required value={parameter.label} o…
+       |                                                               ^
+    764|               <label>Unidad<input value={parameter.unit ?? ""} onChang…
+    765|               {([['min', 'Mínimo'], ['max', 'Máximo'], ['default', 'Va…
+ ❯ ConsoleDocumentForm src/OperatorConsole.tsx:759:29
+ ❯ Object.react_stack_bottom_frame node_modules/react-dom/cjs/react-dom-client.development.js:25904:20
+ ❯ renderWithHooks node_modules/react-dom/cjs/react-dom-client.development.js:7662:22
+ ❯ updateFunctionComponent node_modules/react-dom/cjs/react-dom-client.development.js:10166:19
+ ❯ beginWork node_modules/react-dom/cjs/react-dom-client.development.js:11778:18
+ ❯ runWithFiberInDEV node_modules/react-dom/cjs/react-dom-client.development.js:874:13
+ ❯ performUnitOfWork node_modules/react-dom/cjs/react-dom-client.development.js:17641:22
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/ConsoleExperience.test.tsx:65:25
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+=== ux008-06-green.txt ===
+
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ConsoleExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  18:45:21
+   Duration  8.49s (transform 1.15s, setup 309ms, import 1.63s, tests 4.84s, environment 1.41s)
+
+
+=== ux008-07-red.txt ===
+ FAIL  src/ConsoleExperience.test.tsx > console configuration experience > requires an accepted save before activation
+Error: expect(element).toBeDisabled()
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ConsoleExperience.test.tsx > console configuration experience > requires an accepted save before activation
+and protects edits during that save
+Error: expect(element).toBeDisabled()
+
+Received element is not disabled:
+  <button
+  type="button"
+/>
+ ❯ src/ConsoleExperience.test.tsx:70:61
+     68|     const name = await screen.findByLabelText("Nombre publico");
+     69|     await user.clear(name); await user.type(name, "Pendiente");
+     70|     expect(screen.getByRole("button", { name: "Activar" })).toBeDisabl…
+       |                                                             ^
+     71|     await user.click(screen.getByRole("button", { name: "Guardar confi…
+     72|     expect(screen.getByLabelText("Nombre publico")).toBeDisabled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 skipped (7)
+   Start at  18:46:05
+   Duration  4.34s (transform 1.11s, setup 316ms, import 1.59s, tests 719ms, environment 1.40s)
+
+
+=== ux008-07-green.txt ===
+
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ConsoleExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  7 passed (7)
+   Start at  18:46:41
+   Duration  9.26s (transform 1.17s, setup 318ms, import 1.64s, tests 5.58s, environment 1.41s)
+
+
+=== ux008-08-red.txt ===
+ FAIL  src/ConsoleExperience.test.tsx > console configuration experience > retains the configuration through a failed
+TestingLibraryElementError: Unable to find role="button" and name "Reintentar configuración"
+        <section
+          class="content-panel"
+        >
+          <h1
+            tabindex="-1"
+          >
+            No se pudo cargar
+          </h1>
+          <p
+            role="alert"
+          >
+            Temporalmente no disponible
+          </p>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/ConsoleExperience.test.tsx:65:18
+     63|     vi.spyOn(Date, "now").mockReturnValue(Date.now() + 31_000);
+     64|     await act(async () => { window.dispatchEvent(new Event("visibility…
+     65|     await screen.findByRole("button", { name: "Reintentar configuració…
+       |                  ^
+     66|     expect(screen.getByLabelText("Nombre publico")).toHaveValue("Traba…
+     67|     api.override = () => undefined;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+=== ux008-08-green.txt ===
+
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ConsoleExperience.test.tsx -t failed background read
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 7 skipped (8)
+   Start at  18:48:06
+   Duration  4.65s (transform 1.14s, setup 308ms, import 1.63s, tests 1.03s, environment 1.39s)
+
+
+=== ux008-09-red.txt ===
+ FAIL  src/OperatorConsole.test.tsx > the operator console shell > saves a scalar override before enabling and
+TestingLibraryElementError: Unable to find an accessible element with the role "region" and name "Preparación de la
+          <p
+            class="empty-state"
+          >
+            Todavia no hay corridas.
+          </p>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ Object.getElementError node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/OperatorConsole.test.tsx:1171:32
+    1169|     await user.type(parameter, "6.5");
+    1170|     expect(runButton).toBeDisabled();
+    1171|     const preparation = screen.getByRole("region", { name: "Preparació…
+       |                                ^
+    1172|     expect(preparation).toHaveTextContent("2026-01-01T00:00:00+00:00");
+    1173|     const pending = within(preparation).getByRole("link", { name: "Gua…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 33 skipped (34)
+   Start at  18:48:37
+   Duration  4.51s (transform 1.27s, setup 326ms, import 1.79s, tests 618ms, environment 1.42s)
+
+
+=== ux008-09-green.txt ===
+
+
+> bess-react-ui@0.1.0 test
+> vitest run src/OperatorConsole.test.tsx -t saves a scalar override
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 33 skipped (34)
+   Start at  18:49:36
+   Duration  4.27s (transform 1.14s, setup 303ms, import 1.63s, tests 660ms, environment 1.38s)
+
+
+=== ux008-10-red.txt ===
+ FAIL  src/OperatorConsole.test.tsx > the operator console shell > keeps pending group edits after losing the edit
+TestingLibraryElementError: Unable to find an element with the text: Se perdió la sesión de edición. Tus cambios
+            Historial reciente
+          </h2>
+          <p
+            class="empty-state"
+          >
+            Todavia no hay corridas.
+          </p>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/OperatorConsole.test.tsx:1016:25
+    1014|     await vi.waitFor(() => expect(loseSession).toBeDefined());
+    1015|     await act(async () => { loseSession?.(); });
+    1016|     expect(await screen.findByText("Se perdió la sesión de edición. Tu…
+       |                         ^
+    1017|     const preparation = screen.getByRole("region", { name: "Preparació…
+    1018|     await user.click(within(preparation).getByRole("link", { name: "Gu…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 34 skipped (35)
+   Start at  18:51:10
+   Duration  5.29s (transform 1.14s, setup 315ms, import 1.64s, tests 1.69s, environment 1.36s)
+
+
+=== ux008-10-green.txt ===
+
+
+> bess-react-ui@0.1.0 test
+> vitest run src/OperatorConsole.test.tsx -t losing the edit session
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 34 skipped (35)
+   Start at  18:51:38
+   Duration  4.48s (transform 1.16s, setup 307ms, import 1.66s, tests 835ms, environment 1.38s)
+
+
+=== ux008-11-red.txt ===
+ FAIL  src/ConsoleExperience.test.tsx > console configuration experience > keeps an incomplete numeric field in the
+Error: expect(element).not.toBeInTheDocument()
+        "id": "beneficio",
+        "path": "objective_value_usd",
+        "label": "Beneficio",
+        "unit": "USD",
+        "decimals": 2,
+        "sign": "always",
+        "emphasis": "strong"
+      }
+    ],
+    "charts": [],
+    "tables": []
+  }
+}
+</textarea> instead
+ ❯ src/ConsoleExperience.test.tsx:63:74
+     61|     await user.clear(maximum);
+     62|     await user.click(screen.getByRole("button", { name: "Editar JSON a…
+     63|     expect(screen.queryByLabelText("Configuración completa (JSON)")).n…
+       |                                                                          ^
+     64|     expect(maximum).toHaveFocus();
+     65|     await user.type(maximum, "6");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 skipped (9)
+   Start at  18:56:34
+   Duration  4.24s (transform 1.14s, setup 315ms, import 1.64s, tests 531ms, environment 1.44s)
+
+
+=== ux008-11-green.txt ===
+
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ConsoleExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  18:57:23
+   Duration  11.58s (transform 1.48s, setup 333ms, import 2.06s, tests 7.29s, environment 1.58s)
+
+
+=== ux008-12-red.txt ===
+ FAIL  src/OperatorConsole.test.tsx > the operator console shell > preserves pending parameters while refreshing
+TestingLibraryElementError: Unable to find an accessible element with the role "button" and name "Actualizar
+          <p
+            class="empty-state"
+          >
+            Todavia no hay corridas.
+          </p>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ Object.getElementError node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/OperatorConsole.test.tsx:1008:29
+    1006|     await user.clear(input); await user.type(input, "6");
+    1007|     failed = true;
+    1008|     await user.click(screen.getByRole("button", { name: "Actualizar pr…
+       |                             ^
+    1009|     expect(await screen.findByText(/No se pudo actualizar la preparaci…
+    1010|     expect(screen.getByLabelText("Carga máxima (MW)")).toHaveValue(6);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 35 skipped (36)
+   Start at  18:58:07
+   Duration  4.23s (transform 1.19s, setup 335ms, import 1.69s, tests 511ms, environment 1.39s)
+
+
+=== ux008-12-green.txt ===
+
+
+> bess-react-ui@0.1.0 test
+> vitest run src/OperatorConsole.test.tsx -t refreshing preparation
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 35 skipped (36)
+   Start at  18:58:33
+   Duration  4.44s (transform 1.20s, setup 316ms, import 1.72s, tests 694ms, environment 1.40s)
+
+
+=== ux008-13-red.txt ===
+ FAIL  src/ConsoleExperience.test.tsx > console configuration experience > opens a collapsed results section to
+Error: expect(element).toHaveAttribute("aria-expanded", "true") // element.getAttribute("aria-expanded") === "true"
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ConsoleExperience.test.tsx > console configuration experience > opens a collapsed results section to
+correct an incomplete field before saving
+Error: expect(element).toHaveAttribute("aria-expanded", "true") // element.getAttribute("aria-expanded") === "true"
+
+Expected the element to have attribute:
+  aria-expanded="true"
+Received:
+  aria-expanded="false"
+ ❯ src/ConsoleExperience.test.tsx:155:21
+    153|     await user.click(results);
+    154|     await user.click(screen.getByRole("button", { name: "Guardar confi…
+    155|     expect(results).toHaveAttribute("aria-expanded", "true");
+       |                     ^
+    156|     await waitFor(() => expect(label).toHaveFocus());
+    157|     await user.type(label, "Beneficio corregido");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 9 skipped (10)
+   Start at  19:08:26
+   Duration  4.59s (transform 1.24s, setup 297ms, import 1.73s, tests 875ms, environment 1.38s)
+
+
+=== ux008-13-green.txt ===
+
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ConsoleExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  10 passed (10)
+   Start at  19:08:53
+   Duration  11.91s (transform 1.20s, setup 306ms, import 1.70s, tests 8.32s, environment 1.31s)

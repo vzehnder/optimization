@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -77,7 +77,7 @@ function stubApi(
     method: string,
     body: Record<string, unknown> | undefined,
     init?: RequestInit,
-  ) => Response | undefined,
+  ) => Response | Promise<Response> | undefined,
 ) {
   const fetchMock = vi.fn(
     async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -594,7 +594,7 @@ describe("operator consoles in the scenario workspace", () => {
     await user.click(within(editor).getByRole("button", { name: "Activar" }));
 
     expect(await within(editor).findByRole("alert")).toHaveTextContent(
-      "stale operator console revision",
+      "La configuración cambió en otra sesión. Tus cambios siguen aquí y no se han guardado.",
     );
     expect(within(editor).getByText("Borrador")).toBeVisible();
   });
@@ -993,6 +993,131 @@ const leasePayload = {
 };
 
 describe("the operator console shell", () => {
+  it("preserves pending parameters while refreshing preparation and keeps execution closed after a read failure", async () => {
+    window.history.replaceState({}, "", "/react/console/4");
+    let failed = false;
+    stubApi(operatorIdentity, (path) => {
+      if (path === "/api/console/4")
+        return failed
+          ? Response.json(
+              { detail: "Temporalmente no disponible" },
+              { status: 503 },
+            )
+          : Response.json({
+              ...consoleShellPayload(),
+              groups: [],
+              parameters: [
+                {
+                  id: "carga",
+                  label: "Carga máxima",
+                  unit: "MW",
+                  min: 0,
+                  max: 8,
+                  default: 4,
+                  value: 4,
+                },
+              ],
+            });
+      if (path === "/api/console/4/runs") return Response.json({ history: [] });
+      return undefined;
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    const input = await screen.findByLabelText("Carga máxima (MW)");
+    await user.clear(input);
+    await user.type(input, "6");
+    failed = true;
+    await user.click(
+      screen.getByRole("button", { name: "Actualizar preparación" }),
+    );
+    expect(
+      await screen.findByText(/No se pudo actualizar la preparación/),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Carga máxima (MW)")).toHaveValue(6);
+    await user.clear(input);
+    await user.type(input, "4");
+    expect(screen.getByRole("button", { name: "Ejecutar" })).toBeDisabled();
+    failed = false;
+    await user.click(
+      screen.getByRole("button", { name: "Actualizar preparación" }),
+    );
+    expect(await screen.findByText("Preparado para ejecutar")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Ejecutar" })).toBeEnabled();
+  });
+  it("keeps pending group edits after losing the edit session and guides recovery without engineering review", async () => {
+    window.history.replaceState({}, "", "/react/console/4");
+    let loseSession: (() => void) | undefined;
+    let recovered = false;
+    stubApi(operatorIdentity, (path, method) => {
+      if (path === "/api/console/4")
+        return Response.json(consoleShellPayload());
+      if (path === "/api/console/4/runs") return Response.json({ history: [] });
+      if (path.startsWith("/api/console/4/groups/potencia/values"))
+        return Response.json(
+          groupValuesPayload(
+            method === "PUT" ? [10, 77, 12, 13] : [10, 11, 12, 13],
+          ),
+          { headers: { ETag: '"token-1"' } },
+        );
+      if (path === "/api/console/4/groups/potencia/lease") {
+        if (method === "POST" || recovered) return Response.json(leasePayload);
+        if (method === "PUT")
+          return new Promise<Response>((resolve) => {
+            loseSession = () =>
+              resolve(
+                Response.json(
+                  { detail: "La sesión de edición terminó" },
+                  { status: 409 },
+                ),
+              );
+          });
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(
+      await screen.findByRole("button", { name: "Editar valores" }),
+    );
+    const cell = await screen.findByRole("spinbutton", {
+      name: "Demanda 2026-01-01T01:00:00-03:00",
+    });
+    await user.clear(cell);
+    await user.type(cell, "77");
+    await vi.waitFor(() => expect(loseSession).toBeDefined());
+    await act(async () => {
+      loseSession?.();
+    });
+    expect(
+      await screen.findByText(
+        "Se perdió la sesión de edición. Tus cambios siguen aquí; vuelve a obtener la edición antes de guardar.",
+      ),
+    ).toBeVisible();
+    const preparation = screen.getByRole("region", {
+      name: "Preparación de la ejecución",
+    });
+    await user.click(
+      within(preparation).getByRole("link", {
+        name: "Guardar cambios de Potencia",
+      }),
+    );
+    expect(screen.getByRole("heading", { name: "Potencia" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Ejecutar" })).toBeDisabled();
+    expect(
+      screen.queryByRole("button", { name: "Solicitar revision" }),
+    ).not.toBeInTheDocument();
+    recovered = true;
+    await user.click(screen.getByRole("button", { name: "Editar valores" }));
+    expect(
+      await screen.findByRole("spinbutton", {
+        name: "Demanda 2026-01-01T01:00:00-03:00",
+      }),
+    ).toHaveValue(77);
+    await user.click(screen.getByRole("button", { name: "Guardar valores" }));
+    await vi.waitFor(() =>
+      expect(screen.getByRole("button", { name: "Ejecutar" })).toBeEnabled(),
+    );
+  });
   it("lists the operator's consoles across projects and opens one", async () => {
     window.history.replaceState({}, "", "/react/console");
     stubApi(operatorIdentity, (path) => {
@@ -1168,10 +1293,20 @@ describe("the operator console shell", () => {
     await user.clear(parameter);
     await user.type(parameter, "6.5");
     expect(runButton).toBeDisabled();
+    const preparation = screen.getByRole("region", {
+      name: "Preparación de la ejecución",
+    });
+    expect(preparation).toHaveTextContent("2026-01-01T00:00:00+00:00");
+    const pending = within(preparation).getByRole("link", {
+      name: "Guardar cambios de Potencia maxima BESS",
+    });
+    await user.click(pending);
+    expect(parameter).toHaveFocus();
     await user.click(
       screen.getByRole("button", { name: "Guardar parametros" }),
     );
     await vi.waitFor(() => expect(runButton).toBeEnabled());
+    expect(preparation).toHaveTextContent("Preparado para ejecutar");
     await user.click(runButton);
 
     expect(await screen.findByText("En espera")).toBeVisible();

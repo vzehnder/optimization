@@ -1,0 +1,303 @@
+
+> bess-react-ui@0.1.0 test:browser
+> npm run build && playwright test --grep UX-008
+
+
+> bess-react-ui@0.1.0 build
+> tsc -b && vite build
+
+vite v8.0.16 building client environment for production...
+
+transforming...✓ 96 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                     0.47 kB │ gzip:   0.30 kB
+dist/assets/index-TWpjsARo.css     29.41 kB │ gzip:   6.60 kB
+dist/assets/index-wXzFanqT.js   1,112.22 kB │ gzip: 318.91 kB
+
+✓ built in 995ms
+npm.cmd : [plugin builtin:vite-reporter]
+En línea: 2 Carácter: 41
++ ... /:memory:'; npm.cmd run test:browser -- --grep 'UX-008' *> ..\.tmp\ux ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([plugin builtin:vite-reporter] :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking:
+https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+
+Running 1 test using 1 worker
+
+
+(node:36120) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1/1] e2e\react-foundation.spec.ts:23:1 › UX-008 configures a console and prepares an authorized external execution
+  1) e2e\react-foundation.spec.ts:23:1 › UX-008 configures a console and prepares an authorized external execution
+
+    Error: expect(received).toEqual(expected) // deep equality
+
+    - Expected  -   1
+    + Received  + 233
+
+    - Array []
+    + Array [
+    +   Object {
+    +     "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+    +     "help": "Elements must meet minimum color contrast ratio thresholds",
+    +     "helpUrl": "https://dequeuniversity.com/rules/axe/4.12/color-contrast?application=playwright",
+    +     "id": "color-contrast",
+    +     "impact": "serious",
+    +     "nodes": Array [
+    +       Object {
+    +         "all": Array [],
+    +         "any": Array [
+    +           Object {
+    +             "data": Object {
+    +               "bgColor": "#ffffff",
+    +               "contrastRatio": 1.23,
+    +               "expectedContrastRatio": "4.5:1",
+    +               "fgColor": "#d9eaf5",
+    +               "fontSize": "12.0pt (16px)",
+    +               "fontWeight": "bold",
+    +               "messageKey": null,
+    +             },
+    +             "id": "color-contrast",
+    +             "impact": "serious",
+    +             "message": "Element has insufficient color contrast of 1.23 (foreground color: #d9eaf5, background color: #ffffff, font size: 12.0pt (16px), font weight: bold). Expected contrast ratio of 4.5:1",
+    +             "relatedNodes": Array [
+    +               Object {
+    +                 "html": "<form class=\"workspace-form console-document-form\">",
+    +                 "target": Array [
+    +                   "form",
+    +                 ],
+    +               },
+    +             ],
+    +           },
+    +         ],
+    +         "failureSummary": "Fix any of the following:
+    +   Element has insufficient color contrast of 1.23 (foreground color: #d9eaf5, background color: #ffffff, font size: 12.0pt (16px), font weight: bold). Expected contrast ratio of 4.5:1",
+    +         "html": "<button type=\"button\" class=\"secondary-button\">Editar JSON avanzado</button>",
+    +         "impact": "serious",
+    +         "none": Array [],
+    +         "target": Array [
+    +           ".secondary-button[type=\"button\"]:nth-child(1)",
+    +         ],
+    +       },
+    +       Object {
+    +         "all": Array [],
+    +         "any": Array [
+    +           Object {
+    +             "data": Object {
+    +               "bgColor": "#ffffff",
+    +               "contrastRatio": 1.23,
+    +               "expectedContrastRatio": "4.5:1",
+    +               "fgColor": "#d9eaf5",
+    +               "fontSize": "12.0pt (16px)",
+    +               "fontWeight": "bold",
+    +               "messageKey": null,
+    +             },
+    +             "id": "color-contrast",
+    +             "impact": "serious",
+    +             "message": "Element has insufficient color contrast of 1.23 (foreground color: #d9eaf5, background color: #ffffff, font size: 12.0pt (16px), font weight: bold). Expected contrast ratio of 4.5:1",
+    +             "relatedNodes": Array [
+    +               Object {
+    +                 "html": "<form class=\"workspace-form console-document-form\">",
+    +                 "target": Array [
+    +                   "form",
+    +                 ],
+    +               },
+    +             ],
+    +           },
+    +         ],
+    +         "failureSummary": "Fix any of the following:
+    +   Element has insufficient color contrast of 1.23 (foreground color: #d9eaf5, background color: #ffffff, font size: 12.0pt (16px), font weight: bold). Expected contrast ratio of 4.5:1",
+    +         "html": "<button type=\"button\" class=\"secondary-button\">Quitar parámetro 1</button>",
+    +         "impact": "serious",
+    +         "none": Array [],
+    +         "target": Array [
+    +           "section[aria-label=\"Parámetros expuestos\"] > .console-group-fieldset > .secondary-button[type=\"button\"]",
+    +         ],
+    +       },
+    +       Object {
+    +         "all": Array [],
+    +         "any": Array [
+    +           Object {
+    +             "data": Object {
+    +               "bgColor": "#ffffff",
+    +               "contrastRatio": 1.23,
+    +               "expectedContrastRatio": "4.5:1",
+    +               "fgColor": "#d9eaf5",
+    +               "fontSize": "12.0pt (16px)",
+    +               "fontWeight": "bold",
+    +               "messageKey": null,
+    +             },
+    +             "id": "color-contrast",
+    +             "impact": "serious",
+    +             "message": "Element has insufficient color contrast of 1.23 (foreground color: #d9eaf5, background color: #ffffff, font size: 12.0pt (16px), font weight: bold). Expected contrast ratio of 4.5:1",
+    +             "relatedNodes": Array [
+    +               Object {
+    +                 "html": "<form class=\"workspace-form console-document-form\">",
+    +                 "target": Array [
+    +                   "form",
+    +                 ],
+    +               },
+    +             ],
+    +           },
+    +         ],
+    +         "failureSummary": "Fix any of the following:
+    +   Element has insufficient color contrast of 1.23 (foreground color: #d9eaf5, background color: #ffffff, font size: 12.0pt (16px), font weight: bold). Expected contrast ratio of 4.5:1",
+    +         "html": "<button type=\"button\" class=\"secondary-button\" aria-expanded=\"true\" aria-controls=\"console-results-configuration\">Resultados</button>",
+    +         "impact": "serious",
+    +         "none": Array [],
+    +         "target": Array [
+    +           "button[aria-controls=\"console-results-configuration\"]",
+    +         ],
+    +       },
+    +       Object {
+    +         "all": Array [],
+    +         "any": Array [
+    +           Object {
+    +             "data": Object {
+    +               "bgColor": "#ffffff",
+    +               "contrastRatio": 1.23,
+    +               "expectedContrastRatio": "4.5:1",
+    +               "fgColor": "#d9eaf5",
+    +               "fontSize": "12.0pt (16px)",
+    +               "fontWeight": "bold",
+    +               "messageKey": null,
+    +             },
+    +             "id": "color-contrast",
+    +             "impact": "serious",
+    +             "message": "Element has insufficient color contrast of 1.23 (foreground color: #d9eaf5, background color: #ffffff, font size: 12.0pt (16px), font weight: bold). Expected contrast ratio of 4.5:1",
+    +             "relatedNodes": Array [
+    +               Object {
+    +                 "html": "<form class=\"workspace-form console-document-form\">",
+    +                 "target": Array [
+    +                   "form",
+    +                 ],
+    +               },
+    +             ],
+    +           },
+    +         ],
+    +         "failureSummary": "Fix any of the following:
+    +   Element has insufficient color contrast of 1.23 (foreground color: #d9eaf5, background color: #ffffff, font size: 12.0pt (16px), font weight: bold). Expected contrast ratio of 4.5:1",
+    +         "html": "<button type=\"button\" class=\"secondary-button\">Quitar indicador 1</button>",
+    +         "impact": "serious",
+    +         "none": Array [],
+    +         "target": Array [
+    +           ".console-group-fieldset:nth-child(4) > .secondary-button[type=\"button\"]",
+    +         ],
+    +       },
+    +       Object {
+    +         "all": Array [],
+    +         "any": Array [
+    +           Object {
+    +             "data": Object {
+    +               "bgColor": "#ffffff",
+    +               "contrastRatio": 1.23,
+    +               "expectedContrastRatio": "4.5:1",
+    +               "fgColor": "#d9eaf5",
+    +               "fontSize": "12.0pt (16px)",
+    +               "fontWeight": "bold",
+    +               "messageKey": null,
+    +             },
+    +             "id": "color-contrast",
+    +             "impact": "serious",
+    +             "message": "Element has insufficient color contrast of 1.23 (foreground color: #d9eaf5, background color: #ffffff, font size: 12.0pt (16px), font weight: bold). Expected contrast ratio of 4.5:1",
+    +             "relatedNodes": Array [
+    +               Object {
+    +                 "html": "<form class=\"workspace-form console-document-form\">",
+    +                 "target": Array [
+    +                   "form",
+    +                 ],
+    +               },
+    +             ],
+    +           },
+    +         ],
+    +         "failureSummary": "Fix any of the following:
+    +   Element has insufficient color contrast of 1.23 (foreground color: #d9eaf5, background color: #ffffff, font size: 12.0pt (16px), font weight: bold). Expected contrast ratio of 4.5:1",
+    +         "html": "<button type=\"button\" class=\"secondary-button\">Quitar gráfico 1</button>",
+    +         "impact": "serious",
+    +         "none": Array [],
+    +         "target": Array [
+    +           ".console-group-fieldset:nth-child(9) > .secondary-button[type=\"button\"]",
+    +         ],
+    +       },
+    +       Object {
+    +         "all": Array [],
+    +         "any": Array [
+    +           Object {
+    +             "data": Object {
+    +               "bgColor": "#ffffff",
+    +               "contrastRatio": 1.23,
+    +               "expectedContrastRatio": "4.5:1",
+    +               "fgColor": "#d9eaf5",
+    +               "fontSize": "12.0pt (16px)",
+    +               "fontWeight": "bold",
+    +               "messageKey": null,
+    +             },
+    +             "id": "color-contrast",
+    +             "impact": "serious",
+    +             "message": "Element has insufficient color contrast of 1.23 (foreground color: #d9eaf5, background color: #ffffff, font size: 12.0pt (16px), font weight: bold). Expected contrast ratio of 4.5:1",
+    +             "relatedNodes": Array [
+    +               Object {
+    +                 "html": "<form class=\"workspace-form console-document-form\">",
+    +                 "target": Array [
+    +                   "form",
+    +                 ],
+    +               },
+    +             ],
+    +           },
+    +         ],
+    +         "failureSummary": "Fix any of the following:
+    +   Element has insufficient color contrast of 1.23 (foreground color: #d9eaf5, background color: #ffffff, font size: 12.0pt (16px), font weight: bold). Expected contrast ratio of 4.5:1",
+    +         "html": "<button type=\"button\" class=\"secondary-button\">Quitar tabla 1</button>",
+    +         "impact": "serious",
+    +         "none": Array [],
+    +         "target": Array [
+    +           ".console-group-fieldset:nth-child(13) > .secondary-button[type=\"button\"]",
+    +         ],
+    +       },
+    +     ],
+    +     "tags": Array [
+    +       "cat.color",
+    +       "wcag2aa",
+    +       "wcag143",
+    +       "TTv5",
+    +       "TT13.c",
+    +       "EN-301-549",
+    +       "EN-9.1.4.3",
+    +       "ACT",
+    +       "RGAAv4",
+    +       "RGAA-3.2.1",
+    +     ],
+    +   },
+    + ]
+
+      136 |       ["serious", "critical"].includes(entry.impact ?? ""),
+      137 |     ),
+    > 138 |   ).toEqual([]);
+          |     ^
+      139 |   await page.evaluate(() => {
+      140 |     document.documentElement.style.zoom = "1";
+      141 |   });
+        at verifyCatalogLayout (C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\frontend\e2e\react-foundation.spec.ts:138:5)
+        at C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\frontend\e2e\react-foundation.spec.ts:56:3
+
+    Error Context: test-results\react-foundation-UX-008-co-362cc-thorized-external-execution\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\react-foundation-UX-008-co-362cc-thorized-external-execution\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\react-foundation-UX-008-co-362cc-thorized-external-execution\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+  1 failed
+    e2e\react-foundation.spec.ts:23:1 › UX-008 configures a console and prepares an authorized external execution
