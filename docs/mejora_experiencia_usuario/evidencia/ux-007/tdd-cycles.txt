@@ -1,0 +1,804 @@
+UX-007: extractos reales RED / GREEN, 2026-09-14.
+Se omite el volcado DOM repetido; se conservan comando, diagnóstico y resultado.
+Los espacios al final de una línea no vacía se muestran como ␠.
+
+Ciclo 01: draft / RED
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ReportExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ReportExperience.test.tsx (1 test | 1 failed) 1640ms
+   × saves a report draft from the chosen result and opens its client preview without publishing 1638ms
+npm.cmd :␠
+En línea: 2 Carácter: 329
++ ... oding utf8; npm.cmd test -- src/ReportExperience.test.tsx > ../.tmp/u ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ReportExperience.test.tsx > saves a report draft from the chosen result and opens its client preview␠
+without publishing
+TestingLibraryElementError: Unable to find a label with the text of: Título del informe
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+[... volcado intermedio omitido ...]
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  17:16:35
+   Duration  5.14s (transform 1.04s, setup 304ms, import 1.50s, tests 1.64s, environment 1.41s)
+
+              </section>
+              <section
+                aria-labelledby="run-technical-snapshot"
+[... volcado intermedio omitido ...]
+                    </p>
+                  </li>
+                </ul>
+              </section>
+            </details>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/ReportExperience.test.tsx:141:32
+    139|   render(<App />);
+    140|   await user.click(await screen.findByRole("link", { name: "Preparar i…
+    141|   await user.type(await screen.findByLabelText("Título del informe"), …
+       |                                ^
+    142|   await user.click(screen.getByRole("button", { name: "Guardar borrado…
+    143|   expect(await screen.findByText("Borrador guardado. Todavía no es vis…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+Ciclo 01: draft / GREEN
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ReportExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  17:17:17
+   Duration  4.82s (transform 1.09s, setup 321ms, import 1.57s, tests 1.20s, environment 1.43s)
+
+Ciclo 02: sections / RED
+
+> bess-react-ui@0.1.0 test
+> vitest run src/PortalConfiguration.test.tsx -t preserves configured content
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/PortalConfiguration.test.tsx (7 tests | 1 failed | 6 skipped) 1000ms
+     × preserves configured content while editing branding and changing sections before saving and reopening 998ms
+npm.cmd :␠
+En línea: 2 Carácter: 164
++ ... oding utf8; npm.cmd test -- src/PortalConfiguration.test.tsx -t 'pres ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/PortalConfiguration.test.tsx > portal configuration workspace > preserves configured content while editing␠
+branding and changing sections before saving and reopening
+TestingLibraryElementError: Unable to find an accessible element with the role "button" and name "Gráficos"
+
+Here are the accessible roles:
+
+  banner:
+
+  Name "":
+[... volcado intermedio omitido ...]
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 skipped (7)
+   Start at  17:18:10
+   Duration  4.50s (transform 1.06s, setup 295ms, import 1.53s, tests 1000ms, environment 1.37s)
+
+                <button
+                  type="submit"
+                >
+                  Crear escenario
+                </button>
+              </form>
+            </div>
+            <section
+              aria-labelledby="project-time-series-catalog"
+ ...
+ ❯ Object.getElementError node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/PortalConfiguration.test.tsx:155:29
+    153|     await user.clear(name);
+    154|     await user.type(name, "Cliente Norte");
+    155|     await user.click(screen.getByRole("button", { name: "Gráficos" }));
+       |                             ^
+    156|     expect(name).not.toBeVisible();
+    157|     expect(screen.getByLabelText("Etiqueta de la serie")).toHaveValue(…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+Ciclo 02: sections / GREEN
+
+> bess-react-ui@0.1.0 test
+> vitest run src/PortalConfiguration.test.tsx -t preserves configured content
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 6 skipped (7)
+   Start at  17:18:45
+   Duration  5.05s (transform 1.08s, setup 309ms, import 1.54s, tests 1.55s, environment 1.36s)
+
+Ciclo 03: logo / RED
+
+> bess-react-ui@0.1.0 test
+> vitest run src/PortalConfiguration.test.tsx -t keeps unsaved branding
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/PortalConfiguration.test.tsx (8 tests | 1 failed | 7 skipped) 919ms
+     × keeps unsaved branding when uploading a logo and saves against the accepted logo revision 916ms
+npm.cmd :␠
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/PortalConfiguration.test.tsx -t 'keeps unsaved br ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/PortalConfiguration.test.tsx > portal configuration workspace > keeps unsaved branding when uploading a␠
+logo and saves against the accepted logo revision
+Error: expect(element).toHaveValue(Marca pendiente)
+
+Expected the element to have value:
+  Marca pendiente
+Received:
+
+ ❯ src/PortalConfiguration.test.tsx:150:53
+    148|     await user.click(screen.getByRole("button", { name: "Subir logo" }…
+    149|     await screen.findByText("Logo configurado");
+    150|     expect(screen.getByLabelText("Nombre publico")).toHaveValue("Marca…
+       |                                                     ^
+    151|     await user.click(screen.getByRole("button", { name: "Guardar porta…
+    152|     await screen.findByText("Revision 2");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 7 skipped (8)
+   Start at  17:19:35
+   Duration  4.39s (transform 1.07s, setup 319ms, import 1.51s, tests 919ms, environment 1.33s)
+
+Ciclo 03: logo / GREEN
+
+> bess-react-ui@0.1.0 test
+> vitest run src/PortalConfiguration.test.tsx -t keeps unsaved branding|preserves configured content
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 6 skipped (8)
+   Start at  17:19:57
+   Duration  5.96s (transform 1.10s, setup 303ms, import 1.57s, tests 2.42s, environment 1.36s)
+
+Ciclo 04: conflict / RED
+
+> bess-react-ui@0.1.0 test
+> vitest run src/PortalConfiguration.test.tsx -t does not adopt
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/PortalConfiguration.test.tsx (9 tests | 1 failed | 8 skipped) 1919ms
+     × does not adopt another session's revision while editing and preserves work after a conflict 1916ms
+npm.cmd :␠
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/PortalConfiguration.test.tsx -t 'does not adopt'  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/PortalConfiguration.test.tsx > portal configuration workspace > does not adopt another session's revision␠
+while editing and preserves work after a conflict
+TestingLibraryElementError: Unable to find role="alert"
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+[... volcado intermedio omitido ...]
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 skipped (9)
+   Start at  17:21:08
+   Duration  5.42s (transform 1.08s, setup 301ms, import 1.54s, tests 1.92s, environment 1.37s)
+
+                  rows="3"
+                />
+                <button
+                  type="submit"
+                >
+                  Crear escenario
+                </button>
+              </form>
+            </div>
+            <section
+              aria-labelledby="project-time-series-catalog"
+ ...
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/PortalConfiguration.test.tsx:146:25
+    144|     await act(async () => { window.dispatchEvent(new Event("visibility…
+    145|     await user.click(screen.getByRole("button", { name: "Guardar porta…
+    146|     expect(await screen.findByRole("alert")).toHaveTextContent("La con…
+       |                         ^
+    147|     expect(screen.getByLabelText("Nombre publico")).toHaveValue("Mi ma…
+    148|     await user.click(screen.getByRole("button", { name: "Descartar mis…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+Ciclo 04: conflict / GREEN
+
+> bess-react-ui@0.1.0 test
+> vitest run src/PortalConfiguration.test.tsx -t does not adopt|keeps unsaved branding|preserves configured content
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed | 6 skipped (9)
+   Start at  17:22:27
+   Duration  6.44s (transform 1.13s, setup 317ms, import 1.60s, tests 2.90s, environment 1.33s)
+
+Ciclo 05: publish / RED
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ReportExperience.test.tsx -t publishes explicitly
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ReportExperience.test.tsx (2 tests | 1 failed | 1 skipped) 1072ms
+   × publishes explicitly from the preview and offers the authorized portal link and unpublishing 1070ms
+npm.cmd :␠
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/ReportExperience.test.tsx -t 'publishes explicitl ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ReportExperience.test.tsx > publishes explicitly from the preview and offers the authorized portal link and␠
+unpublishing
+TestingLibraryElementError: Unable to find role="button" and name "Publicar informe"
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+[... volcado intermedio omitido ...]
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 skipped (2)
+   Start at  17:23:26
+   Duration  4.62s (transform 1.07s, setup 284ms, import 1.57s, tests 1.07s, environment 1.40s)
+
+            <dl
+              class="source-metadata version-metadata"
+            >
+[... volcado intermedio omitido ...]
+                class="empty-state"
+              >
+                Los resultados de esta publicacion no estan disponibles.
+              </p>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/ReportExperience.test.tsx:173:33
+    171|   const user = userEvent.setup();
+    172|   render(<App />);
+    173|   await user.click(await screen.findByRole("button", { name: "Publicar…
+       |                                 ^
+    174|   const actions = await screen.findByRole("region", { name: "Publicaci…
+    175|   expect(await within(actions).findByText("Publicado")).toBeVisible();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+Ciclo 05: publish / GREEN
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ReportExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  17:24:05
+   Duration  4.99s (transform 1.16s, setup 327ms, import 1.62s, tests 1.39s, environment 1.36s)
+
+Ciclo 06: config-link / RED
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ReportExperience.test.tsx -t leads from
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ReportExperience.test.tsx (3 tests | 1 failed | 2 skipped) 1078ms
+   × leads from an unconfigured report to the activation field and back to the chosen result 1077ms
+npm.cmd :␠
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/ReportExperience.test.tsx -t 'leads from' > ../.t ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ReportExperience.test.tsx > leads from an unconfigured report to the activation field and back to the␠
+chosen result
+TestingLibraryElementError: Unable to find role="link" and name "Activar configuración del informe"
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+[... volcado intermedio omitido ...]
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/ReportExperience.test.tsx:196:33
+    194|   const user = userEvent.setup();
+    195|   render(<App />);
+    196|   await user.click(await screen.findByRole("link", { name: "Activar co…
+       |                                 ^
+    197|   expect(await screen.findByLabelText("Estado")).toHaveFocus();
+    198|   expect(screen.getByLabelText("Estado")).toHaveValue("draft");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 skipped (3)
+   Start at  17:24:51
+   Duration  4.58s (transform 1.09s, setup 302ms, import 1.55s, tests 1.08s, environment 1.36s)
+
+Ciclo 06: config-link / GREEN
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ReportExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  17:26:44
+   Duration  5.48s (transform 1.09s, setup 296ms, import 1.57s, tests 1.92s, environment 1.39s)
+
+Ciclo 07: refresh / RED
+
+> bess-react-ui@0.1.0 test
+> vitest run src/PortalConfiguration.test.tsx -t background refresh
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/PortalConfiguration.test.tsx (10 tests | 1 failed | 9 skipped) 776ms
+     × keeps pending configuration when a background refresh fails and recovers without clearing it 774ms
+npm.cmd :␠
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/PortalConfiguration.test.tsx -t 'background refre ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/PortalConfiguration.test.tsx > portal configuration workspace > keeps pending configuration when a␠
+background refresh fails and recovers without clearing it
+TestingLibraryElementError: Unable to find a label with the text of: Nombre publico
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+[... volcado intermedio omitido ...]
+    </div>
+  </div>
+</body>
+ ❯ Object.getElementError node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ getAllByLabelText node_modules/@testing-library/dom/dist/queries/label-text.js:111:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/PortalConfiguration.test.tsx:139:19
+    137|     await act(async () => { window.dispatchEvent(new Event("visibility…
+    138|     await screen.findByText("Consulta temporalmente no disponible");
+    139|     expect(screen.getByLabelText("Nombre publico")).toHaveValue("Marca…
+       |                   ^
+    140|     unavailable = false;
+    141|     await user.click(screen.getByRole("button", { name: "Reintentar co…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 9 skipped (10)
+   Start at  17:27:33
+   Duration  4.44s (transform 1.14s, setup 290ms, import 1.62s, tests 776ms, environment 1.44s)
+
+Ciclo 07: refresh / GREEN
+
+> bess-react-ui@0.1.0 test
+> vitest run src/PortalConfiguration.test.tsx -t background refresh
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 9 skipped (10)
+   Start at  17:27:54
+   Duration  4.60s (transform 1.13s, setup 305ms, import 1.62s, tests 975ms, environment 1.39s)
+
+Ciclo 08: leave / RED
+
+> bess-react-ui@0.1.0 test
+> vitest run src/PortalConfiguration.test.tsx -t protects pending report
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/PortalConfiguration.test.tsx (11 tests | 1 failed | 10 skipped) 2270ms
+     × protects pending report configuration when leaving and allows continuing the same edits 2267ms
+npm.cmd :␠
+En línea: 2 Carácter: 211
++ ... w($false)); npm.cmd test -- src/PortalConfiguration.test.tsx -t 'prot ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/PortalConfiguration.test.tsx > portal configuration workspace > protects pending report configuration when␠
+leaving and allows continuing the same edits
+TestingLibraryElementError: Unable to find role="dialog" and name "Configuración sin guardar"
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+[... volcado intermedio omitido ...]
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 10 skipped (11)
+   Start at  17:28:53
+   Duration  5.93s (transform 1.24s, setup 281ms, import 1.78s, tests 2.27s, environment 1.31s)
+
+          <span
+            class="role-badge"
+          >
+[... volcado intermedio omitido ...]
+          </p>
+          <button
+            type="button"
+          >
+            Reintentar
+          </button>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/PortalConfiguration.test.tsx:137:33
+    135|     expect(screen.getByLabelText("Nombre publico")).toHaveValue("Marca…
+    136|     await user.click(within(screen.getByRole("navigation", { name: "Na…
+    137|     const dialog = await screen.findByRole("dialog", { name: "Configur…
+       |                                 ^
+    138|     expect(within(dialog).getByRole("button", { name: "Seguir editando…
+    139|     await user.keyboard("{Escape}");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+Ciclo 08: leave / GREEN
+
+> bess-react-ui@0.1.0 test
+> vitest run src/PortalConfiguration.test.tsx -t protects pending report|does not adopt|keeps unsaved branding|preserves configured content|background refresh
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  5 passed | 6 skipped (11)
+   Start at  17:29:39
+   Duration  8.30s (transform 1.20s, setup 278ms, import 1.71s, tests 4.71s, environment 1.32s)
+
+Ciclo 09: save / RED
+
+> bess-react-ui@0.1.0 test
+> vitest run src/PortalConfiguration.test.tsx -t normalized configuration
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/PortalConfiguration.test.tsx (12 tests | 1 failed | 11 skipped) 1015ms
+     × accepts the normalized configuration returned by a successful save 1012ms
+npm.cmd :␠
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/PortalConfiguration.test.tsx -t 'normalized confi ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/PortalConfiguration.test.tsx > portal configuration workspace > accepts the normalized configuration␠
+returned by a successful save
+Error: expect(element).toHaveValue(Marca aceptada)
+
+Expected the element to have value:
+  Marca aceptada
+Received:
+  Marca aceptada␠
+ ❯ src/PortalConfiguration.test.tsx:136:53
+    134|     await user.click(screen.getByRole("button", { name: "Guardar porta…
+    135|     await screen.findByText("Revision 1");
+    136|     expect(screen.getByLabelText("Nombre publico")).toHaveValue("Marca…
+       |                                                     ^
+    137|     expect(screen.getByText("Configuración guardada")).toBeVisible();
+    138|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 11 skipped (12)
+   Start at  17:30:42
+   Duration  4.63s (transform 1.17s, setup 291ms, import 1.66s, tests 1.01s, environment 1.37s)
+
+Ciclo 09: save / GREEN
+
+> bess-react-ui@0.1.0 test
+> vitest run src/PortalConfiguration.test.tsx -t normalized configuration|preserves configured content|keeps unsaved branding|does not adopt|background refresh|protects pending report
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  6 passed | 6 skipped (12)
+   Start at  17:30:53
+   Duration  8.58s (transform 1.14s, setup 288ms, import 1.61s, tests 5.09s, environment 1.30s)
+
+Ciclo 10: edit-gate / RED
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ReportExperience.test.tsx -t requires saving
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ReportExperience.test.tsx (4 tests | 1 failed | 3 skipped) 962ms
+   × requires saving or cancelling an edited draft before previewing or publishing it 959ms
+npm.cmd :␠
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/ReportExperience.test.tsx -t 'requires saving' >  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ReportExperience.test.tsx > requires saving or cancelling an edited draft before previewing or publishing it
+Error: expect(element).toBeDisabled()
+
+Received element is not disabled:
+  <button
+  type="button"
+/>
+ ❯ src/ReportExperience.test.tsx:214:69
+    212|   await user.click(await screen.findByRole("button", { name: "Editar b…
+    213|   await user.type(screen.getByLabelText("Título del informe editado"),…
+    214|   expect(screen.getByRole("button", { name: "Publicar Invierno" })).to…
+       |                                                                     ^
+    215|   expect(screen.queryByRole("link", { name: "Vista previa de Invierno"…
+    216|   expect(screen.getByText("Guarda o cancela la edición antes de abrir …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 skipped (4)
+   Start at  17:36:44
+   Duration  4.43s (transform 1.13s, setup 276ms, import 1.60s, tests 962ms, environment 1.31s)
+
+Ciclo 10: edit-gate / GREEN
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ReportExperience.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  17:36:55
+   Duration  6.38s (transform 1.20s, setup 302ms, import 1.67s, tests 2.79s, environment 1.33s)
+
+Ciclo 11: hidden-guard / RED
+
+> bess-react-ui@0.1.0 test
+> vitest run src/PortalConfiguration.test.tsx -t confirmation reachable
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/PortalConfiguration.test.tsx (13 tests | 1 failed | 12 skipped) 2011ms
+     × keeps the leave confirmation reachable while the report section is hidden 2008ms
+npm.cmd :␠
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/PortalConfiguration.test.tsx -t 'confirmation rea ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/PortalConfiguration.test.tsx > portal configuration workspace > keeps the leave confirmation reachable␠
+while the report section is hidden
+TestingLibraryElementError: Unable to find role="dialog" and name "Configuración sin guardar"
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="app-frame"
+[... volcado intermedio omitido ...]
+              </form>
+            </div>
+            <section
+              aria-labelledby="project-time-series-catalog"
+
+              class="workspace...
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/PortalConfiguration.test.tsx:135:33
+    133|     await user.click(screen.getByRole("link", { name: "Escenarios" }));
+    134|     await user.click(within(screen.getByRole("navigation", { name: "Na…
+    135|     const dialog = await screen.findByRole("dialog", { name: "Configur…
+       |                                 ^
+    136|     expect(dialog).toBeVisible();
+    137|     await user.click(within(dialog).getByRole("button", { name: "Segui…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 12 skipped (13)
+   Start at  17:38:19
+   Duration  5.63s (transform 1.21s, setup 300ms, import 1.71s, tests 2.01s, environment 1.31s)
+
+Ciclo 11: hidden-guard / GREEN
+
+> bess-react-ui@0.1.0 test
+> vitest run src/PortalConfiguration.test.tsx -t confirmation reachable|protects pending report
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 11 skipped (13)
+   Start at  17:38:31
+   Duration  5.56s (transform 1.15s, setup 284ms, import 1.63s, tests 2.05s, environment 1.31s)
+
+Ciclo 12: invalid / RED
+
+> bess-react-ui@0.1.0 test
+> vitest run src/PortalConfiguration.test.tsx -t invalid field
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/PortalConfiguration.test.tsx (14 tests | 1 failed | 13 skipped) 1153ms
+     × opens a closed section and focuses its invalid field when saving 1150ms
+npm.cmd :␠
+En línea: 2 Carácter: 1
++ npm.cmd test -- src/PortalConfiguration.test.tsx -t 'invalid field' > ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/PortalConfiguration.test.tsx > portal configuration workspace > opens a closed section and focuses its␠
+invalid field when saving
+Error: expect(element).toBeVisible()
+
+Received element is not visible:
+  <input
+  min="1"
+  type="number"
+  value="0"
+/>
+ ❯ src/PortalConfiguration.test.tsx:140:19
+    138|     await user.click(screen.getByRole("button", { name: "Identidad y l…
+    139|     await user.click(screen.getByRole("button", { name: "Guardar porta…
+    140|     expect(limit).toBeVisible();
+       |                   ^
+    141|     expect(limit).toHaveFocus();
+    142|     expect(screen.getByRole("alert")).toHaveTextContent("Filas visible…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 13 skipped (14)
+   Start at  17:43:56
+   Duration  4.72s (transform 1.19s, setup 287ms, import 1.67s, tests 1.15s, environment 1.29s)
+
+Ciclo 12: invalid / GREEN
+
+> bess-react-ui@0.1.0 test
+> vitest run src/PortalConfiguration.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  14 passed (14)
+   Start at  17:44:48
+   Duration  15.25s (transform 1.19s, setup 288ms, import 1.66s, tests 11.68s, environment 1.33s)

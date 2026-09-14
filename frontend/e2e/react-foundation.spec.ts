@@ -694,9 +694,9 @@ test("React client portal reviews published results, downloads allowlisted artif
   await page.goto(`/react/projects/${project.id}`);
   await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
   await page.getByRole("link", { name: "Informes", exact: true }).click();
-  await page.getByLabel("Nombre nuevo template").fill(templateName);
-  await page.getByLabel("Asset dispatch table").uncheck();
-  await page.getByRole("button", { name: "Crear template" }).click();
+  await page.getByLabel("Nombre de la nueva plantilla").fill(templateName);
+  await page.getByLabel("Tabla de despacho por componente").uncheck();
+  await page.getByRole("button", { name: "Crear plantilla" }).click();
   await expect(page.getByText(templateName).first()).toBeVisible();
 
   await page.goto(`/react/runs/${run.id}`);
@@ -704,10 +704,12 @@ test("React client portal reviews published results, downloads allowlisted artif
     page.getByRole("heading", { name: `Ejecución ${run.id}` }),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Publication Drafts" }),
+    page.getByRole("heading", { name: "Informes de esta ejecución" }),
   ).toBeVisible();
-  await page.getByLabel("Public Title").fill(publicationTitle);
-  await page.getByLabel("Analyst Notes").fill("Approved for client review.");
+  await page.getByLabel("Título del informe").fill(publicationTitle);
+  await page
+    .getByLabel("Comentario para el cliente")
+    .fill("Approved for client review.");
   await page.getByLabel("dispatch_csv", { exact: true }).uncheck();
   await page.getByLabel("asset_dispatch_csv", { exact: true }).uncheck();
   const createPublication = page.waitForResponse(
@@ -715,7 +717,7 @@ test("React client portal reviews published results, downloads allowlisted artif
       response.url().endsWith(`/api/runs/${run.id}/publications`) &&
       response.request().method() === "POST",
   );
-  await page.getByRole("button", { name: "Crear publicacion" }).click();
+  await page.getByRole("button", { name: "Guardar borrador" }).click();
   const publication = (
     (await (await createPublication).json()) as { publication: { id: number } }
   ).publication;
@@ -724,7 +726,7 @@ test("React client portal reviews published results, downloads allowlisted artif
     .getByRole("button", { name: `Publicar ${publicationTitle}` })
     .click();
   await expect(
-    page.getByRole("button", { name: `Unpublicar ${publicationTitle}` }),
+    page.getByRole("button", { name: `Despublicar ${publicationTitle}` }),
   ).toBeVisible();
 
   await page.getByRole("button", { name: "Salir" }).click();
@@ -751,8 +753,8 @@ test("React client portal reviews published results, downloads allowlisted artif
   await expect(
     page.getByRole("heading", { name: "Asset Dispatch" }),
   ).toHaveCount(0);
-  await expect(page.getByText("Publication Drafts")).toHaveCount(0);
-  await expect(page.getByText("Crear publicacion")).toHaveCount(0);
+  await expect(page.getByText("Informes de esta ejecución")).toHaveCount(0);
+  await expect(page.getByText("Guardar borrador")).toHaveCount(0);
   await expect(page.getByText("Lanzar run")).toHaveCount(0);
   await expect(page.getByRole("link", { name: "dispatch.csv" })).toHaveCount(0);
   const summaryDownload = page.waitForEvent("download");
@@ -2260,6 +2262,311 @@ test("React run results renders Plotly charts, tables, missing legacy columns, a
   ).toBeVisible();
 });
 
+test("UX-007 preserves report configuration and explicitly publishes the chosen result to an authorized client", async ({
+  page,
+  browser,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await ensureAdminSession(page);
+  const api = page.context().request;
+  const suffix = Date.now();
+  const projectResponse = await postWithCsrf(api, "/api/projects", {
+    name: `Informes UX-007 ${suffix}`,
+  });
+  expect(projectResponse.ok()).toBeTruthy();
+  const project = (await projectResponse.json()) as { id: number };
+  const scenarioResponse = await postWithCsrf(
+    api,
+    `/api/projects/${project.id}/scenarios`,
+    { name: "Invierno" },
+  );
+  expect(scenarioResponse.ok()).toBeTruthy();
+  const scenario = (await scenarioResponse.json()) as { id: number };
+  const versionResponse = await postWithCsrf(
+    api,
+    `/api/scenarios/${scenario.id}/versions`,
+    {
+      system_case_json: readFileSync(
+        resolve("..", "data/cases/hybrid_system/system_case.json"),
+        "utf-8",
+      ),
+    },
+  );
+  expect(versionResponse.status()).toBe(201);
+  const version = (await versionResponse.json()) as { id: number };
+  const runResponse = await postWithCsrf(
+    api,
+    `/api/scenario-versions/${version.id}/runs`,
+  );
+  expect(runResponse.status()).toBe(201);
+  const run = (await runResponse.json()) as { id: number };
+  const saved = await putWithCsrf(
+    api,
+    `/api/projects/${project.id}/portal-configuration`,
+    {
+      document: portalKpiDocument("Marca inicial"),
+      status: "active",
+      expected_revision: 0,
+    },
+  );
+  expect(saved.ok()).toBeTruthy();
+  const userResponse = await postWithCsrf(api, "/api/admin/users", {
+    email: `ux007-${suffix}@example.local`,
+    display_name: "Cliente UX",
+    role: "external",
+    password: "client-pass",
+  });
+  expect(userResponse.status()).toBe(201);
+  const clientUser = (await userResponse.json()).user as { id: number };
+  expect(
+    (
+      await putWithCsrf(
+        api,
+        `/api/admin/projects/${project.id}/external-access/${clientUser.id}`,
+        { portal_view: true, operate: false },
+      )
+    ).ok(),
+  ).toBeTruthy();
+  const clientContext = await browser.newContext({
+    baseURL: "http://127.0.0.1:8123",
+  });
+  const client = await clientContext.newPage();
+  try {
+    await client.goto("/react");
+    await client.getByLabel("Email").fill(`ux007-${suffix}@example.local`);
+    await client.getByLabel("Password").fill("client-pass");
+    await client.getByRole("button", { name: "Entrar" }).click();
+    await expect(client).toHaveURL(/\/react\/client$/);
+    await page.goto(`/react/runs/${run.id}`);
+    await expect(page.getByText("Finalizada", { exact: true })).toBeVisible();
+    await page
+      .getByRole("link", { name: "Preparar informe", exact: true })
+      .click();
+    await page
+      .getByRole("link", { name: "Configurar informe", exact: true })
+      .click();
+    await page.getByLabel("Nombre publico").fill("Planta Norte");
+    await page
+      .getByRole("button", { name: "Indicadores", exact: true })
+      .click();
+    await expect(page.getByLabel("Etiqueta publica")).toHaveValue(
+      "Objective Value",
+    );
+    await page.getByRole("button", { name: "Descargas", exact: true }).click();
+    await expect(page.getByLabel("Mostrar descargas")).toBeChecked();
+    await page
+      .getByRole("button", { name: "Guardar portal", exact: true })
+      .click();
+    await expect(
+      page.getByText("Configuración guardada", { exact: true }),
+    ).toBeVisible();
+    await page
+      .getByLabel("Nombre de la nueva plantilla")
+      .fill("Informe mensual");
+    await page
+      .getByRole("button", { name: "Crear plantilla", exact: true })
+      .click();
+    await expect(
+      page.getByText("Informe mensual", { exact: true }),
+    ).toBeVisible();
+    await page.reload();
+    await expect(page.getByLabel("Nombre publico")).toHaveValue("Planta Norte");
+    await page.setViewportSize({ width: 320, height: 900 });
+    await page.getByRole("button", { name: "Tablas", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Agregar tabla", exact: true })
+      .click();
+    await page.getByLabel("Filas visibles").fill("0");
+    await page
+      .getByRole("button", { name: "Identidad y logo", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Guardar portal", exact: true })
+      .click();
+    await expect(page.getByLabel("Filas visibles")).toBeFocused();
+    await expect(page.getByRole("alert")).toContainText("Filas visibles");
+    await page.screenshot({
+      path: testInfo.outputPath("informe-error-320.png"),
+      fullPage: true,
+    });
+    await page.getByLabel("Filas visibles").fill("24");
+    await page
+      .getByRole("button", { name: "Quitar tabla", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Identidad y logo", exact: true })
+      .click();
+    await page.getByLabel("Nombre publico").fill("Nombre pendiente");
+    await page.getByRole("link", { name: "Escenarios", exact: true }).click();
+    await page
+      .getByRole("navigation", { name: "Navegacion principal" })
+      .getByRole("link", { name: "Proyectos", exact: true })
+      .click();
+    const leaveDialog = page.getByRole("dialog", {
+      name: "Configuración sin guardar",
+    });
+    await expect(leaveDialog).toBeVisible();
+    await expect(
+      leaveDialog.getByRole("button", { name: "Seguir editando" }),
+    ).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(
+      leaveDialog.getByRole("button", { name: "Descartar y salir" }),
+    ).toBeFocused();
+    await page.screenshot({
+      path: testInfo.outputPath("informe-cambios-320.png"),
+      fullPage: true,
+    });
+    const dialogAxe = await new AxeBuilder({ page }).analyze();
+    expect(
+      dialogAxe.violations.filter((entry) =>
+        ["serious", "critical"].includes(entry.impact ?? ""),
+      ),
+    ).toEqual([]);
+    await page.keyboard.press("Escape");
+    await page.getByRole("link", { name: "Informes", exact: true }).click();
+    await expect(page.getByLabel("Nombre publico")).toHaveValue(
+      "Nombre pendiente",
+    );
+    await page.getByLabel("Nombre publico").fill("Planta Norte");
+    await verifyCatalogLayout(page, testInfo, "informe-configuracion");
+    await page
+      .getByRole("link", {
+        name: `Volver a preparar el informe de la ejecución ${run.id}`,
+      })
+      .click();
+    await page
+      .getByLabel("Título del informe", { exact: true })
+      .fill("Informe de invierno UX-007");
+    await page
+      .getByLabel("Comentario para el cliente", { exact: true })
+      .fill("Resultados revisados para el cliente.");
+    const created = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/api/runs/${run.id}/publications`) &&
+        response.request().method() === "POST",
+    );
+    await page
+      .getByRole("button", { name: "Guardar borrador", exact: true })
+      .click();
+    const publication = (await (await created).json()).publication as {
+      id: number;
+    };
+    await expect(
+      page.getByText("Borrador guardado. Todavía no es visible en el portal."),
+    ).toBeVisible();
+    await client.reload();
+    await client
+      .getByRole("link", { name: "Planta Norte", exact: true })
+      .click();
+    await expect(
+      client.getByText("No hay publicaciones activas."),
+    ).toBeVisible();
+    await page
+      .getByRole("link", { name: "Vista previa de Informe de invierno UX-007" })
+      .click();
+    await expect(
+      page.getByRole("heading", {
+        name: "Informe de invierno UX-007",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(page.getByText("1250.5", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Volver al resultado" }),
+    ).toHaveAttribute("href", `/react/runs/${run.id}#publications`);
+    await verifyCatalogLayout(page, testInfo, "informe-preview");
+    await page
+      .getByRole("button", { name: "Publicar informe", exact: true })
+      .focus();
+    await page.keyboard.press("Enter");
+    await expect(
+      page.getByRole("button", { name: "Despublicar informe", exact: true }),
+    ).toBeVisible();
+    const portalPath = `/react/client/projects/${project.id}/publications/${publication.id}`;
+    await client.goto(portalPath);
+    await expect(
+      client.getByRole("heading", {
+        name: "Informe de invierno UX-007",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(client.getByText("1250.5", { exact: true })).toBeVisible();
+    await expect(
+      client.getByText("Planta Norte", { exact: true }).last(),
+    ).toBeVisible();
+    await expect(
+      client.getByText("Contexto interno", { exact: true }),
+    ).toHaveCount(0);
+    const download = client.waitForEvent("download");
+    await client
+      .getByRole("link", { name: "summary.json", exact: true })
+      .click();
+    expect((await download).suggestedFilename()).toBe("summary.json");
+    await verifyCatalogLayout(client, testInfo, "informe-portal");
+    // Changing the shared project configuration updates this exact report on re-entry.
+    await page
+      .getByRole("link", { name: "Configurar informe", exact: true })
+      .click();
+    await page.getByLabel("Nombre publico").fill("Planta Norte revisada");
+    await page
+      .getByRole("button", { name: "Guardar portal", exact: true })
+      .click();
+    await expect(
+      page.getByText("Configuración guardada", { exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole("link", {
+        name: `Volver a preparar el informe de la ejecución ${run.id}`,
+      })
+      .click();
+    await page
+      .getByRole("link", { name: "Vista previa de Informe de invierno UX-007" })
+      .click();
+    await expect(
+      page.getByText("Planta Norte revisada", { exact: true }).last(),
+    ).toBeVisible();
+    await client.reload();
+    await expect(
+      client.getByText("Planta Norte revisada", { exact: true }).last(),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "Despublicar informe", exact: true })
+      .click();
+    await expect(page.getByText("Despublicado", { exact: true })).toBeVisible();
+    await client.reload();
+    await expect(
+      client.getByRole("heading", { name: "No encontrado" }),
+    ).toBeVisible();
+    await expect(client.getByText("1250.5", { exact: true })).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "Publicar informe", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Despublicar informe", exact: true }),
+    ).toBeVisible();
+    await client.goto(portalPath);
+    await expect(client.getByText("1250.5", { exact: true })).toBeVisible();
+    expect(
+      (
+        await deleteWithCsrf(
+          api,
+          `/api/admin/projects/${project.id}/external-access/${clientUser.id}`,
+        )
+      ).ok(),
+    ).toBeTruthy();
+    await client.reload();
+    await expect(
+      client.getByRole("heading", { name: "No encontrado" }),
+    ).toBeVisible();
+    await expect(
+      client.getByRole("link", { name: "summary.json" }),
+    ).toHaveCount(0);
+  } finally {
+    await clientContext.close();
+  }
+});
+
 test("React dashboard templates and publications cover draft preview publish and unpublish", async ({
   page,
 }) => {
@@ -2317,24 +2624,24 @@ test("React dashboard templates and publications cover draft preview publish and
   await page.goto(`/react/projects/${project.id}`);
   await page.getByRole("link", { name: "Informes", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Dashboard templates" }),
+    page.getByRole("heading", { name: "Plantillas de informe" }),
   ).toBeVisible();
 
   const templateName = `Client Summary ${suffix}`;
   const updatedTemplateName = `Client Board ${suffix}`;
   await page.getByRole("link", { name: "Informes", exact: true }).click();
-  await page.getByLabel("Nombre nuevo template").fill(templateName);
-  await page.getByLabel("Renewable chart").uncheck();
-  await page.getByLabel("Asset dispatch table").uncheck();
-  await page.getByLabel("Table row limit").fill("1");
-  await page.getByRole("button", { name: "Crear template" }).click();
+  await page.getByLabel("Nombre de la nueva plantilla").fill(templateName);
+  await page.getByLabel("Gráfico renovable").uncheck();
+  await page.getByLabel("Tabla de despacho por componente").uncheck();
+  await page.getByLabel("Límite de filas de las tablas").fill("1");
+  await page.getByRole("button", { name: "Crear plantilla" }).click();
   await expect(page.getByText(templateName, { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: `Editar ${templateName}` }).click();
   await page
-    .getByLabel("Nombre del template editado")
+    .getByLabel("Nombre de la plantilla editada")
     .fill(updatedTemplateName);
-  await page.getByRole("button", { name: "Actualizar template" }).click();
+  await page.getByRole("button", { name: "Actualizar plantilla" }).click();
   await expect(
     page.getByText(updatedTemplateName, { exact: true }),
   ).toBeVisible();
@@ -2342,14 +2649,14 @@ test("React dashboard templates and publications cover draft preview publish and
   await page.goto(`/react/runs/${run.id}`);
   await expect(page.getByText("Finalizada", { exact: true })).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Publication Drafts" }),
+    page.getByRole("heading", { name: "Informes de esta ejecución" }),
   ).toBeVisible();
-  await page.getByLabel("Dashboard Template").selectOption({
+  await page.getByLabel("Plantilla del informe").selectOption({
     label: updatedTemplateName,
   });
-  await page.getByLabel("Public Title").fill("Board Dispatch Review");
+  await page.getByLabel("Título del informe").fill("Board Dispatch Review");
   await page
-    .getByLabel("Analyst Notes")
+    .getByLabel("Comentario para el cliente")
     .fill("Approved assumptions for preview.");
   await page.getByLabel("model_metadata_json").check();
   const createPublication = page.waitForResponse(
@@ -2357,14 +2664,16 @@ test("React dashboard templates and publications cover draft preview publish and
       response.url().endsWith(`/api/runs/${run.id}/publications`) &&
       response.request().method() === "POST",
   );
-  await page.getByRole("button", { name: "Crear publicacion" }).click();
+  await page.getByRole("button", { name: "Guardar borrador" }).click();
   const publication = (await (await createPublication).json()) as {
     publication: { id: number };
   };
   await expect(
     page.getByText("Board Dispatch Review", { exact: true }),
   ).toBeVisible();
-  await expect(page.locator(".role-badge", { hasText: "draft" })).toBeVisible();
+  await expect(
+    page.locator(".role-badge", { hasText: "Borrador" }),
+  ).toBeVisible();
 
   let failNextPublicationUpdate = true;
   await page.route("**/api/publications/*", async (route) => {
@@ -2381,18 +2690,26 @@ test("React dashboard templates and publications cover draft preview publish and
   });
 
   await page
-    .getByRole("button", { name: "Editar publicacion Board Dispatch Review" })
+    .getByRole("button", { name: "Editar borrador Board Dispatch Review" })
     .click();
-  await page.getByLabel("Public Title editado").fill("Board Dispatch Final");
-  await page.getByLabel("Analyst Notes editadas").fill("Final preview notes.");
-  await page.getByRole("button", { name: "Actualizar publicacion" }).click();
+  await page
+    .getByLabel("Título del informe editado")
+    .fill("Board Dispatch Final");
+  await page
+    .getByLabel("Comentario para el cliente editado")
+    .fill("Final preview notes.");
+  await page
+    .getByRole("button", { name: "Guardar cambios del borrador" })
+    .click();
   await expect(page.getByRole("alert")).toContainText(
     "synthetic publication save failure",
   );
-  await expect(page.getByLabel("Public Title editado")).toHaveValue(
+  await expect(page.getByLabel("Título del informe editado")).toHaveValue(
     "Board Dispatch Final",
   );
-  await page.getByRole("button", { name: "Actualizar publicacion" }).click();
+  await page
+    .getByRole("button", { name: "Guardar cambios del borrador" })
+    .click();
   await expect(
     page.getByText("Board Dispatch Final", { exact: true }),
   ).toBeVisible();
@@ -2401,7 +2718,7 @@ test("React dashboard templates and publications cover draft preview publish and
   ).toBeVisible();
 
   await page
-    .getByRole("link", { name: "Preview as client Board Dispatch Final" })
+    .getByRole("link", { name: "Vista previa de Board Dispatch Final" })
     .click();
   await expect(page).toHaveURL(
     new RegExp(`/react/publications/${publication.publication.id}/preview$`),
@@ -2417,24 +2734,25 @@ test("React dashboard templates and publications cover draft preview publish and
   await expect(
     page.getByRole("heading", { name: "Asset Dispatch" }),
   ).toHaveCount(0);
-  await expect(page.getByText("Publication Drafts")).toHaveCount(0);
+  await expect(page.getByText("Informes de esta ejecución")).toHaveCount(0);
 
   await page.goto(`/react/runs/${run.id}`);
   await page
     .getByRole("button", { name: "Publicar Board Dispatch Final" })
     .click();
   await expect(
-    page.locator(".role-badge", { hasText: "published" }),
+    page.locator(".role-badge", { hasText: "Publicado" }),
   ).toBeVisible();
-  await expect(page.getByText("Published by")).toBeVisible();
+  await page.getByText("Historial de publicación", { exact: true }).click();
+  await expect(page.getByText("Publicado por")).toBeVisible();
   await expect(page.getByText("admin@example.local").first()).toBeVisible();
   await page
-    .getByRole("button", { name: "Unpublicar Board Dispatch Final" })
+    .getByRole("button", { name: "Despublicar Board Dispatch Final" })
     .click();
   await expect(
-    page.locator(".role-badge", { hasText: "unpublished" }),
+    page.locator(".role-badge", { hasText: "Despublicado" }),
   ).toBeVisible();
-  await expect(page.getByText("Unpublished at")).toBeVisible();
+  await expect(page.getByText("Fecha de despublicación")).toBeVisible();
 });
 
 function chart(

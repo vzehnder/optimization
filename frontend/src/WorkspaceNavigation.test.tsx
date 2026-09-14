@@ -149,7 +149,7 @@ describe("workspace task navigation", () => {
       "Verano pendiente",
     );
     expect(
-      screen.queryByRole("heading", { name: "Dashboard templates" }),
+      screen.queryByRole("heading", { name: "Plantillas de informe" }),
     ).not.toBeInTheDocument();
 
     const navigation = screen.getByRole("navigation", {
@@ -159,7 +159,7 @@ describe("workspace task navigation", () => {
       within(navigation).getByRole("link", { name: "Informes" }),
     );
     expect(
-      await screen.findByRole("heading", { name: "Dashboard templates" }),
+      await screen.findByRole("heading", { name: "Plantillas de informe" }),
     ).toBeVisible();
     expect(window.location.search).toBe("?origin=review&section=reports");
     await user.click(

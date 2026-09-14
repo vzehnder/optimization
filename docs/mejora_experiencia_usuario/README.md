@@ -1,8 +1,8 @@
 # Plan de simplificación de la experiencia de BESS Workspace
 
 Fecha de revisión del plan: 2026-09-12. Base del plan: `58cf602`.
-Última implementación: UX-004 sobre `91bb561`, 2026-09-14.
-Estado: UX-000 completado; UX-001 a UX-006 implementados y en revisión.
+Última implementación: UX-007 sobre `cf64106`, 2026-09-14.
+Estado: UX-000 completado; UX-001 a UX-007 implementados y en revisión.
 [Evidencia UX-001](evidencia/ux-001/README.md), [UX-005](evidencia/ux-005/README.md)
 y [UX-006](evidencia/ux-006/README.md), este último sobre `61dc87a`.
 [UX-002](evidencia/ux-002/README.md) está implementado sobre `9c24c1b`.
@@ -29,9 +29,12 @@ los campos avanzados y protege los cambios pendientes, con 243 pruebas
 funcionales aprobadas. UX-003 está In Review y comprueba CSV/XLSX y continuidad
 hasta ejecución. [UX-004](evidencia/ux-004/README.md) está implementado sobre
 `91bb561`: catálogo contextual, filtros y retorno conservados, recuperación de
-conflictos y 491 pruebas aprobadas. El siguiente ticket recomendado es UX-007;
-UX-007/008/009 siguen pendientes. El chequeo global conserva fallos de formato
-previos en 21 archivos no modificados, enumerados en la evidencia de UX-004.
+conflictos y 491 pruebas aprobadas. [UX-007](evidencia/ux-007/README.md) conecta
+configuración, borrador, preview y publicación, conserva cambios/revisiones y
+comprueba el portal autorizado, con 12 ciclos TDD y 323 pruebas aprobadas.
+El siguiente ticket recomendado es UX-008; UX-008/009 siguen pendientes.
+El chequeo global conserva fallos de formato previos en 21 archivos no
+modificados, enumerados en la evidencia de UX-007.
 
 ## Orden recomendado
 

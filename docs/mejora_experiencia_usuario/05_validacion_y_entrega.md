@@ -88,6 +88,29 @@ El chequeo global conserva fallos de Prettier previos; la lista y los comandos
 figuran en la evidencia. No se ejecutaron Julia real, toda la suite Python,
 pruebas con participantes ni una auditoría completa con lectores de pantalla.
 
+## Evidencia posterior: UX-007
+
+La [implementación sobre `cf64106`](evidencia/ux-007/README.md) queda **In Review**
+el 2026-09-14. F1/F2 confirmadas antes de las pruebas, 12 ciclos RED → GREEN:
+configuración por secciones con documento/revisión conservados, logo sin
+pérdida de edición, recuperación de errores y conflictos, salida protegida y
+foco de corrección. El recorrido une la ejecución elegida con borrador,
+preview real y publicación/despublicación explícita; el portal conserva sus
+reglas de autorización y descargas.
+
+Resultado: **323 pruebas aprobadas** (246 frontend, 21 navegador y 56 Python),
+sin duplicar línea base ni repeticiones. Después del último ajuste de foco se
+repitieron Vitest completo, build y el recorrido F1 afectado. TypeScript,
+ESLint, formato del frontend modificado, contrato generado y diff pasan.
+`check` falla por los mismos 21 archivos previos sin formato. Se inspeccionaron
+14 capturas a 1440/1280/320 px y ampliación CSS 200 %; layout y teclado/foco
+comprobados, axe sin serious/critical en las superficies ejercitadas. No se
+ejecutaron Julia real, PostgreSQL, toda la suite Python ni evaluación con
+participantes/lectores de pantalla. El smoke usa resultados sintéticos. No
+cambian contratos o permisos de producción. Tutoriales y tracker actualizados;
+capturas locales regenerables excluidas de Git. El usuario solicitó después
+el commit `feat(ux): guide report configuration and explicit publication`; sin PR.
+
 ## Evidencia histórica de la revisión del plan
 
 El 2026-09-12 se ejecutó desde `frontend/`:

@@ -1,0 +1,11 @@
+> bess-react-ui@0.1.0 test
+> vitest run src/PortalConfiguration.test.tsx src/PortalResults.test.tsx
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+
+ Test Files  2 passed (2)
+      Tests  23 passed (23)
+   Start at  17:15:14
+   Duration  10.10s (transform 2.26s, setup 1.19s, import 3.42s, tests 5.91s, environment 4.98s)

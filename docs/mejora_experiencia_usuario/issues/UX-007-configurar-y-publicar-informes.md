@@ -1,6 +1,10 @@
 # UX-007 · Configurar y publicar informes con claridad
 
-Estado: Todo. Prioridad: P1. Dependencias: UX-006. Tamaño: M.
+Estado: In Review. Prioridad: P1. Dependencias: UX-006. Tamaño: M.
+
+Responsable: Codex. Inicio: 2026-09-14, sobre `cf64106`.
+El usuario confirmó «confirmo» para F1/F2 antes de las pruebas nuevas.
+[Acuerdo y evidencia](../evidencia/ux-007/README.md).
 
 ## Problema y resultado
 
@@ -42,3 +46,49 @@ F1/F2; F3 para permisos/contrato si se modifican:
 - Teclado, estados vacíos, ausencia de resultados y pantallas estrechas tienen revisión visual.
 
 Este ticket no agrega un generador libre de dashboards ni nuevas reglas de entrega por correo. Evaluar separaciones internas pequeñas solo en revisión posterior.
+
+## Resolución
+
+- Responsable: Codex. Inicio y entrega para revisión: 2026-09-14.
+- Estado final: **In Review**, pendiente de aceptación de producto.
+- PR o commits: `feat(ux): guide report configuration and explicit publication`,
+  sobre `cf64106`, solicitado por el usuario. Sin PR.
+- Comportamiento implementado: configuración por sección que conserva el
+  documento y su revisión, logo sin pérdida de edición, recuperación de
+  errores/conflictos, salida protegida y corrección con foco. Flujo Resultado →
+  Contenido → Vista previa → Publicación, con retorno a la ejecución elegida,
+  activación de configuración y acciones explícitas desde preview.
+- Fronteras: el usuario respondió «confirmo» para F1/F2 antes de las pruebas.
+  F3 ejecutó regresiones existentes; no hubo cambio de contrato o permisos.
+- TDD: [12 ciclos RED → GREEN](../evidencia/ux-007/README.md#ciclos-red--green).
+- Verificación: 246 pruebas frontend, 21 navegador y 56 Python aprobadas;
+  323 en total sin duplicar repeticiones. Tras el último ajuste de foco se
+  repitieron Vitest completo, build y F1 afectado. Contrato generado,
+  TypeScript, ESLint y formato del código modificado pasan.
+- Revisión visual: 14 capturas, 1440/1280/320 px y ampliación CSS 200 %;
+  teclado/foco y axe sin serious/critical en las superficies comprobadas.
+- Conservación: las tres filas de informes/portal de la matriz están
+  [contrastadas con pruebas](../evidencia/ux-007/README.md#conservación-funcional).
+  Preview y portal siguen usando la superficie externa compartida; no cambian
+  autorización, persistencia, TS-7 ni resultados matemáticos.
+- Limitaciones: `check` falla por Prettier en 21 archivos previos sin cambios.
+  No se ejecutaron Julia real, PostgreSQL, toda la suite Python ni evaluación
+  con participantes/lectores de pantalla. El smoke tiene solver sintético.
+- Tutoriales actualizados. Persona que revisó/aceptó: pendiente.
+
+### Criterios comprobados
+
+- [x] Guardar borrador, vista previa y publicar son acciones distintas; el
+  borrador no aparece como publicación activa para el externo.
+- [x] Branding/logo, KPI, gráficos, tablas, descargas, plantillas y artefactos
+  conservan sus controles y persistencia.
+- [x] Preview reutiliza el payload externo y sus componentes de informe.
+- [x] El informe muestra los resultados de la ejecución elegida y permite
+  volver a ella después de configurar.
+- [x] Despublicar y revocar acceso retiran el contenido; regresiones API
+  conservan la protección de consultas y descargas por request.
+- [x] Teclado y foco comprobados, revisión visual en tamaños estrechos;
+  estados vacíos y ausencia de resultados cubiertos por las regresiones.
+
+Comandos, resultados reales y límites de capturas en la
+[evidencia completa](../evidencia/ux-007/README.md).

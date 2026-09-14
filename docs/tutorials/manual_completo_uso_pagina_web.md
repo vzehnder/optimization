@@ -431,7 +431,7 @@ La pantalla del proyecto organiza sus tareas en secciones:
 
 - **Escenarios**: listado y formulario **Nuevo escenario**;
 - **Datos**: enlace **Ver catálogo de series de tiempo**;
-- **Informes**: **Portal del cliente** y **Dashboard templates**;
+- **Informes**: **Portal del cliente** y **Plantillas de informe**;
 - **Consolas**: enlaces a las consolas de cada escenario;
 - **Accesos**: **Capacidades externas**, solo para admin.
 
@@ -1704,35 +1704,41 @@ que topología y demás señales son iguales.
 La configuración se hace en la pantalla del proyecto. Conviene tener al menos
 un run exitoso para poder decidir qué información es útil.
 
-### 23.1 Dashboard templates
+### 23.1 Plantillas de informe
 
-En **Nuevo template**:
+En **Nueva plantilla**:
 
-1. escribir **Nombre nuevo template**;
+1. escribir **Nombre de la nueva plantilla**;
 2. activar o desactivar:
-   - Summary;
-   - Price chart;
-   - Grid chart;
-   - Renewable chart;
-   - BESS chart;
-   - Hydro chart;
-   - Profit chart;
-   - System dispatch table;
-   - Asset dispatch table;
-3. definir **Table row limit**;
-4. presionar **Crear template**.
+   - Resumen;
+   - Gráfico de precios;
+   - Gráfico de red;
+   - Gráfico renovable;
+   - Gráfico de batería;
+   - Gráfico hidráulico;
+   - Gráfico de beneficio;
+   - Tabla de despacho del sistema;
+   - Tabla de despacho por componente;
+3. definir **Límite de filas de las tablas**;
+4. presionar **Crear plantilla**.
 
-Los templates existentes se pueden abrir con **Editar {nombre}** y guardar con
-**Actualizar template**.
+Las plantillas existentes se pueden abrir con **Editar {nombre}** y guardar con
+**Actualizar plantilla**.
 
-La plantilla decide qué secciones de resultados se solicitan para una
-publicación. Si una señal no existe en un run, la sección puede aparecer como no
-disponible sin exponer datos técnicos ni romper el resto del reporte.
+Se conservan la configuración y la asociación de cada plantilla. La configuración
+activa del portal determina las secciones públicas actuales, también para los
+informes que tienen una plantilla asociada. Si una señal no existe en la ejecución,
+su ausencia no se representa como cero ni revela el diagnóstico interno.
 
 ### 23.2 Configuración del portal
 
-**Portal del cliente** controla presentación y selección pública. Sus elementos
-principales son:
+**Portal del cliente** controla presentación y selección pública.
+
+Los controles se agrupan en **Identidad y logo**, **Indicadores**, **Gráficos**,
+**Tablas** y **Descargas**. Se abre una sección a la vez; cambiar entre ellas o
+entre las secciones del proyecto conserva la configuración y su revisión.
+
+Sus elementos principales son:
 
 - **Nombre público**;
 - **Logo del portal**, con opciones de upload o retiro;
@@ -1788,21 +1794,36 @@ publicación.
 Guardar con **Guardar portal**. Mantener **Borrador** mientras se diseña;
 cambiar a **Activa** una vez revisados branding, labels y resultados.
 
+La configuración activa se aplica a todas las publicaciones del proyecto,
+incluidas las anteriores; ponerla en Borrador retira sus secciones de la
+superficie externa. Guardar configuración no publica ningún informe.
+El logo se guarda por separado sin descartar los demás cambios pendientes.
+
+**Guardando configuración**, **Cambios sin guardar** y **Configuración guardada**
+describen el envío aceptado. Un fallo de consulta o guardado conserva la edición.
+Ante un conflicto, no se adopta la revisión ajena para sobrescribirla: puedes
+conservar tu trabajo o elegir **Descartar mis cambios y cargar la versión vigente**.
+Al salir con cambios pendientes puedes **Seguir editando** o **Descartar y salir**.
+
 ## 24. Crear, previsualizar y publicar un reporte
 
-La sección **Publication Drafts** aparece en un run `succeeded`.
+**Preparar informe**, junto al resultado de una ejecución finalizada, abre
+**Informes de esta ejecución**. Los pasos **Resultado → Contenido → Vista previa
+→ Publicación** conservan la corrida elegida. **Configurar informe** lleva a
+Informes del proyecto y ofrece volver a preparar esa misma ejecución. Si la
+configuración está en borrador, **Activar configuración del informe** enfoca Estado.
 
 ### 24.1 Crear publicación
 
 Si no hay templates, la interfaz solicita crear uno en el proyecto.
 
-En **Nueva publicación**:
+En **Contenido del informe**:
 
-1. elegir **Dashboard Template**;
-2. completar **Public Title**;
-3. completar **Analyst Notes** con contexto útil para el receptor;
-4. marcar los **Allowed artifact types**;
-5. presionar **Crear publicación**.
+1. elegir **Plantilla del informe**;
+2. completar **Título del informe**;
+3. completar **Comentario para el cliente** con contexto útil para el receptor;
+4. marcar **Archivos disponibles para el cliente**;
+5. presionar **Guardar borrador**: todavía no aparece en el portal.
 
 Por defecto, limitar descargas a artefactos de negocio como summary y dispatch.
 No habilitar input snapshots, stdout, stderr o metadata técnica sin una razón
@@ -1810,7 +1831,9 @@ explícita.
 
 ### 24.2 Preview
 
-Abrir **Preview as client {título}**.
+Abrir **Vista previa de {título}**. Usa el mismo constructor y presentación
+externa del portal; se actualiza al volver después de guardar configuración o
+editar el borrador. **Volver al resultado** conserva la ejecución de origen.
 
 Comprobar:
 
@@ -1824,20 +1847,25 @@ Comprobar:
 - descargas permitidas;
 - ausencia de controles internos.
 
-El preview incluye **Contexto interno** para el analista. El usuario externo no
-debe recibir ese contexto técnico salvo lo incorporado deliberadamente al
-reporte público.
+La vista previa incluye **Contexto interno** contraído, después del informe.
+Ese bloque pertenece únicamente a la superficie interna y no llega al portal.
 
 ### 24.3 Editar, publicar y despublicar
 
-Una publicación `draft` puede editarse. Presionar **Publicar {título}** para
-cambiarla a `published`.
+Un borrador puede editarse con **Editar borrador {título}**. Guarda o cancela
+la edición antes de previsualizar o publicar. **Publicar informe** en la vista
+previa, o **Publicar {título}** en la ejecución, cambia su estado a publicado.
 
-Una publicación publicada ofrece **Unpublicar {título}**. La despublicación
+Una publicación publicada ofrece **Despublicar informe** en la vista previa
+y **Despublicar {título}** en la ejecución. La despublicación
 retira acceso externo de inmediato sin borrar run, versión ni publicación.
 
-Registrar quién publicó, cuándo y qué artefactos quedaron autorizados. Si se
-modifica el template o portal, repetir el preview.
+**Historial de publicación** conserva actor, fechas y estado técnico. El contrato
+solo permite editar borradores; despublicar no vuelve editable el registro.
+Para cambiar título, comentario o archivos de un informe ya publicado, crea otro
+borrador desde esa ejecución. Si cambia la configuración del portal, vuelve a
+comprobar la vista previa. **Enlace para el cliente** requiere una cuenta externa
+con acceso; analistas y administradores comprueban el contenido en la vista previa.
 
 ## 25. Administrar usuarios y capacidades externas
 

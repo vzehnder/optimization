@@ -1297,6 +1297,48 @@ button:focus-visible {
   padding: 0;
 }
 
+.portal-config-form [id^="portal-section-"]:not([hidden]) {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.portal-config-form > [role="status"] {
+  margin: 0;
+  padding: 0;
+  box-shadow: none;
+}
+
+.portal-config-form [aria-expanded="false"] {
+  background: #edf4f8;
+  color: #164761;
+}
+
+.report-steps {
+  align-items: center;
+}
+
+.report-steps > span {
+  padding: 0.65rem 0.9rem;
+  color: #526777;
+}
+
+.report-steps a[aria-current="step"] {
+  background: #075985;
+  color: white;
+}
+
+.report-configuration-context {
+  padding: 0.8rem;
+  border-left: 3px solid #0b779d;
+  background: #f0f7fb;
+  margin-block: 1rem;
+}
+
+.report-configuration-context p {
+  margin: 0 0 0.5rem;
+}
+
 .portal-config-item {
   display: grid;
   gap: 0.35rem;

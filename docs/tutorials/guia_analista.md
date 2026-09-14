@@ -538,9 +538,9 @@ correr desde la variante.
 - Los graficos base cubren precios, importacion/exportacion, renovable usada
   y vertida, carga/descarga y SOC del BESS, generacion y stock hidraulico,
   demanda y profit por periodo, mas KPIs economicos por corrida.
-- **Plantillas de dashboard**: en **Informes** del proyecto puedes guardar
-  configuraciones de graficos como plantillas reutilizables y aplicarlas a
-  corridas nuevas.
+- **Plantillas de informe**: en **Informes** del proyecto puedes crear y editar
+  plantillas y asociarlas a un borrador. La configuración vigente del portal
+  determina las secciones que verá el cliente.
 - **Comparar esta ejecución** abre la comparación con la corrida actual como
   base. También puedes entrar por **Comparar corridas** en **Ejecuciones** del
   escenario y elegir dos corridas exitosas. La selección queda en el enlace y
@@ -559,16 +559,30 @@ Un usuario `external` con `portal_view` no ve nada de lo anterior: solo un
 portal read-only con lo que se publico y se configuro explicitamente. El
 portal no es una vista automatica de los resultados; es una configuracion.
 
-1. **Publicar la corrida.** En el detalle de un run exitoso, seccion de
-   publicacion -> **Nueva publicacion**: eliges que artefactos y dashboards
-   expone. Puedes previsualizarla exactamente como la vera el externo.
-2. **Configurar el portal del proyecto.** En **Informes** del proyecto, la
-   seccion **Portal del cliente** define nombre publico, logo (PNG o JPEG,
-   hasta 256 KiB) y que se muestra: titulos de secciones, KPIs (con signo y
-   enfasis), graficos, tablas y descargas, elegidos desde un catalogo de
-   items disponibles. La configuracion se guarda por revisiones y tiene
-   estado **Borrador** o **Activa**; solo lo activo llega al portal.
-3. **Asignar capacidades.** Un admin decide, proyecto por proyecto, que
+1. **Elegir el resultado.** Desde una ejecución finalizada, **Preparar informe**
+   abre sus informes. El recorrido muestra **Resultado → Contenido → Vista
+   previa → Publicación** y mantiene la ejecución elegida.
+2. **Configurar el informe.** El enlace lleva a **Informes** del mismo proyecto.
+   **Portal del cliente** separa **Identidad y logo**, **Indicadores**,
+   **Gráficos**, **Tablas** y **Descargas**. Cambiar de sección conserva los
+   valores. El logo PNG/JPEG de hasta 256 KiB se guarda por separado sin borrar
+   los cambios pendientes. **Guardar portal** usa la revisión que editaste;
+   un conflicto conserva tu trabajo y ofrece cargar la versión vigente solo
+   después de descartar explícitamente tus cambios. La salida también avisa
+   cuando hay configuración pendiente.
+3. **Guardar borrador y revisar.** Crea una **Plantilla de informe** si falta,
+   vuelve a la ejecución y completa título, comentario para el cliente y archivos.
+   **Guardar borrador** no publica. Abre **Vista previa de {título}** y comprueba
+   el contenido externo real. Activa la configuración si sigue en **Borrador**;
+   el enlace de corrección enfoca **Estado**. Una configuración activa se aplica
+   a todos los informes del proyecto, incluidos los publicados.
+4. **Publicar explícitamente.** Usa **Publicar informe** en la vista previa
+   o **Publicar {título}** en la ejecución. Puedes **Despublicar informe** sin
+   borrar resultados. Solo los borradores se editan: para cambiar título,
+   comentario o archivos de un informe publicado, prepara otro borrador de la
+   misma ejecución. **Enlace para el cliente** requiere una cuenta externa;
+   analistas y administradores verifican el contenido mediante la vista previa.
+5. **Asignar capacidades.** Un admin decide, proyecto por proyecto, que
    usuario externo tiene **Portal** (`portal_view`) y/o **Operar**
    (`operate`), en **Accesos** de la pagina del proyecto.
    Revocar una capacidad surte efecto en el siguiente request.

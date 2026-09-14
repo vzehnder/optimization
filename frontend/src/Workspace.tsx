@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createPortal } from "react-dom";
 import {
   DragEvent,
   FormEvent,
@@ -16,6 +17,7 @@ import {
   useNavigate,
   useParams,
   useSearchParams,
+  useBlocker,
 } from "react-router-dom";
 import {
   formatResultValue,
@@ -643,15 +645,15 @@ function CreateScenarioForm({ projectId }: { projectId: number }) {
 }
 
 const templateBooleanFields: Array<[keyof DashboardTemplatePayload, string]> = [
-  ["show_summary", "Summary"],
-  ["show_price_chart", "Price chart"],
-  ["show_grid_chart", "Grid chart"],
-  ["show_renewable_chart", "Renewable chart"],
-  ["show_bess_chart", "BESS chart"],
-  ["show_hydro_chart", "Hydro chart"],
-  ["show_profit_chart", "Profit chart"],
-  ["show_system_dispatch_table", "System dispatch table"],
-  ["show_asset_dispatch_table", "Asset dispatch table"],
+  ["show_summary", "Resumen"],
+  ["show_price_chart", "Gráfico de precios"],
+  ["show_grid_chart", "Gráfico de red"],
+  ["show_renewable_chart", "Gráfico renovable"],
+  ["show_bess_chart", "Gráfico de batería"],
+  ["show_hydro_chart", "Gráfico hidráulico"],
+  ["show_profit_chart", "Gráfico de beneficio"],
+  ["show_system_dispatch_table", "Tabla de despacho del sistema"],
+  ["show_asset_dispatch_table", "Tabla de despacho por componente"],
 ];
 
 function DashboardTemplateFields({
@@ -688,7 +690,9 @@ function DashboardTemplateFields({
           </label>
         ))}
       </div>
-      <label htmlFor={`${nameLabel}-row-limit`}>Table row limit</label>
+      <label htmlFor={`${nameLabel}-row-limit`}>
+        Límite de filas de las tablas
+      </label>
       <input
         id={`${nameLabel}-row-limit`}
         type="number"
@@ -738,15 +742,15 @@ function CreateDashboardTemplateForm({ projectId }: { projectId: number }) {
         mutation.mutate();
       }}
     >
-      <h3>Nuevo template</h3>
+      <h3>Nueva plantilla</h3>
       {error ? <p role="alert">{error}</p> : null}
       <DashboardTemplateFields
         value={payload}
         onChange={setPayload}
-        nameLabel="Nombre nuevo template"
+        nameLabel="Nombre de la nueva plantilla"
       />
       <button type="submit" disabled={mutation.isPending}>
-        Crear template
+        Crear plantilla
       </button>
     </form>
   );
@@ -795,11 +799,11 @@ function EditDashboardTemplateForm({
       <DashboardTemplateFields
         value={payload}
         onChange={setPayload}
-        nameLabel="Nombre del template editado"
+        nameLabel="Nombre de la plantilla editada"
       />
       <div className="inline-actions">
         <button type="submit" disabled={mutation.isPending}>
-          Actualizar template
+          Actualizar plantilla
         </button>
         <button type="button" className="secondary-action" onClick={onDone}>
           Cancelar
@@ -816,7 +820,7 @@ function DashboardTemplateList({
 }) {
   const [editingId, setEditingId] = useState<number | null>(null);
   if (!templates.length) {
-    return <EmptyState>Aun no hay templates de dashboard.</EmptyState>;
+    return <EmptyState>Todavía no hay plantillas de informe.</EmptyState>;
   }
   return (
     <ul className="resource-list template-list">
@@ -824,18 +828,19 @@ function DashboardTemplateList({
         <li key={template.id}>
           <strong>{template.name}</strong>
           <p>
-            Summary {template.show_summary ? "on" : "off"} | Charts{" "}
+            Resumen {template.show_summary ? "activado" : "desactivado"}.
+            Gráficos:{" "}
             {[
-              template.show_price_chart ? "price" : "",
-              template.show_grid_chart ? "grid" : "",
-              template.show_renewable_chart ? "renewable" : "",
-              template.show_bess_chart ? "BESS" : "",
-              template.show_hydro_chart ? "hydro" : "",
-              template.show_profit_chart ? "profit" : "",
+              template.show_price_chart ? "precios" : "",
+              template.show_grid_chart ? "red" : "",
+              template.show_renewable_chart ? "renovable" : "",
+              template.show_bess_chart ? "batería" : "",
+              template.show_hydro_chart ? "hidráulico" : "",
+              template.show_profit_chart ? "beneficio" : "",
             ]
               .filter(Boolean)
-              .join(", ") || "none"}{" "}
-            | rows {template.table_preview_limit}
+              .join(", ") || "ninguno"}
+            . Máximo {template.table_preview_limit} filas por tabla.
           </p>
           <button
             type="button"
@@ -1217,6 +1222,77 @@ function PortalTableItemFields({
   );
 }
 
+function ReportNavigationGuard({ dirty }: { dirty: boolean }) {
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      dirty && currentLocation.pathname !== nextLocation.pathname,
+  );
+  const continueRef = useRef<HTMLButtonElement>(null);
+  const leaving = blocker.state === "blocked";
+  useEffect(() => {
+    if (!leaving) return;
+    const previous = window.document.activeElement as HTMLElement | null;
+    continueRef.current?.focus();
+    return () => previous?.focus();
+  }, [leaving]);
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (dirty) event.preventDefault();
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+  if (!leaving) return null;
+  return createPortal(
+    <div className="modal-backdrop" role="presentation">
+      <section
+        className="draft-leave-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="leave-report-title"
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            blocker.reset?.();
+          }
+          if (event.key === "Tab") {
+            const buttons = event.currentTarget.querySelectorAll("button");
+            const first = buttons[0],
+              last = buttons[buttons.length - 1];
+            if (event.shiftKey && window.document.activeElement === first) {
+              event.preventDefault();
+              last.focus();
+            } else if (
+              !event.shiftKey &&
+              window.document.activeElement === last
+            ) {
+              event.preventDefault();
+              first.focus();
+            }
+          }
+        }}
+      >
+        <h2 id="leave-report-title">Configuración sin guardar</h2>
+        <p>
+          Guarda la configuración antes de volver al informe o descarta los
+          cambios pendientes.
+        </p>
+        <button
+          type="button"
+          ref={continueRef}
+          onClick={() => blocker.reset?.()}
+        >
+          Seguir editando
+        </button>
+        <button type="button" onClick={() => blocker.proceed?.()}>
+          Descartar y salir
+        </button>
+      </section>
+    </div>,
+    window.document.body,
+  );
+}
+
 function PortalConfigurationForm({
   projectId,
   configuration,
@@ -1225,6 +1301,16 @@ function PortalConfigurationForm({
   configuration: PortalConfiguration;
 }) {
   const queryClient = useQueryClient();
+  const [section, setSection] = useState("branding");
+  const location = useLocation();
+  const statusRef = useRef<HTMLSelectElement>(null);
+  useEffect(() => {
+    if (location.hash !== "#portal-status") return;
+    const frame = requestAnimationFrame(() => statusRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [location.hash]);
+  const [accepted, setAccepted] = useState(configuration);
+  const [conflict, setConflict] = useState(false);
   const [document, setDocument] = useState<PortalConfigDocument>(
     configuration.document,
   );
@@ -1233,39 +1319,78 @@ function PortalConfigurationForm({
   );
   const [error, setError] = useState("");
   const [logoFile, setLogoFile] = useState<File | null>(null);
+  const dirty =
+    status !== accepted.status ||
+    JSON.stringify(document) !== JSON.stringify(accepted.document);
   const mutation = useMutation({
-    mutationFn: () =>
-      savePortalConfiguration(projectId, {
-        document,
-        status,
-        expected_revision: configuration.revision,
-      }),
-    onSuccess: (saved) => {
+    mutationFn: (payload: {
+      document: PortalConfigDocument;
+      status: PortalConfigurationStatus;
+      expected_revision: number;
+    }) => savePortalConfiguration(projectId, payload),
+    onSuccess: (saved, submitted) => {
       setError("");
+      setConflict(false);
+      setAccepted(saved);
+      setDocument((current) =>
+        current === submitted.document ? saved.document : current,
+      );
+      setStatus((current) =>
+        current === submitted.status ? saved.status : current,
+      );
+      void queryClient.invalidateQueries({ queryKey: ["publication-preview"] });
       queryClient.setQueryData(portalConfigurationQueryKey(projectId), saved);
     },
-    onError: (mutationError) => setError(errorMessage(mutationError)),
+    onError: handleSaveError,
   });
   const logoMutation = useMutation({
     mutationFn: () => {
       if (!logoFile) throw new Error("Selecciona un logo PNG o JPEG.");
-      return uploadPortalLogo(projectId, logoFile, configuration.revision);
+      return uploadPortalLogo(projectId, logoFile, accepted.revision);
     },
     onSuccess: (saved) => {
       setError("");
       setLogoFile(null);
+      setAccepted(saved);
+      void queryClient.invalidateQueries({ queryKey: ["publication-preview"] });
       queryClient.setQueryData(portalConfigurationQueryKey(projectId), saved);
     },
-    onError: (mutationError) => setError(errorMessage(mutationError)),
+    onError: handleSaveError,
   });
   const removeLogoMutation = useMutation({
-    mutationFn: () => removePortalLogo(projectId, configuration.revision),
+    mutationFn: () => removePortalLogo(projectId, accepted.revision),
     onSuccess: (saved) => {
       setError("");
       setLogoFile(null);
+      setAccepted(saved);
+      void queryClient.invalidateQueries({ queryKey: ["publication-preview"] });
       queryClient.setQueryData(portalConfigurationQueryKey(projectId), saved);
     },
-    onError: (mutationError) => setError(errorMessage(mutationError)),
+    onError: handleSaveError,
+  });
+
+  function handleSaveError(mutationError: unknown) {
+    const isConflict =
+      mutationError instanceof ApiError && mutationError.status === 409;
+    setConflict(isConflict);
+    setError(
+      isConflict
+        ? "La configuración cambió en otra sesión. Tus cambios siguen aquí y no se han guardado."
+        : errorMessage(mutationError),
+    );
+  }
+  const reloadMutation = useMutation({
+    mutationFn: () => getPortalConfiguration(projectId),
+    onSuccess: (saved) => {
+      setAccepted(saved);
+      setDocument(saved.document);
+      setStatus(saved.status);
+      setLogoFile(null);
+      setError("");
+      setConflict(false);
+      queryClient.setQueryData(portalConfigurationQueryKey(projectId), saved);
+    },
+    onError: handleSaveError,
   });
 
   const catalogs = useQuery<PortalCatalogs>({
@@ -1304,231 +1429,333 @@ function PortalConfigurationForm({
   return (
     <form
       className="workspace-form portal-config-form"
+      onInvalidCapture={(event) => {
+        event.preventDefault();
+        const field = event.target as HTMLInputElement;
+        const panel = field.closest('[id^="portal-section-"]');
+        if (panel) setSection(panel.id.replace("portal-section-", ""));
+        setError(
+          `Revisa ${field.labels?.[0]?.textContent || "el campo indicado"}: introduce un valor válido${field.min ? `, al menos ${field.min}` : ""}.`,
+        );
+        field.setAttribute("aria-describedby", "portal-configuration-error");
+        requestAnimationFrame(() => field.focus());
+      }}
+      onInputCapture={(event) => {
+        const field = event.target as HTMLInputElement;
+        if (
+          field.getAttribute("aria-describedby") ===
+            "portal-configuration-error" &&
+          field.validity.valid
+        ) {
+          field.removeAttribute("aria-describedby");
+          setError("");
+        }
+      }}
       onSubmit={(event) => {
         event.preventDefault();
         setError("");
-        mutation.mutate();
+        mutation.mutate({
+          document,
+          status,
+          expected_revision: accepted.revision,
+        });
       }}
     >
-      {error ? <p role="alert">{error}</p> : null}
-      <p>Revision {configuration.revision}</p>
-      <label htmlFor="portal-display-name">Nombre publico</label>
-      <input
-        id="portal-display-name"
-        type="text"
-        value={document.display_name}
-        onChange={(event) =>
-          setDocument({ ...document, display_name: event.target.value })
-        }
-      />
-      <fieldset className="portal-logo-editor">
-        <legend>Logo</legend>
-        <p>{configuration.has_logo ? "Logo configurado" : "Sin logo"}</p>
-        <label htmlFor="portal-logo">Logo del portal</label>
-        <input
-          id="portal-logo"
-          type="file"
-          accept="image/png,image/jpeg"
-          onChange={(event) => setLogoFile(event.target.files?.[0] || null)}
-        />
-        <p className="field-hint">PNG o JPEG, hasta 256 KiB.</p>
-        <div className="button-row">
-          <button
-            type="button"
-            disabled={!logoFile || logoMutation.isPending}
-            onClick={() => {
-              setError("");
-              logoMutation.mutate();
-            }}
-          >
-            {configuration.has_logo ? "Reemplazar logo" : "Subir logo"}
-          </button>
-          {configuration.has_logo ? (
-            <button
-              type="button"
-              className="secondary-button"
-              disabled={removeLogoMutation.isPending}
-              onClick={() => {
-                setError("");
-                removeLogoMutation.mutate();
-              }}
-            >
-              Quitar logo
-            </button>
-          ) : null}
-        </div>
-      </fieldset>
-      <label className="checkbox-row">
-        <input
-          type="checkbox"
-          aria-label="Mostrar KPIs"
-          checked={kpis.enabled}
-          onChange={(event) => updateKpis({ enabled: event.target.checked })}
-        />
-        <span>Mostrar KPIs</span>
-      </label>
-      <label htmlFor="portal-kpi-label">Titulo de la seccion KPI</label>
-      <input
-        id="portal-kpi-label"
-        type="text"
-        value={kpis.label}
-        onChange={(event) => updateKpis({ label: event.target.value })}
-      />
-      <ul className="portal-config-item-list">
-        {kpis.items.map((item, index) => (
-          <PortalKpiItemFields
-            key={index}
-            index={index}
-            item={item}
-            onChange={(next) =>
-              updateKpis({
-                items: kpis.items.map((current, position) =>
-                  position === index ? next : current,
-                ),
-              })
-            }
-            onRemove={() =>
-              updateKpis({
-                items: kpis.items.filter((_, position) => position !== index),
-              })
-            }
-          />
-        ))}
-      </ul>
-      <button
-        type="button"
-        onClick={() =>
-          updateKpis({ items: [...kpis.items, newPortalKpiItem()] })
-        }
+      <ReportNavigationGuard dirty={dirty || logoFile !== null} />
+      {error ? (
+        <p role="alert" id="portal-configuration-error">
+          {error}
+        </p>
+      ) : null}
+      {conflict ? (
+        <button
+          type="button"
+          disabled={reloadMutation.isPending}
+          onClick={() => reloadMutation.mutate()}
+        >
+          Descartar mis cambios y cargar la versión vigente
+        </button>
+      ) : null}
+      <p>Revision {accepted.revision}</p>
+      <p role="status">
+        {mutation.isPending
+          ? "Guardando configuración"
+          : dirty
+            ? "Cambios sin guardar"
+            : accepted.revision === 0
+              ? "Sin configuración guardada"
+              : "Configuración guardada"}
+      </p>
+      <p>
+        La configuración activa se aplica a todos los informes del proyecto,
+        incluidos los ya publicados. Guardarla no publica borradores. El logo se
+        guarda por separado.
+      </p>
+      <div
+        className="inline-actions"
+        role="group"
+        aria-label="Secciones del informe"
       >
-        Agregar KPI
-      </button>
-      <label className="checkbox-row">
-        <input
-          type="checkbox"
-          aria-label="Mostrar graficos"
-          checked={charts.enabled}
-          onChange={(event) => updateCharts({ enabled: event.target.checked })}
-        />
-        <span>Mostrar graficos</span>
-      </label>
-      <label htmlFor="portal-chart-label">
-        Titulo de la seccion de graficos
-      </label>
-      <input
-        id="portal-chart-label"
-        type="text"
-        value={charts.label}
-        onChange={(event) => updateCharts({ label: event.target.value })}
-      />
-      <ul className="portal-config-item-list">
-        {charts.items.map((item, index) => (
-          <PortalChartItemFields
-            key={item.id}
-            item={item}
-            onChange={(next) =>
-              updateCharts({
-                items: charts.items.map((current, position) =>
-                  position === index ? next : current,
-                ),
-              })
-            }
-            onRemove={() =>
-              updateCharts({
-                items: charts.items.filter((_, position) => position !== index),
-              })
-            }
-          />
+        {[
+          ["branding", "Identidad y logo"],
+          ["kpis", "Indicadores"],
+          ["charts", "Gráficos"],
+          ["tables", "Tablas"],
+          ["downloads", "Descargas"],
+        ].map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            aria-expanded={section === id}
+            aria-controls={`portal-section-${id}`}
+            onClick={() => setSection(id)}
+          >
+            {label}
+          </button>
         ))}
-      </ul>
-      <CatalogPicker
-        label="Grafico del catalogo"
-        actionLabel="Agregar grafico"
-        options={chartCatalog.filter(
-          (chart) => !charts.items.some((item) => item.chart_key === chart.key),
-        )}
-        onAdd={(key) => {
-          const chart = chartCatalog.find((entry) => entry.key === key);
-          if (!chart) return;
-          updateCharts({
-            items: [...charts.items, chartItemFromCatalog(chart)],
-          });
-        }}
-      />
-      <label className="checkbox-row">
+      </div>
+      <div id="portal-section-branding" hidden={section !== "branding"}>
+        <label htmlFor="portal-display-name">Nombre publico</label>
         <input
-          type="checkbox"
-          aria-label="Mostrar tablas"
-          checked={tables.enabled}
-          onChange={(event) => updateTables({ enabled: event.target.checked })}
-        />
-        <span>Mostrar tablas</span>
-      </label>
-      <label htmlFor="portal-table-label">Titulo de la seccion de tablas</label>
-      <input
-        id="portal-table-label"
-        type="text"
-        value={tables.label}
-        onChange={(event) => updateTables({ label: event.target.value })}
-      />
-      <ul className="portal-config-item-list">
-        {tables.items.map((item, index) => (
-          <PortalTableItemFields
-            key={item.id}
-            item={item}
-            catalog={tableCatalog.find((entry) => entry.key === item.table_key)}
-            onChange={(next) =>
-              updateTables({
-                items: tables.items.map((current, position) =>
-                  position === index ? next : current,
-                ),
-              })
-            }
-            onRemove={() =>
-              updateTables({
-                items: tables.items.filter((_, position) => position !== index),
-              })
-            }
-          />
-        ))}
-      </ul>
-      <CatalogPicker
-        label="Tabla del catalogo"
-        actionLabel="Agregar tabla"
-        options={tableCatalog.filter(
-          (table) => !tables.items.some((item) => item.table_key === table.key),
-        )}
-        onAdd={(key) => {
-          const table = tableCatalog.find((entry) => entry.key === key);
-          if (!table) return;
-          updateTables({
-            items: [...tables.items, tableItemFromCatalog(table)],
-          });
-        }}
-      />
-      <label className="checkbox-row">
-        <input
-          type="checkbox"
-          aria-label="Mostrar descargas"
-          checked={downloads.enabled}
+          id="portal-display-name"
+          type="text"
+          value={document.display_name}
           onChange={(event) =>
-            updateDownloads({ enabled: event.target.checked })
+            setDocument({ ...document, display_name: event.target.value })
           }
         />
-        <span>Mostrar descargas</span>
-      </label>
-      <label htmlFor="portal-downloads-label">
-        Titulo de la seccion de descargas
-      </label>
-      <input
-        id="portal-downloads-label"
-        type="text"
-        value={downloads.label}
-        onChange={(event) => updateDownloads({ label: event.target.value })}
-      />
+        <fieldset className="portal-logo-editor">
+          <legend>Logo</legend>
+          <p>{configuration.has_logo ? "Logo configurado" : "Sin logo"}</p>
+          <label htmlFor="portal-logo">Logo del portal</label>
+          <input
+            id="portal-logo"
+            type="file"
+            accept="image/png,image/jpeg"
+            onChange={(event) => setLogoFile(event.target.files?.[0] || null)}
+          />
+          <p className="field-hint">PNG o JPEG, hasta 256 KiB.</p>
+          <div className="button-row">
+            <button
+              type="button"
+              disabled={!logoFile || logoMutation.isPending}
+              onClick={() => {
+                setError("");
+                logoMutation.mutate();
+              }}
+            >
+              {configuration.has_logo ? "Reemplazar logo" : "Subir logo"}
+            </button>
+            {configuration.has_logo ? (
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={removeLogoMutation.isPending}
+                onClick={() => {
+                  setError("");
+                  removeLogoMutation.mutate();
+                }}
+              >
+                Quitar logo
+              </button>
+            ) : null}
+          </div>
+        </fieldset>
+      </div>
+      <div id="portal-section-kpis" hidden={section !== "kpis"}>
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            aria-label="Mostrar KPIs"
+            checked={kpis.enabled}
+            onChange={(event) => updateKpis({ enabled: event.target.checked })}
+          />
+          <span>Mostrar KPIs</span>
+        </label>
+        <label htmlFor="portal-kpi-label">Titulo de la seccion KPI</label>
+        <input
+          id="portal-kpi-label"
+          type="text"
+          value={kpis.label}
+          onChange={(event) => updateKpis({ label: event.target.value })}
+        />
+        <ul className="portal-config-item-list">
+          {kpis.items.map((item, index) => (
+            <PortalKpiItemFields
+              key={index}
+              index={index}
+              item={item}
+              onChange={(next) =>
+                updateKpis({
+                  items: kpis.items.map((current, position) =>
+                    position === index ? next : current,
+                  ),
+                })
+              }
+              onRemove={() =>
+                updateKpis({
+                  items: kpis.items.filter((_, position) => position !== index),
+                })
+              }
+            />
+          ))}
+        </ul>
+        <button
+          type="button"
+          onClick={() =>
+            updateKpis({ items: [...kpis.items, newPortalKpiItem()] })
+          }
+        >
+          Agregar KPI
+        </button>
+      </div>
+      <div id="portal-section-charts" hidden={section !== "charts"}>
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            aria-label="Mostrar graficos"
+            checked={charts.enabled}
+            onChange={(event) =>
+              updateCharts({ enabled: event.target.checked })
+            }
+          />
+          <span>Mostrar graficos</span>
+        </label>
+        <label htmlFor="portal-chart-label">
+          Titulo de la seccion de graficos
+        </label>
+        <input
+          id="portal-chart-label"
+          type="text"
+          value={charts.label}
+          onChange={(event) => updateCharts({ label: event.target.value })}
+        />
+        <ul className="portal-config-item-list">
+          {charts.items.map((item, index) => (
+            <PortalChartItemFields
+              key={item.id}
+              item={item}
+              onChange={(next) =>
+                updateCharts({
+                  items: charts.items.map((current, position) =>
+                    position === index ? next : current,
+                  ),
+                })
+              }
+              onRemove={() =>
+                updateCharts({
+                  items: charts.items.filter(
+                    (_, position) => position !== index,
+                  ),
+                })
+              }
+            />
+          ))}
+        </ul>
+        <CatalogPicker
+          label="Grafico del catalogo"
+          actionLabel="Agregar grafico"
+          options={chartCatalog.filter(
+            (chart) =>
+              !charts.items.some((item) => item.chart_key === chart.key),
+          )}
+          onAdd={(key) => {
+            const chart = chartCatalog.find((entry) => entry.key === key);
+            if (!chart) return;
+            updateCharts({
+              items: [...charts.items, chartItemFromCatalog(chart)],
+            });
+          }}
+        />
+      </div>
+      <div id="portal-section-tables" hidden={section !== "tables"}>
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            aria-label="Mostrar tablas"
+            checked={tables.enabled}
+            onChange={(event) =>
+              updateTables({ enabled: event.target.checked })
+            }
+          />
+          <span>Mostrar tablas</span>
+        </label>
+        <label htmlFor="portal-table-label">
+          Titulo de la seccion de tablas
+        </label>
+        <input
+          id="portal-table-label"
+          type="text"
+          value={tables.label}
+          onChange={(event) => updateTables({ label: event.target.value })}
+        />
+        <ul className="portal-config-item-list">
+          {tables.items.map((item, index) => (
+            <PortalTableItemFields
+              key={item.id}
+              item={item}
+              catalog={tableCatalog.find(
+                (entry) => entry.key === item.table_key,
+              )}
+              onChange={(next) =>
+                updateTables({
+                  items: tables.items.map((current, position) =>
+                    position === index ? next : current,
+                  ),
+                })
+              }
+              onRemove={() =>
+                updateTables({
+                  items: tables.items.filter(
+                    (_, position) => position !== index,
+                  ),
+                })
+              }
+            />
+          ))}
+        </ul>
+        <CatalogPicker
+          label="Tabla del catalogo"
+          actionLabel="Agregar tabla"
+          options={tableCatalog.filter(
+            (table) =>
+              !tables.items.some((item) => item.table_key === table.key),
+          )}
+          onAdd={(key) => {
+            const table = tableCatalog.find((entry) => entry.key === key);
+            if (!table) return;
+            updateTables({
+              items: [...tables.items, tableItemFromCatalog(table)],
+            });
+          }}
+        />
+      </div>
+      <div id="portal-section-downloads" hidden={section !== "downloads"}>
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            aria-label="Mostrar descargas"
+            checked={downloads.enabled}
+            onChange={(event) =>
+              updateDownloads({ enabled: event.target.checked })
+            }
+          />
+          <span>Mostrar descargas</span>
+        </label>
+        <label htmlFor="portal-downloads-label">
+          Titulo de la seccion de descargas
+        </label>
+        <input
+          id="portal-downloads-label"
+          type="text"
+          value={downloads.label}
+          onChange={(event) => updateDownloads({ label: event.target.value })}
+        />
+      </div>
       <label htmlFor="portal-status">Estado</label>
       <select
         id="portal-status"
+        ref={statusRef}
         value={status}
         onChange={(event) =>
           setStatus(event.target.value as PortalConfigurationStatus)
@@ -1557,16 +1784,24 @@ function PortalConfigurationSection({ projectId }: { projectId: number }) {
       aria-labelledby="portal-configuration"
     >
       <h2 id="portal-configuration">Portal del cliente</h2>
+      {configuration.isError && configuration.data ? (
+        <div role="alert">
+          <p>{errorMessage(configuration.error)}</p>
+          <button type="button" onClick={() => void configuration.refetch()}>
+            Reintentar configuración
+          </button>
+        </div>
+      ) : null}
       {configuration.isPending ? (
         <LoadingView label="Cargando configuracion del portal" />
-      ) : configuration.isError ? (
+      ) : !configuration.data ? (
         <RequestErrorView
           error={configuration.error}
           retry={() => void configuration.refetch()}
         />
       ) : (
         <PortalConfigurationForm
-          key={configuration.data.revision}
+          key={projectId}
           projectId={projectId}
           configuration={configuration.data}
         />
@@ -1587,9 +1822,13 @@ function DashboardTemplatesSection({ projectId }: { projectId: number }) {
       className="workspace-section"
       aria-labelledby="dashboard-templates"
     >
-      <h2 id="dashboard-templates">Dashboard templates</h2>
+      <h2 id="dashboard-templates">Plantillas de informe</h2>
+      <p>
+        La configuración del portal determina lo que verá el cliente, también en
+        informes con una plantilla asociada.
+      </p>
       {templates.isPending ? (
-        <p role="status">Cargando templates</p>
+        <p role="status">Cargando plantillas</p>
       ) : templates.isError ? (
         <div role="alert">
           <p>{errorMessage(templates.error)}</p>
@@ -1602,6 +1841,61 @@ function DashboardTemplatesSection({ projectId }: { projectId: number }) {
       )}
       <CreateDashboardTemplateForm projectId={projectId} />
     </section>
+  );
+}
+
+function ReportConfigurationLink({
+  projectId,
+  runId,
+}: {
+  projectId: number;
+  runId: number;
+}) {
+  const configuration = useQuery({
+    queryKey: portalConfigurationQueryKey(projectId),
+    queryFn: ({ signal }) => getPortalConfiguration(projectId, signal),
+    retry: false,
+  });
+  const inactive = configuration.data?.status === "draft";
+  return (
+    <div className="report-configuration-context">
+      {configuration.isPending ? (
+        <p role="status">Consultando configuración del informe</p>
+      ) : null}
+      {configuration.isError ? (
+        <p role="alert">
+          No pudimos comprobar la configuración.{" "}
+          <button type="button" onClick={() => void configuration.refetch()}>
+            Reintentar configuración
+          </button>
+        </p>
+      ) : null}
+      {configuration.data ? (
+        <p>
+          {inactive
+            ? "La configuración está en borrador: el portal no mostrará las secciones configuradas."
+            : `Configuración vigente: ${configuration.data.document.display_name || "nombre del proyecto"}. Revisión ${configuration.data.revision}.`}
+        </p>
+      ) : null}
+      <Link
+        to={`/projects/${projectId}?section=reports&reportRun=${runId}${inactive ? "#portal-status" : "#portal-configuration"}`}
+      >
+        {inactive ? "Activar configuración del informe" : "Configurar informe"}
+      </Link>
+    </div>
+  );
+}
+
+function ReportReturnLink() {
+  const location = useLocation();
+  const runId = Number(new URLSearchParams(location.search).get("reportRun"));
+  if (!Number.isSafeInteger(runId) || runId < 1) return null;
+  return (
+    <p>
+      <Link to={`/runs/${runId}#publications`}>
+        Volver a preparar el informe de la ejecución {runId}
+      </Link>
+    </p>
   );
 }
 
@@ -1739,6 +2033,7 @@ export function ProjectDetailView({
           </div>
         ) : null}
         <div className="workspace-stack" hidden={section !== "reports"}>
+          <ReportReturnLink />
           <PortalConfigurationSection projectId={projectId} />
           <DashboardTemplatesSection projectId={projectId} />
         </div>
@@ -9712,7 +10007,7 @@ function PublicationEditorForm({
         onChange={(event) => setDashboardTemplateId(Number(event.target.value))}
       >
         <option value="" disabled>
-          Selecciona template
+          Selecciona una plantilla
         </option>
         {templates.map((template) => (
           <option key={template.id} value={template.id}>
@@ -9736,7 +10031,7 @@ function PublicationEditorForm({
         onChange={(event) => setAnalystNotes(event.target.value)}
       />
       <fieldset className="artifact-fieldset">
-        <legend>Allowed artifact types</legend>
+        <legend>Archivos disponibles para el cliente</legend>
         {artifactTypes.length ? (
           artifactTypes.map((artifactType) => (
             <label key={artifactType} className="checkbox-row">
@@ -9752,7 +10047,7 @@ function PublicationEditorForm({
             </label>
           ))
         ) : (
-          <p className="empty-state">No hay artifacts registrados.</p>
+          <p className="empty-state">No hay archivos registrados.</p>
         )}
       </fieldset>
       <div className="inline-actions">
@@ -9799,21 +10094,27 @@ function CreatePublicationForm({
   if (!templates.length) {
     return (
       <p className="empty-state">
-        Crea un dashboard template del proyecto antes de publicar.
+        Crea una plantilla en Informes del proyecto para preparar el borrador.
       </p>
     );
   }
 
   return (
     <div className="publication-create">
-      <h3>Nueva publicacion</h3>
+      <h3>Contenido del informe</h3>
+      <p>Guardar un borrador permite revisarlo antes de publicarlo.</p>
+      {mutation.isSuccess ? (
+        <p role="status">
+          Borrador guardado. Todavía no es visible en el portal.
+        </p>
+      ) : null}
       <PublicationEditorForm
         templates={templates}
         artifacts={artifacts}
-        titleLabel="Public Title"
-        notesLabel="Analyst Notes"
-        templateLabel="Dashboard Template"
-        submitLabel="Crear publicacion"
+        titleLabel="Título del informe"
+        notesLabel="Comentario para el cliente"
+        templateLabel="Plantilla del informe"
+        submitLabel="Guardar borrador"
         pending={mutation.isPending}
         error={error}
         onSubmit={(payload) => {
@@ -9829,27 +10130,27 @@ function PublicationAudit({ publication }: { publication: Publication }) {
   return (
     <dl className="source-metadata version-metadata publication-audit">
       <div>
-        <dt>Status</dt>
+        <dt>Estado técnico</dt>
         <dd>{publication.status}</dd>
       </div>
       <div>
-        <dt>Updated by</dt>
+        <dt>Actualizado por</dt>
         <dd>{displayValue(publication.updated_by)}</dd>
       </div>
       <div>
-        <dt>Updated at</dt>
+        <dt>Última actualización</dt>
         <dd>{displayValue(publication.updated_at)}</dd>
       </div>
       <div>
-        <dt>Published by</dt>
+        <dt>Publicado por</dt>
         <dd>{displayValue(publication.published_by)}</dd>
       </div>
       <div>
-        <dt>Published at</dt>
+        <dt>Fecha de publicación</dt>
         <dd>{displayValue(publication.published_at)}</dd>
       </div>
       <div>
-        <dt>Unpublished at</dt>
+        <dt>Fecha de despublicación</dt>
         <dd>{displayValue(publication.unpublished_at)}</dd>
       </div>
     </dl>
@@ -9914,32 +10215,55 @@ function PublicationItem({
     <li>
       <div className="publication-heading-row">
         <strong>{publication.public_title}</strong>
-        <span className="role-badge">{publication.status}</span>
+        <span className="role-badge">
+          {publication.status === "published"
+            ? "Publicado"
+            : publication.status === "unpublished"
+              ? "Despublicado"
+              : "Borrador"}
+        </span>
       </div>
       <p>{publication.analyst_notes || "Sin notas."}</p>
-      <p>{publication.allowed_artifact_types.join(", ") || "Sin downloads"}</p>
-      <PublicationAudit publication={publication} />
+      <p>{publication.allowed_artifact_types.join(", ") || "Sin descargas"}</p>
+      <details>
+        <summary>Historial de publicación</summary>
+        <PublicationAudit publication={publication} />
+      </details>
+      {publication.status !== "draft" ? (
+        <p>
+          Para cambiar el título, el comentario o los archivos, prepara un nuevo
+          borrador desde esta ejecución. Puedes despublicar el informe anterior
+          cuando corresponda.
+        </p>
+      ) : null}
       {transitionError ? <p role="alert">{transitionError}</p> : null}
+      {editing ? (
+        <p>
+          Guarda o cancela la edición antes de abrir la vista previa o publicar.
+        </p>
+      ) : null}
       <div className="inline-actions">
-        <Link
-          className="button-link"
-          to={`/publications/${publication.id}/preview`}
-        >
-          Preview as client {publication.public_title}
-        </Link>
+        {!editing ? (
+          <Link
+            className="button-link"
+            to={`/publications/${publication.id}/preview`}
+          >
+            Vista previa de {publication.public_title}
+          </Link>
+        ) : null}
         {publication.status === "draft" ? (
           <button
             type="button"
             className="secondary-action"
             onClick={() => setEditing(true)}
           >
-            Editar publicacion {publication.public_title}
+            Editar borrador {publication.public_title}
           </button>
         ) : null}
         {publication.status !== "published" ? (
           <button
             type="button"
-            disabled={publishMutation.isPending}
+            disabled={publishMutation.isPending || editing}
             onClick={() => {
               setTransitionError("");
               publishMutation.mutate();
@@ -9956,7 +10280,7 @@ function PublicationItem({
               unpublishMutation.mutate();
             }}
           >
-            Unpublicar {publication.public_title}
+            Despublicar {publication.public_title}
           </button>
         )}
       </div>
@@ -9965,10 +10289,10 @@ function PublicationItem({
           templates={templates}
           artifacts={artifacts}
           publication={publication}
-          titleLabel="Public Title editado"
-          notesLabel="Analyst Notes editadas"
-          templateLabel="Dashboard Template editado"
-          submitLabel="Actualizar publicacion"
+          titleLabel="Título del informe editado"
+          notesLabel="Comentario para el cliente editado"
+          templateLabel="Plantilla del informe editada"
+          submitLabel="Guardar cambios del borrador"
           pending={editMutation.isPending}
           error={editError}
           onCancel={() => {
@@ -9995,7 +10319,11 @@ function PublicationList({
   artifacts: RunArtifact[];
 }) {
   if (!publications.length) {
-    return <EmptyState>No publication drafts yet.</EmptyState>;
+    return (
+      <EmptyState>
+        Todavía no hay informes preparados para esta ejecución.
+      </EmptyState>
+    );
   }
   return (
     <ul className="resource-list publication-list">
@@ -10046,7 +10374,7 @@ function PublicationSection({
   ) {
     return (
       <section className="workspace-section" aria-labelledby="publications">
-        <h2 id="publications">Publication Drafts</h2>
+        <h2 id="publications">Informes de esta ejecución</h2>
         <p role="status">Cargando publicaciones</p>
       </section>
     );
@@ -10054,7 +10382,7 @@ function PublicationSection({
   if (templates.isError || publications.isError || artifacts.isError) {
     return (
       <section className="workspace-section" aria-labelledby="publications">
-        <h2 id="publications">Publication Drafts</h2>
+        <h2 id="publications">Informes de esta ejecución</h2>
         <p role="alert">
           {errorMessage(
             templates.error || publications.error || artifacts.error,
@@ -10066,7 +10394,12 @@ function PublicationSection({
 
   return (
     <section className="workspace-section" aria-labelledby="publications">
-      <h2 id="publications">Publication Drafts</h2>
+      <h2 id="publications">Informes de esta ejecución</h2>
+      <ReportSteps runId={run.id} />
+      <p>
+        Estás preparando informes con los resultados de la ejecución {run.id}.
+      </p>
+      <ReportConfigurationLink projectId={projectId} runId={run.id} />
       <PublicationList
         publications={publications.data}
         templates={templates.data}
@@ -10081,13 +10414,64 @@ function PublicationSection({
   );
 }
 
+function ReportSteps({
+  runId,
+  previewId,
+}: {
+  runId: number;
+  previewId?: number;
+}) {
+  return (
+    <nav aria-label="Preparar informe" className="workspace-nav report-steps">
+      <Link to={`/runs/${runId}`}>Resultado</Link>
+      <Link
+        to={`/runs/${runId}#publications`}
+        aria-current={!previewId ? "step" : undefined}
+      >
+        Contenido
+      </Link>
+      {previewId ? (
+        <Link to={`/publications/${previewId}/preview`} aria-current="step">
+          Vista previa
+        </Link>
+      ) : (
+        <span>Vista previa</span>
+      )}
+      {previewId ? (
+        <a href="#report-publication">Publicación</a>
+      ) : (
+        <span>Publicación</span>
+      )}
+    </nav>
+  );
+}
+
 export function PublicationPreviewView() {
+  const queryClient = useQueryClient();
   const publicationId = useNumericParam("publicationId");
   const preview = useQuery({
     queryKey: publicationPreviewQueryKey(publicationId || 0),
     queryFn: ({ signal }) => getPublicationPreview(publicationId || 0, signal),
     enabled: publicationId !== null,
+    staleTime: 0,
+    refetchOnMount: "always",
     retry: false,
+  });
+  const transition = useMutation({
+    mutationFn: (action: "publish" | "unpublish") =>
+      action === "publish"
+        ? publishPublication(publicationId!)
+        : unpublishPublication(publicationId!),
+    onSuccess: async (updated) => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: publicationPreviewQueryKey(updated.id),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: runPublicationsQueryKey(updated.run_id),
+        }),
+      ]);
+    },
   });
 
   if (publicationId === null) {
@@ -10116,32 +10500,95 @@ export function PublicationPreviewView() {
           {data.branding.display_name}
         </Link>
         <span aria-hidden="true">/</span>
-        <Link to={`/runs/${context.run_id}`}>Run {context.run_id}</Link>
+        <Link to={`/runs/${context.run_id}`}>Ejecución {context.run_id}</Link>
         <span aria-hidden="true">/</span>
-        <span>Preview</span>
+        <span>Vista previa</span>
       </Breadcrumbs>
-      <p className="eyebrow">Client preview</p>
+      <ReportSteps runId={context.run_id} previewId={publicationId} />
+      <Link to={`/runs/${context.run_id}#publications`}>
+        Volver al resultado
+      </Link>
+      <p className="eyebrow">Vista previa del cliente</p>
+      <ReportConfigurationLink
+        projectId={data.publication.project_id}
+        runId={context.run_id}
+      />
       <PortalPublicationHeader detail={data} />
-      <section className="workspace-section" aria-labelledby="preview-context">
-        <h2 id="preview-context">Contexto interno</h2>
-        <dl className="source-metadata version-metadata">
-          <div>
-            <dt>Estado</dt>
-            <dd>{data.publication.status}</dd>
-          </div>
-          <div>
-            <dt>Version de escenario</dt>
-            <dd>{context.scenario_version_number}</dd>
-          </div>
-          {context.results_error ? (
-            <div>
-              <dt>Resultados</dt>
-              <dd>{context.results_error}</dd>
-            </div>
-          ) : null}
-        </dl>
-      </section>
       <PortalPublicationReport detail={data} />
+      <details className="workspace-section">
+        <summary>Contexto interno</summary>
+        <section aria-labelledby="preview-context">
+          <h2 id="preview-context">Contexto interno</h2>
+          <dl className="source-metadata version-metadata">
+            <div>
+              <dt>Estado</dt>
+              <dd>{data.publication.status}</dd>
+            </div>
+            <div>
+              <dt>Version de escenario</dt>
+              <dd>{context.scenario_version_number}</dd>
+            </div>
+            {context.results_error ? (
+              <div>
+                <dt>Resultados</dt>
+                <dd>{context.results_error}</dd>
+              </div>
+            ) : null}
+          </dl>
+        </section>
+      </details>
+      <section
+        className="workspace-section"
+        aria-labelledby="report-publication"
+      >
+        <h2 id="report-publication">Publicación</h2>
+        <p role="status">
+          {data.publication.status === "published"
+            ? "Publicado"
+            : data.publication.status === "unpublished"
+              ? "Despublicado"
+              : "Borrador: todavía no es visible en el portal."}
+        </p>
+        <p>
+          El informe será visible solo para quienes tengan acceso a los informes
+          de este proyecto.
+        </p>
+        {transition.isError ? (
+          <p role="alert">{errorMessage(transition.error)}</p>
+        ) : null}
+        <div className="inline-actions">
+          {data.publication.status === "published" ? (
+            <>
+              <Link
+                target="_blank"
+                rel="noopener"
+                to={`/client/projects/${data.publication.project_id}/publications/${publicationId}`}
+              >
+                Enlace para el cliente
+              </Link>
+              <p>
+                El enlace requiere una cuenta externa con acceso al proyecto.
+                Con tu cuenta puedes comprobar el informe en esta vista previa.
+              </p>
+              <button
+                type="button"
+                disabled={transition.isPending || preview.isFetching}
+                onClick={() => transition.mutate("unpublish")}
+              >
+                Despublicar informe
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              disabled={transition.isPending || preview.isFetching}
+              onClick={() => transition.mutate("publish")}
+            >
+              Publicar informe
+            </button>
+          )}
+        </div>
+      </section>
     </section>
   );
 }
