@@ -1,0 +1,290 @@
+UX-009: extractos literales de las ejecuciones RED y GREEN.
+Se omiten volcados DOM; los conteos focalizados no se suman a las suites finales.
+
+ux009-01-red.txt
+> bess-react-ui@0.1.0 test
+> vitest run src/AdminExperience.test.tsx -t creates one external
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/AdminExperience.test.tsx > understandable administration > creates one external identity and shows its
+readable role after reopening
+AssertionError: expected [ 'analyst', 'external', …(2) ] to deeply equal [ 'Analista', 'Usuario externo', …(1) ]
+
+- Expected
++ Received
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  19:53:06
+   Duration  2.55s (transform 194ms, setup 275ms, import 341ms, tests 283ms, environment 1.35s)
+
+ux009-01-green.txt
+> bess-react-ui@0.1.0 test
+> vitest run src/AdminExperience.test.tsx src/Admin.test.tsx
+ Test Files  2 passed (2)
+      Tests  3 passed (3)
+   Start at  19:53:34
+   Duration  3.79s (transform 300ms, setup 534ms, import 618ms, tests 2.42s, environment 2.73s)
+
+ux009-02-red.txt
+> bess-react-ui@0.1.0 test
+> vitest run src/AdminExperience.test.tsx -t reviews the person
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/AdminExperience.test.tsx > understandable administration > reviews the person and project before granting
+reports without console access
+TestingLibraryElementError: Unable to find a label with the text of: Ver informes
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 skipped (2)
+   Start at  19:55:01
+   Duration  3.38s (transform 180ms, setup 305ms, import 345ms, tests 1.06s, environment 1.36s)
+
+     60|     const consoles = screen.getByLabelText("Operar consolas");
+     61|     expect(reports).not.toBeChecked();
+
+
+ux009-02-green.txt
+> bess-react-ui@0.1.0 test
+> vitest run src/AdminExperience.test.tsx
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  19:55:46
+   Duration  4.03s (transform 186ms, setup 291ms, import 326ms, tests 1.79s, environment 1.35s)
+
+ux009-03-red.txt
+> bess-react-ui@0.1.0 test
+> vitest run src/AdminExperience.test.tsx -t adds console
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/AdminExperience.test.tsx > understandable administration > adds console access without removing the
+existing report permission
+TestingLibraryElementError: Unable to find an accessible element with the role "region" and name "Revisar cambios de
+persona@example.local"
+
+Here are the accessible roles:
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 skipped (3)
+   Start at  19:56:21
+   Duration  2.77s (transform 195ms, setup 304ms, import 346ms, tests 497ms, environment 1.31s)
+
+            Operar consolas
+          </label>
+        </fieldset>
+
+ux009-03-green.txt
+> bess-react-ui@0.1.0 test
+> vitest run src/AdminExperience.test.tsx
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  19:56:56
+   Duration  4.13s (transform 190ms, setup 291ms, import 345ms, tests 1.94s, environment 1.26s)
+
+ux009-04-red.txt
+> bess-react-ui@0.1.0 test
+> vitest run src/AdminExperience.test.tsx -t duplicate email
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/AdminExperience.test.tsx > understandable administration > identifies a duplicate email and preserves the
+form for a corrected retry
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  Ya existe un usuario con este email.
+Received:
+  email already exists
+ ❯ src/AdminExperience.test.tsx:83:46
+     81|     await user.selectOptions(screen.getByLabelText("Rol"), "external");
+     82|     await user.click(screen.getByRole("button", { name: "Crear usuario…
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 skipped (4)
+   Start at  19:57:40
+   Duration  3.77s (transform 196ms, setup 297ms, import 349ms, tests 1.49s, environment 1.35s)
+
+ux009-04-green.txt
+> bess-react-ui@0.1.0 test
+> vitest run src/AdminExperience.test.tsx
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  19:58:11
+   Duration  5.99s (transform 199ms, setup 296ms, import 359ms, tests 3.69s, environment 1.34s)
+
+ux009-05-red.txt
+> bess-react-ui@0.1.0 test
+> vitest run src/AdminExperience.test.tsx -t separates scheduling
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/AdminExperience.test.tsx > understandable administration > separates scheduling from users while retaining
+both unfinished forms
+Error: expect(element).not.toBeInTheDocument()
+
+expected document not to contain element, found <button
+  class="secondary-action"
+  type="button"
+ Test Files  1 failed (1)
+      Tests  1 failed | 4 skipped (5)
+   Start at  19:58:50
+   Duration  3.01s (transform 210ms, setup 291ms, import 375ms, tests 693ms, environment 1.36s)
+
+ux009-05-green.txt
+> bess-react-ui@0.1.0 test
+> vitest run src/AdminExperience.test.tsx
+ Test Files  1 passed (1)
+      Tests  5 passed (5)
+   Start at  19:59:42
+   Duration  7.03s (transform 196ms, setup 296ms, import 359ms, tests 4.76s, environment 1.32s)
+
+ux009-06-red.txt
+> bess-react-ui@0.1.0 test
+> vitest run src/AdminExperience.test.tsx -t failed access query
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/AdminExperience.test.tsx > understandable administration > recovers a failed access query before offering
+project permissions
+TestingLibraryElementError: Unable to find an accessible element with the role "button" and name "Reintentar accesos"
+
+Here are the accessible roles:
+
+  region:
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 skipped (6)
+   Start at  20:01:05
+   Duration  2.64s (transform 223ms, setup 306ms, import 382ms, tests 232ms, environment 1.41s)
+
+ux009-06-green.txt
+> bess-react-ui@0.1.0 test
+> vitest run src/AdminExperience.test.tsx
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  20:01:15
+   Duration  6.99s (transform 209ms, setup 288ms, import 364ms, tests 4.72s, environment 1.34s)
+
+ux009-07-red.txt
+> bess-react-ui@0.1.0 test
+> vitest run src/AdminExperience.test.tsx -t rejected schedule date
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/AdminExperience.test.tsx > understandable administration > focuses a rejected schedule date without losing
+the selected range or cadence
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  Próxima ejecución debe incluir un offset horario, por ejemplo -03:00.
+Received:
+  next_run_at must include a timezone offset
+ ❯ src/AdminExperience.test.tsx:85:46
+     83|     await user.click(screen.getByRole("button", { name: "Crear program…
+     84|     const date = screen.getByLabelText("Próxima ejecución");
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 skipped (7)
+   Start at  20:03:37
+   Duration  4.62s (transform 214ms, setup 310ms, import 395ms, tests 2.18s, environment 1.42s)
+
+ux009-07-green.txt
+> bess-react-ui@0.1.0 test
+> vitest run src/AdminExperience.test.tsx
+ Test Files  1 passed (1)
+      Tests  7 passed (7)
+   Start at  20:04:35
+   Duration  9.47s (transform 229ms, setup 309ms, import 383ms, tests 7.08s, environment 1.41s)
+
+ux009-08-red.txt
+> bess-react-ui@0.1.0 test
+> vitest run src/AdminExperience.test.tsx -t keyboard focus
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/AdminExperience.test.tsx > understandable administration > moves keyboard focus to the access review before
+confirmation
+Error: expect(element).toHaveFocus()
+
+Expected element with focus:
+  <h3>
+  Revisar acceso
+</h3>
+Received element with focus:
+  <body>
+  <div>
+    <section
+      aria-labelledby="project-access"
+ Test Files  1 failed (1)
+      Tests  1 failed | 7 skipped (8)
+   Start at  20:07:20
+   Duration  2.87s (transform 220ms, setup 284ms, import 399ms, tests 446ms, environment 1.42s)
+
+ux009-08-green.txt
+> bess-react-ui@0.1.0 test
+> vitest run src/AdminExperience.test.tsx src/Admin.test.tsx
+ Test Files  2 passed (2)
+      Tests  10 passed (10)
+   Start at  20:07:50
+   Duration  9.50s (transform 388ms, setup 654ms, import 703ms, tests 8.28s, environment 2.75s)
+
+ux009-09-red.txt
+> bess-react-ui@0.1.0 test
+> vitest run src/AdminExperience.test.tsx -t adds console
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/AdminExperience.test.tsx > understandable administration > adds console access without removing the
+existing report permission
+Error: expect(element).toHaveFocus()
+
+Expected element with focus:
+  <h3>
+  Revisar cambios de·
+  persona@example.local
+</h3>
+Received element with focus:
+  <body>
+  <div>
+    <section
+      aria-labelledby="project-access"
+ Test Files  1 failed (1)
+      Tests  1 failed | 7 skipped (8)
+   Start at  20:13:23
+   Duration  2.78s (transform 201ms, setup 306ms, import 363ms, tests 434ms, environment 1.35s)
+
+            Nuevo acceso a·
+            Planta Norte
+          </legend>
+
+Ciclo 09 GREEN: ver vitest-final.txt (267/267). La primera repetición aprobó las 8 pruebas nuevas, pero falló un selector ambiguo de la regresión antigua; se ajustó al nombre accesible de cada usuario. No se cuenta esa repetición como suite aprobada.

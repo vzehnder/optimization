@@ -1,5 +1,25 @@
 # Validación, medición y entrega
 
+## Evidencia posterior: UX-009
+
+La [implementación sobre `902662a`](evidencia/ux-009/README.md) queda **In Review**
+el 2026-09-14. F1/F2 confirmadas antes de las pruebas: nueve ciclos F2 y dos
+correcciones de layout detectadas en navegador (320 px y ampliación 200 %). Roles legibles, revisión
+de capacidades independientes, programación separada y conservación de valores
+ante errores y cambios de sección. El backend conserva contratos y permisos.
+
+Resultado: **335 pruebas aprobadas** (267 React, 23 navegador y 45 Python),
+con dos PostgreSQL omitidas. El recorrido real comprueba creación, persistencia,
+revocación parcial en sesión abierta, desactivación, programación y borrado.
+Tras el último ajuste CSS se repitieron build y los tres recorridos afectados
+(administración, UX-009 y accesibilidad), sin duplicarlos en el total.
+Catorce capturas locales incluyen 1440/1280/320 px y ampliación CSS 200 %;
+teclado/foco y axe sin serious/critical en usuarios, revisión de acceso y
+programación. TypeScript, ESLint, build, formato del frontend modificado y diff
+pasan. `check` falla por los mismos 21 archivos previos sin formato. No se
+ejecutaron Julia real, PostgreSQL, toda la suite Python ni sesiones con
+participantes/lectores de pantalla. El servidor smoke usa resultados sintéticos.
+
 ## Evidencia posterior: UX-008
 
 La [implementación sobre `a1b47e1`](evidencia/ux-008/README.md) queda **In Review**

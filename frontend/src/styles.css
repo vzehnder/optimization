@@ -460,6 +460,60 @@ button:focus-visible {
   justify-content: space-between;
 }
 
+.admin-view .workspace-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+}
+
+.admin-view,
+.external-access {
+  overflow-wrap: anywhere;
+}
+
+.admin-resource-row > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.admin-view .resource-list li,
+.external-access .resource-list li {
+  min-width: 0;
+}
+
+.external-access fieldset {
+  display: grid;
+  gap: 0.7rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0.8rem;
+  border: 1px solid #b8c7d6;
+  border-radius: 0.5rem;
+}
+
+.external-access label:has(input[type="checkbox"]) {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.external-access input[type="checkbox"] {
+  width: 1.1rem;
+  height: 1.1rem;
+  flex: 0 0 auto;
+}
+
+.external-access button {
+  margin: 0.5rem 0.5rem 0 0;
+  max-width: 100%;
+}
+
+.admin-view [role="status"],
+.admin-view [role="alert"],
+.external-access [role="status"],
+.external-access [role="alert"] {
+  width: 100%;
+  margin: 0.7rem 0;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;

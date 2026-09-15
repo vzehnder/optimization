@@ -1,0 +1,118 @@
+./.venv/Scripts/python.exe : C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\.venv\Lib\s
+ite-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is
+deprecated; install `httpx2` instead.
+En línea: 2 Carácter: 41
++ ... /:memory:'; ./.venv/Scripts/python.exe -m unittest tests.test_configu ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\vicen\...ttpx2` instead.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+  from starlette.testclient import TestClient as TestClient  # noqa
+test_admin_api_rejects_the_legacy_client_role
+(tests.test_configuration_layer_access.ConfigurationLayerAccessApiTests.test_admin_api_rejects_the_legacy_client_role)
+... ok
+test_admin_can_create_an_external_identity
+(tests.test_configuration_layer_access.ConfigurationLayerAccessApiTests.test_admin_can_create_an_external_identity)
+... ok
+test_admin_can_manage_independent_project_capabilities (tests.test_configuration_layer_access.ConfigurationLayerAccessA
+piTests.test_admin_can_manage_independent_project_capabilities) ... ok
+test_analyst_cannot_administer_external_capabilities (tests.test_configuration_layer_access.ConfigurationLayerAccessApi
+Tests.test_analyst_cannot_administer_external_capabilities) ... ok
+test_legacy_client_access_admin_endpoint_is_retired (tests.test_configuration_layer_access.ConfigurationLayerAccessApiT
+ests.test_legacy_client_access_admin_endpoint_is_retired) ... ok
+test_operate_only_external_cannot_enter_the_portal_api (tests.test_configuration_layer_access.ConfigurationLayerAccessA
+piTests.test_operate_only_external_cannot_enter_the_portal_api) ... ok
+test_portal_view_changes_apply_on_the_next_external_request (tests.test_configuration_layer_access.ConfigurationLayerAc
+cessApiTests.test_portal_view_changes_apply_on_the_next_external_request) ... ok
+test_legacy_client_assignment_migrates_without_expanding_access (tests.test_configuration_layer_access.ConfigurationLay
+erAccessMigrationTests.test_legacy_client_assignment_migrates_without_expanding_access) ... ok
+test_legacy_client_role_is_rejected_after_cutover (tests.test_configuration_layer_access.ConfigurationLayerAccessMigrat
+ionTests.test_legacy_client_role_is_rejected_after_cutover) ... ok
+test_json_bootstrap_login_logout_deactivation_and_csrf_contract (tests.test_react_auth.ReactAuthenticationContractTests
+.test_json_bootstrap_login_logout_deactivation_and_csrf_contract) ... ok
+test_production_cookie_secure_flag_is_configurable
+(tests.test_react_auth.ReactAuthenticationContractTests.test_production_cookie_secure_flag_is_configurable) ... ok
+test_execute_schedule_creates_snapshot_run_tick_and_advances_next_fire_time (tests.test_ts6_008_schedules.FixedRangeSch
+eduleExecutionTests.test_execute_schedule_creates_snapshot_run_tick_and_advances_next_fire_time) ... ok
+test_execute_schedule_records_gate_failure_without_creating_run (tests.test_ts6_008_schedules.FixedRangeScheduleExecuti
+onTests.test_execute_schedule_records_gate_failure_without_creating_run) ... ok
+test_rolling_schedule_recomputes_range_for_each_tick
+(tests.test_ts6_008_schedules.FixedRangeScheduleExecutionTests.test_rolling_schedule_recomputes_range_for_each_tick)
+... ok
+test_create_fixed_range_schedule_records_case_variant_parameter_hash_and_cadence (tests.test_ts6_008_schedules.RunSched
+ulePersistenceTests.test_create_fixed_range_schedule_records_case_variant_parameter_hash_and_cadence) ... ok
+test_create_rolling_schedule_records_range_rule
+(tests.test_ts6_008_schedules.RunSchedulePersistenceTests.test_create_rolling_schedule_records_range_rule) ... ok
+test_admin_api_creates_lists_and_runs_due_schedules
+(tests.test_ts6_008_schedules.ScheduleApiTests.test_admin_api_creates_lists_and_runs_due_schedules) ... ok
+test_admin_api_creates_rolling_schedule
+(tests.test_ts6_008_schedules.ScheduleApiTests.test_admin_api_creates_rolling_schedule) ... ok
+test_schedule_management_is_admin_only
+(tests.test_ts6_008_schedules.SchedulePermissionApiTests.test_schedule_management_is_admin_only) ... ok
+test_daily_schedule_due_at_or_before_now_with_fixed_range
+(tests.test_ts6_008_schedules.SchedulePlanningTests.test_daily_schedule_due_at_or_before_now_with_fixed_range) ... ok
+test_next_fire_time_advances_from_due_time_not_wall_clock
+(tests.test_ts6_008_schedules.SchedulePlanningTests.test_next_fire_time_advances_from_due_time_not_wall_clock) ... ok
+test_rolling_schedule_range_resolves_from_due_time
+(tests.test_ts6_008_schedules.SchedulePlanningTests.test_rolling_schedule_range_resolves_from_due_time) ... ok
+test_allowlist_covers_exactly_the_accepted_transformations_and_rejects_unknown_types (tests.test_ts6_acceptance.TS6Acce
+ptanceTests.test_allowlist_covers_exactly_the_accepted_transformations_and_rejects_unknown_types) ... ok
+test_every_allowlisted_transformation_derives_a_set_with_full_lineage
+(tests.test_ts6_acceptance.TS6AcceptanceTests.test_every_allowlisted_transformation_derives_a_set_with_full_lineage)
+... ok
+test_manual_variant_driven_runs_are_unchanged_by_ts6_features
+(tests.test_ts6_acceptance.TS6AcceptanceTests.test_manual_variant_driven_runs_are_unchanged_by_ts6_features) ... ok
+test_mocked_connector_data_lands_through_the_common_source_set_path
+(tests.test_ts6_acceptance.TS6AcceptanceTests.test_mocked_connector_data_lands_through_the_common_source_set_path) ...
+ok
+test_rolling_schedules_resolve_ranges_per_tick_and_keep_failures_visible (tests.test_ts6_acceptance.TS6AcceptanceTests.
+test_rolling_schedules_resolve_ranges_per_tick_and_keep_failures_visible) ... ok
+test_scheduled_runs_create_the_same_snapshots_and_indexed_results_as_manual_runs (tests.test_ts6_acceptance.TS6Acceptan
+ceTests.test_scheduled_runs_create_the_same_snapshots_and_indexed_results_as_manual_runs) ... ok
+test_source_edits_mark_derived_sets_stale_and_regeneration_preserves_history (tests.test_ts6_acceptance.TS6AcceptanceTe
+sts.test_source_edits_mark_derived_sets_stale_and_regeneration_preserves_history) ... ok
+test_ts6_documentation_tracker_and_issues_are_done
+(tests.test_ts6_acceptance.TS6AcceptanceTests.test_ts6_documentation_tracker_and_issues_are_done) ... ok
+test_deleting_a_project_leaves_no_canonical_row_behind
+(tests.test_ts7_024_project_purge.CanonicalTrailPurgeTests.test_deleting_a_project_leaves_no_canonical_row_behind) ...
+ok
+test_deleting_a_project_with_a_ts7_trail_answers_the_deleted_project (tests.test_ts7_024_project_purge.DeleteProjectApi
+Tests.test_deleting_a_project_with_a_ts7_trail_answers_the_deleted_project) ... ok
+test_a_sealed_revision_still_refuses_deletion_with_no_purge_declared (tests.test_ts7_024_project_purge.ImmutabilityOuts
+ideAPurgeTests.test_a_sealed_revision_still_refuses_deletion_with_no_purge_declared) ... ok
+test_an_open_purge_does_not_make_a_sealed_revision_writable (tests.test_ts7_024_project_purge.ImmutabilityOutsideAPurge
+Tests.test_an_open_purge_does_not_make_a_sealed_revision_writable) ... ok
+test_an_open_purge_does_not_make_a_signal_identity_movable (tests.test_ts7_024_project_purge.ImmutabilityOutsideAPurgeT
+ests.test_an_open_purge_does_not_make_a_signal_identity_movable) ... ok
+test_the_values_of_a_sealed_revision_still_refuse_deletion (tests.test_ts7_024_project_purge.ImmutabilityOutsideAPurgeT
+ests.test_the_values_of_a_sealed_revision_still_refuse_deletion) ... ok
+test_a_failure_halfway_through_restores_the_whole_trail
+(tests.test_ts7_024_project_purge.InterruptedPurgeTests.test_a_failure_halfway_through_restores_the_whole_trail) ... ok
+test_the_link_event_ledger_still_refuses_deletion (tests.test_ts7_024_project_purge.LedgerImmutabilityOutsideAPurgeTest
+s.test_the_link_event_ledger_still_refuses_deletion) ... ok
+test_the_link_event_ledger_still_refuses_rewriting_during_a_purge (tests.test_ts7_024_project_purge.LedgerImmutabilityO
+utsideAPurgeTests.test_the_link_event_ledger_still_refuses_rewriting_during_a_purge) ... ok
+test_deleting_a_project_takes_its_links_and_ledgers
+(tests.test_ts7_024_project_purge.LinkLayerPurgeTests.test_deleting_a_project_takes_its_links_and_ledgers) ... ok
+test_purging_one_project_leaves_the_other_untouched
+(tests.test_ts7_024_project_purge.NeighbourProjectTests.test_purging_one_project_leaves_the_other_untouched) ... ok
+test_a_sealed_revision_still_refuses_deletion_with_no_purge_declared (tests.test_ts7_024_project_purge.PostgresProjectP
+urgeTests.test_a_sealed_revision_still_refuses_deletion_with_no_purge_declared) ... skipped 'set
+POSTGRES_TEST_DATABASE_URL to mirror the purge on PostgreSQL'
+test_the_project_and_its_canonical_trail_leave_together
+(tests.test_ts7_024_project_purge.PostgresProjectPurgeTests.test_the_project_and_its_canonical_trail_leave_together)
+... skipped 'set POSTGRES_TEST_DATABASE_URL to mirror the purge on PostgreSQL'
+test_the_purge_takes_the_dependencies_of_its_variants_and_sets (tests.test_ts7_024_project_purge.ValidationDependencyPu
+rgeTests.test_the_purge_takes_the_dependencies_of_its_variants_and_sets) ... ok
+test_external_can_read_own_session_but_not_analyst_apis (tests.test_iter6_authorization_hardening.Iteration6Authorizati
+onHardeningTests.test_external_can_read_own_session_but_not_analyst_apis) ... ok
+test_external_is_not_found_on_legacy_bookmarks_and_internal_apis (tests.test_iter6_authorization_hardening.Iteration6Au
+thorizationHardeningTests.test_external_is_not_found_on_legacy_bookmarks_and_internal_apis) ... ok
+test_project_publication_and_user_revocation_block_client_downloads_immediately (tests.test_iter6_authorization_hardeni
+ng.Iteration6AuthorizationHardeningTests.test_project_publication_and_user_revocation_block_client_downloads_immediatel
+y) ... ok
+
+----------------------------------------------------------------------
+Ran 47 tests in 21.493s
+
+OK (skipped=2)

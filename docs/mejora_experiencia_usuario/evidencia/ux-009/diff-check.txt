@@ -1,0 +1,2 @@
+git -c core.safecrlf=false diff --check
+Exit code: 0

@@ -219,7 +219,7 @@ test("representative React pages pass automated accessibility and keyboard smoke
   // Admin page.
   await page.goto("/react/admin/users");
   await expect(
-    page.getByRole("heading", { name: "Administracion" }),
+    page.getByRole("heading", { name: "Administración" }),
   ).toBeVisible();
   await expectNoSeriousAccessibilityViolations(page, "admin");
   await expectKeyboardReachesInteractiveControls(page, "admin");

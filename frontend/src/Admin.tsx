@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 
 import {
   ApiError,
@@ -24,7 +25,22 @@ const adminUsersQueryKey = ["admin-users"] as const;
 const runSchedulesQueryKey = ["run-schedules"] as const;
 const projectExternalAccessQueryKey = (projectId: number) =>
   ["project-external-access", projectId] as const;
+const cadenceLabels: Record<string, string> = {
+  hourly: "Cada hora",
+  daily: "Diaria",
+  weekly: "Semanal",
+};
+const tickLabels: Record<string, string> = {
+  queued: "En cola",
+  failed: "Fallido",
+  pending: "Pendiente",
+};
 const userRoles: UserCreatePayload["role"][] = ["admin", "analyst", "external"];
+const roleLabels = {
+  admin: "Administrador",
+  analyst: "Analista",
+  external: "Usuario externo",
+};
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
@@ -80,7 +96,7 @@ function RunScheduleList({
   ticks: RunScheduleTick[];
 }) {
   if (!schedules.length) {
-    return <p className="empty-state">No hay schedules configurados.</p>;
+    return <p className="empty-state">No hay programaciones configuradas.</p>;
   }
 
   const ticksBySchedule = new Map<number, RunScheduleTick[]>();
@@ -96,26 +112,30 @@ function RunScheduleList({
         const latestTick = ticksBySchedule.get(schedule.id)?.[0];
         const rangeRule =
           schedule.range_mode === "rolling"
-            ? `rolling | offset ${schedule.rolling_start_offset_hours ?? 0}h | duracion ${schedule.rolling_duration_hours ?? 0}h`
-            : "fixed";
+            ? `Horizonte móvil | desplazamiento ${schedule.rolling_start_offset_hours ?? 0} h | duración ${schedule.rolling_duration_hours ?? 0} h`
+            : "Período fijo";
         return (
           <li key={schedule.id}>
             <div className="admin-resource-row">
               <div>
                 <strong>{schedule.display_name}</strong>
                 <p>
-                  scenario {schedule.scenario_id} | variant{" "}
-                  {schedule.case_input_variant_id} | {schedule.cadence} | next{" "}
-                  {schedule.next_run_at}
+                  Escenario {schedule.scenario_id} | Variante{" "}
+                  {schedule.case_input_variant_id} |{" "}
+                  {cadenceLabels[schedule.cadence] || schedule.cadence} |
+                  Próxima ejecución {schedule.next_run_at}
                 </p>
                 <p>
-                  rango {schedule.range_start} - {schedule.range_end}
+                  Período {schedule.range_start} - {schedule.range_end}
                 </p>
                 <p>{rangeRule}</p>
                 {latestTick ? (
                   <p>
-                    ultimo tick {latestTick.status}
-                    {latestTick.run_id ? ` | run ${latestTick.run_id}` : ""}
+                    Último intento{" "}
+                    {tickLabels[latestTick.status] || latestTick.status}
+                    {latestTick.run_id
+                      ? ` | ejecución ${latestTick.run_id}`
+                      : ""}
                     {latestTick.error_message
                       ? ` | ${latestTick.error_message}`
                       : ""}
@@ -125,9 +145,10 @@ function RunScheduleList({
                   <ul aria-label={`Historial ${schedule.display_name}`}>
                     {ticksBySchedule.get(schedule.id)?.map((tick) => (
                       <li key={tick.id}>
-                        tick {tick.id} {tick.status} | rango {tick.range_start}{" "}
-                        - {tick.range_end}
-                        {tick.run_id ? ` | run ${tick.run_id}` : ""}
+                        Intento {tick.id}{" "}
+                        {tickLabels[tick.status] || tick.status} | período{" "}
+                        {tick.range_start} - {tick.range_end}
+                        {tick.run_id ? ` | ejecución ${tick.run_id}` : ""}
                         {tick.error_message ? ` | ${tick.error_message}` : ""}
                       </li>
                     ))}
@@ -135,7 +156,7 @@ function RunScheduleList({
                 ) : null}
               </div>
               <span className="status-pill">
-                {schedule.is_active ? "active" : "inactive"}
+                {schedule.is_active ? "Activa" : "Inactiva"}
               </span>
             </div>
           </li>
@@ -147,6 +168,8 @@ function RunScheduleList({
 
 function RunSchedulesPanel() {
   const queryClient = useQueryClient();
+  const formRef = useRef<HTMLFormElement>(null);
+  const [errorField, setErrorField] = useState("");
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const schedules = useQuery({
@@ -158,6 +181,7 @@ function RunSchedulesPanel() {
     mutationFn: createRunSchedule,
     onSuccess: (schedule) => {
       setError("");
+      setErrorField("");
       setStatus(`${schedule.display_name} creado.`);
       queryClient.setQueryData<{
         schedules: RunSchedule[];
@@ -168,13 +192,38 @@ function RunSchedulesPanel() {
       }));
       void queryClient.invalidateQueries({ queryKey: runSchedulesQueryKey });
     },
-    onError: (mutationError) => setError(errorMessage(mutationError)),
+    onError: (mutationError) => {
+      const message = errorMessage(mutationError);
+      for (const [field, label] of [
+        ["next_run_at", "Próxima ejecución"],
+        ["range_start", "Inicio del período"],
+        ["range_end", "Fin del período"],
+      ]) {
+        const missingOffset =
+          message === `${field} must include a timezone offset`;
+        if (missingOffset || message === `${field} must be ISO-8601`) {
+          setError(
+            missingOffset
+              ? `${label} debe incluir un offset horario, por ejemplo -03:00.`
+              : `${label} debe ser una fecha ISO-8601 válida.`,
+          );
+          setErrorField(field);
+          (
+            formRef.current?.elements.namedItem(
+              field,
+            ) as HTMLInputElement | null
+          )?.focus();
+          return;
+        }
+      }
+      setError(message);
+    },
   });
   const runDueMutation = useMutation({
     mutationFn: runDueSchedules,
     onSuccess: (report) => {
       setError("");
-      setStatus(`${report.due_count} schedule(s) evaluados.`);
+      setStatus(`${report.due_count} programación(es) evaluadas.`);
       void queryClient.invalidateQueries({ queryKey: runSchedulesQueryKey });
     },
     onError: (mutationError) => setError(errorMessage(mutationError)),
@@ -183,6 +232,7 @@ function RunSchedulesPanel() {
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    setErrorField("");
     setStatus("");
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
@@ -211,11 +261,24 @@ function RunSchedulesPanel() {
 
   return (
     <section className="workspace-section" aria-labelledby="admin-schedules">
-      <h2 id="admin-schedules">Schedules</h2>
-      {error ? <p role="alert">{error}</p> : null}
-      {status ? <p className="inline-status">{status}</p> : null}
+      <h2 id="admin-schedules">Programación de ejecuciones</h2>
+      <p>
+        Define el escenario, la variante y el período. Ejecutar vencidos evalúa
+        las programaciones activas cuya fecha ya llegó; cada ejecución conserva
+        la validación y el registro del servidor.
+      </p>
+      {error ? (
+        <p role="alert" id="schedule-error">
+          {error}
+        </p>
+      ) : null}
+      {status ? (
+        <p className="inline-status" role="status">
+          {status}
+        </p>
+      ) : null}
       {schedules.isPending ? (
-        <p role="status">Cargando schedules</p>
+        <p role="status">Cargando programación</p>
       ) : schedules.isError ? (
         <p role="alert">{errorMessage(schedules.error)}</p>
       ) : (
@@ -241,11 +304,15 @@ function RunSchedulesPanel() {
           Refrescar
         </button>
       </div>
-      <form className="workspace-form nested-form" onSubmit={submit}>
-        <h3>Nuevo schedule</h3>
-        <label htmlFor="schedule-name">Nombre schedule</label>
+      <form
+        ref={formRef}
+        className="workspace-form nested-form"
+        onSubmit={submit}
+      >
+        <h3>Nueva programación</h3>
+        <label htmlFor="schedule-name">Nombre de la programación</label>
         <input id="schedule-name" name="display_name" required />
-        <label htmlFor="schedule-scenario">Scenario ID</label>
+        <label htmlFor="schedule-scenario">Escenario (ID)</label>
         <input
           id="schedule-scenario"
           name="scenario_id"
@@ -253,7 +320,7 @@ function RunSchedulesPanel() {
           min="1"
           required
         />
-        <label htmlFor="schedule-variant">Variant ID</label>
+        <label htmlFor="schedule-variant">Variante (ID)</label>
         <input
           id="schedule-variant"
           name="case_input_variant_id"
@@ -261,17 +328,46 @@ function RunSchedulesPanel() {
           min="1"
           required
         />
-        <label htmlFor="schedule-range-start">Rango inicio</label>
-        <input id="schedule-range-start" name="range_start" required />
-        <label htmlFor="schedule-range-end">Rango termino</label>
-        <input id="schedule-range-end" name="range_end" required />
+        <label htmlFor="schedule-range-start">Inicio del período</label>
+        <input
+          id="schedule-range-start"
+          name="range_start"
+          required
+          aria-invalid={errorField === "range_start" || undefined}
+          aria-describedby={
+            errorField === "range_start"
+              ? "schedule-error"
+              : "schedule-period-help"
+          }
+        />
+        <label htmlFor="schedule-range-end">Fin del período</label>
+        <input
+          id="schedule-range-end"
+          name="range_end"
+          required
+          aria-invalid={errorField === "range_end" || undefined}
+          aria-describedby={
+            errorField === "range_end"
+              ? "schedule-error"
+              : "schedule-period-help"
+          }
+        />
+        <p id="schedule-period-help">
+          Inicio incluido y fin excluido. Usa fechas ISO con offset explícito,
+          por ejemplo 2026-09-15T00:00:00-03:00.
+        </p>
         <label htmlFor="schedule-range-mode">Modo de rango</label>
         <select id="schedule-range-mode" name="range_mode" defaultValue="fixed">
-          <option value="fixed">fixed</option>
-          <option value="rolling">rolling</option>
+          <option value="fixed">Fijo</option>
+          <option value="rolling">Horizonte móvil</option>
         </select>
+        <p>
+          Fijo repite el mismo período. Horizonte móvil calcula el inicio desde
+          la fecha programada más el desplazamiento, y el fin según la duración
+          indicada.
+        </p>
         <label htmlFor="schedule-rolling-offset">
-          Offset inicio rolling (horas)
+          Desplazamiento del inicio (horas)
         </label>
         <input
           id="schedule-rolling-offset"
@@ -280,7 +376,7 @@ function RunSchedulesPanel() {
           step="0.25"
         />
         <label htmlFor="schedule-rolling-duration">
-          Duracion rolling (horas)
+          Duración del horizonte (horas)
         </label>
         <input
           id="schedule-rolling-duration"
@@ -289,16 +385,26 @@ function RunSchedulesPanel() {
           min="0.25"
           step="0.25"
         />
-        <label htmlFor="schedule-cadence">Cadencia</label>
+        <label htmlFor="schedule-cadence">Frecuencia</label>
         <select id="schedule-cadence" name="cadence" defaultValue="daily">
-          <option value="hourly">hourly</option>
-          <option value="daily">daily</option>
-          <option value="weekly">weekly</option>
+          <option value="hourly">Cada hora</option>
+          <option value="daily">Diaria</option>
+          <option value="weekly">Semanal</option>
         </select>
-        <label htmlFor="schedule-next-run">Proxima ejecucion</label>
-        <input id="schedule-next-run" name="next_run_at" required />
+        <label htmlFor="schedule-next-run">Próxima ejecución</label>
+        <input
+          id="schedule-next-run"
+          name="next_run_at"
+          required
+          aria-invalid={errorField === "next_run_at" || undefined}
+          aria-describedby={
+            errorField === "next_run_at"
+              ? "schedule-error"
+              : "schedule-period-help"
+          }
+        />
         <button type="submit" disabled={createMutation.isPending}>
-          Crear schedule
+          Crear programación
         </button>
       </form>
     </section>
@@ -309,11 +415,13 @@ function CreateUserForm() {
   const queryClient = useQueryClient();
   const emailRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
+  const [emailError, setEmailError] = useState(false);
   const [status, setStatus] = useState("");
   const mutation = useMutation({
     mutationFn: createAdminUser,
     onSuccess: (created) => {
       setError("");
+      setEmailError(false);
       setStatus(`${created.email} creado.`);
       queryClient.setQueryData<AdminUser[]>(adminUsersQueryKey, (users) =>
         appendUser(users, created),
@@ -321,12 +429,24 @@ function CreateUserForm() {
       void queryClient.invalidateQueries({ queryKey: adminUsersQueryKey });
       emailRef.current?.focus();
     },
-    onError: (mutationError) => setError(errorMessage(mutationError)),
+    onError: (mutationError) => {
+      const message = errorMessage(mutationError);
+      const emailMessage =
+        message === "email already exists"
+          ? "Ya existe un usuario con este email."
+          : message === "valid email is required"
+            ? "Introduce un email válido."
+            : "";
+      setError(emailMessage || message);
+      setEmailError(!!emailMessage);
+      if (emailMessage) emailRef.current?.focus();
+    },
   });
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    setEmailError(false);
     setStatus("");
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
@@ -349,7 +469,11 @@ function CreateUserForm() {
   return (
     <form className="workspace-form" onSubmit={submit}>
       <h2>Nuevo usuario</h2>
-      {error ? <p role="alert">{error}</p> : null}
+      {error ? (
+        <p role="alert" id="admin-user-error">
+          {error}
+        </p>
+      ) : null}
       {status ? <p className="inline-status">{status}</p> : null}
       <label htmlFor="admin-user-email">Email</label>
       <input
@@ -357,6 +481,8 @@ function CreateUserForm() {
         ref={emailRef}
         name="email"
         type="email"
+        aria-invalid={emailError || undefined}
+        aria-describedby={emailError ? "admin-user-error" : undefined}
         autoComplete="username"
         required
       />
@@ -368,7 +494,7 @@ function CreateUserForm() {
         autoComplete="name"
         required
       />
-      <label htmlFor="admin-user-password">Password</label>
+      <label htmlFor="admin-user-password">Contraseña</label>
       <input
         id="admin-user-password"
         name="password"
@@ -378,10 +504,9 @@ function CreateUserForm() {
       />
       <label htmlFor="admin-user-role">Rol</label>
       <select id="admin-user-role" name="role" defaultValue="analyst" required>
-        <option value="analyst">analyst</option>
-        <option value="external">external</option>
-        <option value="client">client</option>
-        <option value="admin">admin</option>
+        <option value="analyst">Analista</option>
+        <option value="external">Usuario externo</option>
+        <option value="admin">Administrador</option>
       </select>
       <button type="submit" disabled={mutation.isPending}>
         Crear usuario
@@ -409,7 +534,7 @@ function DeactivateUserControl({
     onError: (mutationError) => setError(errorMessage(mutationError)),
   });
 
-  if (!user.is_active) return <span className="status-pill">deactivated</span>;
+  if (!user.is_active) return <span className="status-pill">Desactivado</span>;
 
   if (!confirming) {
     return (
@@ -426,6 +551,10 @@ function DeactivateUserControl({
   return (
     <div className="remove-confirmation">
       <p>Confirma desactivar {user.email}</p>
+      <p>
+        Perderá el acceso a todos sus proyectos en su siguiente solicitud.
+        Desactivar la cuenta no cancela ejecuciones ya iniciadas.
+      </p>
       {error ? <p role="alert">{error}</p> : null}
       <button
         type="button"
@@ -438,6 +567,7 @@ function DeactivateUserControl({
       <button
         type="button"
         className="secondary-action"
+        disabled={mutation.isPending}
         onClick={() => {
           setConfirming(false);
           setError("");
@@ -468,8 +598,8 @@ function AdminUserList({
             <div>
               <strong>{user.email}</strong>
               <p>
-                {user.display_name || "Sin nombre"} | {user.role} |{" "}
-                {user.is_active ? "active" : "deactivated"}
+                {user.display_name || "Sin nombre"} | {roleLabels[user.role]} |{" "}
+                {user.is_active ? "Activo" : "Desactivado"}
               </p>
             </div>
             <DeactivateUserControl user={user} onDeactivated={onDeactivated} />
@@ -481,6 +611,9 @@ function AdminUserList({
 }
 
 export function AdminUsersView() {
+  const [searchParams] = useSearchParams();
+  const section =
+    searchParams.get("section") === "schedules" ? "schedules" : "users";
   const queryClient = useQueryClient();
   const statusRef = useRef<HTMLParagraphElement>(null);
   const [deactivationStatus, setDeactivationStatus] = useState("");
@@ -502,43 +635,72 @@ export function AdminUsersView() {
     setDeactivationStatus(`${user.email} desactivado.`);
   }
 
-  if (users.isPending) {
-    return <p role="status">Cargando usuarios</p>;
-  }
-  if (users.isError) {
-    return (
-      <section className="content-panel">
-        <h1>No se pudo cargar</h1>
-        <p>{errorMessage(users.error)}</p>
-        <button type="button" onClick={() => void users.refetch()}>
-          Reintentar
-        </button>
-      </section>
-    );
-  }
-
   return (
-    <section className="workspace-view">
+    <section className="workspace-view admin-view">
       <header className="workspace-heading">
-        <p className="eyebrow">Admin</p>
-        <h1>Administracion</h1>
+        <p className="eyebrow">Gestión del espacio de trabajo</p>
+        <h1>Administración</h1>
       </header>
-      <div className="workspace-grid">
-        <section className="workspace-section" aria-labelledby="admin-users">
-          <h2 id="admin-users">Cuentas locales</h2>
-          {deactivationStatus ? (
-            <p
-              ref={statusRef}
-              className="inline-status"
-              tabIndex={-1}
-              aria-live="polite"
+      <nav className="workspace-nav" aria-label="Secciones de administración">
+        {[
+          ["users", "Usuarios y accesos"],
+          ["schedules", "Programación"],
+        ].map(([key, label]) => {
+          const params = new URLSearchParams(searchParams);
+          params.set("section", key);
+          return (
+            <Link
+              key={key}
+              to={`?${params}`}
+              aria-current={section === key ? "page" : undefined}
             >
-              {deactivationStatus}
-            </p>
-          ) : null}
-          <AdminUserList users={users.data} onDeactivated={acceptDeactivated} />
-        </section>
-        <CreateUserForm />
+              {label}
+            </Link>
+          );
+        })}
+      </nav>
+      <div hidden={section !== "users"}>
+        <h2>Usuarios y accesos</h2>
+        <p>
+          Las cuentas definen la identidad. Los permisos de un usuario externo
+          se conceden por separado en Accesos de cada proyecto.
+        </p>
+        <Link to="/projects">
+          Elegir un proyecto para administrar sus accesos
+        </Link>
+        <div className="workspace-grid">
+          <section className="workspace-section" aria-labelledby="admin-users">
+            <h2 id="admin-users">Cuentas locales</h2>
+            {deactivationStatus ? (
+              <p
+                ref={statusRef}
+                className="inline-status"
+                tabIndex={-1}
+                aria-live="polite"
+              >
+                {deactivationStatus}
+              </p>
+            ) : null}
+            {users.isPending ? (
+              <p role="status">Cargando usuarios</p>
+            ) : users.isError ? (
+              <div>
+                <p role="alert">{errorMessage(users.error)}</p>
+                <button type="button" onClick={() => void users.refetch()}>
+                  Reintentar usuarios
+                </button>
+              </div>
+            ) : (
+              <AdminUserList
+                users={users.data}
+                onDeactivated={acceptDeactivated}
+              />
+            )}
+          </section>
+          <CreateUserForm />
+        </div>
+      </div>
+      <div hidden={section !== "schedules"}>
         <RunSchedulesPanel />
       </div>
     </section>
@@ -556,10 +718,21 @@ function ExternalCapabilityEditor({
   projectName: string;
   onChanged: (assignment: ExternalProjectAccess) => void;
 }) {
+  const reviewRef = useRef<HTMLHeadingElement>(null);
+  const permissionsRef = useRef<HTMLInputElement>(null);
+  const returnToPermissions = useRef(false);
   const [portalView, setPortalView] = useState(assignment.portal_view);
   const [operate, setOperate] = useState(assignment.operate);
+  const [reviewing, setReviewing] = useState(false);
   const [confirmingRemoval, setConfirmingRemoval] = useState(false);
   const [error, setError] = useState("");
+  useEffect(() => {
+    if (reviewing || confirmingRemoval) reviewRef.current?.focus();
+    else if (returnToPermissions.current) {
+      permissionsRef.current?.focus();
+      returnToPermissions.current = false;
+    }
+  }, [reviewing, confirmingRemoval]);
   const saveMutation = useMutation({
     mutationFn: () =>
       setProjectExternalAccess(projectId, assignment.user_id, {
@@ -568,6 +741,7 @@ function ExternalCapabilityEditor({
       }),
     onSuccess: (updated) => {
       setError("");
+      setReviewing(false);
       onChanged(updated);
     },
     onError: (mutationError) => setError(errorMessage(mutationError)),
@@ -590,49 +764,129 @@ function ExternalCapabilityEditor({
           <strong>{assignment.email}</strong>
           <p>
             {assignment.display_name || "Sin nombre"} |{" "}
-            {assignment.is_active ? "active" : "deactivated"} | actualizado por{" "}
+            {assignment.is_active ? "Activo" : "Desactivado"} | actualizado por{" "}
             {assignment.updated_by}
           </p>
         </div>
-        <div>
+        <fieldset
+          disabled={
+            reviewing ||
+            confirmingRemoval ||
+            saveMutation.isPending ||
+            removeMutation.isPending
+          }
+        >
+          <legend>Permisos en {projectName}</legend>
           <label>
             <input
               type="checkbox"
               checked={portalView}
+              ref={permissionsRef}
+              aria-label={`Ver informes para ${assignment.email}`}
               onChange={(event) => setPortalView(event.target.checked)}
             />
-            Portal {assignment.email}
+            Ver informes
           </label>
           <label>
             <input
               type="checkbox"
               checked={operate}
+              aria-label={`Operar consolas para ${assignment.email}`}
               onChange={(event) => setOperate(event.target.checked)}
             />
-            Operar {assignment.email}
+            Operar consolas
           </label>
-        </div>
+        </fieldset>
       </div>
       {error ? <p role="alert">{error}</p> : null}
-      <button
-        type="button"
-        disabled={saveMutation.isPending}
-        onClick={() => saveMutation.mutate()}
-      >
-        Guardar capacidades de {assignment.email}
-      </button>
+      {!reviewing ? (
+        <button
+          type="button"
+          disabled={
+            confirmingRemoval ||
+            saveMutation.isPending ||
+            removeMutation.isPending ||
+            (portalView === assignment.portal_view &&
+              operate === assignment.operate)
+          }
+          onClick={() => {
+            setError("");
+            setReviewing(true);
+          }}
+        >
+          Guardar capacidades de {assignment.email}
+        </button>
+      ) : (
+        <section
+          className="remove-confirmation"
+          aria-label={`Revisar cambios de ${assignment.email}`}
+        >
+          <h3 ref={reviewRef} tabIndex={-1}>
+            Revisar cambios de {assignment.email}
+          </h3>
+          <p>Proyecto: {projectName}.</p>
+          <p>
+            Ver informes: {assignment.portal_view ? "Permitido" : "Sin acceso"}{" "}
+            → {portalView ? "Permitido" : "Sin acceso"}.
+          </p>
+          <p>
+            Operar consolas: {assignment.operate ? "Permitido" : "Sin acceso"} →{" "}
+            {operate ? "Permitido" : "Sin acceso"}.
+          </p>
+          {(assignment.portal_view && !portalView) ||
+          (assignment.operate && !operate) ? (
+            <p>
+              Los permisos retirados dejarán de estar disponibles en la
+              siguiente solicitud. Este cambio no cancela ejecuciones ya
+              iniciadas.
+            </p>
+          ) : null}
+          <button
+            type="button"
+            disabled={saveMutation.isPending}
+            onClick={() => saveMutation.mutate()}
+          >
+            Confirmar cambios
+          </button>
+          <button
+            type="button"
+            className="secondary-action"
+            disabled={saveMutation.isPending}
+            onClick={() => {
+              returnToPermissions.current = true;
+              setReviewing(false);
+            }}
+          >
+            Volver a editar permisos
+          </button>
+        </section>
+      )}
       {!confirmingRemoval ? (
         <button
           type="button"
           className="danger-button"
-          onClick={() => setConfirmingRemoval(true)}
+          disabled={
+            reviewing ||
+            saveMutation.isPending ||
+            removeMutation.isPending ||
+            (!assignment.portal_view && !assignment.operate)
+          }
+          onClick={() => {
+            setError("");
+            setConfirmingRemoval(true);
+          }}
         >
           Revocar {assignment.email}
         </button>
       ) : (
         <div className="remove-confirmation">
-          <p>
+          <h3 ref={reviewRef} tabIndex={-1}>
             Confirma revocar a {assignment.email} de {projectName}
+          </h3>
+          <p>
+            Se retirarán Ver informes y Operar consolas en este proyecto. Los
+            demás proyectos conservan sus permisos. La revocación se aplica en
+            la siguiente solicitud y no cancela ejecuciones ya iniciadas.
           </p>
           <button
             type="button"
@@ -645,7 +899,11 @@ function ExternalCapabilityEditor({
           <button
             type="button"
             className="secondary-action"
-            onClick={() => setConfirmingRemoval(false)}
+            disabled={removeMutation.isPending}
+            onClick={() => {
+              returnToPermissions.current = true;
+              setConfirmingRemoval(false);
+            }}
           >
             Cancelar
           </button>
@@ -697,9 +955,18 @@ export function ProjectExternalAccessSection({
 }) {
   const queryClient = useQueryClient();
   const statusRef = useRef<HTMLParagraphElement>(null);
+  const reviewRef = useRef<HTMLHeadingElement>(null);
+  const userRef = useRef<HTMLSelectElement>(null);
+  const returnToUser = useRef(false);
   const [selectedUserId, setSelectedUserId] = useState("");
   const [grantPortalView, setGrantPortalView] = useState(false);
   const [grantOperate, setGrantOperate] = useState(false);
+  const [grantReview, setGrantReview] = useState<{
+    userId: number;
+    email: string;
+    portal_view: boolean;
+    operate: boolean;
+  } | null>(null);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const users = useQuery({
@@ -735,10 +1002,10 @@ export function ProjectExternalAccessSection({
       ? String(eligibleExternalUsers[0].id)
       : "";
   const assignMutation = useMutation({
-    mutationFn: (userId: number) =>
-      setProjectExternalAccess(projectId, userId, {
-        portal_view: grantPortalView,
-        operate: grantOperate,
+    mutationFn: (review: NonNullable<typeof grantReview>) =>
+      setProjectExternalAccess(projectId, review.userId, {
+        portal_view: review.portal_view,
+        operate: review.operate,
       }),
     onSuccess: (assignment) => {
       setError("");
@@ -747,6 +1014,7 @@ export function ProjectExternalAccessSection({
       );
       setGrantPortalView(false);
       setGrantOperate(false);
+      setGrantReview(null);
       queryClient.setQueryData<ExternalProjectAccess[]>(
         projectExternalAccessQueryKey(projectId),
         (assignments) => replaceAssignment(assignments, assignment),
@@ -762,6 +1030,14 @@ export function ProjectExternalAccessSection({
     if (status) statusRef.current?.focus();
   }, [status]);
 
+  useEffect(() => {
+    if (grantReview) reviewRef.current?.focus();
+    else if (returnToUser.current) {
+      userRef.current?.focus();
+      returnToUser.current = false;
+    }
+  }, [grantReview]);
+
   function changeAccepted(assignment: ExternalProjectAccess) {
     queryClient.setQueryData<ExternalProjectAccess[]>(
       projectExternalAccessQueryKey(projectId),
@@ -773,7 +1049,10 @@ export function ProjectExternalAccessSection({
 
   if (users.isPending || access.isPending) {
     return (
-      <section className="workspace-section" aria-labelledby="project-access">
+      <section
+        className="workspace-section external-access"
+        aria-labelledby="project-access"
+      >
         <h2 id="project-access">Capacidades externas</h2>
         <p role="status">Cargando capacidades externas</p>
       </section>
@@ -781,16 +1060,37 @@ export function ProjectExternalAccessSection({
   }
   if (users.isError || access.isError) {
     return (
-      <section className="workspace-section" aria-labelledby="project-access">
+      <section
+        className="workspace-section external-access"
+        aria-labelledby="project-access"
+      >
         <h2 id="project-access">Capacidades externas</h2>
         <p role="alert">{errorMessage(users.error || access.error)}</p>
+        <button
+          type="button"
+          onClick={() => {
+            void users.refetch();
+            void access.refetch();
+          }}
+        >
+          Reintentar accesos
+        </button>
       </section>
     );
   }
 
   return (
-    <section className="workspace-section" aria-labelledby="project-access">
+    <section
+      className="workspace-section external-access"
+      aria-labelledby="project-access"
+    >
       <h2 id="project-access">Capacidades externas</h2>
+      <p>
+        Elige el acceso a {projectName} para cada usuario. Ver informes permite
+        consultar publicaciones y descargar sus archivos autorizados. Operar
+        consolas permite ajustar los datos habilitados y ejecutar las consolas
+        de este proyecto.
+      </p>
       {status ? (
         <p
           ref={statusRef}
@@ -820,51 +1120,104 @@ export function ProjectExternalAccessSection({
           event.preventDefault();
           setError("");
           setStatus("");
-          if (effectiveSelectedUserId)
-            assignMutation.mutate(Number(effectiveSelectedUserId));
+          const selected = eligibleExternalUsers.find(
+            (user) => String(user.id) === effectiveSelectedUserId,
+          );
+          if (selected)
+            setGrantReview({
+              userId: selected.id,
+              email: selected.email,
+              portal_view: grantPortalView,
+              operate: grantOperate,
+            });
         }}
       >
         <h3>Otorgar capacidades</h3>
         {error ? <p role="alert">{error}</p> : null}
-        <label htmlFor="eligible-external-user">Usuario externo</label>
-        <select
-          id="eligible-external-user"
-          value={effectiveSelectedUserId}
-          disabled={!eligibleExternalUsers.length}
-          onChange={(event) => setSelectedUserId(event.target.value)}
-        >
-          {eligibleExternalUsers.length ? (
-            eligibleExternalUsers.map((externalUser) => (
-              <option key={externalUser.id} value={externalUser.id}>
-                {externalUser.email}
-              </option>
-            ))
-          ) : (
-            <option value="">Sin usuarios externos elegibles</option>
-          )}
-        </select>
-        <label>
-          <input
-            type="checkbox"
-            checked={grantPortalView}
-            onChange={(event) => setGrantPortalView(event.target.checked)}
-          />
-          Portal al otorgar
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={grantOperate}
-            onChange={(event) => setGrantOperate(event.target.checked)}
-          />
-          Operar al otorgar
-        </label>
-        <button
-          type="submit"
-          disabled={!effectiveSelectedUserId || assignMutation.isPending}
-        >
-          Otorgar capacidades
-        </button>
+        <fieldset disabled={!!grantReview || assignMutation.isPending}>
+          <legend>Nuevo acceso a {projectName}</legend>
+          <label htmlFor="eligible-external-user">Usuario externo</label>
+          <select
+            id="eligible-external-user"
+            ref={userRef}
+            value={effectiveSelectedUserId}
+            disabled={!eligibleExternalUsers.length}
+            onChange={(event) => setSelectedUserId(event.target.value)}
+          >
+            {eligibleExternalUsers.length ? (
+              eligibleExternalUsers.map((externalUser) => (
+                <option key={externalUser.id} value={externalUser.id}>
+                  {externalUser.email}
+                </option>
+              ))
+            ) : (
+              <option value="">Sin usuarios externos elegibles</option>
+            )}
+          </select>
+          <label>
+            <input
+              type="checkbox"
+              checked={grantPortalView}
+              onChange={(event) => setGrantPortalView(event.target.checked)}
+            />
+            Ver informes
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={grantOperate}
+              onChange={(event) => setGrantOperate(event.target.checked)}
+            />
+            Operar consolas
+          </label>
+        </fieldset>
+        {!grantReview ? (
+          <button
+            type="submit"
+            disabled={
+              !effectiveSelectedUserId ||
+              (!grantPortalView && !grantOperate) ||
+              assignMutation.isPending
+            }
+          >
+            Revisar acceso
+          </button>
+        ) : (
+          <section aria-label="Revisar acceso" className="remove-confirmation">
+            <h3 ref={reviewRef} tabIndex={-1}>
+              Revisar acceso
+            </h3>
+            <p>
+              Usuario: {grantReview.email}. Proyecto: {projectName}.
+            </p>
+            <p>
+              Ver informes:{" "}
+              {grantReview.portal_view ? "Permitido" : "Sin acceso"}.
+            </p>
+            <p>
+              Operar consolas:{" "}
+              {grantReview.operate ? "Permitido" : "Sin acceso"}.
+            </p>
+            <button
+              type="button"
+              disabled={assignMutation.isPending}
+              onClick={() => assignMutation.mutate(grantReview)}
+            >
+              Otorgar capacidades
+            </button>
+            <button
+              type="button"
+              className="secondary-action"
+              disabled={assignMutation.isPending}
+              onClick={() => {
+                returnToUser.current = true;
+                setGrantReview(null);
+              }}
+            >
+              Volver a editar acceso
+            </button>
+          </section>
+        )}
       </form>
     </section>
   );

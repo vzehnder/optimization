@@ -142,6 +142,18 @@ El rol `client` de iteraciones anteriores fue retirado. Si vienes de esa
 version, el equivalente actual es un usuario `external` con `portal_view` en
 los proyectos que le correspondan.
 
+En **Administración → Usuarios y accesos**, esos roles se muestran como
+**Analista**, **Administrador** y **Usuario externo**. Crear una cuenta externa
+no le concede permisos. En **Accesos** del proyecto se eligen **Ver informes**
+y **Operar consolas** por separado; **Revisar acceso** muestra persona, proyecto
+y permisos antes de **Otorgar capacidades**. Para cambiar una asignación, usar
+**Guardar capacidades de {email}**, revisar el antes/después y **Confirmar
+cambios**. Un fallo conserva la selección para corregir o reintentar.
+
+**Revocar** retira ambas capacidades de ese proyecto; desactivar una cuenta
+afecta todos sus proyectos. Las confirmaciones explican el efecto en la
+siguiente solicitud. Estas acciones no cancelan ejecuciones ya iniciadas.
+
 ### Las tres raices de la aplicacion
 
 La UI React se sirve bajo `/react` y esta partida en tres raices que no
@@ -645,7 +657,7 @@ regeneracion automatica no existe, es una decision tuya.
 
 Para reruns periodicos (por ejemplo, reoptimizar cada dia con el pronostico
 mas reciente) existen los **schedules**, gestionados por un admin en la
-seccion Admin:
+sección **Administración → Programación**:
 
 - Un schedule referencia caso + variante + regla de rango + cadencia. Nunca
   se pega un JSON de caso a mano.
@@ -660,6 +672,13 @@ seccion Admin:
   snapshot inmutable, y pasan por los mismos gates: si la variante esta
   stale o el rango no tiene cobertura, el tick falla visiblemente y **no**
   se crea ninguna corrida.
+
+El formulario identifica escenario, variante, inicio/fin con offset, frecuencia
+y próxima ejecución. **Fijo** conserva el período; **Horizonte móvil** usa el
+desplazamiento y la duración respecto a la fecha programada. Las etiquetas
+mantienen los valores API existentes. **Crear programación**, **Ejecutar
+vencidos** y **Refrescar** conservan sus operaciones. Cambiar a **Usuarios y
+accesos** y volver mantiene el formulario pendiente dentro de la pantalla.
 
 ## 13. Eliminar Un Proyecto
 

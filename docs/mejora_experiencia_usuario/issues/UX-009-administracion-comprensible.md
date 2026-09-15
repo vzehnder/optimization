@@ -1,6 +1,10 @@
 # UX-009 · Administración y acciones sensibles comprensibles
 
-Estado: Todo. Prioridad: P2. Dependencias: UX-001. Tamaño: S.
+Estado: In Review. Prioridad: P2. Dependencias: UX-001. Tamaño: S.
+
+Responsable: Codex. Inicio: 2026-09-14, sobre `902662a`.
+F1/F2 confirmadas por el usuario antes de las pruebas nuevas.
+[Acuerdo y evidencia](../evidencia/ux-009/README.md).
 
 ## Problema y resultado
 
@@ -41,3 +45,33 @@ F1/F2; F3 si se modifica contrato/permisos:
 - Los usuarios externos no reciben diagnóstico administrativo ni detalles de programas no autorizados.
 
 No cambiar el modelo de roles ni migrar tablas en este ticket. Cualquier conflicto con compatibilidad vigente se documenta y se resuelve con una extensión acotada del alcance antes de implementar. Revisión estructural posterior al ciclo TDD.
+
+## Resolución
+
+- Responsable: Codex. Inicio y entrega para revisión: 2026-09-14.
+- Estado final: In Review, pendiente de aceptación del resultado.
+- PR o commits: `feat(ux): clarify administration and sensitive actions`, sobre
+  `902662a`, solicitado por el usuario el 2026-09-15; sin PR.
+- Implementación: roles legibles con una sola identidad externa; capacidades
+  independientes sin preselección, revisión explícita y efecto de revocación;
+  usuarios y programación separados conservando formularios al alternar;
+  errores de email/fechas vinculados al campo, reintentos y foco de teclado.
+- Criterios y conservación funcional: identidad/autorización, acceso a informes,
+  usuarios/capacidades, programación y eliminación de proyectos comprobados en
+  [la evidencia](../evidencia/ux-009/README.md). La API ya rechazaba crear `client`;
+  se conserva la migración histórica a `external + portal_view` sin cambios.
+- Fronteras: «Confirmo F1 y F2 para UX-009», antes de las pruebas nuevas.
+  Nueve ciclos F2 y dos fallos de layout F1 corregidos; regresiones existentes F3.
+- Validación: 267 React, 23 navegador y 45 Python aprobadas; dos PostgreSQL
+  omitidas. TypeScript, ESLint, build, formato de los siete archivos frontend
+  modificados y diff pasan. El chequeo global falla solo por formato previo
+  en 21 archivos sin modificaciones.
+- Visual/accesibilidad: 14 capturas locales regenerables, 1440/1280/320 px y
+  ampliación CSS 200 %, foco/teclado y axe sin serious/critical en las tres
+  superficies comprobadas. Confirmaciones de desactivación y borrado revisadas.
+- Revisión estructural: estados de revisión locales y HTTP como frontera;
+  contratos, permisos y purga conservados. Sin refactorización ajena al alcance.
+- Límites: sin Julia real, PostgreSQL, suite Python completa ni evaluación con
+  participantes/lectores de pantalla. El servidor smoke usa resultados sintéticos.
+- Persona que revisó/aceptó: revisión técnica local de Codex; aceptación del
+  producto pendiente.

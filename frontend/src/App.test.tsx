@@ -438,7 +438,7 @@ describe("application shell", () => {
     // BESS-TS5-006: `scenario_versions.case_name` is a frozen free-text label
     // from the payload at promotion time (it can differ between versions of
     // the same scenario), not the stable `OptimizationCase` this scenario
-    // owns one-to-one. An unqualified "Case" label next to "Scenario ID"
+    // owns one-to-one. An unqualified "Case" label next to "Escenario (ID)"
     // reads as if versions could belong to different case entities.
     window.history.replaceState({}, "", "/react/scenario-versions/41");
     const project = {
@@ -7846,7 +7846,7 @@ describe("application shell", () => {
     });
   });
 
-  it("lets internal users delete a project after confirmation", async () => {
+  it("lets internal users retry a failed project deletion after confirmation", async () => {
     window.history.replaceState({}, "", "/react/projects");
     const projects = [
       {
@@ -7888,6 +7888,11 @@ describe("application shell", () => {
         }
         if (path === "/api/projects/1" && method === "DELETE") {
           deleteCalls += 1;
+          if (deleteCalls === 1)
+            return Response.json(
+              { detail: "No se pudo eliminar el proyecto." },
+              { status: 503 },
+            );
           expect(new Headers(init?.headers).get("X-CSRF-Token")).toBe(
             "csrf-token",
           );
@@ -7935,6 +7940,16 @@ describe("application shell", () => {
       }),
     );
 
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "No se pudo eliminar el proyecto.",
+    );
+    expect(screen.getByRole("link", { name: "Hybrid PMGD" })).toBeVisible();
+    await user.click(
+      screen.getByRole("button", {
+        name: "Confirmar eliminar proyecto Hybrid PMGD",
+      }),
+    );
+
     expect(
       await screen.findByText(
         "Crea un proyecto para comenzar a modelar escenarios.",
@@ -7943,7 +7958,7 @@ describe("application shell", () => {
     expect(
       screen.queryByRole("link", { name: "Hybrid PMGD" }),
     ).not.toBeInTheDocument();
-    expect(deleteCalls).toBe(1);
+    expect(deleteCalls).toBe(2);
   });
 
   it("lets admins manage users and external project capabilities without a document reload", async () => {
@@ -8230,55 +8245,66 @@ describe("application shell", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "Administracion" }),
+      await screen.findByRole("heading", { name: "Administración" }),
     ).toBeVisible();
-    expect(screen.getByText("admin@example.local")).toBeVisible();
+    expect(await screen.findByText("admin@example.local")).toBeVisible();
+    await user.click(screen.getByRole("link", { name: "Programación" }));
     expect(await screen.findByText("Daily API schedule")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Ejecutar vencidos" }));
-    expect(await screen.findByText("1 schedule(s) evaluados.")).toBeVisible();
-    expect(await screen.findByText(/ultimo tick queued/)).toBeVisible();
+    expect(
+      await screen.findByText("1 programación(es) evaluadas."),
+    ).toBeVisible();
+    expect(await screen.findByText(/Último intento En cola/)).toBeVisible();
     expect(
       await screen.findByText(
-        /tick 99 queued \| rango 2026-08-01T00:00:00-04:00 - 2026-08-02T00:00:00-04:00 \| run 55/,
+        /Intento 99 En cola \| período 2026-08-01T00:00:00-04:00 - 2026-08-02T00:00:00-04:00 \| ejecución 55/,
       ),
     ).toBeVisible();
 
     await user.type(
-      screen.getByLabelText("Nombre schedule"),
+      screen.getByLabelText("Nombre de la programación"),
       "Rolling API schedule",
     );
-    await user.type(screen.getByLabelText("Scenario ID"), "10");
-    await user.type(screen.getByLabelText("Variant ID"), "30");
+    await user.type(screen.getByLabelText("Escenario (ID)"), "10");
+    await user.type(screen.getByLabelText("Variante (ID)"), "30");
     await user.type(
-      screen.getByLabelText("Rango inicio"),
+      screen.getByLabelText("Inicio del período"),
       "2020-01-01T00:00:00+00:00",
     );
     await user.type(
-      screen.getByLabelText("Rango termino"),
+      screen.getByLabelText("Fin del período"),
       "2020-01-02T00:00:00+00:00",
     );
     await user.selectOptions(screen.getByLabelText("Modo de rango"), "rolling");
     await user.type(
-      screen.getByLabelText("Offset inicio rolling (horas)"),
+      screen.getByLabelText("Desplazamiento del inicio (horas)"),
       "0",
     );
-    await user.type(screen.getByLabelText("Duracion rolling (horas)"), "24");
     await user.type(
-      screen.getByLabelText("Proxima ejecucion"),
+      screen.getByLabelText("Duración del horizonte (horas)"),
+      "24",
+    );
+    await user.type(
+      screen.getByLabelText("Próxima ejecución"),
       "2026-08-11T09:00:00+00:00",
     );
-    await user.click(screen.getByRole("button", { name: "Crear schedule" }));
+    await user.click(
+      screen.getByRole("button", { name: "Crear programación" }),
+    );
     expect(
       await screen.findByText("Rolling API schedule creado."),
     ).toBeVisible();
     expect(
-      await screen.findByText(/rolling \| offset 0h \| duracion 24h/),
+      await screen.findByText(
+        /Horizonte móvil \| desplazamiento 0 h \| duración 24 h/,
+      ),
     ).toBeVisible();
 
+    await user.click(screen.getByRole("link", { name: "Usuarios y accesos" }));
     await user.type(screen.getByLabelText("Email"), "external@example.local");
     await user.type(screen.getByLabelText("Nombre"), "External User");
-    await user.type(screen.getByLabelText("Password"), "external pass");
+    await user.type(screen.getByLabelText("Contraseña"), "external pass");
     await user.selectOptions(screen.getByLabelText("Rol"), "external");
     await user.click(screen.getByRole("button", { name: "Crear usuario" }));
     expect(await screen.findByText("external@example.local")).toBeVisible();
@@ -8300,8 +8326,9 @@ describe("application shell", () => {
     ).toBeVisible();
 
     await user.selectOptions(screen.getByLabelText("Usuario externo"), "8");
-    await user.click(screen.getByLabelText("Portal al otorgar"));
-    await user.click(screen.getByLabelText("Operar al otorgar"));
+    await user.click(screen.getByRole("checkbox", { name: "Ver informes" }));
+    await user.click(screen.getByRole("checkbox", { name: "Operar consolas" }));
+    await user.click(screen.getByRole("button", { name: "Revisar acceso" }));
     await user.click(
       screen.getByRole("button", { name: "Otorgar capacidades" }),
     );
@@ -8314,10 +8341,10 @@ describe("application shell", () => {
       screen.getByRole("button", { name: "Revocar external@example.local" }),
     ).toBeVisible();
     expect(
-      screen.getByLabelText("Portal external@example.local"),
+      screen.getByLabelText("Ver informes para external@example.local"),
     ).toBeChecked();
     expect(
-      screen.getByLabelText("Operar external@example.local"),
+      screen.getByLabelText("Operar consolas para external@example.local"),
     ).toBeChecked();
 
     await user.click(
@@ -8339,10 +8366,10 @@ describe("application shell", () => {
       ),
     ).toBeVisible();
     expect(
-      screen.getByLabelText("Portal external@example.local"),
+      screen.getByLabelText("Ver informes para external@example.local"),
     ).not.toBeChecked();
     expect(
-      screen.getByLabelText("Operar external@example.local"),
+      screen.getByLabelText("Operar consolas para external@example.local"),
     ).not.toBeChecked();
 
     await user.click(screen.getByRole("link", { name: "Administración" }));
@@ -8362,8 +8389,8 @@ describe("application shell", () => {
     expect(
       await screen.findByText("external@example.local desactivado."),
     ).toHaveFocus();
-    expect(screen.getByText("deactivated")).toBeVisible();
-  });
+    expect(screen.getByText("Desactivado", { exact: true })).toBeVisible();
+  }, 10_000);
 
   it("renders the read-only client portal and clears protected data after authorization failure", async () => {
     window.history.replaceState({}, "", "/react/client");

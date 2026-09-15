@@ -1873,40 +1873,54 @@ Esta sección requiere rol `admin`.
 
 ### 25.1 Crear usuario
 
-En **Admin** > **Nuevo usuario**:
+En **Administración** > **Usuarios y accesos** > **Nuevo usuario**:
 
 1. completar Email;
 2. completar Nombre;
-3. definir Password inicial;
-4. elegir `admin`, `analyst` o `external`;
+3. definir la **Contraseña** inicial;
+4. elegir **Administrador**, **Analista** o **Usuario externo**;
 5. presionar **Crear usuario**.
 
-No elegir el valor legado `client` si aparece en un selector antiguo. Después de
-crear una cuenta externa, todavía no tiene acceso a ningún proyecto.
+Las etiquetas corresponden a `admin`, `analyst` y `external` en la API. Hay una
+sola identidad externa; el rol histórico `client` no se ofrece para cuentas
+nuevas. Después de crear una cuenta externa todavía no tiene acceso a ningún
+proyecto. Un email duplicado se identifica en el campo y permite corregirlo sin
+borrar los demás valores.
 
 ### 25.2 Otorgar capacidades en un proyecto
 
-En el proyecto, la sección **Capacidades externas** solo aparece para admin.
+En **Accesos** del proyecto, la sección **Capacidades externas** solo aparece
+para el administrador. También se puede llegar desde **Usuarios y accesos**,
+siguiendo el enlace para elegir un proyecto.
 
 1. En **Otorgar capacidades**, elegir **Usuario externo**.
-2. Marcar **Portal al otorgar**, **Operar al otorgar** o ambos.
-3. Presionar **Otorgar capacidades**.
-4. Verificar que el usuario aparezca en la lista.
+2. Elegir **Ver informes**, **Operar consolas** o ambos. Ninguno viene marcado.
+   El primero permite publicaciones y descargas autorizadas; el segundo permite
+   operar las consolas habilitadas del proyecto.
+3. Presionar **Revisar acceso** y comprobar email, proyecto y permisos.
+4. Confirmar con **Otorgar capacidades** o **Volver a editar acceso**.
+5. Verificar el resultado aceptado en la lista.
 
 Para una asignación existente:
 
-- cambiar checkboxes **Portal {email}** y **Operar {email}**;
-- presionar **Guardar capacidades de {email}**.
+- cambiar **Ver informes** y **Operar consolas**, independientemente;
+- presionar **Guardar capacidades de {email}**;
+- revisar el permiso vigente y el propuesto antes de **Confirmar cambios**.
+
+Un guardado fallido conserva las decisiones para un reintento explícito.
+Si falla la consulta inicial, **Reintentar accesos** vuelve a consultar el estado.
 
 ### 25.3 Revocar o desactivar
 
 - **Revocar {email}** quita capacidades de ese proyecto.
-- **Desactivar {email}** en Admin desactiva la cuenta completa.
+- **Desactivar {email}** en Administración desactiva la cuenta completa.
 
 Ambas operaciones tienen efecto inmediato sobre nuevas peticiones. Una sesión
 abierta deja de resolver cuando el usuario está desactivado. Antes de confirmar,
 verificar email y proyecto; una revocación no borra publicaciones ni consolas,
-solo el acceso.
+solo el acceso. Ninguna de estas acciones cancela ejecuciones ya iniciadas.
+Para retirar una sola capacidad, editar sus casillas y confirmar los cambios;
+**Revocar** retira ambas capacidades de ese proyecto.
 
 ## 26. Usar el portal como usuario externo
 
@@ -2272,28 +2286,32 @@ al responsable que revise el estado de migración. Después de la primera
 escritura canónica no se vuelve al escritor legado para intentar eludir el
 bloqueo.
 
-## 31. Schedules administrados
+## 31. Programación de ejecuciones
 
-Solo `admin` ve **Schedules** en la pantalla de administración.
+Solo el administrador accede a **Administración** > **Programación**. El enlace
+directo es `/react/admin/users?section=schedules`. Cambiar entre las dos secciones
+conserva formularios pendientes; recargar no guarda esos valores.
 
-### 31.1 Crear schedule
+### 31.1 Crear programación
 
 Completar:
 
-- **Nombre schedule**;
-- **Scenario ID**;
-- **Variant ID**;
-- **Rango inicio** y **Rango término**;
-- **Modo de rango** `fixed` o `rolling`;
-- offset inicial y duración, si es rolling;
-- cadencia `hourly`, `daily` o `weekly`;
+- **Nombre de la programación**;
+- **Escenario (ID)**;
+- **Variante (ID)**;
+- **Inicio del período** y **Fin del período**;
+- **Modo de rango**: **Fijo** (`fixed`) o **Horizonte móvil** (`rolling`);
+- **Desplazamiento del inicio (horas)** y **Duración del horizonte (horas)**,
+  cuando se usa horizonte móvil;
+- **Frecuencia**: **Cada hora**, **Diaria** o **Semanal**;
 - **Próxima ejecución**.
 
-Usar timestamps ISO-8601 con zona. Para `fixed`, el mismo rango se materializa
-en cada disparo. Para `rolling`, el rango se calcula respecto del instante de
-ejecución.
+Usar fechas ISO-8601 con offset explícito. El inicio está incluido y el fin
+excluido. El modo fijo materializa el mismo período en cada disparo. En horizonte
+móvil el inicio es la fecha programada más el desplazamiento; la duración fija
+el fin. Una fecha rechazada se identifica y enfoca sin borrar el formulario.
 
-Presionar **Crear schedule** y revisar ID de scenario/variant, próxima
+Presionar **Crear programación** y revisar escenario, variante, próxima
 ejecución y rango.
 
 ### 31.2 Ejecutar vencidos

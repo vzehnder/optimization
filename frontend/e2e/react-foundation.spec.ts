@@ -487,7 +487,7 @@ test("React admin users and project access cover assignment, removal, deactivati
   ) {
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Nombre", { exact: true }).fill(name);
-    await page.getByLabel("Password").fill(password);
+    await page.getByLabel("Contraseña").fill(password);
     await page.getByLabel("Rol", { exact: true }).selectOption(role);
     await page.getByRole("button", { name: "Crear usuario" }).click();
     await expect(page.getByText(`${email} creado.`)).toBeVisible();
@@ -504,7 +504,7 @@ test("React admin users and project access cover assignment, removal, deactivati
 
   await page.getByRole("link", { name: "Administración", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Administracion" }),
+    page.getByRole("heading", { name: "Administración" }),
   ).toBeVisible();
   await createUser(clientEmail, "Portal Client", "external", "client-pass");
   await createUser(analystEmail, "Ops Analyst", "analyst", "analyst-pass");
@@ -512,10 +512,12 @@ test("React admin users and project access cover assignment, removal, deactivati
 
   await page.getByLabel("Email").fill(clientEmail);
   await page.getByLabel("Nombre", { exact: true }).fill("Duplicate Client");
-  await page.getByLabel("Password").fill("client-pass");
+  await page.getByLabel("Contraseña").fill("client-pass");
   await page.getByLabel("Rol", { exact: true }).selectOption("external");
   await page.getByRole("button", { name: "Crear usuario" }).click();
-  await expect(page.getByRole("alert")).toContainText("email already exists");
+  await expect(page.getByRole("alert")).toContainText(
+    "Ya existe un usuario con este email.",
+  );
 
   await page
     .getByRole("navigation", { name: "Navegacion principal" })
@@ -533,7 +535,10 @@ test("React admin users and project access cover assignment, removal, deactivati
   ).toBeVisible();
 
   await page.getByLabel("Usuario externo").selectOption({ label: clientEmail });
-  await page.getByLabel("Portal al otorgar").check();
+  await page
+    .getByRole("checkbox", { name: "Ver informes", exact: true })
+    .check();
+  await page.getByRole("button", { name: "Revisar acceso" }).click();
   await page.getByRole("button", { name: "Otorgar capacidades" }).click();
   await expect(
     page.getByText(
@@ -556,7 +561,9 @@ test("React admin users and project access cover assignment, removal, deactivati
       `Capacidades de ${clientEmail} revocadas en ${projectName}.`,
     ),
   ).toBeVisible();
-  await expect(page.getByLabel(`Portal ${clientEmail}`)).not.toBeChecked();
+  await expect(
+    page.getByLabel(`Ver informes para ${clientEmail}`),
+  ).not.toBeChecked();
 
   await page.getByRole("button", { name: "Salir" }).click();
   await login(analystEmail, "analyst-pass");
@@ -682,7 +689,10 @@ test("React client portal reviews published results, downloads allowlisted artif
     page.getByRole("heading", { name: "Capacidades externas" }),
   ).toBeVisible();
   await page.getByLabel("Usuario externo").selectOption({ label: clientEmail });
-  await page.getByLabel("Portal al otorgar").check();
+  await page
+    .getByRole("checkbox", { name: "Ver informes", exact: true })
+    .check();
+  await page.getByRole("button", { name: "Revisar acceso" }).click();
   await page.getByRole("button", { name: "Otorgar capacidades" }).click();
   await expect(
     page.getByText(
@@ -3108,6 +3118,354 @@ test("UX-004 follows a model source through association, exact variant use and e
       ["serious", "critical"].includes(entry.impact ?? ""),
     ),
   ).toEqual([]);
+});
+
+test("UX-009 administers independent access, schedules and sensitive actions", async ({
+  page,
+  browser,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await ensureAdminSession(page);
+  const api = page.request;
+  const fixture = (await (await api.get("/api/auth/ux008-fixture")).json()) as {
+    project_id: number;
+    scenario_id: number;
+    variant_id: number;
+    horizon: { start: string; end: string };
+  };
+  const email = `ux009-${Date.now()}@example.local`;
+  await page.goto("/react/admin/users");
+  await page.getByLabel("Email").fill(email);
+  await page
+    .getByLabel("Nombre", { exact: true })
+    .fill("Persona externa UX-009");
+  await page.getByLabel("Contraseña").fill("ux009-test-only");
+  await page
+    .getByLabel("Rol", { exact: true })
+    .selectOption({ label: "Usuario externo" });
+  const creation = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/admin/users") &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Crear usuario" }).click();
+  const createdUser = (await (await creation).json()).user as {
+    id: number;
+    role: string;
+  };
+  expect(createdUser.role).toBe("external");
+  await expect(page.getByText(`${email} creado.`)).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByText("Persona externa UX-009 | Usuario externo | Activo", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await verifyCatalogLayout(page, testInfo, "ux009-usuarios");
+
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.evaluate(() => {
+    document.documentElement.style.zoom = "2";
+  });
+  const accounts = await page
+    .getByRole("region", { name: "Cuentas locales" })
+    .boundingBox();
+  const newUser = await page
+    .getByRole("heading", { name: "Nuevo usuario" })
+    .boundingBox();
+  expect(accounts).not.toBeNull();
+  expect(newUser!.y).toBeGreaterThanOrEqual(accounts!.y + accounts!.height);
+  await page.evaluate(() => {
+    document.documentElement.style.zoom = "1";
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  const consoleResponse = await postWithCsrf(
+    api,
+    `/api/scenarios/${fixture.scenario_id}/consoles`,
+    {
+      source_variant_id: fixture.variant_id,
+      document: {
+        schema_version: "operator_console_config.v1",
+        public_identity: {
+          name: "Consola de acceso UX-009",
+          description: "Verificación de permisos",
+        },
+        parameters: [],
+        groups: [],
+        results: { kpis: [], charts: [], tables: [] },
+      },
+    },
+  );
+  expect(consoleResponse.status()).toBe(201);
+  const consoleConfig = (await consoleResponse.json())
+    .operator_console as OperatorConsole;
+  expect(
+    (
+      await putWithCsrf(
+        api,
+        `/api/scenarios/${fixture.scenario_id}/consoles/${consoleConfig.id}`,
+        {
+          document: consoleConfig.document,
+          status: "active",
+          expected_revision: consoleConfig.revision,
+        },
+      )
+    ).ok(),
+  ).toBeTruthy();
+
+  const accessUrl = `/react/projects/${fixture.project_id}?section=access`;
+  await page.goto(accessUrl);
+  await page
+    .getByLabel("Usuario externo", { exact: true })
+    .selectOption({ label: email });
+  await expect(
+    page.getByRole("checkbox", { name: "Ver informes", exact: true }),
+  ).not.toBeChecked();
+  await expect(
+    page.getByRole("checkbox", { name: "Operar consolas", exact: true }),
+  ).not.toBeChecked();
+  await page
+    .getByRole("checkbox", { name: "Ver informes", exact: true })
+    .check();
+  await page.getByRole("button", { name: "Revisar acceso" }).focus();
+  await page.keyboard.press("Enter");
+  const grantReview = page.getByRole("region", {
+    name: "Revisar acceso",
+    exact: true,
+  });
+  await expect(grantReview).toContainText(email);
+  await expect(grantReview).toContainText("Ver informes: Permitido");
+  await expect(grantReview).toContainText("Operar consolas: Sin acceso");
+  await expect(
+    page.getByRole("heading", { name: "Revisar acceso" }),
+  ).toBeFocused();
+  await verifyCatalogLayout(page, testInfo, "ux009-revision-acceso");
+  await grantReview
+    .getByRole("button", { name: "Otorgar capacidades" })
+    .click();
+  await expect(
+    page.getByText(new RegExp(`Capacidades de ${email} otorgadas`)),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByLabel(`Ver informes para ${email}`, { exact: true }),
+  ).toBeChecked();
+  await expect(
+    page.getByLabel(`Operar consolas para ${email}`, { exact: true }),
+  ).not.toBeChecked();
+
+  const externalContext = await browser.newContext({
+    baseURL: "http://127.0.0.1:8123",
+  });
+  try {
+    await apiLogin(externalContext.request, email, "ux009-test-only");
+    const externalPage = await externalContext.newPage();
+    await externalPage.goto(`/react/client/projects/${fixture.project_id}`);
+    await expect(
+      externalPage.getByText("No hay publicaciones activas."),
+    ).toBeVisible();
+    await externalPage.goto(`/react/console/${consoleConfig.id}`);
+    await expect(
+      externalPage.getByRole("heading", { name: "No encontrado" }),
+    ).toBeVisible();
+
+    await page
+      .getByLabel(`Operar consolas para ${email}`, { exact: true })
+      .check();
+    await page
+      .getByRole("button", {
+        name: `Guardar capacidades de ${email}`,
+        exact: true,
+      })
+      .click();
+    const review = page.getByRole("region", {
+      name: `Revisar cambios de ${email}`,
+      exact: true,
+    });
+    await expect(review).toContainText("Ver informes: Permitido → Permitido");
+    await review.getByRole("button", { name: "Confirmar cambios" }).click();
+    await expect(
+      page.getByText(`Capacidades de ${email} actualizadas.`),
+    ).toBeVisible();
+    await externalPage.goto(`/react/console/${consoleConfig.id}`);
+    await expect(
+      externalPage.getByRole("heading", {
+        level: 1,
+        name: "Consola de acceso UX-009",
+      }),
+    ).toBeVisible();
+    expect(
+      (
+        await externalContext.request.get(
+          `/api/client/projects/${fixture.project_id}/publications`,
+        )
+      ).status(),
+    ).toBe(200);
+
+    await page
+      .getByLabel(`Ver informes para ${email}`, { exact: true })
+      .uncheck();
+    await page
+      .getByRole("button", {
+        name: `Guardar capacidades de ${email}`,
+        exact: true,
+      })
+      .click();
+    await expect(review).toContainText("Ver informes: Permitido → Sin acceso");
+    await expect(review).toContainText(
+      "Operar consolas: Permitido → Permitido",
+    );
+    await expect(review).toContainText("no cancela ejecuciones ya iniciadas");
+    await review.getByRole("button", { name: "Confirmar cambios" }).click();
+    await expect(
+      page.getByLabel(`Ver informes para ${email}`, { exact: true }),
+    ).not.toBeChecked();
+    await expect(
+      page.getByRole("region", {
+        name: `Revisar cambios de ${email}`,
+        exact: true,
+      }),
+    ).toBeHidden();
+    expect(
+      (
+        await externalContext.request.get(
+          `/api/client/projects/${fixture.project_id}/publications`,
+        )
+      ).status(),
+    ).toBe(404);
+    await externalPage.reload();
+    await expect(
+      externalPage.getByRole("heading", {
+        level: 1,
+        name: "Consola de acceso UX-009",
+      }),
+    ).toBeVisible();
+    await externalPage.goto(`/react/client/projects/${fixture.project_id}`);
+    await expect(
+      externalPage.getByRole("heading", { name: "No encontrado" }),
+    ).toBeVisible();
+
+    await page
+      .getByRole("button", { name: `Revocar ${email}`, exact: true })
+      .click();
+    await expect(
+      page.getByText(/La revocación se aplica en la siguiente solicitud/),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: `Confirmar revocar ${email}`, exact: true })
+      .click();
+    await expect(
+      page.getByText(new RegExp(`Capacidades de ${email} revocadas`)),
+    ).toBeVisible();
+    expect(
+      (
+        await externalContext.request.get(`/api/console/${consoleConfig.id}`)
+      ).status(),
+    ).toBe(404);
+    await externalPage.goto(`/react/console/${consoleConfig.id}`);
+    await expect(
+      externalPage.getByRole("heading", { name: "No encontrado" }),
+    ).toBeVisible();
+
+    await page.goto("/react/admin/users");
+    await page
+      .getByRole("button", { name: `Desactivar ${email}`, exact: true })
+      .click();
+    await expect(
+      page.getByText(
+        /Desactivar la cuenta no cancela ejecuciones ya iniciadas/,
+      ),
+    ).toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath("ux009-desactivacion.png"),
+      fullPage: true,
+    });
+    await page
+      .getByRole("button", {
+        name: `Confirmar desactivar ${email}`,
+        exact: true,
+      })
+      .click();
+    await expect(page.getByText(`${email} desactivado.`)).toBeFocused();
+    await externalPage.reload();
+    await expect(
+      externalPage.getByRole("heading", { name: "Iniciar sesion" }),
+    ).toBeVisible();
+  } finally {
+    await externalContext.close();
+  }
+
+  await page.getByRole("link", { name: "Programación", exact: true }).click();
+  await page.reload();
+  await expect(
+    page.getByRole("link", { name: "Programación", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
+  const scheduleName = `Plan UX-009 ${Date.now()}`;
+  await page.getByLabel("Nombre de la programación").fill(scheduleName);
+  await page.getByLabel("Escenario (ID)").fill(String(fixture.scenario_id));
+  await page.getByLabel("Variante (ID)").fill(String(fixture.variant_id));
+  await page.getByLabel("Inicio del período").fill(fixture.horizon.start);
+  await page.getByLabel("Fin del período").fill(fixture.horizon.end);
+  await page.getByLabel("Próxima ejecución").fill("2099-01-01T00:00:00-03:00");
+  await page.getByRole("button", { name: "Crear programación" }).click();
+  await expect(page.getByText(`${scheduleName} creado.`)).toBeVisible();
+  await page.reload();
+  await expect(page.getByText(scheduleName, { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Ejecutar vencidos" }).click();
+  await expect(page.getByText("0 programación(es) evaluadas.")).toBeVisible();
+  await verifyCatalogLayout(page, testInfo, "ux009-programacion");
+  await page.goBack();
+  await expect(
+    page.getByRole("heading", { name: "Usuarios y accesos", exact: true }),
+  ).toBeVisible();
+  await page.goForward();
+  await expect(
+    page.getByRole("heading", { name: "Programación de ejecuciones" }),
+  ).toBeVisible();
+
+  const projectName = `Proyecto desechable UX-009 ${Date.now()}`;
+  const project = (await (
+    await postWithCsrf(api, "/api/projects", { name: projectName })
+  ).json()) as { id: number };
+  expect(
+    (
+      await postWithCsrf(api, `/api/projects/${project.id}/scenarios`, {
+        name: "Escenario a eliminar",
+      })
+    ).ok(),
+  ).toBeTruthy();
+  await page.goto("/react/projects");
+  await page
+    .getByRole("button", { name: `Acciones del proyecto ${projectName}` })
+    .click();
+  await page
+    .getByRole("menuitem", { name: `Eliminar proyecto ${projectName}` })
+    .click();
+  await expect(
+    page.getByText(new RegExp(`Eliminar el proyecto ${projectName} borra`)),
+  ).toContainText("versiones, corridas, series de tiempo y publicaciones");
+  await page.screenshot({
+    path: testInfo.outputPath("ux009-eliminar-proyecto.png"),
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "Mantener", exact: true }).click();
+  await expect(
+    page.getByRole("link", { name: projectName, exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: `Acciones del proyecto ${projectName}` })
+    .click();
+  await page
+    .getByRole("menuitem", { name: `Eliminar proyecto ${projectName}` })
+    .click();
+  await page
+    .getByRole("button", { name: `Confirmar eliminar proyecto ${projectName}` })
+    .click();
+  await expect(
+    page.getByRole("link", { name: projectName, exact: true }),
+  ).toHaveCount(0);
+  expect((await api.get(`/api/projects/${project.id}`)).status()).toBe(404);
 });
 
 test("UX-008 configures a console and prepares an authorized external execution", async ({

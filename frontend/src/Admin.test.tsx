@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import { AdminUsersView, ProjectExternalAccessSection } from "./Admin";
@@ -27,12 +28,14 @@ describe("external project capabilities", () => {
 
     render(
       <QueryClientProvider client={queryClient}>
-        <AdminUsersView />
+        <MemoryRouter>
+          <AdminUsersView />
+        </MemoryRouter>
       </QueryClientProvider>,
     );
 
     expect(await screen.findByLabelText("Rol")).toContainElement(
-      screen.getByRole("option", { name: "external" }),
+      screen.getByRole("option", { name: "Usuario externo" }),
     );
   });
 
@@ -160,19 +163,24 @@ describe("external project capabilities", () => {
       await screen.findByRole("heading", { name: "Capacidades externas" }),
     ).toBeVisible();
     expect(
-      await screen.findByLabelText("Portal viewer@example.local"),
+      await screen.findByLabelText("Ver informes para viewer@example.local"),
     ).toBeChecked();
     expect(
-      screen.getByLabelText("Operar viewer@example.local"),
+      screen.getByLabelText("Operar consolas para viewer@example.local"),
     ).not.toBeChecked();
 
-    await user.click(screen.getByLabelText("Portal viewer@example.local"));
-    await user.click(screen.getByLabelText("Operar viewer@example.local"));
+    await user.click(
+      screen.getByLabelText("Ver informes para viewer@example.local"),
+    );
+    await user.click(
+      screen.getByLabelText("Operar consolas para viewer@example.local"),
+    );
     await user.click(
       screen.getByRole("button", {
         name: "Guardar capacidades de viewer@example.local",
       }),
     );
+    await user.click(screen.getByRole("button", { name: "Confirmar cambios" }));
     await waitFor(() =>
       expect(capabilityWrites[0]).toEqual({
         userId: 9,
@@ -182,8 +190,9 @@ describe("external project capabilities", () => {
     );
 
     await user.selectOptions(screen.getByLabelText("Usuario externo"), "10");
-    await user.click(screen.getByLabelText("Portal al otorgar"));
-    await user.click(screen.getByLabelText("Operar al otorgar"));
+    await user.click(screen.getByRole("checkbox", { name: "Ver informes" }));
+    await user.click(screen.getByRole("checkbox", { name: "Operar consolas" }));
+    await user.click(screen.getByRole("button", { name: "Revisar acceso" }));
     await user.click(
       screen.getByRole("button", { name: "Otorgar capacidades" }),
     );
@@ -205,11 +214,11 @@ describe("external project capabilities", () => {
     );
     await waitFor(() =>
       expect(
-        screen.getByLabelText("Portal viewer@example.local"),
+        screen.getByLabelText("Ver informes para viewer@example.local"),
       ).not.toBeChecked(),
     );
     expect(
-      screen.getByLabelText("Operar viewer@example.local"),
+      screen.getByLabelText("Operar consolas para viewer@example.local"),
     ).not.toBeChecked();
   });
 });

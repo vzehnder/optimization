@@ -1,0 +1,66 @@
+> bess-react-ui@0.1.0 test:browser
+> npm run build && playwright test --grep UX-009 administers
+
+
+> bess-react-ui@0.1.0 build
+> tsc -b && vite build
+
+vite v8.0.16 building client environment for production...
+
+transforming...✓ 96 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                     0.47 kB │ gzip:   0.30 kB
+dist/assets/index-C224QzDW.css     31.67 kB │ gzip:   7.01 kB
+dist/assets/index-N5yxfYXA.js   1,118.77 kB │ gzip: 320.81 kB
+
+✓ built in 896ms
+npm.cmd : [plugin builtin:vite-reporter]
+En línea: 3 Carácter: 1
++ npm.cmd run test:browser -- --grep 'UX-009 administers' *> ../.tmp/ux ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([plugin builtin:vite-reporter] :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking:
+https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+
+Running 1 test using 1 worker
+
+
+(node:64068) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1/1] e2e\react-foundation.spec.ts:3123:1 › UX-009 administers independent access, schedules and sensitive actions
+  1) e2e\react-foundation.spec.ts:3123:1 › UX-009 administers independent access, schedules and sensitive actions
+
+    Error: expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 2389.5625
+    Received:    1208.203125
+
+      3175 |     .boundingBox();
+      3176 |   expect(accounts).not.toBeNull();
+    > 3177 |   expect(newUser!.y).toBeGreaterThanOrEqual(accounts!.y + accounts!.height);
+           |                      ^
+      3178 |   await page.evaluate(() => {
+      3179 |     document.documentElement.style.zoom = "1";
+      3180 |   });
+        at C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\frontend\e2e\react-foundation.spec.ts:3177:22
+
+    Error Context: test-results\react-foundation-UX-009-ad-cfb3e-dules-and-sensitive-actions\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\react-foundation-UX-009-ad-cfb3e-dules-and-sensitive-actions\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\react-foundation-UX-009-ad-cfb3e-dules-and-sensitive-actions\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+  1 failed
+    e2e\react-foundation.spec.ts:3123:1 › UX-009 administers independent access, schedules and sensitive actions

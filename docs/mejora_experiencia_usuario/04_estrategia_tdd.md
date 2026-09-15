@@ -41,12 +41,19 @@ verificar estados/foco con HTTP controlado. F3 solo ejecutó regresiones
 existentes; no cambian contratos/permisos y no se incorpora F4.
 [Doce ciclos y resultados](evidencia/ux-007/README.md).
 
+Para UX-009, el usuario respondió «Confirmo F1 y F2 para UX-009» el 2026-09-14
+antes de las pruebas nuevas. F1 comprueba usuarios, capacidades independientes,
+revocación, desactivación, programación y borrado en navegador con API aislada;
+F2 comprueba formularios, errores, confirmaciones, foco y valores conservados.
+F3 ejecuta regresiones existentes; no cambian contratos ni permisos.
+[Acuerdo y ciclos](evidencia/ux-009/README.md).
+
 Una frontera es la interfaz pública desde la que se observa el comportamiento. No es un archivo interno elegido por conveniencia.
 
 | Frontera | Observación permitida | Uso propuesto | Estado |
 | --- | --- | --- | --- |
-| F1: navegador → React → FastAPI aislado | Tarea visible, navegación, formularios, autenticación, persistencia tras recarga, descargas | Aceptación del recorrido de cada ticket | Confirmada para UX-001 a UX-007; acuerdos específicos en cada evidencia |
-| F2: React renderizado con Testing Library | Roles/nombres accesibles, mensajes, interacción y resultado mostrado; respuestas HTTP controladas | Variantes de estado/errores difíciles de reproducir; feedback rápido | Confirmada para UX-001 a UX-007; acuerdos específicos en cada evidencia |
+| F1: navegador → React → FastAPI aislado | Tarea visible, navegación, formularios, autenticación, persistencia tras recarga, descargas | Aceptación del recorrido de cada ticket | Confirmada para UX-001 a UX-009; acuerdos específicos en cada evidencia |
+| F2: React renderizado con Testing Library | Roles/nombres accesibles, mensajes, interacción y resultado mostrado; respuestas HTTP controladas | Variantes de estado/errores difíciles de reproducir; feedback rápido | Confirmada para UX-001 a UX-009; acuerdos específicos en cada evidencia |
 | F3: API pública FastAPI → almacén de prueba | Requests autenticados, códigos y payloads, lectura posterior por API, archivo descargado | Cambios de contrato, permisos, precondiciones o persistencia | Condicional para UX-001; confirmada para UX-005 |
 | F4: API/CLI pública de Julia | Resultado del caso conocido y archivos de salida | Solo si se cambia generación, contrato matemático o materialización | Condicional, por confirmar |
 
