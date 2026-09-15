@@ -1,5 +1,8 @@
 # Guia Del Analista: Primeros Pasos Con BESS Workspace
 
+> Revisada contra el código del repositorio el 2026-09-15. Incluye los cambios
+> de interfaz UX-001 a UX-009 y los recorridos canónicos TS-7 disponibles.
+
 Audiencia: analistas con experiencia en herramientas de optimizacion
 (formulacion LP/MIP, solvers, analisis de escenarios, series de tiempo) pero
 sin experiencia previa con esta aplicacion en particular.
@@ -10,7 +13,7 @@ resultados, comparar corridas, configurar una consola de operador y entregar
 resultados a un usuario externo.
 
 Si buscas un recorrido paso a paso, pantalla por pantalla, el documento
-complementario es `docs/tutorials/manual_completo_uso_pagina_web.md`. Esta guia
+complementario es el [manual completo](./manual_completo_uso_pagina_web.md). Esta guia
 explica el modelo mental; el manual detalla la operacion.
 
 ## 1. Que Es Esta Herramienta
@@ -100,8 +103,8 @@ Nada se propaga solo desde la primera hacia la segunda.
 
 ## 3. Puesta En Marcha
 
-Requisitos locales: Python con el venv del repo, PostgreSQL corriendo con las
-credenciales de `.env` (variable `DB_PASSWORD`), y Julia disponible si vas a
+Requisitos locales: Python con el venv del repo, Node.js y npm para el frontend,
+PostgreSQL corriendo con las credenciales de `.env` y Julia disponible si vas a
 ejecutar corridas (sin Julia puedes modelar y validar datos, pero las
 corridas fallaran).
 
@@ -109,6 +112,10 @@ Desde la raiz del repositorio:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+cd frontend
+npm.cmd ci
+npm.cmd run build
+cd ..
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
@@ -119,6 +126,9 @@ http://127.0.0.1:8000/
 ```
 
 Si el puerto 8000 esta ocupado, agregar `--port 8001` y ajustar la URL.
+El backend sirve la interfaz compilada bajo `/react`. Para trabajar con Vite
+en desarrollo o revisar la configuración local, sigue la
+[sección 5 del manual](./manual_completo_uso_pagina_web.md#5-preparar-y-arrancar-la-aplicación).
 
 ### Sesion, roles y capacidades
 
@@ -157,7 +167,8 @@ siguiente solicitud. Estas acciones no cancelan ejecuciones ya iniciadas.
 ### Las tres raices de la aplicacion
 
 La UI React se sirve bajo `/react` y esta partida en tres raices que no
-comparten navegacion:
+comparten navegacion. Las rutas abreviadas de esta guía se entienden bajo ese
+prefijo: `/projects` corresponde a `/react/projects` en el navegador.
 
 | Raiz | Quien entra | Que hay |
 | --- | --- | --- |
@@ -219,7 +230,8 @@ Secciones del editor:
   - `load`: demanda local.
   - `hydro`: activo despachable con stock intertemporal (tipo bateria con
     afluentes naturales), vertimiento y valor de agua opcionales.
-- **Time-series metadata**: metadatos de las series que el caso espera.
+- **Series de tiempo**: metadatos e importación de archivos, con las
+  herramientas de compatibilidad en un desplegable.
 - **Red y punto de conexión**: límites de importación/exportación y control de
   simultaneidad. Cero y un límite vacío tienen significados distintos.
 - **Opciones técnicas del modelo**: IDs del PCC y de la red, tipo de conexión,
@@ -237,7 +249,10 @@ Acciones importantes:
 - **Generar preview**: muestra el `system_case` que se generaria desde el
   draft, para inspeccionarlo antes de comprometerte.
 - **Validar con Julia**: corre la validacion del contrato contra el motor
-  real sin ejecutar la optimizacion. Usalo temprano y seguido.
+  real sin ejecutar la optimizacion. Se aplica al caso generado desde el draft
+  y su fuente embebida. Con catálogo y bindings, las series se materializan al
+  ejecutar: sigue **Revisar preparación** de la sección 8. Promover el draft
+  manualmente no es un requisito previo de ese flujo.
 
 Para casos con hidrologia compleja existe ademas el **editor de diagrama
 hidraulico** (desde el escenario): nodos, tramos, curvas cota-volumen,
@@ -267,12 +282,14 @@ periodos con resolucion homogenea y zona horaria explicita.
 Caminos de entrada de datos:
 
 1. **CSV o XLSX desde el modelo**: guarda el modelo y abre **Series de tiempo →
-   Importar series de tiempo**. Sigue Archivo → Columnas → Revisión → Importación.
+   Importar series de tiempo**. Para un conjunto nuevo del proyecto, sigue
+   Archivo → Columnas → Revisión → Importación.
    Elige la hoja solo para XLSX, revisa ejemplos y unidades y confirma las columnas.
    **Comprobar datos** revisa todas las filas; un error localizado lleva a la celda.
    Guarda las correcciones en la fuente temporal y comprueba de nuevo antes de
-   **Confirmar importación**. El destino indicado por el servidor puede ser un
-   conjunto nuevo del proyecto o el recorrido protegido desde una necesidad del modelo.
+   **Confirmar importación**. Si aparece **Elegir la necesidad del modelo para
+   importar**, el servidor exige partir del componente en **Datos**; sigue el
+   recorrido protegido de la sección 6.2.
 2. **Conector externo** (panel *Ingesta de pronostico* en el catalogo):
    trae datos de una API HTTP JSON configurable. El resultado entra igual
    que un archivo: un set `forecast` o, si lo marcas como **Programa
@@ -301,10 +318,10 @@ Las senales canonicas que un caso puede requerir son, entre otras:
 renovable), `natural_inflow_m3s` (afluentes por nodo hidraulico) y
 `minimum_flow_m3s` (caudal minimo por tramo).
 
-Versionado: editar valores a mano o reemplazar el archivo de un set **no
-sobreescribe nada**: crea una nueva *revision* con nuevo `content_hash`. El
-historial de revisiones es inmutable; las corridas viejas siguen apuntando a
-la revision que usaron.
+Versionado: una corrección con contenido distinto crea una nueva *revisión*
+con su `content_hash`; una operación sin cambios puede reutilizar el contenido
+existente. Comprueba la respuesta y el historial. Las revisiones selladas son
+inmutables; las corridas anteriores conservan la revisión que usaron.
 
 Nota tecnica: estas pantallas conservan su forma, pero desde el cutover
 escriben en el modelo canonico. Las respuestas de las rutas antiguas anuncian
@@ -361,7 +378,7 @@ El catalogo del proyecto (seccion 6) responde "que archivos cargue". El
 para que sirven y quien las usa". Es el modelo que introdujo TS-7, y desde el
 cutover es el unico escritor de series de tiempo de la aplicacion.
 
-**Acceso.** El enlace **Catalogo** de la navegacion, y las tres rutas
+**Acceso.** El enlace **Catálogo de series** de la navegacion, y las tres rutas
 asociadas, se abren solo a cuentas habilitadas para la lectura canonica.
 Antes del cutover C6 esas son las cuentas de verificacion listadas en
 `TS_NEXT_CANONICAL_READ_ACCOUNTS` (o, sin esa variable, la unica credencial
@@ -391,6 +408,10 @@ enumera en vez de dar una negativa seca. Repetir un cambio ya vigente devuelve
 fila: propietario, revisiones, asociaciones e historial siguen siendo los
 mismos.
 
+El cambio de alcance se realiza mediante la API administrativa; la web aún
+no ofrece ese control. Consulta el [manual, sección 15.10](./manual_completo_uso_pagina_web.md#1510-cambiar-el-alcance-de-un-set)
+para preparar sus dos pasos.
+
 **Resumen contextual del objeto**
 (`/projects/{proyecto}/linkable-objects/{objeto}/time-series`). Es la vista
 inversa: parado en un componente, que series tiene, de que tipo son, si estan
@@ -408,8 +429,23 @@ formulario, CSV o XLSX), que quedan en staging con una vista previa de su
 hash; y solo al sellar nace la revision, con el mismo hash que el staging
 habia mostrado.
 
-**El recorrido protegido** (`/time-series/journey`). Es el **unico** camino
-que muta el modelo canonico. Se entra desde el catalogo o desde el resumen del
+Después de **Guardar definición**, el archivo se carga con **Subir archivo
+temporal**. Elige hoja, inicio, duración **en horas** y columna de valor;
+pulsa **Confirmar columnas y validar archivo** y revisa el lote antes de
+**Publicar revisión de esta serie** en el paso de impacto. El formulario
+alternativo de puntos usa duración **en segundos**. Para corregir valores del
+archivo, vuelve a subir el archivo corregido.
+
+Publicar los datos no crea el binding. El recorrido permite definir y publicar
+una serie nueva, pero todavía no seleccionar una específica existente para
+usarla en una variante, reabrir su carga o archivarla; esas operaciones requieren
+la API. El [manual, sección 15.8](./manual_completo_uso_pagina_web.md#158-crear-y-cargar-una-serie-específica)
+detalla ese límite.
+
+**El recorrido protegido** (`/time-series/journey`). Es la interfaz guiada para
+asociar fuentes, fijar revisiones y confirmar cambios con impacto. Otras
+operaciones siguen disponibles mediante sus APIs o formularios compatibles,
+según las capacidades del servidor. Se entra desde el catálogo o el resumen del
 objeto, y siempre tiene los mismos cuatro pasos:
 
 1. **Origen y alcance**: necesidad funcional, y si la fuente sera generica
@@ -436,6 +472,11 @@ salidas con nombre propio:
 - **Publicar para todos**: publica una revision nueva de la fuente
   compartida. Exige motivo explicito y reconocimiento de lo que implica, y
   deja visiblemente obsoletos los bindings de los consumidores.
+
+Este cambio compartido requiere un enlace preparado con la asociación verificada;
+el resumen aún no ofrece una acción por fila. Publicar sobre una fuente `global`
+requiere admin. Sigue el [manual, sección 15.9](./manual_completo_uso_pagina_web.md#159-cambiar-una-fuente-compartida-desde-el-objeto)
+para abrir el recorrido correcto y comprobar sus consumidores.
 
 **Auditoria.** Las asociaciones, los bindings y los cambios de alcance tienen
 cada uno su libro de eventos, y los tres son inmutables: ninguna ruta publica
@@ -595,13 +636,14 @@ portal no es una vista automatica de los resultados; es una configuracion.
    misma ejecución. **Enlace para el cliente** requiere una cuenta externa;
    analistas y administradores verifican el contenido mediante la vista previa.
 5. **Asignar capacidades.** Un admin decide, proyecto por proyecto, que
-   usuario externo tiene **Portal** (`portal_view`) y/o **Operar**
+   usuario externo tiene **Ver informes** (`portal_view`) y/o **Operar consolas**
    (`operate`), en **Accesos** de la pagina del proyecto.
    Revocar una capacidad surte efecto en el siguiente request.
 
-El externo entra, aterriza en el portal, ve los proyectos que le asignaron,
-las publicaciones y las descargas habilitadas por allowlist. No puede editar,
-correr ni ver corridas no publicadas, y el contenido de otro proyecto le
+El externo con `portal_view` puede entrar al portal y ver los proyectos asignados;
+si también tiene `operate`, su aterrizaje favorece la consola (sección 3). Ve
+las publicaciones y las descargas habilitadas por allowlist. En el portal no
+puede editar, correr ni ver corridas no publicadas, y el contenido de otro proyecto le
 responde 404, no un mensaje de permiso.
 
 ## 11. Consolas De Operador
@@ -616,27 +658,50 @@ consola y **variante de origen**, luego **Crear consola**. La consola recibe
 **su propia variante clonada**: el operador nunca ve ni toca la variante del
 analista.
 
-**Configurarla** (accion `Configurar`). El documento
-(`operator_console_config.v1`) define:
+**Configurarla** (acción **Configurar**). El formulario permite preparar:
 
-- **Identidad publica**: nombre y descripcion que vera el operador.
-- **Grupos y columnas**: las tablas que el operador puede editar. Cada
-  columna se ata a una senal del **catalogo canonico de senales**; una senal
-  que no este en el catalogo se rechaza al guardar, no al ejecutar.
-- **Parametros y resultados** (JSON): que parametros quedan expuestos, con
-  etiqueta, unidad y minimo/maximo, y que KPIs, graficos y tablas se
-  muestran.
+- **Identidad pública**: nombre y descripción que verá el operador.
+- **Parámetros**: elige **Componente del parámetro** y **Campo del modelo**,
+  pulsa **Agregar parámetro** y ajusta etiqueta, unidad, mínimo, máximo y valor
+  inicial. Son controles sobre campos numéricos; configurarlos no modifica
+  el modelo guardado.
+- **Resultados**: agrega indicadores, gráficos y tablas mediante sus
+  formularios; elige series, columnas, etiquetas y unidades.
+- **Columnas de grupos existentes**: revisa etiqueta, señal canónica y entidad.
+  Las señales se eligen del catálogo y se validan al guardar.
 
-Estado **Borrador** o **Activa**; solo lo activo es operable.
+**Editar JSON avanzado** abre el documento completo `operator_console_config.v1`,
+incluidos grupos y fuentes; permite preparar estructuras sin botón de creación
+en el formulario. **Volver al formulario** conserva sus propiedades. Un JSON
+inválido conserva el texto y requiere corrección antes de guardar o cambiar
+de modo; también deben completarse los campos numéricos antes de abrir JSON.
 
-**Que puede hacer el operador.** Elegir periodo dentro del rango disponible,
-mover los parametros expuestos dentro de sus limites, editar las tablas
-declaradas (pegado incluido, con revision de cambios celda a celda antes de
-guardar), **Ejecutar**, ver el historial reciente y comparar dos corridas
-suyas. Las ediciones se hacen sobre **copias operativas** de las series: el
-dato canonico no se toca. Para editar hay que tomar un lease, hay heartbeat y
-contencion visible, el guardado de varios sets es atomico, y el historial
-registra quien cambio que celda, con deshacer y restaurar append-only.
+**Guardar configuración** comprueba que la revisión de partida siga vigente
+y guarda el documento sin activar la consola.
+Termina el guardado antes de **Activar**, **Desactivar** o **Probar consola**.
+Si otra sesión cambió la revisión, la pantalla conserva tu trabajo y ofrece
+**Descartar mis cambios y cargar la configuración vigente**. Una consulta
+fallida permite reintentar sin borrar la edición. Solo una consola **Activa**
+es operable.
+
+**Prepararla como operador.** **Preparación de la ejecución** muestra el
+período y enlaces a cada parámetro o grupo pendiente. Elige inicio y fin,
+ajusta los parámetros dentro de sus límites y pulsa **Guardar parámetros**.
+Para cada grupo, toma edición con **Editar valores**, modifica o pega las
+celdas y pulsa **Guardar valores**; **Revisar cambios** permite consultar el
+detalle antes de guardar. Al terminar, usa **Liberar edición**.
+
+Los parámetros y grupos se guardan por separado. **Actualizar preparación**
+consulta los bloqueos vigentes conservando los cambios pendientes. **Ejecutar**
+solo se habilita con los guardados aceptados y autorización del servidor.
+Después puedes consultar el historial y comparar dos corridas propias.
+
+Las series se editan sobre **copias operativas**. El permiso temporal de
+edición del grupo (*lease*) evita escrituras simultáneas; si se pierde, las
+celdas pendientes permanecen visibles para recuperar edición y revisar el
+guardado. No permite forzar el acceso de otra persona. El guardado de varios
+sets del grupo es atómico y el historial registra actor y cambios, con
+deshacer y restaurar mediante nuevas revisiones.
 
 **Cuando la consola se bloquea.** Si el analista cambia el modelo por debajo,
 la consola falla cerrado en vez de correr con supuestos viejos. El panel
@@ -682,17 +747,21 @@ accesos** y volver mantiene el formulario pendiente dentro de la pantalla.
 
 ## 13. Eliminar Un Proyecto
 
+En **Proyectos**, abre el menú de tres puntos de la tarjeta y elige **Eliminar
+proyecto {nombre}**. Revisa el alcance y pulsa **Confirmar eliminar proyecto
+{nombre}** solo para el proyecto previsto. **Mantener** cancela. La acción no
+se puede deshacer desde la web.
+
 Eliminar un proyecto es la unica operacion que termina la retencion de su
 historia. Borra escenarios, versiones, corridas, series de tiempo,
 publicaciones, consolas y todo el rastro canonico del proyecto —
 asociaciones, bindings y libros de auditoria incluidos — dentro de una sola
 transaccion: si algo falla, no se borra nada.
 
-Fuera de ese caso nada se puede borrar ni reescribir: una revision sellada,
-una identidad de senal, una asociacion, un binding y los tres libros siguen
-siendo inmutables. Y aun durante el borrado del proyecto solo se permite
-eliminar, nunca actualizar; no hay forma de alterar historia y hacerla pasar
-por algo que si ocurrio.
+Las revisiones selladas y los libros de auditoría canónicos permanecen
+protegidos frente a edición o borrado ordinario. La excepción de borrado del
+proyecto permite eliminar su historia, sin reescribirla; las operaciones
+normales de asociación y binding conservan su registro auditable.
 
 Consecuencia a tener presente: un lineage que cruza dos proyectos se va con el
 primero de los dos que se elimine.
@@ -709,7 +778,7 @@ primero de los dos que se elimine.
 | El draft no genera el caso | `schema_version` alterado o campos invalidos. | Restaurar `bess_editor_draft.v1` y revisar los errores de validacion. |
 | La corrida queda `failed` | Error del solver o caso infactible. | Revisar el error estructurado, stdout y stderr en el detalle del run. |
 | Corridas fallan de inmediato en ambiente nuevo | Julia no esta disponible para el worker. | Instalar/configurar el motor Julia; la parte web funciona igual sin el, pero no puede ejecutar. |
-| No aparece el enlace **Catalogo** y `/time-series/catalog` responde 404 | La cuenta no esta habilitada para la lectura canonica antes del cutover. | Agregar la cuenta a `TS_NEXT_CANONICAL_READ_ACCOUNTS`, o esperar al cutover, que la abre a toda identidad interna. |
+| No aparece **Catálogo de series** y `/time-series/catalog` responde 404 | La cuenta no está habilitada para la lectura canónica antes del cutover. | El responsable de instalación debe revisar la habilitación y el estado de C6; consulta la sección 6.2. |
 | Una fuente aparece bloqueada al intentar asociarla | Incompatibilidad de tipo semantico, unidad o tipo de objeto. | Leer el codigo estable que acompana al bloqueo; elegir otra fuente o crear una serie especifica del objeto. |
 | La serie especifica creada no se puede seleccionar | Se guardo la definicion pero todavia no tiene una revision sellada. | Cargar los puntos y sellar la revision; solo entonces es seleccionable. |
 | `TS_SCOPE_ADMIN_REQUIRED` al promover o degradar un set | El cambio de alcance es operacion de admin. | Pedirlo a un admin; la prevalidacion muestra el impacto antes de escribir nada. |
@@ -720,6 +789,9 @@ primero de los dos que se elimine.
 
 ## 15. Donde Profundizar
 
+- [Índice de tutoriales](./README.md): elige el recorrido según tu tarea.
+- [Mejoras de experiencia de usuario](../mejora_experiencia_usuario/README.md):
+  navegación, importación, preparación, resultados, informes y administración.
 - Recorrido operativo completo, pantalla por pantalla:
   `docs/tutorials/manual_completo_uso_pagina_web.md`.
 - Carga y matcheo de series:

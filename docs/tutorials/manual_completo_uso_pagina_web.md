@@ -3,9 +3,11 @@
 > Tutorial operativo extremadamente detallado para una sesión guiada con un
 > experto. Este documento describe la interfaz React vigente, sus rutas, roles,
 > campos, decisiones y mecanismos de seguridad. Última revisión contra el código
-> de la aplicación: 2026-09-08, incluyendo TS-7 y el borrado integral de
-> proyectos. La disponibilidad del catálogo canónico depende del estado de
-> migración de cada instalación; se explica en la sección 7.1.
+> de la aplicación: 2026-09-15. Incluye TS-7 y los cambios de interfaz UX-001
+> a UX-009: navegación por tareas, edición e importación guiadas, preparación,
+> resultados, informes, consolas y administración. La disponibilidad del
+> catálogo canónico depende del estado de migración de cada instalación;
+> se explica en la sección 7.1.
 
 ## 1. Propósito de este manual
 
@@ -77,6 +79,8 @@ Login
       -> Variante de entrada
         -> Bindings a revisiones exactas
         -> Rango
+        -> Revisar preparación
+        -> Ejecutar variante
           -> Corrida
             -> Resultados
             -> Publicación
@@ -299,7 +303,7 @@ En una base sin usuarios, la aplicación muestra **Crear admin**.
 4. Presionar **Crear admin**.
 
 El bootstrap se cierra después de crear la primera cuenta. Las cuentas
-posteriores se crean desde **Admin**.
+posteriores se crean desde **Administración → Usuarios y accesos**.
 
 ### 6.2 Iniciar y cerrar sesión
 
@@ -382,7 +386,7 @@ por coma). Si esa variable no está definida, se usa `MAIL_USUARIO_TEST`.
 Después de activar C6, se habilitan para todos los usuarios internos (`admin`
 y `analyst`). No inferir que C6 está activo solo porque el repositorio contiene
 TS-7. Una cuenta sin habilitación ve **No encontrado**, y no el enlace
-**Catálogo**. El responsable de la instalación debe comprobar su configuración
+**Catálogo de series**. El responsable de la instalación debe comprobar su configuración
 y estado de migración; el usuario no necesita cambiar su rol para continuar
 con las pantallas del proyecto que tenga disponibles.
 
@@ -537,7 +541,11 @@ borra ni reemplaza estos valores.
 
 El experto debe comprobar si el precio será único
 `price_usd_per_mwh` o separado en `import_price_usd_per_mwh` y
-`export_price_usd_per_mwh`. La elección afecta las señales requeridas.
+`export_price_usd_per_mwh`. El mapeo de compatibilidad del draft admite ambos
+precios separados; el selector de variantes agrupa la familia de precio en un
+requerimiento. Seleccionar un set con dos precios no garantiza que se
+materialicen ambos: comprobar el contrato ejecutable y la
+[explicación de precios separados](carga_y_matcheo_series_tiempo.md#31-precio-único-frente-a-precios-separados).
 
 ### 11.4 Seleccionar y agregar componentes
 
@@ -740,6 +748,12 @@ En el modelo, la sección **Series de tiempo → Importar series de tiempo** gu�
 la carga. El destino se consulta al servidor: conjunto nuevo del proyecto o
 recorrido protegido desde una necesidad del modelo.
 
+Si aparece **Elegir la necesidad del modelo para importar**, abrir ese enlace
+y seguir las series del componente. Para una serie específica nueva, la carga
+de CSV/XLSX se realiza en el paso de datos de la sección 15.8. Los pasos del
+asistente siguientes corresponden al destino **conjunto nuevo del proyecto**,
+cuando está permitido.
+
 1. **Guardar modelo** y elegir **Archivo CSV o XLSX**.
 2. **Continuar a columnas** guarda una fuente temporal; todavía no crea un conjunto.
 3. En XLSX, elegir **Hoja**. CSV pasa directamente a las columnas.
@@ -804,9 +818,11 @@ En **Signal mappings**, cada fila relaciona:
 2. **Canonical signal**: la clave aceptada por la aplicación;
 3. **Source unit**: unidad real de la columna.
 
-Agregar o quitar mappings según corresponda. No mapear la misma columna a dos
-conceptos diferentes sin una razón validada. La unidad declarada debe coincidir
-con la magnitud, no solo con el texto del encabezado.
+Agregar o quitar mappings según corresponda. Cada columna y cada señal canónica
+pueden aparecer una sola vez en una importación directa. Para dos cargas con
+`load_demand_mw`, crear un set por carga o importar la fuente dos veces con
+distintas columnas. La unidad declarada debe coincidir con la canónica y con
+los valores; el importador no realiza conversiones.
 
 Cuando todo esté completo:
 
@@ -853,7 +869,7 @@ Existen dos vistas complementarias:
 | Vista | Entrada | Qué permite revisar |
 | --- | --- | --- |
 | Catálogo de sets del proyecto | **Ver catálogo de series de tiempo** dentro del proyecto. | Sets completos, archivos, valores, reemplazos, transformaciones y conectores. |
-| Catálogo global por señal | **Catálogo** en la navegación principal. | Señales genéricas, propietario, alcance, contrato, consumidores y revisiones exactas. |
+| Catálogo global por señal | **Catálogo de series** en la navegación principal. | Señales genéricas, propietario, alcance, contrato, consumidores y revisiones exactas. |
 
 Las secciones 15.1 a 15.3 describen la primera vista; desde 15.4 se explica la
 segunda. Tras C6, las operaciones de las pantallas anteriores se canalizan por
@@ -928,7 +944,7 @@ todos** en el recorrido de la sección 15.9, con los permisos correspondientes.
 
 ### 15.4 Explorar el catálogo global por señal
 
-1. Abrir **Catálogo** en la navegación principal. El título es **Catálogo de
+1. Abrir **Catálogo de series** en la navegación principal. El título es **Catálogo de
    series genéricas**.
 2. Completar **Buscar**, **Tipo semántico** y **Unidad**. Abrir **Más filtros**
    para **Clase**, **Alcance** y **Estado**; su contador indica los filtros adicionales aplicados.
@@ -1121,6 +1137,23 @@ Usar este camino cuando la curva pertenece únicamente a un objeto:
 8. Comprobar **Revisión sellada** y que el hash coincide con el validado.
 9. Volver al objeto: debe verse como **Serie específica**, **Solo este objeto**
    y **Sin asociación de catálogo**.
+
+**Alternativa con CSV o XLSX:** después de **Guardar definición**, el paso de
+datos muestra **Importar archivo para esta serie**:
+
+1. Elegir **Archivo para esta serie** y pulsar **Subir archivo temporal**.
+2. Seleccionar **Hoja del archivo** si es XLSX.
+3. Mapear **Columna de inicio**, **Columna de duración en horas** y **Columna
+   de valor**. La señal de destino es la de la definición guardada.
+4. Pulsar **Confirmar columnas y validar archivo** y revisar el lote temporal,
+   sus errores, vista previa y hash.
+5. Continuar a **Impacto y confirmación** y **Publicar revisión de esta serie**
+   con motivo, igual que para los puntos manuales.
+
+La duración del archivo se expresa en **horas**; el formulario de puntos usa
+**segundos**. Para corregir valores del archivo, modificarlo y volver a subirlo;
+el mapeo puede corregirse dentro del mismo lote. Salir deja la definición y el
+archivo temporal persistidos, sin publicar, y pierde las decisiones locales.
 
 La publicación de datos no crea automáticamente un binding. El modelo admite
 vincular la revisión directamente a su propio objeto sin asociación intermedia,
@@ -1325,6 +1358,12 @@ inmutable.
 
 ### 18.2 Validar con Julia
 
+Este paso valida el caso generado desde el draft y su fuente embebida. Cuando
+las series provienen exclusivamente de bindings del catálogo, se materializan
+al ejecutar el período: seguir **Revisar preparación** y **Ejecutar variante**
+de las secciones 19 y 20. La promoción manual del draft no es un requisito
+previo de ese recorrido.
+
 1. Con el draft guardado, presionar **Validar con Julia**.
 2. Esperar la validación.
 3. Revisar fase, status y mensaje.
@@ -1349,19 +1388,21 @@ nueva versión.
 
 ## 19. Variantes de entrada y bindings
 
-La pantalla del escenario contiene **Variante de entrada: {nombre}**.
+En **Datos** del escenario está el panel **Variante de entrada: {nombre}**.
 
-El panel conserva los selectores de sets del proyecto para el flujo habitual.
-TS-7 añade el recorrido por objeto, con asociación y revisión exacta explícitas
-(sección 19.5). Usar el resumen del objeto para comprobar los usos canónicos;
-un selector del panel del escenario no muestra por sí solo toda su historia.
+El servidor decide el recorrido disponible. En compatibilidad hay selectores
+de sets y **Confirmar fuentes**. Tras C6, o con bindings canónicos activos,
+se muestran las fuentes y revisiones exactas con enlaces al recorrido por
+objeto de la sección 19.5. La lectura canónica habilita esos enlaces; no
+determina el modo de escritura. Usar el resumen del objeto para comprobar
+asociaciones y usos canónicos.
 
 ### 19.1 Elegir o clonar una variante
 
 - Todo caso tiene una variante default.
 - **Variante activa** determina qué bindings se editan y ejecutan.
-- Para una sensibilidad, escribir **Nombre nueva variante** y presionar
-  **Clonar variante activa**.
+- Para una sensibilidad, abrir **Gestionar variantes**, escribir **Nombre
+  nueva variante** y presionar **Clonar variante activa**.
 
 La clonación hereda los bindings. Cambiar la copia no debe alterar la variante
 de origen.
@@ -1369,7 +1410,9 @@ de origen.
 ### 19.2 Leer las señales requeridas
 
 La lista **Señales requeridas** se deriva de la topología y parámetros del caso.
-Cada fila muestra entidad, clave y si está vinculada.
+Cada fila muestra nombre funcional, entidad, clave y si está vinculada. Cuando
+hay una fuente confirmada, también muestra su nombre, revisión y estado:
+**Revisión fijada**, **Obsoleta: revisar** o **Inválida: corregir**.
 
 Ejemplos:
 
@@ -1379,7 +1422,7 @@ load_demand_mw (load_1): vinculada (set #12)
 renewable_available_power_mw (solar_1): vinculada (set #13)
 ```
 
-Para cada selector:
+Para cada necesidad:
 
 1. identificar la señal y entidad;
 2. elegir un set que realmente contenga esa combinación;
@@ -1387,7 +1430,7 @@ Para cada selector:
 4. comprobar timezone, horizonte y resolución;
 5. no seleccionar un set solo porque su nombre parece correcto.
 
-Este panel muestra los sets del proyecto en el selector; revisar su semántica
+En compatibilidad, el panel muestra los sets del proyecto en el selector; revisar su semántica
 antes de elegir. En el recorrido protegido TS-7, las candidatas incompatibles
 se muestran bloqueadas y explicadas. Que un nombre aparezca en un selector no
 garantiza que pase la validación del servidor.
@@ -2353,12 +2396,12 @@ residente dentro del proceso web.
 | Promoción hidráulica deshabilitada  | No guardado, validación fallida/stale o sin payload. | Guardar, validar y generar preview v3.                            |
 | **No encontrado**, `403` o `404` al entrar como externo a una URL interna | Límite de autorización; las superficies TS-7 no revelan recursos internos. | Volver a portal/consola y revisar capacidades con el administrador. |
 | `404` de publicación externa        | No publicada, revocada o proyecto no visible.        | Revisar publicación y asignación con admin.                       |
-| No aparece **Catálogo** | C6 no activo y cuenta fuera de la habilitación de lectura canónica. | Revisar con el responsable el estado de migración y las cuentas de verificación; sección 7.1. |
+| No aparece **Catálogo de series** | C6 no activo y cuenta fuera de la habilitación de lectura canónica. | Revisar con el responsable el estado de migración y las cuentas de verificación; sección 7.1. |
 | `TS_QUERY_CURSOR_EXPIRED`, `TS_QUERY_CURSOR_MISMATCH` o `TS_QUERY_SNAPSHOT_CHANGED` | El cursor venció, cambió la consulta o cambió el catálogo. | Volver a aplicar filtros desde la primera página. |
 | `TS_PREVIEW_TOO_LARGE` | El preview excede el límite admitido. | Acortar el rango o elegir muestreo; no interpretar una muestra como todos los datos. |
 | Candidata bloqueada por `TS_COMPAT_*` | Tipo semántico, dimensión, unidad, alcance u objeto incompatibles. | Leer razón y código; corregir el contrato o elegir una fuente compatible. |
 | Serie `awaiting_data` no seleccionable | Solo se guardó la definición. | Validar los puntos y publicar una revisión sellada; sección 15.8. |
-| Serie específica no aparece en **Catálogo** | Pertenece únicamente a un objeto. | Consultar el resumen de su propio objeto. |
+| Serie específica no aparece en **Catálogo de series** | Pertenece únicamente a un objeto. | Consultar el resumen de su propio objeto. |
 | `TS_LINK_PREVALIDATION_EXPIRED` o `TS_LINK_PRECONDITION_CHANGED` | La evidencia de confirmación venció o cambió el estado observado. | Reabrir los pasos afectados y revisar una nueva prevalidación. |
 | `TS_LINK_CONFLICT` al cambiar un selector del escenario | Ya hay un uso para esa necesidad que no se puede sustituir por el camino de compatibilidad. | Revisar el binding vigente y reemplazarlo en el recorrido protegido con motivo. |
 | **Obsoleta** y **Ejecución bloqueada**, o `TS_BINDING_EXECUTION_BLOCKED` | Binding canónico desactualizado, inválido o con dependencias pendientes. | Revisar el uso exacto y resolverlo; la revalidación general del escenario puede no bastar. |
@@ -2428,9 +2471,10 @@ se muestre, junto con el paso y la acción que se intentó.
 - [ ] Subir fuente.
 - [ ] Revisar preview y columnas.
 - [ ] Mapear timestamp, duración y señales.
-- [ ] Importar al catálogo.
+- [ ] Importar el conjunto o publicar la revisión de una serie específica,
+  según el destino habilitado por el servidor.
 - [ ] Revisar horizonte, señales, valores, revisión y hash.
-- [ ] Explorar una señal en **Catálogo**, revisar propietario/alcance y pedir
+- [ ] Explorar una señal en **Catálogo de series**, revisar propietario/alcance y pedir
   un preview de revisión exacta, si TS-7 está habilitado.
 - [ ] Opcional: crear derivado y explicar lineage.
 
@@ -2442,8 +2486,8 @@ se muestre, junto con el paso y la acción que se intentó.
 - [ ] Para el recorrido TS-7, asociar la fuente al objeto y después usar la
   revisión en la variante; registrar ambos lotes.
 - [ ] Definir rango `[inicio, fin)`.
-- [ ] Confirmar validación de rango.
-- [ ] Ejecutar.
+- [ ] Confirmar fuentes y pulsar **Revisar preparación**.
+- [ ] Esperar **Preparado para ejecutar este período** y pulsar **Ejecutar variante**.
 - [ ] Seguir estado.
 - [ ] Revisar lineage, snapshot, resultados y artefactos.
 
@@ -2481,7 +2525,8 @@ se muestre, junto con el paso y la acción que se intentó.
 - [ ] Condiciones terminales son deliberadas.
 - [ ] Draft está guardado.
 - [ ] Preview coincide con el diseño.
-- [ ] Validación Julia está vigente.
+- [ ] Si se promueve el draft con fuente embebida, la validación Julia está
+  vigente; si se ejecuta con catálogo, se revisará la preparación de la variante.
 
 ### Datos
 
@@ -2507,6 +2552,8 @@ se muestre, junto con el paso y la acción que se intentó.
 - [ ] El rango es `[inicio, fin)` y tiene cobertura completa.
 - [ ] Resoluciones son compatibles.
 - [ ] La variante no está desactualizada.
+- [ ] Las fuentes están confirmadas y la revisión muestra **Preparado para
+  ejecutar este período**, sin cambios posteriores.
 
 ### Resultado
 
@@ -2560,6 +2607,8 @@ se muestre, junto con el paso y la acción que se intentó.
   archivos, sets, mappings y rangos. Para el recorrido TS-7 y sus límites de
   interfaz, seguir las secciones 15 y 19 de este manual.
 - [Guía del analista](guia_analista.md): introducción al flujo analítico.
+- [Mejoras de experiencia de usuario](../mejora_experiencia_usuario/README.md):
+  navegación por tareas y evidencia de las entregas UX-001 a UX-009.
 - [Objetivo final](../final/objetivo_final.md): visión de producto y alcance.
 - [Modelo BESS](../iter1/mathematical_model.md) y
   [modelo hidro v2](../iter5/mathematical_model.md): formulación matemática.
@@ -2587,6 +2636,9 @@ Para comprobar etiquetas, rutas y controles disponibles en la revisión actual:
   [recorrido protegido](../../frontend/src/ProtectedMutationJourney.tsx).
 - [Pantallas del workspace](../../frontend/src/Workspace.tsx) y
   [contratos HTTP](../../app/main.py).
+- [Importación guiada](../../frontend/src/GuidedImport.tsx) e
+  [ingesta de archivos por objeto](../../frontend/src/ObjectSeriesFileImport.tsx).
+- [Configuración y operación de consolas](../../frontend/src/OperatorConsole.tsx).
 
 ## 38. Criterio de término de la capacitación
 

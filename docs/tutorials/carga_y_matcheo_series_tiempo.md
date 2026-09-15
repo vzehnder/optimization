@@ -1,5 +1,8 @@
 # Tutorial detallado: carga y matcheo de series de tiempo
 
+> Revisado contra la aplicación del repositorio el 2026-09-15. Incluye la
+> importación guiada, las fuentes por componente y la preparación de ejecuciones.
+
 Este tutorial amplía las secciones 6, 7 y 8 de la
 [Guía del analista](./guia_analista.md). Está pensado para un analista que ya
 tiene el caso modelado y necesita llevar precios, demanda, disponibilidad
@@ -17,9 +20,10 @@ Al terminar deberías poder:
   desactualizadas;
 - comprobar en el detalle de la corrida qué revisión y hash se consumieron.
 
-> **Resumen corto:** cargar no es lo mismo que vincular. Primero se normalizan
-> columnas y valores dentro del catálogo. Después, en la variante de entrada,
-> se decide qué set alimenta a cada entidad concreta del caso.
+> **Resumen corto:** importar guarda datos; asociar una fuente genérica la hace
+> disponible para un objeto; usar una revisión fija el binding de la variante.
+> Después se revisa la preparación para el período elegido y se ejecuta.
+> Ninguno de los pasos anteriores a ejecutar crea una corrida.
 
 ## 1. El flujo completo
 
@@ -38,24 +42,45 @@ Set versionado en el catálogo del proyecto
         v
 Set listo para optimización
         |
-        |  4. Binding señal + entidad -> set
+        |  4. Asociación al objeto, si es una fuente genérica en TS-7
+        |     Binding objeto + necesidad -> señal + revisión exacta + hash
         v
 Variante de entrada
         |
-        |  5. Selección y validación del rango [inicio, fin)
+        |  5. Período [inicio, fin) -> Revisar preparación
+        |     Preparado para ejecutar este período -> Ejecutar variante
         v
 Snapshot inmutable -> corrida -> resultados y lineage
 ```
 
-Hay dos “matcheos” diferentes:
+Hay dos “matcheos” que conviene distinguir:
 
 1. **Mapeo de importación:** una columna física, por ejemplo `demanda_mw`, se
    interpreta como la señal canónica `load_demand_mw`.
-2. **Binding del caso:** el set que contiene `load_demand_mw` se asigna, por
-   ejemplo, al activo `load_centro` y no a `load_norte`.
+2. **Uso en el caso:** la señal y su revisión se asignan, por ejemplo, al activo
+   `load_centro` y no a `load_norte`. En el recorrido protegido, una fuente
+   genérica se asocia primero al objeto y después se fija su uso en la variante.
 
 El primer paso da significado y unidad al dato. El segundo le da destino
 dentro del modelo.
+
+### 1.1 Reconocer el recorrido disponible
+
+En **Datos** del escenario, la aplicación muestra el modo permitido por el
+servidor:
+
+| Lo que ves | Cómo continuar |
+| --- | --- |
+| Selectores **Serie ...** y **Confirmar fuentes** | Camino de compatibilidad: elige los sets y confirma los cambios antes de revisar la preparación. |
+| Fuentes con revisión fijada y enlaces **Corregir**, **Revisar fuente** o **Ver fuentes del componente** | Recorrido protegido: revisa el objeto, asocia la fuente genérica si falta y confirma la revisión para la variante. |
+| **Elegir la necesidad del modelo para importar**, en el editor | Abre **Datos** y parte desde el componente; el asistente de conjuntos nuevos no está habilitado para ese destino. |
+
+Después del cambio al escritor canónico C6, o si la variante tiene bindings
+canónicos activos, el servidor exige el recorrido protegido. La habilitación de
+lectura del catálogo no decide qué escrituras están permitidas. Si aparece
+**La edición de estas fuentes aún no está habilitada para tu cuenta**, consulta
+al responsable de la instalación; el [manual, sección 7.1](./manual_completo_uso_pagina_web.md#71-disponibilidad-del-catálogo-ts-7)
+explica el acceso durante la migración.
 
 ## 2. Vocabulario mínimo
 
@@ -69,7 +94,9 @@ dentro del modelo.
 | Revisión | Estado inmutable del contenido. Una corrección agrega una revisión; no reescribe la anterior. |
 | `content_hash` | Huella SHA-256 del contenido exacto de una revisión. Cambia cuando cambian datos o metadatos relevantes. |
 | Variante de entrada | Configuración nombrada de bindings entre los requerimientos del caso y sets del catálogo. |
-| Binding | Referencia desde una señal requerida —y, cuando corresponde, una entidad— hacia un set. No copia valores. |
+| Asociación | Hace disponible una fuente genérica para una necesidad del objeto; no crea su uso en una variante. |
+| Serie específica | Fuente que pertenece solo a un objeto; no aparece en el catálogo global ni requiere asociación de catálogo. |
+| Binding | Uso de una señal para un objeto y necesidad en una variante. Fija una revisión exacta y su hash; no copia valores. |
 | Rango | Intervalo de ejecución `[inicio, fin)`: incluye `inicio` y excluye `fin`. |
 | Stale / desactualizado | Estado que bloquea la corrida porque cambió una serie, la topología, los parámetros o un origen derivado desde la última validación. |
 
@@ -101,8 +128,8 @@ No mezcles los dos enfoques accidentalmente. En particular, no cargues solo
 uno de los dos precios separados: Julia rechaza un periodo que tenga precio de
 importación sin precio de exportación, o viceversa.
 
-La UI actual de **Variante de entrada** descubre un único requerimiento de
-familia de precio y muestra el selector **Serie de precio
+El descubrimiento de necesidades one-bus agrupa la familia de precio en un
+requerimiento. En compatibilidad muestra el selector **Serie de precio
 (`price_usd_per_mwh`)**. Acepta como candidato un set con cualquiera de las
 tres claves, pero el binding resuelve una clave concreta. Por eso:
 
@@ -113,8 +140,10 @@ tres claves, pero el binding resuelve una clave concreta. Por eso:
 - si el caso necesita precios asimétricos, comprueba que el preview ejecutable
   tenga las dos claves en todos los periodos y valida con Julia antes de crear
   la versión. El mapeo legacy del draft sí permite mapear ambas columnas; el
-  selector genérico de variantes todavía no presenta dos bindings de precio
-  independientes.
+  selector de compatibilidad todavía no presenta dos bindings de precio
+  independientes. En el recorrido protegido, revisa además el rol funcional
+  de cada uso; la presencia de ambas señales en el catálogo no demuestra que
+  el snapshot vaya a contenerlas.
 
 ### 3.2 Señales con entidad
 
@@ -200,8 +229,9 @@ varios nodos hidráulicos con afluentes o varios tramos con caudal mínimo.
 
 ### 4.3 Convención de nombres recomendada
 
-El selector de variantes muestra principalmente nombre y etiqueta de versión.
-Usa nombres que permitan decidir sin abrir cada set:
+El selector de compatibilidad muestra nombre y etiqueta de versión; el
+recorrido protegido también muestra revisión, propietario y alcance. Usa
+nombres que permitan reconocer la fuente antes de inspeccionarla:
 
 ```text
 Precio spot SEN - base - 2026
@@ -349,17 +379,30 @@ Antes de abrir la aplicación, confirma:
 - [ ] Elegí una zona IANA coherente.
 - [ ] El nombre del set identifica fuente, entidad y escenario de datos.
 
-## 6. Camino recomendado: importar desde una fuente del draft al catálogo
+## 6. Importar un archivo desde el modelo
 
-La UI de carga vive en el editor del draft, aunque el resultado recomendado
-para trabajo nuevo es un set reutilizable del catálogo del proyecto.
+La entrada está en **Modelo → Series de tiempo → Importar series de tiempo**.
+Guarda el modelo primero. Si aparece **Elegir la necesidad del modelo para
+importar**, sigue el recorrido por objeto de la sección 10.7 y la carga de la
+sección 6.6. Los pasos del asistente que siguen corresponden al destino
+**conjunto nuevo del proyecto**, cuando está permitido.
 
 ### 6.0 Asistente de importación
 
-En **Modelo → Series de tiempo → Importar series de tiempo**, sigue Archivo →
-Columnas → Revisión → Importación. Guarda primero el modelo. Sube un CSV o XLSX,
-elige hoja cuando corresponde y confirma columnas, zona, señales y unidades tras
-revisar sus ejemplos. Los metadatos de versión y clase están en un desplegable.
+Sigue **Archivo → Columnas → Revisión → Importación**:
+
+1. Selecciona **Archivo CSV o XLSX** y pulsa **Continuar a columnas**. Se guarda
+   una fuente temporal, todavía sin crear el conjunto.
+2. Para XLSX, elige **Hoja**. Completa **Nombre del conjunto** y **Zona horaria
+   (IANA)**; revisa las columnas de fecha/hora y duración en horas.
+3. Por cada señal, elige **Columna de valores N**, **Señal N** y **Unidad de
+   origen N**. Usa **Agregar señal** si hace falta. Las propuestas por nombre
+   de cabecera requieren revisión: comprueba los ejemplos y las unidades.
+4. En **Metadatos del conjunto**, revisa **Etiqueta de versión** y **Clase de
+   datos**. Pulsa **Confirmar columnas y revisar**.
+5. Comprueba o corrige las filas y pulsa **Comprobar datos**.
+6. Cuando la validación termine sin errores, usa **Continuar a importación**,
+   revisa destino y contenido, y pulsa **Confirmar importación**.
 
 **Comprobar datos** valida todas las filas. Los errores con ubicación llevan a la
 hoja/fila/columna; corrige la celda, **Guardar correcciones en la fuente temporal**
@@ -367,13 +410,9 @@ y vuelve a comprobar. La tabla muestra 50 filas por página y conserva cambios a
 retroceder, cambiar de página y volver a una hoja ya visitada. El resumen muestra
 cobertura, resolución, señales, destino y hasta cinco filas normalizadas.
 
-**Confirmar importación** crea un conjunto nuevo cuando el servidor permite esa
-ruta. El enlace final abre el recurso persistido. Después debes elegir la fuente
-en Datos del escenario y revisar su uso en la variante. Si el servidor indica el
-recorrido protegido, elige primero la necesidad del modelo. La ingesta de archivo
-de una serie específica conserva el lote temporal y las garantías de publicación
-y revisión de impacto TS-7; los valores del archivo se corrigen subiendo un archivo
-corregido, mientras el mapeo puede corregirse en el mismo lote.
+El enlace final abre el conjunto persistido. Después vuelve a **Datos** del
+escenario y confirma su uso en la variante. La validación del archivo y la
+revisión de preparación de la corrida son comprobaciones distintas.
 
 Al salir se explica qué fuente está guardada y qué decisiones locales se pierden.
 Una respuesta de importación incierta requiere comprobar el catálogo antes de
@@ -388,8 +427,9 @@ API mantienen sus accesos independientes.
 ### 6.1 Subir la fuente con las herramientas de compatibilidad
 
 1. Entra al proyecto y abre el escenario.
-2. Presiona **Abrir draft**.
-3. Guarda cualquier cambio pendiente con **Guardar draft**. La carga queda
+2. Presiona **Modelo** y abre **Series de tiempo → Herramientas de
+   compatibilidad: fuente del modelo y extracción**.
+3. Guarda cualquier cambio pendiente con **Guardar modelo**. La carga queda
    deshabilitada si el draft tiene cambios sin guardar.
 4. En la sección de series, busca **Source file**.
 5. Selecciona un `.csv` o `.xlsx`.
@@ -495,6 +535,34 @@ al set y revisa, como mínimo:
 
 No pases al binding solo porque la importación terminó: valida que el set
 represente la entidad que dice su nombre.
+
+### 6.6 Cargar CSV o XLSX para una serie específica
+
+Desde **Ver fuentes del componente**, abre **Asociar fuente al objeto**,
+declara la necesidad y elige **Crear específica para este objeto**. Completa
+la definición y pulsa **Guardar definición**. La serie queda `awaiting_data`.
+
+En su paso de datos:
+
+1. Selecciona **Archivo para esta serie** y pulsa **Subir archivo temporal**.
+2. Elige **Hoja del archivo** si es XLSX.
+3. Asigna **Columna de inicio**, **Columna de duración en horas** y **Columna
+   de valor**. El destino es la señal de esta definición.
+4. Pulsa **Confirmar columnas y validar archivo**. Revisa errores, cobertura,
+   vista previa y hash del lote, que aún no está publicado.
+5. Continúa a **Impacto y confirmación**, escribe el motivo y confirma
+   **Publicar revisión de esta serie**. Comprueba la revisión sellada.
+
+Para corregir valores, modifica el archivo y vuelve a subirlo; puedes corregir
+el mapeo en el mismo lote. Como alternativa, el formulario de puntos usa
+instante ISO, **duración en segundos** y valor, sin encabezado. No confundas
+los segundos de ese formulario con las horas de la columna del archivo.
+
+La serie queda en el resumen de su objeto, fuera del catálogo global. Publicar
+sus datos no crea un binding. La interfaz todavía no ofrece un selector de
+específicas existentes para usarlas en una variante ni para reabrir una carga:
+esas operaciones requieren la API de series del objeto y bindings. Consulta
+los límites y pasos en el [manual, sección 15.8](./manual_completo_uso_pagina_web.md#158-crear-y-cargar-una-serie-específica).
 
 ## 7. Camino legacy: “Column mapping” y extracción posterior
 
@@ -710,11 +778,11 @@ requerimiento y la variante quedará desactualizada.
 
 ### 10.2 Elegir o clonar una variante
 
-En **Variante de entrada**:
+En **Datos** del escenario, panel **Variante de entrada**:
 
 - usa **Default** para la configuración base;
-- para una sensibilidad, selecciona la base, escribe un nombre y usa **Clonar
-  variante activa**;
+- para una sensibilidad, selecciona la base, abre **Gestionar variantes**,
+  escribe un nombre y usa **Clonar variante activa**;
 - cambia solo los bindings que diferencian la sensibilidad.
 
 Ejemplo:
@@ -736,7 +804,10 @@ entre corridas.
 
 ### 10.3 Leer la lista “Señales requeridas”
 
-Cada fila muestra:
+Cada fila muestra el nombre funcional, la clave y el componente, y si falta
+vincular o existe un uso. Cuando hay una fuente confirmada, también muestra
+nombre, revisión y estado: **Revisión fijada**, **Obsoleta: revisar** o
+**Inválida: corregir**, según corresponda. La parte técnica conserva textos como:
 
 ```text
 <signal_key> (<entity_id>): vinculada (set #N)
@@ -766,7 +837,8 @@ minimum_flow_m3s (reach_laja_rucue): falta vincular
 
 ### 10.4 Criterios para seleccionar un set
 
-Para cada selector **Serie ...**, confirma estas seis condiciones:
+Para cada necesidad, tanto en los selectores de compatibilidad como en el
+recorrido protegido, confirma estas seis condiciones:
 
 1. **Señal:** el detalle del set contiene la clave requerida.
 2. **Entidad:** el nombre/procedencia del set corresponde al ID mostrado.
@@ -776,9 +848,14 @@ Para cada selector **Serie ...**, confirma estas seis condiciones:
 6. **Vigencia:** el set o derivado no está desactualizado y su revisión es la
    que quieres consumir.
 
-El desplegable puede mostrar sets del proyecto que no contienen la señal
+El desplegable de compatibilidad puede mostrar sets del proyecto que no contienen la señal
 requerida. La presencia de un set en la lista no demuestra compatibilidad:
 abre el catálogo y verifica sus señales antes de seleccionarlo.
+
+En el recorrido protegido, **Buscar fuentes candidatas** consulta al servidor;
+**Fuentes anteriores** y **Más fuentes** recorren las páginas. Las candidatas
+incompatibles aparecen bloqueadas con su explicación. Cambiar la necesidad
+descarta la selección anterior: vuelve a revisar objeto, señal y fuente.
 
 ### 10.5 Ejemplo de matriz de matcheo
 
@@ -823,6 +900,29 @@ Por eso el set no “sabe” por sí solo a qué activo va destinado en el caso:
 binding agrega ese contexto. Un nombre de set ambiguo facilita errores humanos
 aunque la validación técnica pase.
 
+### 10.7 Asociar una fuente y fijar su revisión en el recorrido protegido
+
+1. En **Datos**, comprueba **Variante activa** y abre **Ver fuentes del
+   componente** de la necesidad que vas a resolver. El enlace conserva
+   escenario, variante y regreso.
+2. Si la fuente genérica aún no está asociada, abre **Asociar fuente al objeto**,
+   declara **Necesidad funcional** y elige **Reutilizar una fuente genérica**.
+3. Busca una candidata compatible; revisa su revisión, hash, cobertura,
+   propietario y alcance. En **Impacto y confirmación**, revisa la
+   prevalidación y confirma **Asociar fuente al objeto**.
+4. Abre **Usar revisión en una variante** para esa fuente. Comprueba escenario,
+   variante, objeto y necesidad; selecciona la fuente y revisa la revisión
+   exacta. Si reemplaza otro uso, compara el antes/después y completa el motivo.
+5. Revisa el impacto y confirma **Usar revisión en una variante**. Si hay un
+   conflicto, pulsa **Revisar de nuevo** antes de intentar confirmar.
+6. Vuelve al objeto y comprueba **Usada en {variante}**, revisión y hash. Usa
+   **Volver al escenario** o **Volver al origen** y revisa el período.
+
+**Corregir** y **Revisar fuente** pueden abrir directamente el recorrido de uso;
+si falta la asociación de la fuente genérica, resuélvela primero desde el objeto.
+La asociación por sí sola no deja la variante lista para ejecutar. Para una
+serie específica, aplican los límites de interfaz de la sección 6.6.
+
 ## 11. Elegir y validar el rango
 
 ### 11.1 Semántica `[inicio, fin)`
@@ -844,16 +944,22 @@ rango de las tres filas es:
 [00:00, 03:00)
 ```
 
-### 11.2 Valores propuestos por la UI
+### 11.2 Completar el período y revisar su preparación
 
-La UI propone el inicio y fin del primer set seleccionado. Revísalos: que sean
-válidos para un set no garantiza que lo sean para los demás.
+Completa **Inicio del período**, **Fin del período**, **Offset de inicio** y
+**Offset de fin**. Conserva el offset de las fuentes y comprueba la zona,
+duración y resumen `[inicio, fin)`. **Entrada ISO avanzada** permite editar
+los valores literales del ejemplo anterior.
 
-Cuando todos los bindings son compatibles aparece:
+Revisa cualquier sugerencia inicial. Cambiar de fuente conserva el rango
+digitado; **Usar cobertura disponible** lo sustituye solo cuando tú lo pides
+y el servidor ha comprobado la cobertura común. Si no aparece, define un
+período cubierto por todas las fuentes y resuelve los problemas indicados.
 
-```text
-Rango valido para correr.
-```
+El mensaje local **Rango valido para correr** no basta. Con las fuentes
+confirmadas, pulsa **Revisar preparación**. La ejecución se habilita al ver
+**Preparado para ejecutar este período**. Cambiar fuentes, bindings o período,
+o fallar la actualización de su consulta, exige revisar de nuevo.
 
 ### 11.3 Validaciones exactas
 
@@ -875,23 +981,33 @@ No hay tolerancia temporal ni remuestreo implícito. Dos grillas que representan
 conceptualmente la misma hora, pero quedan almacenadas con límites u offsets
 distintos, se consideran incompatibles.
 
-### 11.4 Vincular y correr
+### 11.4 Confirmar fuentes, revisar y ejecutar
 
-Cuando todas las señales están seleccionadas, el rango es válido y la variante
-no está stale, presiona **Vincular y correr variante**.
+1. En compatibilidad, selecciona las fuentes y pulsa **Confirmar fuentes**.
+   En el modo protegido, confirma los usos mediante la sección 10.7.
+2. Define el período y pulsa **Revisar preparación**.
+3. Espera **Preparado para ejecutar este período**.
+4. Pulsa **Ejecutar variante** una vez y espera la navegación o el error.
 
-Esta acción:
+Confirmar fuentes y revisar preparación no crean una versión ni una corrida.
+El botón final usa los bindings ya confirmados; no vuelve a guardarlos. Al
+ejecutar, el servidor:
 
-1. guarda o actualiza cada binding seleccionado;
-2. resuelve las revisiones actuales de los sets;
-3. vuelve a validar cobertura y grilla en el backend;
-4. materializa las filas del rango;
-5. congela topología, parámetros, variante, rango y lineage;
-6. crea la versión inmutable;
-7. crea y lanza la corrida.
+1. vuelve a comprobar dependencias, revisiones, cobertura y grilla;
+2. materializa las filas desde las revisiones fijadas para el rango;
+3. congela topología, parámetros, variante, rango y lineage;
+4. crea la versión inmutable y la corrida;
+5. encola la ejecución y abre su detalle.
 
 No se leen valores “en vivo” durante la ejecución. La corrida usa el snapshot
 que acaba de crearse.
+
+Si **Confirmar fuentes** falla parcialmente, el mensaje cuenta los cambios
+aceptados y conserva los pendientes. Consulta el estado actualizado antes de
+reintentar. Si aparece **No pudimos confirmar el envío** al ejecutar, abre
+**Consultar historial de ejecuciones**: la corrida puede haberse aceptado.
+Solo después de comprobarlo usa **Ya consulté el historial: preparar otro
+intento**, si corresponde, y revisa de nuevo. No hay reenvío automático.
 
 ## 12. Revalidación y cambios posteriores
 
@@ -913,13 +1029,19 @@ Cuando aparece **Variante desactualizada: revalida antes de correr**:
 2. si hay un derivado stale, regénéralo primero;
 3. confirma en el catálogo la nueva revisión y el nuevo hash;
 4. revisa el rango;
-5. presiona **Revalidar variante**;
-6. espera que desaparezca el banner;
-7. vuelve a comprobar los selectores;
-8. corre.
+5. si un binding canónico está obsoleto o inválido, abre **Revisar fuente** y
+   confirma el uso de la revisión elegida con su motivo e impacto;
+6. presiona **Revisar preparación** en **Datos** del escenario;
+7. espera **Preparado para ejecutar este período** y comprueba variante,
+   fuentes y rango;
+8. presiona **Ejecutar variante**.
 
-Revalidar significa aceptar explícitamente las dependencias actuales. No
-modifica corridas anteriores ni cambia los hashes que ellas ya congelaron.
+En compatibilidad, la revisión valida las dependencias actuales. En canónico,
+**Revisar preparación** comprueba las revisiones fijadas: no reemplaza un
+binding obsoleto ni elige automáticamente la revisión más reciente. Conservar
+explícitamente una revisión histórica como `pinned` requiere el flujo API;
+el recorrido React ofrece la vigente. Las corridas anteriores conservan sus
+snapshots y hashes en todos los casos.
 
 ### 12.3 Corregir un set
 
@@ -929,8 +1051,15 @@ En el detalle del set hay dos caminos:
 - **Reemplazar con nuevo archivo** -> subir CSV/XLSX -> remapear ->
   **Reemplazar set**.
 
-Ambos crean una revisión nueva. El nombre y la etiqueta de versión del set se
+Con contenido distinto se registra una revisión nueva; una operación sin
+cambios puede reutilizar el contenido existente. Comprueba la respuesta, el
+historial y el hash. El nombre y la etiqueta de versión del set se
 mantienen en un reemplazo; cambian el número de revisión y el `content_hash`.
+
+Para una fuente `global`, el reemplazo tras C6 exige la confirmación de impacto
+compartido. Si aparece `TS_LINK_CONFIRMATION_REQUIRED`, sigue **Publicar para
+todos** en el [manual, sección 15.9](./manual_completo_uso_pagina_web.md#159-cambiar-una-fuente-compartida-desde-el-objeto),
+con una cuenta admin. Repetir el formulario de reemplazo no resuelve ese requisito.
 
 Usa **Resumen del cambio** o **Resumen del reemplazo** para dejar una
 explicación auditable, por ejemplo:
@@ -940,6 +1069,12 @@ Se corrige demanda de 2026-01-03 14:00 por dato oficial del operador.
 ```
 
 ## 13. Recetas completas
+
+Las recetas siguientes describen los datos, mapeos y destinos esperados. Para
+crear conjuntos nuevos usa el asistente de la sección 6.0 cuando esté habilitado;
+para fuentes canónicas existentes usa la sección 10.7. Si el destino requiere
+una serie específica, consulta la sección 6.6 y su límite para crear el binding.
+Termina cada receta confirmando las fuentes, revisando la preparación y ejecutando.
 
 ### 13.1 BESS + grid con precio único
 
@@ -955,12 +1090,12 @@ timestamp,duration_hours,spot
 Importación:
 
 ```text
-Catalog set name: Precio spot - base 2026-01-01
-Catalog version label: v1
-Catalog data kind: real
-Catalog timezone: America/Santiago
-Catalog timestamp column: timestamp
-Catalog duration column: duration_hours
+Nombre del conjunto: Precio spot - base 2026-01-01
+Etiqueta de versión: v1
+Clase de datos: Real (real)
+Zona horaria (IANA): America/Santiago
+Columna de fecha y hora: timestamp
+Columna de duración (horas): duration_hours
 spot -> price_usd_per_mwh -> USD/MWh
 ```
 
@@ -1065,7 +1200,7 @@ misma fuente varias veces, igual que en el ejemplo de dos cargas.
 
 | Mensaje o síntoma | Causa probable | Qué revisar |
 | --- | --- | --- |
-| **Import to catalog** deshabilitado | Falta nombre, versión, zona, timestamp, duración o hay un mapeo incompleto. | Completa o elimina cada fila de **Signal mappings**. |
+| No se puede avanzar en la importación | Falta una columna, señal, unidad u otro campo, hay cambios sin comprobar o falló la validación. | Revisa **Columnas**, guarda las correcciones y usa **Comprobar datos** antes de confirmar. En compatibilidad revisa **Signal mappings**. |
 | `timestamp ... must be ISO-8601` | Formato no ISO, celda vacía o fecha decorativa de Excel. | Usa `YYYY-MM-DDTHH:MM:SS` con offset opcional. |
 | `duplicate timestamp` | Dos filas representan el mismo inicio después de normalizar zona. | Elimina duplicado o corrige zona/offset. |
 | `periods must be ordered` | Filas fuera de orden. | Ordena ascendentemente el archivo. |
@@ -1076,7 +1211,7 @@ misma fuente varias veces, igual que en el ejemplo de dos cargas.
 | `source unit ... does not match canonical unit` | Unidad distinta o alias no reconocido. | Convierte valores y declara exactamente la unidad canónica. |
 | `column ... is mapped more than once` | Reutilizaste una columna en dos filas de mapeo. | Deja una asignación por columna. |
 | `signal_key ... is mapped more than once` | Dos columnas se intentan cargar bajo la misma clave en un set. | Crea sets separados por entidad. |
-| Set visible pero falla el binding | El dropdown lista sets de todo el proyecto y el elegido no contiene la señal. | Abre el set y comprueba **Señales**. |
+| Set visible pero falla el binding | El selector de compatibilidad lista sets del proyecto y el elegido no contiene la señal. | Abre el set y comprueba **Señales**. En el recorrido protegido, lee la incompatibilidad de la candidata. |
 | `missing required bindings` | Falta al menos un requerimiento de topología. | Revisa toda la lista **Señales requeridas**. |
 | `missing coverage for [A, B)` | El rango excede el set o contiene un hueco. | Acorta rango, reemplaza fuente o interpola explícitamente. |
 | `first period starts ... before requested range start` | Inicio no coincide con límite de periodo. | Copia el `timestamp_start` exacto del catálogo. |
@@ -1084,14 +1219,18 @@ misma fuente varias veces, igual que en el ejemplo de dos cargas.
 | `horizon incompatible ... no implicit resampling` | Cantidad, timestamps o duraciones difieren entre sets. | Resamplea/combina antes o elige sets con la misma grilla. |
 | `missing value for period` | El set tiene periodo pero no valor para esa señal. | Revisa importación/revisión y reemplaza el set. |
 | Julia exige ambos precios separados | Solo llegó importación o solo exportación. | Usa precio único o materializa ambas claves en cada periodo. |
-| **Variante desactualizada** | Cambió serie, derivado, topología o parámetros. | Lee motivos, regenera si aplica y revalida. |
+| **Variante desactualizada** | Cambió serie, derivado, topología o parámetros. | Lee motivos, regenera si aplica, resuelve usos canónicos obsoletos y pulsa **Revisar preparación**. |
+| Rango válido pero **Ejecutar variante** deshabilitado | Falta confirmar fuentes o revisar la preparación vigente. | Confirma los usos y espera **Preparado para ejecutar este período**. |
+| **No pudimos confirmar el envío** | No se pudo confirmar la respuesta a la solicitud de ejecución. | Consulta el historial antes de preparar otro intento; puede existir una corrida aceptada. |
+| `TS_BINDING_EXECUTION_BLOCKED` | Hay usos canónicos obsoletos o inválidos. | Revisa cada fuente desde su objeto y confirma la revisión; después revisa la preparación. |
+| Serie específica sin uso en variante | Publicar datos no crea el binding. | Comprueba la revisión sellada y prepara el uso mediante la API; consulta la sección 6.6. |
 | Derivado **Desactualizado** | Cambió uno de sus inputs. | **Regenerar set derivado** y luego revalidar variante. |
 | Corrida `failed` pese a rango válido | Contrato incompleto, parámetros inviables o error de solver. | Revisa snapshot, error estructurado, stdout y stderr del run. |
 
 ## 15. Verificación posterior a la corrida
 
-En el detalle de un run exitoso, revisa **Series de entrada** o el lineage de
-la versión. Para cada binding deben aparecer:
+En el detalle de un run exitoso, abre **Detalle técnico y auditoría → Series
+de entrada** y contrasta el lineage de la versión. Para cada binding comprueba:
 
 - `signal_key`;
 - `entity_type` y `entity_id`, si corresponden;
@@ -1100,6 +1239,11 @@ la versión. Para cada binding deben aparecer:
 - número de revisión;
 - `content_hash`;
 - rango validado.
+
+Para usos TS-7, comprueba también `binding_id`, `linkable_object_id`,
+`binding_role_key`, `signal_id` y `set_revision_id` en `series_bindings` de la
+metadata de generación de la versión. Esa es la referencia congelada de la
+corrida, aunque la fuente haya cambiado después.
 
 Ejemplo conceptual:
 
@@ -1135,24 +1279,31 @@ antes de cuestionar el solver confirma:
 
 ### Variante
 
-- [ ] Elegí la variante correcta, no otra guardada en el navegador.
-- [ ] Cada requerimiento tiene un set seleccionado.
-- [ ] Cada set corresponde a la entidad mostrada.
-- [ ] Los sets contienen realmente la señal requerida.
+- [ ] Elegí la variante correcta y comprobé el contexto al volver del objeto.
+- [ ] Cada requerimiento tiene una fuente confirmada, no solo seleccionada.
+- [ ] Cada binding corresponde al objeto y necesidad mostrados.
+- [ ] Las fuentes contienen la señal requerida y fijan la revisión esperada.
 - [ ] Inicio y fin son límites exactos de periodos.
-- [ ] La UI muestra **Rango valido para correr**.
+- [ ] Usé **Revisar preparación** y veo **Preparado para ejecutar este período**.
 - [ ] La variante no está desactualizada.
+- [ ] Ningún binding canónico aparece obsoleto, inválido o bloqueado.
 
 ### Corrida
 
 - [ ] El preview es correcto y, cuando contiene series embebidas, la
   validación Julia también.
-- [ ] Presioné **Vincular y correr variante** una sola vez y esperé la redirección.
+- [ ] Presioné **Ejecutar variante** una sola vez y esperé la redirección.
+- [ ] Si el envío quedó incierto, consulté el historial antes de otro intento.
 - [ ] En el detalle del run verifiqué set, revisión, hash, entidad y rango.
 
 ## 17. Referencias internas
 
 - [Guía del analista](./guia_analista.md).
+- [Manual completo de la aplicación](./manual_completo_uso_pagina_web.md).
+- [Catálogo global y series específicas TS-7](../series_tiempo/iter7/spec_ts7_catalogo_global_y_series_especificas.md).
+- [Importación guiada: comportamiento implementado](../mejora_experiencia_usuario/evidencia/ux-003/README.md).
+- [Fuentes desde la necesidad del modelo](../mejora_experiencia_usuario/evidencia/ux-004/README.md).
+- [Preparación y ejecución de variantes](../mejora_experiencia_usuario/evidencia/ux-005/README.md).
 - [Semántica del catálogo de series](../series_tiempo/iter2/decision_record_ts2_catalog_semantics.md).
 - [Semántica de variantes y bindings](../series_tiempo/iter3/decision_record_ts3_variant_semantics.md).
 - [Arquitectura final de transformaciones, conectores y schedules](../series_tiempo/iter6/architecture_ts6_final.md).
