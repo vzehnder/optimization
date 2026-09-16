@@ -4,6 +4,181 @@ import { describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
 
+it("shows the full destination at every step and returns with the original variant and filters", async () => {
+  const objectSearch = new URLSearchParams({
+    scenario_id: "4",
+    variant_id: "9",
+    return_to: "/scenarios/4?section=data&variant=9",
+    q: "load_1",
+    kind: "all",
+  });
+  const returnTo = `/projects/1/linkable-objects/7/time-series?${objectSearch}`;
+  window.history.replaceState(
+    {},
+    "",
+    `/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=associate&scenario_id=4&variant_id=9&${new URLSearchParams({ return_to: returnTo })}`,
+  );
+  const writes: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    journeyFetch((url) => {
+      if (url.pathname === "/api/time-series/catalog/inputs")
+        return json(candidatePage());
+      if (url.pathname === "/api/time-series/catalog/inputs/41")
+        return json(inputDetail());
+      if (url.pathname === "/api/auth/csrf")
+        return json({ csrf_token: "csrf" });
+      if (url.pathname.endsWith("association-prevalidations"))
+        return json(associationPrevalidation());
+      if (url.pathname.endsWith("association-batches"))
+        writes.push(url.pathname);
+      return null;
+    }),
+  );
+  const user = userEvent.setup();
+  render(<App />);
+  const destination = await screen.findByRole("region", {
+    name: "Destino de la vinculación",
+  });
+  await within(destination).findByText("Default · #9");
+  function checkDestination() {
+    expect(destination).toHaveTextContent("Cuenca Norte · #1");
+    expect(destination).toHaveTextContent("Plan base · #4");
+    expect(destination).toHaveTextContent("Caso base · #2");
+    expect(destination).toHaveTextContent("Default · #9");
+    expect(destination).toHaveTextContent("Sistema · #7");
+    expect(
+      within(destination).getByRole("link", {
+        name: "Revisar objetos del escenario",
+      }),
+    ).toHaveAttribute("href", "/react/scenarios/4?section=data&variant=9");
+  }
+  checkDestination();
+  expect(
+    screen.queryByRole("button", { name: "Paso anterior" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("link", { name: "Volver a la pantalla de origen" }),
+  ).toHaveAttribute("href", `/react${returnTo}`);
+  await user.selectOptions(
+    screen.getByLabelText("Necesidad funcional"),
+    "grid_import_price",
+  );
+  await user.click(
+    screen.getByRole("radio", { name: "Reutilizar una fuente generica" }),
+  );
+  await user.click(screen.getByRole("button", { name: "Siguiente" }));
+  await user.click(
+    await screen.findByRole("radio", { name: "Elegir Precio de energia" }),
+  );
+  checkDestination();
+  await user.click(screen.getByRole("button", { name: "Siguiente" }));
+  await screen.findByRole("heading", { name: "Datos o revision ejecutable" });
+  checkDestination();
+  await user.click(screen.getByRole("button", { name: "Siguiente" }));
+  await screen.findByRole("table", { name: "Prevalidacion por fila" });
+  checkDestination();
+  expect(
+    screen.queryByRole("button", { name: "Siguiente" }),
+  ).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Paso anterior" }));
+  expect(
+    screen.getByRole("heading", { name: "Datos o revision ejecutable" }),
+  ).toHaveFocus();
+  await user.click(screen.getByRole("button", { name: "Paso anterior" }));
+  expect(
+    screen.getByRole("radio", { name: "Elegir Precio de energia" }),
+  ).toBeChecked();
+  await user.click(screen.getByRole("button", { name: "Paso anterior" }));
+  expect(screen.getByLabelText("Necesidad funcional")).toHaveValue(
+    "grid_import_price",
+  );
+  await user.click(
+    screen.getByRole("link", { name: "Volver a la pantalla de origen" }),
+  );
+  await waitFor(() =>
+    expect(window.location.pathname).toBe(
+      "/react/projects/1/linkable-objects/7/time-series",
+    ),
+  );
+  expect(window.location.search).toBe(`?${objectSearch}`);
+  expect(writes).toEqual([]);
+});
+
+it("provides a local exit when the journey has no return URL", async () => {
+  window.history.replaceState(
+    {},
+    "",
+    "/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=associate",
+  );
+  vi.stubGlobal("fetch", journeyFetch());
+  render(<App />);
+  expect(
+    await screen.findByRole("link", { name: "Volver a la pantalla de origen" }),
+  ).toHaveAttribute("href", "/react/projects/1/linkable-objects/7/time-series");
+  const destination = screen.getByRole("region", {
+    name: "Destino de la vinculación",
+  });
+  expect(
+    within(destination).queryByRole("link", {
+      name: "Revisar objetos del escenario",
+    }),
+  ).not.toBeInTheDocument();
+  expect(within(destination).getAllByText("Sin seleccionar")).toHaveLength(3);
+});
+
+it("updates the destination when the execution variant changes", async () => {
+  window.history.replaceState(
+    {},
+    "",
+    "/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=use_revision&scenario_id=4&variant_id=9",
+  );
+  vi.stubGlobal(
+    "fetch",
+    journeyFetch((url) => {
+      if (url.pathname === "/api/scenarios/4/case/variants")
+        return json({
+          ...VARIANTS,
+          variants: [
+            ...VARIANTS.variants,
+            {
+              ...VARIANTS.variants[0],
+              variant: {
+                ...VARIANTS.variants[0].variant,
+                id: 10,
+                display_name: "Alternativa solar",
+                is_default: false,
+              },
+            },
+          ],
+        });
+      if (url.pathname.endsWith("/time-series-bindings"))
+        return json(boundBindings());
+      return null;
+    }),
+  );
+  const user = userEvent.setup();
+  render(<App />);
+  const destination = await screen.findByRole("region", {
+    name: "Destino de la vinculación",
+  });
+  await within(destination).findByText("Default · #9");
+  await user.selectOptions(screen.getByLabelText("Variante"), "10");
+  expect(
+    within(destination).getByText("Alternativa solar · #10"),
+  ).toBeVisible();
+  expect(
+    within(destination).queryByText("Default · #9"),
+  ).not.toBeInTheDocument();
+  expect(
+    within(destination).getByRole("link", {
+      name: "Revisar objetos del escenario",
+    }),
+  ).toHaveAttribute("href", "/react/scenarios/4?section=data&variant=10");
+  await user.selectOptions(screen.getByLabelText("Escenario"), "");
+  expect(within(destination).getAllByText("Sin seleccionar")).toHaveLength(3);
+});
+
 it.each([
   "entry=object&project_id=0&object_id=7",
   "entry=object&project_id=1&object_id=9007199254740993",
@@ -97,6 +272,150 @@ it("UX-004 retries a failed prevalidation with the same selected source", async 
   ).toHaveTextContent("Precio de energia");
 });
 
+it("filters needs by object and blocks a stale incompatible need from the URL", async () => {
+  window.history.replaceState(
+    {},
+    "",
+    "/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=associate&binding_role_key=renewable_available_power",
+  );
+  const roleQueries: URL[] = [];
+  const candidateQueries: URL[] = [];
+  vi.stubGlobal(
+    "fetch",
+    journeyFetch((url) => {
+      if (url.pathname === "/api/time-series/catalog/descriptors") {
+        roleQueries.push(url);
+        return json(BINDING_ROLES);
+      }
+      if (url.pathname === "/api/time-series/catalog/inputs") {
+        candidateQueries.push(url);
+        return json(candidatePage());
+      }
+      return null;
+    }),
+  );
+  render(<App />);
+  const user = userEvent.setup();
+  await screen.findByRole("option", { name: "Precio de compra a la red" });
+  expect(
+    screen.queryByRole("option", { name: "Renewable Available Power" }),
+  ).not.toBeInTheDocument();
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "La necesidad seleccionada no corresponde a Sistema",
+  );
+  await user.click(
+    screen.getByRole("radio", { name: "Reutilizar una fuente generica" }),
+  );
+  expect(screen.getByRole("button", { name: "Siguiente" })).toBeDisabled();
+  expect(candidateQueries).toHaveLength(0);
+  expect(
+    roleQueries.at(-1)!.searchParams.get("context_linkable_object_id"),
+  ).toBe("7");
+  expect(roleQueries.at(-1)!.searchParams.get("context_usage")).toBe(
+    "association",
+  );
+  await user.selectOptions(
+    screen.getByLabelText("Necesidad funcional"),
+    "grid_import_price",
+  );
+  await user.click(screen.getByRole("button", { name: "Siguiente" }));
+  await user.click(
+    await screen.findByRole("radio", { name: "Elegir Precio de energia" }),
+  );
+  expect(screen.getByRole("button", { name: "Siguiente" })).toBeEnabled();
+});
+
+it("showing all sources preserves the search but resets the page and selected source", async () => {
+  window.history.replaceState(
+    {},
+    "",
+    "/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=associate&binding_role_key=grid_import_price&q=Precio",
+  );
+  const queries: URL[] = [];
+  vi.stubGlobal(
+    "fetch",
+    journeyFetch((url) => {
+      if (url.pathname !== "/api/time-series/catalog/inputs") return null;
+      queries.push(url);
+      const page = candidatePage();
+      const allowed = page.items.filter(
+        (row) => row.compatibility_decision.allowed,
+      );
+      return json({
+        ...page,
+        items:
+          url.searchParams.get("cursor") === "second"
+            ? [allowed[1]]
+            : url.searchParams.get("compatibility") === "all"
+              ? page.items
+              : allowed,
+        page: {
+          limit: 2,
+          has_more: !url.searchParams.has("cursor"),
+          next_cursor: "second",
+        },
+      });
+    }),
+  );
+  render(<App />);
+  const user = userEvent.setup();
+  await user.click(
+    await screen.findByRole("radio", {
+      name: "Reutilizar una fuente generica",
+    }),
+  );
+  await user.click(screen.getByRole("button", { name: "Siguiente" }));
+  await screen.findByRole("radio", { name: "Elegir Precio de energia" });
+  expect(
+    screen.getByRole("checkbox", { name: "Mostrar todas las series" }),
+  ).not.toBeChecked();
+  await user.click(screen.getByRole("button", { name: "Más fuentes" }));
+  await screen.findByText("Página 2");
+  await user.click(
+    await screen.findByRole("radio", { name: "Elegir Precio spot" }),
+  );
+  expect(screen.getByRole("button", { name: "Siguiente" })).toBeEnabled();
+  await user.click(
+    screen.getByRole("checkbox", { name: "Mostrar todas las series" }),
+  );
+  expect(
+    await screen.findByRole("radio", { name: "Elegir Afluente medido" }),
+  ).toBeDisabled();
+  expect(screen.getByText("Página 1")).toBeVisible();
+  expect(
+    screen.getByRole("radio", { name: "Elegir Precio spot" }),
+  ).not.toBeChecked();
+  expect(screen.getByRole("button", { name: "Siguiente" })).toBeDisabled();
+  expect(screen.getByLabelText("Buscar fuentes candidatas")).toHaveValue(
+    "Precio",
+  );
+  expect(queries.at(-1)!.searchParams.get("q")).toBe("Precio");
+  expect(queries.at(-1)!.searchParams.get("compatibility")).toBe("all");
+  expect(queries.at(-1)!.searchParams.has("cursor")).toBe(false);
+  expect(new URLSearchParams(window.location.search).get("show_all")).toBe("1");
+  await user.click(
+    screen.getByRole("checkbox", { name: "Mostrar todas las series" }),
+  );
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("radio", { name: "Elegir Afluente medido" }),
+    ).not.toBeInTheDocument(),
+  );
+  expect(
+    screen.getByRole("checkbox", { name: "Mostrar todas las series" }),
+  ).not.toBeChecked();
+  expect(
+    queries.some(
+      (query) =>
+        query.searchParams.get("compatibility") === "allowed" &&
+        !query.searchParams.has("cursor"),
+    ),
+  ).toBe(true);
+  expect(new URLSearchParams(window.location.search).has("show_all")).toBe(
+    false,
+  );
+});
+
 it("UX-004 changing the need discards its candidate and cursor", async () => {
   window.history.replaceState(
     {},
@@ -129,7 +448,7 @@ it("UX-004 changing the need discards its candidate and cursor", async () => {
   await user.click(
     await screen.findByRole("radio", { name: "Elegir Precio de energia" }),
   );
-  await user.click(screen.getByRole("button", { name: "Volver" }));
+  await user.click(screen.getByRole("button", { name: "Paso anterior" }));
   await user.selectOptions(
     screen.getByLabelText("Necesidad funcional"),
     "grid_export_price",
@@ -366,6 +685,18 @@ function journeyFetch(
     const answered = extra?.(url, init);
     if (answered) return answered;
     if (url.pathname === "/api/auth/me") return json(VERIFICATION_IDENTITY);
+    if (url.pathname === "/api/projects/1")
+      return json({
+        project: {
+          id: 1,
+          name: "Cuenca Norte",
+          description: "",
+          created_at: "2026-01-01",
+        },
+      });
+    if (url.pathname === "/api/projects/1/scenarios") return json(SCENARIOS);
+    if (url.pathname === "/api/scenarios/4/case/variants")
+      return json(VARIANTS);
     if (url.pathname === "/api/projects/1/linkable-objects/7/time-series")
       return json(objectSummaryPage());
     if (url.pathname === "/api/time-series/catalog/descriptors")
@@ -1224,8 +1555,8 @@ describe("single protected mutation journey", () => {
     );
 
     // The draft is intact: the same source is still chosen two steps back.
-    await user.click(screen.getByRole("button", { name: "Volver" }));
-    await user.click(screen.getByRole("button", { name: "Volver" }));
+    await user.click(screen.getByRole("button", { name: "Paso anterior" }));
+    await user.click(screen.getByRole("button", { name: "Paso anterior" }));
     expect(
       screen.getByRole("radio", { name: "Elegir Precio de energia" }),
     ).toBeChecked();
@@ -1621,14 +1952,14 @@ describe("single protected mutation journey", () => {
     await screen.findByRole("region", { name: "Impacto y confirmacion" });
     expect(prevalidated).toHaveLength(1);
 
-    await user.click(screen.getByRole("button", { name: "Volver" }));
-    await user.click(screen.getByRole("button", { name: "Volver" }));
+    await user.click(screen.getByRole("button", { name: "Paso anterior" }));
+    await user.click(screen.getByRole("button", { name: "Paso anterior" }));
 
     // The draft survived both steps back.
     expect(
       screen.getByRole("radio", { name: "Elegir Precio de energia" }),
     ).toBeChecked();
-    await user.click(screen.getByRole("button", { name: "Volver" }));
+    await user.click(screen.getByRole("button", { name: "Paso anterior" }));
     expect(screen.getByLabelText("Necesidad funcional")).toHaveValue(
       "grid_import_price",
     );
@@ -1755,7 +2086,14 @@ describe("single protected mutation journey", () => {
     const fetchMock = journeyFetch((url) => {
       if (url.pathname !== "/api/time-series/catalog/inputs") return null;
       searches.push(url.search);
-      return json(candidatePage());
+      const page = candidatePage();
+      return json({
+        ...page,
+        items:
+          url.searchParams.get("compatibility") === "all"
+            ? page.items
+            : page.items.filter((row) => row.compatibility_decision.allowed),
+      });
     });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
@@ -1780,7 +2118,20 @@ describe("single protected mutation journey", () => {
     });
     expect(within(compatible).getByRole("radio")).toBeEnabled();
 
-    const denied = within(table).getByRole("row", { name: /Afluente medido/ });
+    expect(
+      within(table).queryByRole("row", { name: /Afluente medido/ }),
+    ).not.toBeInTheDocument();
+    expect(new URLSearchParams(searches.at(-1)).get("compatibility")).toBe(
+      "allowed",
+    );
+    await user.click(
+      screen.getByRole("checkbox", { name: "Mostrar todas las series" }),
+    );
+    await screen.findByRole("radio", { name: "Elegir Afluente medido" });
+
+    const denied = within(
+      screen.getByRole("table", { name: "Fuentes genericas candidatas" }),
+    ).getByRole("row", { name: /Afluente medido/ });
     expect(within(denied).getByRole("radio")).toBeDisabled();
     expect(
       within(denied).getByText(
@@ -2224,6 +2575,18 @@ describe("single protected mutation journey", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input), "http://localhost");
       if (url.pathname === "/api/auth/me") return json(VERIFICATION_IDENTITY);
+      if (url.pathname === "/api/projects/1")
+        return json({
+          project: {
+            id: 1,
+            name: "Cuenca Norte",
+            description: "",
+            created_at: "2026-01-01",
+          },
+        });
+      if (url.pathname === "/api/projects/1/scenarios") return json(SCENARIOS);
+      if (url.pathname === "/api/scenarios/4/case/variants")
+        return json(VARIANTS);
       if (url.pathname === "/api/projects/1/linkable-objects/7/time-series")
         return json(objectSummaryPage());
       if (url.pathname === "/api/time-series/catalog/descriptors")

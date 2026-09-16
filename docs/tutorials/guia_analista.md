@@ -448,11 +448,12 @@ operaciones siguen disponibles mediante sus APIs o formularios compatibles,
 según las capacidades del servidor. Se entra desde el catálogo o el resumen del
 objeto, y siempre tiene los mismos cuatro pasos:
 
-1. **Origen y alcance**: necesidad funcional, y si la fuente sera generica
-   compartida o solo de este objeto.
+1. **Origen y alcance**: necesidad funcional compatible con el objeto, y si
+   la fuente sera generica compartida o solo de este objeto.
 2. **Definicion o seleccion**: elegir la fuente compatible o definir la serie
-   especifica. Las fuentes incompatibles aparecen bloqueadas con su codigo
-   estable, no ocultas.
+   especifica. Por defecto se muestran las fuentes compatibles. Al activar
+   **Mostrar todas las series**, tambien aparecen las incompatibles,
+   bloqueadas y con el motivo del rechazo.
 3. **Datos o revision**: cargar los datos, o elegir la revision exacta.
 4. **Impacto y confirmacion**: el impacto completo antes de decidir, y la
    confirmacion con motivo.

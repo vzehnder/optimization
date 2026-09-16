@@ -8949,6 +8949,8 @@ class AnalystStore:
         q: str = "",
         statuses: list[str] | None = None,
         actor_class: str = "internal",
+        context_linkable_object_id: int | None = None,
+        context_usage: str | None = None,
     ) -> dict[str, Any]:
         """One independently paged persistent selector catalog."""
 
@@ -9006,7 +9008,51 @@ class AnalystStore:
         resolved_limit = normalize_catalog_limit(limit)
         normalized_q = normalize_search_text(q)
         selected_statuses = sorted(set(statuses or ["active"]))
-        rows = [dict(row) for row in self.connection.execute(queries[kind]).fetchall()]
+        parameters: tuple = ()
+        descriptor_context = {}
+        if context_linkable_object_id is not None or context_usage is not None:
+            if (
+                kind != "binding_role"
+                or context_linkable_object_id is None
+                or context_usage not in {"association", "execution"}
+            ):
+                raise CatalogQueryError(
+                    "TS_QUERY_INVALID", field="context_usage",
+                    reason="binding_role_object_context_required",
+                )
+            try:
+                linkable = self.get_linkable_object(context_linkable_object_id)
+            except LinkableObjectError as error:
+                raise CatalogQueryError(
+                    "TS_QUERY_INVALID", field="context_linkable_object_id"
+                ) from error
+            usage_column = (
+                "association_allowed" if context_usage == "association"
+                else "execution_allowed"
+            )
+            queries[kind] += f"""
+                WHERE role.status = 'active' AND role.{usage_column} = 1
+                  AND ? = 'active'
+                  AND EXISTS (
+                    SELECT 1 FROM time_series_role_compatibilities AS compatibility
+                    JOIN time_series_semantic_types AS semantic
+                      ON semantic.id = compatibility.semantic_type_id
+                    WHERE compatibility.binding_role_id = role.id
+                      AND compatibility.object_type_id = ?
+                      AND compatibility.status = 'active'
+                      AND compatibility.{usage_column} = 1
+                      AND semantic.status = 'active'
+                  )
+            """
+            parameters = (linkable["status"], linkable["object_type_id"])
+            descriptor_context = {
+                "context_linkable_object_id": context_linkable_object_id,
+                "context_usage": context_usage,
+            }
+        rows = [
+            dict(row)
+            for row in self.connection.execute(queries[kind], parameters).fetchall()
+        ]
         items: list[dict[str, Any]] = []
         for row in rows:
             if row["status"] not in selected_statuses:
@@ -9040,7 +9086,10 @@ class AnalystStore:
         )
         generation = int(hashlib.sha256(generation_source.encode()).hexdigest()[:15], 16)
         filters_digest = input_filters_hash(
-            {"kind": kind, "q": normalized_q, "statuses": selected_statuses}
+            {
+                "kind": kind, "q": normalized_q,
+                "statuses": selected_statuses, **descriptor_context,
+            }
         )
         cursor_key = None
         if cursor is not None:
@@ -31628,10 +31677,9 @@ class AnalystStore:
             required_signal_status_to_dict(status)
             for status in evaluate_variant_completeness(required, bindings)
         ]
-        objects = (
-            self.list_linkable_objects(project_id=int(scenario["project_id"]))
-            if protected else []
-        )
+        # Registered targets also let a legacy variant select its first
+        # canonical source. Discovering them must not switch its writer mode.
+        objects = self.list_linkable_objects(project_id=int(scenario["project_id"]))
         for status in statuses:
             matches = [
                 item for item in objects

@@ -195,6 +195,125 @@ function serveBoundPreparation(
 }
 
 describe("variant preparation", () => {
+  it.each([
+    { canonicalRead: true, hasLegacySets: false },
+    { canonicalRead: true, hasLegacySets: true },
+    { canonicalRead: false, hasLegacySets: false },
+  ])(
+    "offers the first generic source from an unbound legacy variant ($canonicalRead, $hasLegacySets)",
+    async ({ canonicalRead, hasLegacySets }) => {
+      window.history.replaceState(
+        {},
+        "",
+        "/react/scenarios/10?section=data&variant=4",
+      );
+      const needs = [
+        {
+          entity_type: "grid",
+          entity_id: "grid_1",
+          signal_key: "price_usd_per_mwh",
+          linkable_object_id: 9,
+        },
+        {
+          entity_type: "component:load",
+          entity_id: "load_1",
+          signal_key: "load_demand_mw",
+          linkable_object_id: 10,
+        },
+        {
+          entity_type: "component:renewable",
+          entity_id: "solar_1",
+          signal_key: "renewable_available_power_mw",
+          linkable_object_id: 11,
+        },
+      ].map((need) => ({ ...need, bound: false, time_series_set_id: null }));
+      servePreparation((path) => {
+        if (path === "/api/auth/me")
+          return Response.json({
+            user: {
+              id: 7,
+              role: "analyst",
+              email: "analyst@example.local",
+              is_active: true,
+            },
+            landing_path: "/react/projects",
+            ts_next_canonical_read: canonicalRead,
+          });
+        if (path === "/api/projects/1/time-series-sets")
+          return Response.json({
+            time_series_sets: hasLegacySets ? [priceSet] : [],
+          });
+        if (path.endsWith("/case/variants"))
+          return Response.json({
+            default_variant_id: 4,
+            variants: [
+              {
+                variant: {
+                  id: 4,
+                  display_name: "Sin fuentes",
+                  is_default: true,
+                },
+                bindings: [],
+                required_signals: needs,
+                staleness: { stale: false, validated: false, reasons: [] },
+                preparation: {
+                  binding_mode: "legacy",
+                  model_status: "available",
+                  required_signals: needs,
+                  sources: [],
+                  bindings_revision: 0,
+                },
+              },
+            ],
+          });
+        return undefined;
+      });
+      render(<App />);
+      await screen.findByText("load_demand_mw (load_1): falta vincular");
+      for (const need of needs) {
+        const link = screen.queryByRole("link", {
+          name: `Elegir fuente del catálogo genérico para ${need.entity_id}`,
+        });
+        if (canonicalRead) {
+          expect(link).toBeVisible();
+          const destination = new URL(
+            link!.getAttribute("href")!,
+            "http://localhost",
+          );
+          expect(destination.pathname).toBe(
+            `/react/projects/1/linkable-objects/${need.linkable_object_id}/time-series`,
+          );
+          expect(destination.searchParams.get("scenario_id")).toBe("10");
+          expect(destination.searchParams.get("variant_id")).toBe("4");
+          expect(destination.searchParams.get("return_to")).toBe(
+            "/scenarios/10?section=data&variant=4",
+          );
+        } else expect(link).not.toBeInTheDocument();
+      }
+      const selector = screen.queryByLabelText(
+        "Serie de precio (price_usd_per_mwh)",
+      );
+      if (canonicalRead && !hasLegacySets) {
+        expect(selector).not.toBeInTheDocument();
+        expect(
+          screen.queryByRole("link", {
+            name: "Corregir price_usd_per_mwh (grid_1)",
+          }),
+        ).not.toBeInTheDocument();
+      } else expect(selector).toBeVisible();
+      expect(
+        screen.getByRole("button", { name: "Ejecutar variante" }),
+      ).toBeDisabled();
+      expect(
+        vi
+          .mocked(fetch)
+          .mock.calls.every(
+            ([, init]) => !init?.method || init.method === "GET",
+          ),
+      ).toBe(true);
+    },
+  );
+
   it("keeps a local source choice pending when another session changes the saved binding during review", async () => {
     window.history.replaceState({}, "", "/react/scenarios/10?section=data");
     let changed = false;

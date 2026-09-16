@@ -9238,6 +9238,8 @@ export interface operations {
                 limit?: number;
                 cursor?: string | null;
                 q?: string;
+                context_linkable_object_id?: number | null;
+                context_usage?: string | null;
             };
             header?: never;
             path?: never;

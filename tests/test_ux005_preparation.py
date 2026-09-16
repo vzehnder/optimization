@@ -117,3 +117,31 @@ class VariantPreparationApiTests(unittest.TestCase):
             response = self.client.get(self.path)
             self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual(response.json()["variants"][0]["preparation"]["binding_mode"], "protected")
+
+    def test_unbound_legacy_variant_exposes_registered_targets_for_its_first_canonical_source(self):
+        document = grid_battery_draft_document()
+        document["assets"].extend([
+            {"id": "load_1", "type": "load"},
+            {"id": "solar_1", "type": "renewable", "category": "solar"},
+        ])
+        self.store.create_or_replace_scenario_draft(scenario_id=self.scenario["id"], document=document)
+        before = self.client.get(self.path).json()["variants"][0]
+        self.assertEqual(before["preparation"]["binding_mode"], "legacy")
+        self.assertIsNone(before["preparation"]["required_signals"][0]["linkable_object_id"])
+        registered = self.store.materialize_project_linkable_objects(project_id=self.project["id"])
+        objects_by_key = {item["object_key"]: item["id"] for item in registered["objects"]}
+
+        response = self.client.get(self.path)
+        self.assertEqual(response.status_code, 200, response.text)
+        detail = response.json()["variants"][0]
+        preparation = detail["preparation"]
+        self.assertEqual(preparation["binding_mode"], "legacy")
+        self.assertEqual(len(preparation["required_signals"]), 3)
+        for need in preparation["required_signals"]:
+            key = "system" if need["entity_type"] == "grid" else need["entity_id"]
+            self.assertEqual(need["linkable_object_id"], objects_by_key[key])
+            self.assertFalse(need["bound"])
+        self.assertEqual(preparation["bindings_revision"], 0)
+        self.assertEqual(detail["bindings"], [])
+        self.assertEqual(preparation["sources"], [])
+        self.assertCountEqual(self.store.list_linkable_objects(project_id=self.project["id"]), registered["objects"])

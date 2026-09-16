@@ -75,6 +75,14 @@ servidor:
 | Fuentes con revisión fijada y enlaces **Corregir**, **Revisar fuente** o **Ver fuentes del componente** | Recorrido protegido: revisa el objeto, asocia la fuente genérica si falta y confirma la revisión para la variante. |
 | **Elegir la necesidad del modelo para importar**, en el editor | Abre **Datos** y parte desde el componente; el asistente de conjuntos nuevos no está habilitado para ese destino. |
 
+Si la variante todavía usa compatibilidad y tu cuenta tiene acceso al catálogo
+genérico, **Elegir fuente del catálogo genérico para ...** abre las fuentes del
+objeto registrado, incluso antes de la primera vinculación. Desde allí, sigue
+**Asociar fuente al objeto** y luego **Usar revisión en una variante**. Los
+desplegables de compatibilidad consultan los sets del proyecto; cuando están
+vacíos y existe ese acceso al catálogo genérico, se muestra el enlace para elegir
+la fuente sin presentar un desplegable vacío.
+
 Después del cambio al escritor canónico C6, o si la variante tiene bindings
 canónicos activos, el servidor exige el recorrido protegido. La habilitación de
 lectura del catálogo no decide qué escrituras están permitidas. Si aparece
@@ -853,9 +861,22 @@ requerida. La presencia de un set en la lista no demuestra compatibilidad:
 abre el catálogo y verifica sus señales antes de seleccionarlo.
 
 En el recorrido protegido, **Buscar fuentes candidatas** consulta al servidor;
-**Fuentes anteriores** y **Más fuentes** recorren las páginas. Las candidatas
-incompatibles aparecen bloqueadas con su explicación. Cambiar la necesidad
+**Fuentes anteriores** y **Más fuentes** recorren las páginas. Por defecto se
+muestran las fuentes compatibles con la necesidad y el objeto elegidos. Activa
+**Mostrar todas las series** para ver también las incompatibles, bloqueadas con
+su explicación. El cambio de filtro vuelve a la primera página y descarta la
+selección anterior, conservando la búsqueda. **Necesidad funcional** solo ofrece
+roles admitidos para el objeto: los precios se asignan a **System**, la demanda
+a `load_1` y la disponibilidad renovable a `solar_1`. Cambiar la necesidad
 descarta la selección anterior: vuelve a revisar objeto, señal y fuente.
+
+El panel **Destino de la vinculación** muestra proyecto, escenario, caso,
+variante y objeto, con sus nombres e identificadores, en todos los pasos.
+**Revisar objetos del escenario** regresa a los datos de la misma variante
+para elegir otro componente. **Paso anterior** retrocede dentro del recorrido;
+**Volver a la pantalla de origen** sale hacia el destino original conservando
+sus filtros. Asociar una fuente al objeto y usar su revisión en una variante
+son acciones separadas.
 
 ### 10.5 Ejemplo de matriz de matcheo
 

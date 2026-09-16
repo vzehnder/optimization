@@ -3557,9 +3557,15 @@ export async function listCatalogInputRevisions(
 export async function listCatalogDescriptors(
   kind: string,
   signal?: AbortSignal,
+  context?: { linkableObjectId: number; usage: "association" | "execution" },
 ): Promise<CatalogPageEnvelope<CatalogDescriptor>> {
+  const params = new URLSearchParams({ kind, limit: "200" });
+  if (context) {
+    params.set("context_linkable_object_id", String(context.linkableObjectId));
+    params.set("context_usage", context.usage);
+  }
   return requestJson<CatalogPageEnvelope<CatalogDescriptor>>(
-    `/api/time-series/catalog/descriptors?kind=${encodeURIComponent(kind)}&limit=200`,
+    `/api/time-series/catalog/descriptors?${params.toString()}`,
     { signal },
   );
 }
@@ -3673,6 +3679,7 @@ export interface ObjectSourceCandidateQuery {
   q?: string;
   limit?: number;
   cursor?: string | null;
+  compatibility?: "allowed" | "all";
 }
 
 export async function listCatalogSourcesForObject(
@@ -3683,9 +3690,7 @@ export async function listCatalogSourcesForObject(
     context_linkable_object_id: String(query.linkableObjectId),
     context_binding_role_key: query.bindingRoleKey,
     context_usage: query.usage,
-    // Chapter 8.7: an incompatible candidate is explained, never hidden, so
-    // the surface asks for the refused rows on purpose.
-    compatibility: "all",
+    compatibility: query.compatibility ?? "allowed",
   });
   if (query.usage === "execution") {
     params.set("context_scenario_id", String(query.scenarioId ?? ""));

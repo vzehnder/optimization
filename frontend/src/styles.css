@@ -2209,6 +2209,16 @@ button:focus-visible {
   margin: 0;
 }
 
+.journey-destination-title {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.journey-rail section > a {
+  display: inline-block;
+  margin-top: 0.75rem;
+}
+
 .journey-context dt {
   color: #55606d;
   font-size: 0.85rem;

@@ -533,6 +533,52 @@ class CatalogInputsApiTests(unittest.TestCase):
         self.assertNotEqual(first_roles["items"][0]["id"], second_roles["items"][0]["id"])
         self.assertEqual(first_roles["meta"]["kind"], "binding_role")
 
+    def test_binding_role_descriptors_follow_the_registered_object_and_usage(self):
+        system = self.store.ensure_global_signal_slot(project_id=self.project["id"])
+        load = self.store.ensure_project_component(project_id=self.project["id"], component_key="load_1", component_type="load")
+        solar = self.store.ensure_project_component(project_id=self.project["id"], component_key="solar_1", component_type="renewable")
+        path = "/api/time-series/catalog/descriptors"
+        for target, expected in [
+            (system, {"grid_import_price", "grid_export_price"}),
+            (load, {"load_demand"}),
+            (solar, {"renewable_available_power"}),
+        ]:
+            with self.subTest(object=target["object_type_key"]):
+                response = self.client.get(path, params={"kind": "binding_role", "context_linkable_object_id": target["id"], "context_usage": "association"})
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual({item["key"] for item in response.json()["items"]}, expected)
+                self.assertEqual(response.json()["summary"]["total_count"], len(expected))
+
+        for usage, expected in [("association", {"grid_import_price", "grid_export_price"}), ("execution", {"grid_import_price", "grid_export_price"})]:
+            response = self.client.get(path, params={"kind": "binding_role", "context_linkable_object_id": system["id"], "context_usage": usage})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual({item["key"] for item in response.json()["items"]}, expected)
+
+    def test_contextual_role_descriptors_reject_incomplete_context_and_cursor_reuse(self):
+        system = self.store.ensure_global_signal_slot(project_id=self.project["id"])
+        other_project = self.store.create_project(name="Otro proyecto")
+        other = self.store.ensure_global_signal_slot(project_id=other_project["id"])
+        path = "/api/time-series/catalog/descriptors"
+        for params in [
+            {"kind": "binding_role", "context_linkable_object_id": system["id"]},
+            {"kind": "binding_role", "context_usage": "association"},
+            {"kind": "binding_role", "context_linkable_object_id": system["id"], "context_usage": "unknown"},
+            {"kind": "semantic_type", "context_linkable_object_id": system["id"], "context_usage": "association"},
+            {"kind": "binding_role", "context_linkable_object_id": 99999999, "context_usage": "association"},
+        ]:
+            with self.subTest(params=params):
+                response = self.client.get(path, params=params)
+                self.assertEqual(response.status_code, 400, response.text)
+        params = {"kind": "binding_role", "limit": 1, "context_linkable_object_id": system["id"], "context_usage": "association"}
+        first = self.client.get(path, params=params).json()
+        self.assertTrue(first["page"]["has_more"])
+        second = self.client.get(path, params={**params, "cursor": first["page"]["next_cursor"]})
+        self.assertEqual(second.status_code, 200, second.text)
+        self.assertNotEqual(first["items"][0]["key"], second.json()["items"][0]["key"])
+        reused = self.client.get(path, params={**params, "context_linkable_object_id": other["id"], "cursor": first["page"]["next_cursor"]})
+        self.assertEqual(reused.status_code, 400, reused.text)
+        self.assertEqual(reused.json()["error"]["code"], "TS_QUERY_CURSOR_MISMATCH")
+
     def test_object_candidates_use_the_single_evaluator_and_denied_are_not_selectable(self):
         system = self.store.ensure_global_signal_slot(
             project_id=self.project["id"], display_name="Sistema"

@@ -1008,6 +1008,12 @@ abre el recorrido para el escenario y la variante actuales. Estos accesos
 dependen de la lectura canónica habilitada por el servidor. No sustituir el ID
 del objeto por el del escenario ni por el nombre de un asset.
 
+Antes de la primera vinculación canónica, una variante en compatibilidad también
+ofrece **Elegir fuente del catálogo genérico para ...** si el objeto ya está
+registrado y la cuenta tiene acceso. El enlace conserva escenario y variante y
+permite asociar una fuente y después usar su revisión. Si el catálogo de sets del
+proyecto está vacío, ese acceso sustituye al desplegable vacío del componente.
+
 **Volver al escenario** conserva la variante de origen. **Explorar catálogo
 general** permite ampliar la búsqueda y regresar al objeto con sus filtros.
 
@@ -1037,18 +1043,31 @@ no ofrece edición de celdas ni un botón de archivo de series.
 ### 15.6 Entender los cuatro pasos del recorrido protegido
 
 El recorrido se abre desde el inspector del catálogo, el objeto o una necesidad
-del modelo. El título nombra la acción y la franja de contexto mantiene visibles
-objeto, alcance, necesidad y acción. Las candidatas se buscan y paginan en el
-servidor; una fila incompatible conserva su explicación y no se puede elegir.
+del modelo. El título nombra la acción y **Destino de la vinculación** mantiene
+visibles los nombres e identificadores de proyecto, escenario, caso, variante
+y objeto durante los cuatro pasos. **Revisar objetos del escenario** permite
+regresar a sus datos conservando la variante. En una asociación, escenario y
+variante describen el contexto de origen; el uso de la fuente en la variante
+se confirma por separado. También se muestran alcance, necesidad y acción.
+**Necesidad funcional** ofrece únicamente
+roles admitidos para ese objeto. Las candidatas se buscan y paginan en el
+servidor y, por defecto, solo se muestran las compatibles. **Mostrar todas las
+series** incluye también las incompatibles, que conservan su explicación y no
+se pueden elegir. Cambiar ese filtro vuelve a la primera página y descarta la
+fuente seleccionada, conservando la búsqueda.
 
 | Paso | Decisión y evidencia |
 | --- | --- |
 | **Origen y alcance** | Declarar la necesidad, el origen genérico o específico y, al crear un uso, escenario y variante. |
-| **Definición o selección** | Completar una definición o elegir candidatas compatibles. Las incompatibles muestran razón y código, y están bloqueadas. |
+| **Definición o selección** | Completar una definición o elegir candidatas compatibles. **Mostrar todas las series** incluye las incompatibles con razón y código, bloqueadas. |
 | **Datos o revisión** | Ver la revisión/hash observados o preparar los datos que se van a sellar. |
 | **Impacto y confirmación** | Revisar prevalidación, consumidores, permisos, cambios de estado e historia, y confirmar la acción concreta. |
 
-Usar **Siguiente** y **Volver**. Si cambia la fuente, necesidad, variante o
+Usar **Siguiente** y **Paso anterior** para moverse dentro del recorrido,
+conservando las selecciones. **Volver a la pantalla de origen** está disponible
+en todos los pasos y conserva el destino y sus filtros. En el último paso,
+la acción de confirmación sustituye a **Siguiente**.
+Si cambia la fuente, necesidad, variante o
 contenido, revisar otra vez los pasos afectados: una prevalidación anterior no
 autoriza una operación distinta. El servidor vuelve a comprobar permisos y
 estado al confirmar.
@@ -1431,8 +1450,9 @@ Para cada necesidad:
 5. no seleccionar un set solo porque su nombre parece correcto.
 
 En compatibilidad, el panel muestra los sets del proyecto en el selector; revisar su semántica
-antes de elegir. En el recorrido protegido TS-7, las candidatas incompatibles
-se muestran bloqueadas y explicadas. Que un nombre aparezca en un selector no
+antes de elegir. En el recorrido protegido TS-7, al activar **Mostrar todas las
+series**, las candidatas incompatibles se muestran bloqueadas y explicadas.
+Que un nombre aparezca en un selector no
 garantiza que pase la validación del servidor.
 
 En compatibilidad, **Confirmar fuentes** guarda las selecciones pendientes sin

@@ -2141,6 +2141,8 @@ def create_app(
         limit: int = 50,
         cursor: str | None = None,
         q: str = "",
+        context_linkable_object_id: int | None = None,
+        context_usage: str | None = None,
     ):
         user = request.state.current_user or {}
         actor_class = f"{user.get('role', 'analyst')}:{user.get('id', 'auth-disabled')}"
@@ -2153,6 +2155,8 @@ def create_app(
                 q=q,
                 statuses=request.query_params.getlist("status") or None,
                 actor_class=actor_class,
+                context_linkable_object_id=context_linkable_object_id,
+                context_usage=context_usage,
             )
         except CatalogQueryError as error:
             status_code = 410 if error.code == "TS_QUERY_CURSOR_EXPIRED" else 400

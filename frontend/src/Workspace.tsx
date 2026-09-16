@@ -8764,6 +8764,14 @@ function CaseInputVariantBindingEditor({
             : "Aun no hay una serie de precio vinculada."}
         </p>
       ) : null}
+      {!protectedSources &&
+      canonicalCatalogRead &&
+      requiredSignals.some((signal) => signal.linkable_object_id) ? (
+        <p>
+          Puedes elegir una fuente del catálogo genérico para cada componente.
+          Primero asóciala al objeto y después usa su revisión en esta variante.
+        </p>
+      ) : null}
       <ul aria-label="Senales requeridas">
         {requiredSignals.map((signal: RequiredSignalStatus) => {
           const source = preparation?.sources?.find(
@@ -8830,9 +8838,7 @@ function CaseInputVariantBindingEditor({
                   </>
                 )
               ) : null}
-              {protectedSources &&
-              canonicalCatalogRead &&
-              signal.linkable_object_id ? (
+              {canonicalCatalogRead && signal.linkable_object_id ? (
                 <>
                   {" · "}
                   <Link
@@ -8844,11 +8850,17 @@ function CaseInputVariantBindingEditor({
                       },
                     )}`}
                   >
-                    Ver fuentes del componente {signal.entity_id}
+                    {protectedSources
+                      ? `Ver fuentes del componente ${signal.entity_id}`
+                      : `Elegir fuente del catálogo genérico para ${signal.entity_id}`}
                   </Link>
                 </>
               ) : null}
-              {!signal.bound && !protectedSources ? (
+              {!signal.bound &&
+              !protectedSources &&
+              (timeSeriesSets.length > 0 ||
+                !canonicalCatalogRead ||
+                !signal.linkable_object_id) ? (
                 <>
                   {" "}
                   ·{" "}
@@ -8870,41 +8882,48 @@ function CaseInputVariantBindingEditor({
         })}
       </ul>
       {!protectedSources &&
-        requiredSignals.map((signal: RequiredSignalStatus) => (
-          <div
-            className="field-row"
-            key={`binding-select:${inputVariantRequirementKey(signal)}`}
-          >
-            <label htmlFor={requiredSignalSelectId(signal)}>
-              {requiredSignalSelectLabel(signal)}
-            </label>
-            <select
-              id={requiredSignalSelectId(signal)}
-              disabled={preparing || preparation?.binding_mode !== "legacy"}
-              value={selectedSetIds[inputVariantRequirementKey(signal)] ?? ""}
-              onChange={(event) => {
-                const value = event.target.value;
-                setError("");
-                setRangeStartDraft(rangeStart || null);
-                setRangeEndDraft(rangeEnd || null);
-                setReviewedSelection("");
-                setSaveMessage("");
-                setSelectedSetIds((current) => ({
-                  ...current,
-                  [inputVariantRequirementKey(signal)]:
-                    value === "" ? "" : Number(value),
-                }));
-              }}
+        requiredSignals
+          .filter(
+            (signal: RequiredSignalStatus) =>
+              timeSeriesSets.length > 0 ||
+              !canonicalCatalogRead ||
+              !signal.linkable_object_id,
+          )
+          .map((signal: RequiredSignalStatus) => (
+            <div
+              className="field-row"
+              key={`binding-select:${inputVariantRequirementKey(signal)}`}
             >
-              <option value="">Selecciona una serie</option>
-              {timeSeriesSets.map((set: ProjectTimeSeriesSetSummary) => (
-                <option key={`${signal.entity_id}:${set.id}`} value={set.id}>
-                  {set.name} - {set.version_label}
-                </option>
-              ))}
-            </select>
-          </div>
-        ))}
+              <label htmlFor={requiredSignalSelectId(signal)}>
+                {requiredSignalSelectLabel(signal)}
+              </label>
+              <select
+                id={requiredSignalSelectId(signal)}
+                disabled={preparing || preparation?.binding_mode !== "legacy"}
+                value={selectedSetIds[inputVariantRequirementKey(signal)] ?? ""}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setError("");
+                  setRangeStartDraft(rangeStart || null);
+                  setRangeEndDraft(rangeEnd || null);
+                  setReviewedSelection("");
+                  setSaveMessage("");
+                  setSelectedSetIds((current) => ({
+                    ...current,
+                    [inputVariantRequirementKey(signal)]:
+                      value === "" ? "" : Number(value),
+                  }));
+                }}
+              >
+                <option value="">Selecciona una serie</option>
+                {timeSeriesSets.map((set: ProjectTimeSeriesSetSummary) => (
+                  <option key={`${signal.entity_id}:${set.id}`} value={set.id}>
+                    {set.name} - {set.version_label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
       <fieldset className="variant-period" disabled={preparing}>
         <legend>Período de ejecución</legend>
         <p>

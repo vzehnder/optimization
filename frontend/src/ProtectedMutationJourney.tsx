@@ -17,6 +17,7 @@ import {
   getCatalogInputDetail,
   getObjectCatalogAssociation,
   getObjectTimeSeriesContext,
+  getProject,
   listCaseInputVariants,
   listCaseTimeSeriesBindings,
   listCatalogDescriptors,
@@ -146,14 +147,90 @@ interface RailContext {
   scope: string;
   need: string;
   action: string;
+  destination?: { scenarioId: number | null; variantId: number | null };
+}
+
+function JourneyDestination({ rail }: { rail: RailContext }) {
+  const [params] = useSearchParams();
+  const projectId = numericParam(params.get("project_id"));
+  const objectId = numericParam(params.get("object_id"));
+  const scenarioId = rail.destination
+    ? rail.destination.scenarioId
+    : numericParam(params.get("scenario_id"));
+  const variantId = rail.destination
+    ? rail.destination.variantId
+    : numericParam(params.get("variant_id"));
+  const project = useQuery({
+    queryKey: ["project", projectId],
+    queryFn: ({ signal }) => getProject(projectId as number, signal),
+    enabled: projectId !== null,
+    retry: false,
+  });
+  const scenarios = useQuery({
+    queryKey: ["journey-scenarios", projectId],
+    queryFn: ({ signal }) => listScenarios(projectId as number, signal),
+    enabled: projectId !== null && scenarioId !== null,
+    retry: false,
+  });
+  const scenario = scenarios.data?.find((item) => item.id === scenarioId);
+  const variants = useQuery({
+    queryKey: ["journey-variants", scenarioId],
+    queryFn: ({ signal }) =>
+      listCaseInputVariants(scenarioId as number, signal),
+    enabled: scenario !== undefined,
+    retry: false,
+  });
+  const variant = variants.data?.variants.find(
+    (item) => item.variant.id === variantId,
+  )?.variant;
+  function label(name: string | undefined, id: number | null) {
+    if (id === null) return "Sin seleccionar";
+    return `${name ?? "Nombre no disponible"} · #${id}`;
+  }
+  const scenarioPath = scenario
+    ? `/scenarios/${scenario.id}?section=data${variant ? `&variant=${variant.id}` : ""}`
+    : null;
+  return (
+    <section aria-label="Destino de la vinculación">
+      <h2 className="journey-destination-title">Destino de la vinculación</h2>
+      <dl className="journey-context">
+        <dt>Proyecto</dt>
+        <dd>{label(project.data?.name, projectId)}</dd>
+        <dt>Escenario</dt>
+        <dd>{label(scenario?.name, scenarioId)}</dd>
+        <dt>Caso</dt>
+        <dd>
+          {label(
+            variants.data?.case.display_name,
+            variants.data?.case.id ?? null,
+          )}
+        </dd>
+        <dt>Variante</dt>
+        <dd>{label(variant?.display_name, variantId)}</dd>
+        <dt>Objeto</dt>
+        <dd>
+          <span>{rail.objectName}</span>
+          {objectId !== null ? <span> · #{objectId}</span> : null}
+        </dd>
+      </dl>
+      {scenarioPath ? (
+        <Link to={scenarioPath}>Revisar objetos del escenario</Link>
+      ) : null}
+    </section>
+  );
 }
 
 function JourneyRail({ step, rail }: { step: StepId; rail: RailContext }) {
   return (
     <aside className="journey-rail" aria-label="Contexto del recorrido">
+      <JourneyDestination rail={rail} />
+      {rail.action === INTENT_ACTIONS.associate ? (
+        <p className="journey-destination-note">
+          Asociación al objeto del proyecto. El uso de la fuente en una variante
+          se confirma por separado.
+        </p>
+      ) : null}
       <dl className="journey-context">
-        <dt>Objeto</dt>
-        <dd>{rail.objectName}</dd>
         <dt>Alcance</dt>
         <dd>{rail.scope}</dd>
         <dt>Necesidad</dt>
@@ -205,6 +282,13 @@ function JourneyShell({
   }, [step, children]);
   const [params] = useSearchParams();
   const returnTo = safeReturnPath(params.get("return_to"));
+  const projectId = numericParam(params.get("project_id"));
+  const objectId = numericParam(params.get("object_id"));
+  const exitTo =
+    returnTo ??
+    (objectId !== null
+      ? `/projects/${projectId}/linkable-objects/${objectId}/time-series`
+      : `/projects/${projectId}`);
   return (
     <section className="workspace-view journey-surface">
       <header className="workspace-heading">
@@ -220,21 +304,25 @@ function JourneyShell({
         <div className="journey-step-panel" ref={panel}>
           {children}
           <nav className="journey-navigation" aria-label="Pasos">
-            <button
-              className="secondary-button"
-              type="button"
-              disabled={stepIndex === 0}
-              onClick={() => onStep(STEPS[stepIndex - 1].id)}
-            >
-              Volver
-            </button>
-            <button
-              type="button"
-              disabled={!canAdvance}
-              onClick={() => onStep(STEPS[stepIndex + 1].id)}
-            >
-              Siguiente
-            </button>
+            {stepIndex > 0 ? (
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => onStep(STEPS[stepIndex - 1].id)}
+              >
+                Paso anterior
+              </button>
+            ) : null}
+            {stepIndex < STEPS.length - 1 ? (
+              <button
+                type="button"
+                disabled={!canAdvance}
+                onClick={() => onStep(STEPS[stepIndex + 1].id)}
+              >
+                Siguiente
+              </button>
+            ) : null}
+            <Link to={exitTo}>Volver a la pantalla de origen</Link>
           </nav>
         </div>
       </div>
@@ -1160,15 +1248,22 @@ function LinkFlow({
     (params.get("q") ?? "").slice(0, 200),
   );
   const appliedSearch = (params.get("q") ?? "").slice(0, 200);
+  const showAllSources = params.get("show_all") === "1";
   const candidateCursors = params
     .getAll("cursor")
     .filter((value) => value.length > 0 && value.length <= 4096)
     .slice(0, 50);
   const candidateCursor = candidateCursors.at(-1) ?? null;
-  function browseCandidates(q: string, cursors: string[]) {
+  function browseCandidates(
+    q: string,
+    cursors: string[],
+    showAll = showAllSources,
+  ) {
     const next = new URLSearchParams(params);
     next.set("q", q);
     next.delete("cursor");
+    if (showAll) next.set("show_all", "1");
+    else next.delete("show_all");
     for (const cursor of cursors) next.append("cursor", cursor);
     setParams(next);
   }
@@ -1210,11 +1305,20 @@ function LinkFlow({
   const [publishPending, setPublishPending] = useState(false);
 
   const objectName = useObjectName(projectId, linkableObjectId);
+  const usage = intent === "use_revision" ? "execution" : "association";
   const roles = useQuery({
-    queryKey: ["catalog-descriptors", "binding_role"],
-    queryFn: ({ signal }) => listCatalogDescriptors("binding_role", signal),
+    queryKey: ["catalog-descriptors", "binding_role", linkableObjectId, usage],
+    queryFn: ({ signal }) =>
+      listCatalogDescriptors("binding_role", signal, {
+        linkableObjectId: linkableObjectId as number,
+        usage,
+      }),
+    enabled: linkableObjectId !== null,
     staleTime: 5 * 60_000,
   });
+  const roleAllowed = Boolean(
+    roles.data?.items.some((role) => role.key === draft.bindingRoleKey),
+  );
   const scenarios = useQuery({
     queryKey: ["journey-scenarios", projectId],
     queryFn: ({ signal }) => listScenarios(projectId as number, signal),
@@ -1247,6 +1351,7 @@ function LinkFlow({
       "journey-candidates",
       appliedSearch,
       candidateCursor,
+      showAllSources,
       linkableObjectId,
       draft.bindingRoleKey,
       intent,
@@ -1258,18 +1363,19 @@ function LinkFlow({
         {
           linkableObjectId: linkableObjectId as number,
           bindingRoleKey: draft.bindingRoleKey,
-          usage: intent === "use_revision" ? "execution" : "association",
+          usage,
           scenarioId: draft.scenarioId,
           variantId: draft.variantId,
           q: appliedSearch,
           cursor: candidateCursor,
+          compatibility: showAllSources ? "all" : "allowed",
         },
         signal,
       ),
     enabled:
       linkableObjectId !== null &&
       draft.sourceChoice === "generic" &&
-      Boolean(draft.bindingRoleKey) &&
+      roleAllowed &&
       (intent === "associate" ||
         (draft.scenarioId !== null && draft.variantId !== null)),
     retry: false,
@@ -1588,10 +1694,7 @@ function LinkFlow({
   }
 
   const originComplete =
-    Boolean(
-      roles.data?.items.some((role) => role.key === draft.bindingRoleKey) &&
-      draft.sourceChoice,
-    ) &&
+    Boolean(roleAllowed && draft.sourceChoice) &&
     (intent === "associate" ||
       (scenarios.data?.some((scenario) => scenario.id === draft.scenarioId) &&
         variants.data?.variants.some(
@@ -1640,6 +1743,10 @@ function LinkFlow({
       onStep={onStep}
       rail={{
         objectName,
+        destination: {
+          scenarioId: draft.scenarioId,
+          variantId: draft.variantId,
+        },
         scope: scopeLabel(draft.sourceChoice),
         need:
           roles.data?.items.find((role) => role.key === draft.bindingRoleKey)
@@ -1651,16 +1758,36 @@ function LinkFlow({
       }}
     >
       {step === "origin" ? (
-        <OriginStep
-          draft={draft}
-          intent={intent}
-          roles={roles.data?.items ?? []}
-          scenarios={scenarios.data ?? []}
-          variants={(variants.data?.variants ?? []).map(
-            (entry) => entry.variant,
-          )}
-          onChange={update}
-        />
+        <>
+          {roles.isError ? <MutationRefusal error={roles.error} /> : null}
+          {roles.isSuccess && draft.bindingRoleKey && !roleAllowed ? (
+            <p role="alert">
+              La necesidad seleccionada no corresponde a {objectName}. Elige una
+              necesidad disponible o vuelve al componente correcto.
+            </p>
+          ) : null}
+          <p>
+            Las necesidades disponibles corresponden al objeto {objectName}.
+          </p>
+          {intent === "associate" ? (
+            <p>
+              La fuente se asociará a este objeto del proyecto. El escenario y
+              la variante indican desde dónde abriste el recorrido. Para usar la
+              fuente en la variante, continúa después con «Usar revisión en una
+              variante».
+            </p>
+          ) : null}
+          <OriginStep
+            draft={draft}
+            intent={intent}
+            roles={roles.data?.items ?? []}
+            scenarios={scenarios.data ?? []}
+            variants={(variants.data?.variants ?? []).map(
+              (entry) => entry.variant,
+            )}
+            onChange={update}
+          />
+        </>
       ) : null}
       {step === "selection" && definingLocally ? (
         <ObjectSeriesDefinitionStep
@@ -1692,6 +1819,22 @@ function LinkFlow({
               onChange={(event) => setCandidateSearch(event.target.value)}
             />
             <button type="submit">Buscar fuentes</button>
+            <label>
+              <input
+                type="checkbox"
+                checked={showAllSources}
+                onChange={(event) => {
+                  browseCandidates(appliedSearch, [], event.target.checked);
+                  update({ signalId: null });
+                }}
+              />
+              Mostrar todas las series
+            </label>
+            <p>
+              {showAllSources
+                ? "Las series incompatibles muestran el motivo y no se pueden seleccionar."
+                : "Se muestran solo las series compatibles con la necesidad y el objeto seleccionados."}
+            </p>
           </form>
           {candidates.isPending ? (
             <p role="status">Buscando fuentes compatibles</p>
