@@ -13902,7 +13902,7 @@ class AnalystStore:
                 missing = [
                     status
                     for status in evaluate_variant_completeness(
-                        discover_required_signals(base_system_case),
+                        discover_required_signals(base_system_case, separate_grid_prices=True),
                         legacy_shape_bindings,
                     )
                     if not status.bound
@@ -31645,6 +31645,7 @@ class AnalystStore:
                         "content_hash": item["bound_content_hash"],
                         "state": item["state"],
                         "binding_id": item["binding_id"],
+                        "binding_role_key": item["binding_role"]["key"],
                         "linkable_object_id": item["object"]["id"],
                         "timezone": revision["timezone"],
                     }
@@ -31668,7 +31669,7 @@ class AnalystStore:
                 )
         try:
             base = self._generate_base_system_case_for_variant(scenario_id)
-            required = discover_required_signals(base)
+            required = discover_required_signals(base, separate_grid_prices=protected)
             model_status = "available"
         except (KeyError, DraftGenerationError):
             required = []
@@ -31680,6 +31681,13 @@ class AnalystStore:
         # Registered targets also let a legacy variant select its first
         # canonical source. Discovering them must not switch its writer mode.
         objects = self.list_linkable_objects(project_id=int(scenario["project_id"]))
+        roles_by_contract: dict[str, list[str]] = {}
+        if protected:
+            for role in self.connection.execute(
+                "SELECT role_key, execution_contract_key FROM time_series_binding_roles "
+                "WHERE status = 'active' AND execution_allowed = 1"
+            ).fetchall():
+                roles_by_contract.setdefault(role["execution_contract_key"], []).append(role["role_key"])
         for status in statuses:
             matches = [
                 item for item in objects
@@ -31691,6 +31699,8 @@ class AnalystStore:
                 )
             ]
             status["linkable_object_id"] = matches[0]["id"] if len(matches) == 1 else None
+            roles = roles_by_contract.get(status["signal_key"], [])
+            status["binding_role_key"] = roles[0] if len(roles) == 1 else None
         return {
             "binding_mode": "protected" if protected else "legacy",
             "model_status": model_status,
@@ -31747,8 +31757,15 @@ class AnalystStore:
         self.assert_case_bindings_executable(scenario_id=scenario_id, variant_id=variant_id)
         if preparation["model_status"] != "available":
             raise InputVariantRangeError("Falta definir o corregir el modelo.")
-        if not rows or any(not status["bound"] for status in preparation["required_signals"]):
-            raise InputVariantRangeError("Faltan fuentes confirmadas para los componentes del modelo.")
+        missing = [status for status in preparation["required_signals"] if not status["bound"]]
+        if not rows or missing:
+            detail = ", ".join(
+                f"{status['signal_key']} ({status['entity_id']})" for status in missing
+            )
+            raise InputVariantRangeError(
+                "Faltan fuentes confirmadas para los componentes del modelo."
+                + (f" Falta vincular: {detail}." if detail else "")
+            )
         resolved = {}
         for binding, source in rows:
             key = binding["signal_key"]

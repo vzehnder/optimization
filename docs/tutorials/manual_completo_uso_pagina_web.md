@@ -1056,6 +1056,12 @@ series** incluye también las incompatibles, que conservan su explicación y no
 se pueden elegir. Cambiar ese filtro vuelve a la primera página y descarta la
 fuente seleccionada, conservando la búsqueda.
 
+Al preparar una variante con vínculos del catálogo genérico, los precios de
+compra y venta aparecen como necesidades separadas. Cada dirección requiere
+su propio vínculo; las dos pueden usar la misma fuente y revisión. La fila
+pendiente ofrece **Corregir**, con la necesidad, el objeto y la variante ya
+identificados. Una sola dirección no basta para validar ni ejecutar.
+
 | Paso | Decisión y evidencia |
 | --- | --- |
 | **Origen y alcance** | Declarar la necesidad, el origen genérico o específico y, al crear un uso, escenario y variante. |

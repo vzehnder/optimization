@@ -165,6 +165,22 @@ class OneBusRequirementListTests(unittest.TestCase):
 
 
 class EvaluateVariantCompletenessTests(unittest.TestCase):
+    def test_separate_prices_require_both_directions_even_with_the_same_source(self):
+        required = discover_required_signals(grid_battery_system_case(), separate_grid_prices=True)
+        keys = ["import_price_usd_per_mwh", "export_price_usd_per_mwh"]
+        self.assertEqual([item.signal_key for item in required], keys)
+        for key in keys:
+            with self.subTest(key=key):
+                statuses = evaluate_variant_completeness(required, [
+                    {"signal_key": key, "time_series_set_id": 5},
+                ])
+                self.assertEqual([item.signal_key for item in statuses if item.bound], [key])
+                self.assertEqual(len([item for item in statuses if not item.bound]), 1)
+        complete = evaluate_variant_completeness(required, [
+            {"signal_key": key, "time_series_set_id": 5} for key in keys
+        ])
+        self.assertTrue(all(item.bound for item in complete))
+
     def test_no_bindings_reports_every_required_signal_missing(self):
         required = discover_required_signals(grid_battery_system_case())
 

@@ -41,6 +41,46 @@ class VariantPreparationApiTests(unittest.TestCase):
             self.store.backfill_time_series_c4(actor="internal_admin")
             self.store.verify_time_series_c5_shadow(actor="internal_admin")
             self.store.cut_over_time_series_c6(actor="internal_admin")
+        # The migrated import-only source is not a sale-price source. Add a
+        # compatible export source so the history fixture can really execute.
+        page = self.store.read_case_bindings(scenario_id=self.scenario["id"], variant_id=variant_id)
+        buy = page["items"][0]
+        import_revision = self.store.read_canonical_revision(buy["set_revision_id"])
+        sale = self.store.publish_canonical_set_revision(
+            project_id=self.project["id"], name="Precio de venta",
+            data_class_key="real", timezone=import_revision["timezone"],
+            signals=[{
+                "series_key": "sale_price", "display_name": "Precio de venta",
+                "semantic_type_key": "grid_export_price", "unit_key": "usd_per_mwh",
+                "signal_role": "input", "aggregation": "mean",
+            }],
+            periods=import_revision["periods"],
+            values={"sale_price": import_revision["values"][buy["signal"]["series_key"]]},
+            actor="ux005@example.local",
+        )
+        canonical_root = f"/api/scenarios/{self.scenario['id']}/case-variants/{variant_id}"
+        request = {
+            "expected_bindings_revision": page["meta"]["bindings_revision"],
+            "operations": [{
+                "client_operation_id": "use-export-price",
+                "action": "create",
+                "linkable_object_id": buy["object"]["id"],
+                "binding_role_key": "grid_export_price",
+                "signal_id": sale["signal_ids"]["sale_price"],
+                "revision": {"mode": "current", "revision_id": sale["revision_id"], "content_hash": sale["content_hash"]},
+                "catalog_association_id": None,
+                "reason_code": "variant_input_selected",
+            }],
+        }
+        reviewed_binding = post_json_with_csrf(self.client, f"{canonical_root}/time-series-binding-prevalidations", request)
+        self.assertEqual(reviewed_binding.status_code, 200, reviewed_binding.text)
+        self.assertTrue(reviewed_binding.json()["can_commit"], reviewed_binding.text)
+        saved_binding = self.client.post(
+            f"{canonical_root}/time-series-binding-batches",
+            json={**request, "prevalidation_token": reviewed_binding.json()["prevalidation_token"], "confirmed": True},
+            headers={**csrf_headers(self.client), "If-Match": reviewed_binding.json()["commit_etag"], "Idempotency-Key": "use-export-price"},
+        )
+        self.assertEqual(saved_binding.status_code, 201, saved_binding.text)
         preparation = self.client.get(self.path).json()["variants"][0]["preparation"]
         self.assertEqual(preparation["binding_mode"], "protected")
         payload = {"range_start": "2026-01-01T00:00:00+00:00", "range_end": "2026-01-01T02:00:00+00:00", "expected_bindings_revision": preparation["bindings_revision"]}

@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -195,6 +196,84 @@ function serveBoundPreparation(
 }
 
 describe("variant preparation", () => {
+  it.each(["import", "export"])(
+    "shows the missing %s price separately and links to its exact role",
+    async (missing) => {
+      window.history.replaceState(
+        {},
+        "",
+        "/react/scenarios/10?section=data&variant=4",
+      );
+      const needs = ["import", "export"].map((direction) => ({
+        entity_type: "grid",
+        entity_id: "grid_1",
+        signal_key: `${direction}_price_usd_per_mwh`,
+        binding_role_key: `grid_${direction}_price`,
+        linkable_object_id: 9,
+        bound: direction !== missing,
+        bound_signal_key:
+          direction !== missing ? `${direction}_price_usd_per_mwh` : null,
+        time_series_set_id: direction !== missing ? 5 : null,
+      }));
+      serveBoundPreparation((path) =>
+        path.endsWith("/case/variants")
+          ? Response.json({
+              default_variant_id: 3,
+              variants: [
+                {
+                  ...boundVariant,
+                  variant: {
+                    id: 4,
+                    display_name: "Precio revisado",
+                    is_default: false,
+                  },
+                  bindings: [],
+                  preparation: {
+                    ...boundVariant.preparation,
+                    binding_mode: "protected",
+                    required_signals: needs,
+                    sources: [],
+                  },
+                },
+              ],
+            })
+          : undefined,
+      );
+      render(<App />);
+      const requirements = await screen.findByRole("list", {
+        name: "Senales requeridas",
+      });
+      expect(
+        within(requirements).getByText("Precio de compra a la red"),
+      ).toBeVisible();
+      expect(
+        within(requirements).getByText("Precio de venta a la red"),
+      ).toBeVisible();
+      expect(
+        within(requirements).getByText(
+          `${missing}_price_usd_per_mwh (grid_1): falta vincular`,
+        ),
+      ).toBeVisible();
+      const correction = within(requirements).getByRole("link", {
+        name: `Corregir ${missing}_price_usd_per_mwh (grid_1)`,
+      });
+      const destination = new URL(
+        correction.getAttribute("href")!,
+        "http://localhost",
+      );
+      expect(destination.searchParams.get("object_id")).toBe("9");
+      expect(destination.searchParams.get("scenario_id")).toBe("10");
+      expect(destination.searchParams.get("variant_id")).toBe("4");
+      expect(destination.searchParams.get("binding_role_key")).toBe(
+        `grid_${missing}_price`,
+      );
+      expect(destination.searchParams.get("intent")).toBe("use_revision");
+      expect(
+        screen.getByRole("button", { name: "Ejecutar variante" }),
+      ).toBeDisabled();
+    },
+  );
+
   it.each([
     { canonicalRead: true, hasLegacySets: false },
     { canonicalRead: true, hasLegacySets: true },

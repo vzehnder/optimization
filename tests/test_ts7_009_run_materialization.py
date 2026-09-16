@@ -250,6 +250,56 @@ class CanonicalRunMaterializationApiTests(unittest.TestCase):
             self.queue.enqueued_run_ids, [first_run["id"], replay_run["id"]]
         )
 
+    def test_missing_export_price_is_visible_and_blocks_validation_and_run_before_julia(self):
+        request = {
+            "expected_bindings_revision": 1,
+            "operations": [{
+                "client_operation_id": "remove-export",
+                "action": "remove",
+                "binding_id": self.binding_ids[1],
+                "expected_lifecycle_revision": 1,
+                "reason_code": "variant_input_removed",
+                "reason_text": "Test incomplete price pair",
+            }],
+        }
+        review = self.client.post(
+            f"{self.canonical_root}/time-series-binding-prevalidations",
+            json=request, headers=csrf_headers(self.client),
+        )
+        self.assertEqual(review.status_code, 200, review.text)
+        committed = self.client.post(
+            f"{self.canonical_root}/time-series-binding-batches",
+            json={**request, "prevalidation_token": review.json()["prevalidation_token"], "confirmed": True},
+            headers={**csrf_headers(self.client), "If-Match": review.json()["commit_etag"], "Idempotency-Key": "remove-export"},
+        )
+        self.assertEqual(committed.status_code, 201, committed.text)
+        preparation = self.client.get(
+            f"/api/scenarios/{self.scenario['id']}/case/variants"
+        ).json()["variants"][0]["preparation"]
+        by_key = {item["signal_key"]: item for item in preparation["required_signals"]}
+        self.assertTrue(by_key["import_price_usd_per_mwh"]["bound"])
+        export = by_key["export_price_usd_per_mwh"]
+        self.assertFalse(export["bound"])
+        self.assertEqual(export["linkable_object_id"], self.object["id"])
+        self.assertEqual(export["binding_role_key"], "grid_export_price")
+        self.assertIsNone(preparation["available_coverage"])
+        self.assertEqual(preparation["sources"][0]["binding_role_key"], "grid_import_price")
+        validated = self.client.post(
+            self.run_path.removesuffix("run") + "validate",
+            json={"range_start": "2026-01-01T00:00:00", "range_end": "2026-01-01T02:00:00"},
+            headers=csrf_headers(self.client),
+        )
+        self.assertEqual(validated.status_code, 400, validated.text)
+        self.assertIn("export_price_usd_per_mwh", validated.text)
+        # The permissive validator would accept malformed prices: the run
+        # must refuse the incomplete bindings before invoking that validator.
+        response = self._run()
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("export_price_usd_per_mwh", response.text)
+        self.assertEqual(self.store.list_scenario_versions(self.scenario["id"]), [])
+        self.assertEqual(self.store.list_scenario_runs(self.scenario["id"]), [])
+        self.assertEqual(self.queue.enqueued_run_ids, [])
+
     def test_materialization_recomputes_the_pinned_hash_and_refuses_corrupt_values(self):
         # Simulate storage corruption below the normal sealed-revision guard.
         # The run path must hash what it actually reads, not trust the pointer.

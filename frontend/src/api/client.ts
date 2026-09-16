@@ -1996,6 +1996,7 @@ export interface CaseTimeSeriesBinding {
 
 export interface RequiredSignalStatus {
   linkable_object_id?: number | null;
+  binding_role_key?: string | null;
   entity_type: string;
   entity_id: string;
   signal_key: string;
@@ -2038,6 +2039,7 @@ export interface CaseInputVariantDetail {
     required_signals: RequiredSignalStatus[];
     sources: {
       signal_key?: string;
+      binding_role_key?: string;
       entity_type?: string | null;
       entity_id?: string | null;
       name: string;

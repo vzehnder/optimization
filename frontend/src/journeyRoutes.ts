@@ -97,6 +97,7 @@ export function objectJourneyPath({
   associationId,
   scenarioId,
   variantId,
+  bindingRoleKey,
   returnTo,
 }: {
   projectId: number;
@@ -105,6 +106,7 @@ export function objectJourneyPath({
   associationId?: number;
   scenarioId?: number;
   variantId?: number;
+  bindingRoleKey?: string | null;
   returnTo?: string;
 }): string {
   const params = new URLSearchParams({
@@ -118,6 +120,7 @@ export function objectJourneyPath({
   }
   if (scenarioId !== undefined) params.set("scenario_id", String(scenarioId));
   if (variantId !== undefined) params.set("variant_id", String(variantId));
+  if (bindingRoleKey) params.set("binding_role_key", bindingRoleKey);
   const returnPath = safeReturnPath(returnTo);
   if (returnPath) params.set("return_to", returnPath);
   return `/time-series/journey?${params.toString()}`;

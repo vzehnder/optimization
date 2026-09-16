@@ -84,12 +84,16 @@ class MissingRequiredSignalsError(ValueError):
         super().__init__("missing required bindings: " + "; ".join(descriptions))
 
 
-def discover_required_signals(system_case: dict[str, Any]) -> list[RequiredSignal]:
+def discover_required_signals(
+    system_case: dict[str, Any], *, separate_grid_prices: bool = False
+) -> list[RequiredSignal]:
     """Derive the case's required signals from its one-bus topology.
 
     ``system_case`` is the flat ``nodes``/``edges`` shape produced by
     ``generate_system_case_from_draft``; each node type declares the ordered
     list of canonical signals its family needs, per the TS-2 signal catalog.
+    Canonical grid bindings execute separate import/export contracts: both
+    are required, including when they reference the same source revision.
     """
     required: list[RequiredSignal] = []
     nodes = system_case.get("nodes")
@@ -97,7 +101,13 @@ def discover_required_signals(system_case: dict[str, Any]) -> list[RequiredSigna
         for node in nodes:
             if not isinstance(node, dict):
                 continue
-            for requirement in ONE_BUS_ENTITY_SIGNALS.get(node.get("type"), ()):
+            requirements = ONE_BUS_ENTITY_SIGNALS.get(node.get("type"), ())
+            if separate_grid_prices and node.get("type") == "grid":
+                requirements = (
+                    OneBusSignalRequirement("grid", "import_price_usd_per_mwh"),
+                    OneBusSignalRequirement("grid", "export_price_usd_per_mwh"),
+                )
+            for requirement in requirements:
                 required.append(
                     RequiredSignal(
                         entity_type=requirement.entity_type,

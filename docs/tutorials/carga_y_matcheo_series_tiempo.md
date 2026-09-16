@@ -878,6 +878,12 @@ para elegir otro componente. **Paso anterior** retrocede dentro del recorrido;
 sus filtros. Asociar una fuente al objeto y usar su revisión en una variante
 son acciones separadas.
 
+En una variante que usa revisiones del catálogo genérico, la red muestra dos
+necesidades: **Precio de compra a la red** y **Precio de venta a la red**.
+Ambas deben estar vinculadas, aunque uses la misma serie y revisión para las
+dos. Si falta una, su enlace **Corregir** abre esa necesidad en la variante
+actual. La preparación y la ejecución rechazan una pareja incompleta.
+
 ### 10.5 Ejemplo de matriz de matcheo
 
 | Requerimiento del caso | Set elegido | Qué se comprueba |
