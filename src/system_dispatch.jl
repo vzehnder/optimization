@@ -472,7 +472,7 @@ function validate_hydraulic_v3_system_case_document(document)::Dict{String,Any}
             "units" => length(units),
             "required_time_series" => length(required_time_series),
         ),
-        "component_rule_versions" => [COMPONENT_RULE_VERSION, HYDRAULIC_RULE_VERSION, TEMPORAL_RULE_VERSION],
+        "component_rule_versions" => [COMPONENT_RULE_VERSION, HYDRAULIC_RULE_VERSION, TEMPORAL_RULE_VERSION, BUDGET_RULE_VERSION],
     )
 end
 

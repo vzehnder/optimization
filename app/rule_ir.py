@@ -4,6 +4,7 @@ import math
 IR_VERSION = "affine_flow.v1"
 HYDRAULIC_IR_VERSION = "affine_hydraulic.v1"
 TEMPORAL_IR_VERSION = "affine_temporal.v1"
+BUDGET_IR_VERSION = "affine_budget.v1"
 
 
 class RuleBoundsError(ValueError):
@@ -83,9 +84,14 @@ def validate_bounds(rows, unit, period_count):
     return [{"period": t, "minimum": lo, "maximum": hi, "unit": "m3_per_s"} for t, (lo, hi) in enumerate(bounds)]
 
 
-def validate_ir(ir, object_id, period_count, objects=None):
-    if not isinstance(ir, dict) or set(ir) != {"version", "rows"} or ir["version"] not in {IR_VERSION, HYDRAULIC_IR_VERSION, TEMPORAL_IR_VERSION}:
+def validate_ir(ir, object_id, period_count, objects=None, *, grid=None, windows=None, temporal=None):
+    if not isinstance(ir, dict) or set(ir) != {"version", "rows"} or ir["version"] not in {IR_VERSION, HYDRAULIC_IR_VERSION, TEMPORAL_IR_VERSION, BUDGET_IR_VERSION}:
         raise ValueError("Contrato de restricciones desconocido")
+    budget = ir["version"] == BUDGET_IR_VERSION
+    expected_windows = []
+    if budget:
+        from runtime.component_rules.windows import build_windows
+        expected_windows = build_windows(grid, windows)
     from app.rule_objects import VARIABLES
     allowed = {object_id: {"caudal": "m3_per_s"}} if ir["version"] == IR_VERSION else {
         item["id"]: VARIABLES[item["kind"]] for item in (objects or []) if item["kind"] != "hydraulic_plant"}
@@ -94,7 +100,13 @@ def validate_ir(ir, object_id, period_count, objects=None):
         raise ValueError("Cuota de restricciones o períodos excedida")
     names, total, normalized = set(), 0, []
     for row in rows:
-        if set(row) != {"name", "line", "period", "relation", "unit", "constant", "terms"}:
+        window = row.get("window")
+        fields = {"name", "line", "period", "relation", "unit", "constant", "terms"}
+        if window is not None:
+            if not budget or window not in expected_windows or row["period"] != window["periods"][-1]:
+                raise ValueError("Ventana fuera del snapshot o incompatible con la política")
+            fields.add("window")
+        if set(row) != fields:
             raise ValueError("Fila de restricciones inválida")
         period = row["period"]
         if type(period) is not int or not 0 <= period < period_count:
@@ -102,7 +114,7 @@ def validate_ir(ir, object_id, period_count, objects=None):
         if not isinstance(row["name"], str) or not 1 <= len(row["name"]) <= 200 or (row["name"], period) in names:
             raise ValueError("Nombre de restricción vacío o duplicado")
         names.add((row["name"], period))
-        if type(row["line"]) is not int or row["line"] < 1 or row["relation"] not in {"<=", ">=", "=="} or row["unit"] not in ({"m3_per_s"} if ir["version"] == IR_VERSION else {"m3_per_s", "mw", "hm3"}):
+        if type(row["line"]) is not int or row["line"] < 1 or row["relation"] not in {"<=", ">=", "=="} or row["unit"] not in ({"mwh", "m3", "hm3"} if window else {"m3_per_s"} if ir["version"] == IR_VERSION else {"m3_per_s", "mw", "hm3"}):
             raise ValueError("Origen, relación o unidad inválidos")
         finite(row["constant"])
         terms = row["terms"]
@@ -115,15 +127,24 @@ def validate_ir(ir, object_id, period_count, objects=None):
         for term in terms:
             if set(term) != {"object_id", "variable", "period", "coefficient", "unit"}:
                 raise ValueError("Término inválido")
-            if type(term["object_id"]) is not int or allowed.get(term["object_id"], {}).get(term["variable"]) != row["unit"]:
+            variable_unit = allowed.get(term["object_id"], {}).get(term["variable"])
+            coefficient_unit = ({("mw", "mwh"): "h", ("m3_per_s", "m3"): "s",
+                                 ("m3_per_s", "hm3"): "hm3_per_m3_per_s"}.get((variable_unit, row["unit"]))
+                                if window else "dimensionless")
+            if coefficient_unit is None:
+                raise ValueError("La integral requiere potencia o caudal con unidades compatibles")
+            if type(term["object_id"]) is not int or (coefficient_unit == "dimensionless" and variable_unit != row["unit"]):
                 raise ValueError("Objeto o variable fuera del snapshot")
-            if type(term["period"]) is not int or not 0 <= term["period"] <= period or (ir["version"] != TEMPORAL_IR_VERSION and term["period"] != period) or term["unit"] != "dimensionless":
+            previous_allowed = ir["version"] == TEMPORAL_IR_VERSION or (budget and temporal)
+            if type(term["period"]) is not int or not 0 <= term["period"] <= period or (not window and not previous_allowed and term["period"] != period) or term["unit"] != coefficient_unit:
                 raise ValueError("Referencia temporal o unidad no soportada")
-            key = (term["object_id"], term["variable"], term["period"])
+            if window and term["period"] not in window["periods"]:
+                raise ValueError("Término fuera de la ventana")
+            key = (term["object_id"], term["variable"], term["period"], coefficient_unit)
             coefficients[key] = finite(coefficients.get(key, 0.0) + finite(term["coefficient"]))
         normalized.append({**row, "terms": [{"object_id": oid, "variable": variable, "period": term_period,
-                                            "coefficient": coefficient, "unit": "dimensionless"}
-                                           for (oid, variable, term_period), coefficient in sorted(coefficients.items()) if coefficient]})
+                                            "coefficient": coefficient, "unit": coefficient_unit}
+                                           for (oid, variable, term_period, coefficient_unit), coefficient in sorted(coefficients.items()) if coefficient]})
     return {"version": ir["version"], "rows": sorted(normalized, key=lambda row: (row["period"], row["name"]))}
 
 

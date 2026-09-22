@@ -1,7 +1,7 @@
 # Plan: motor de cálculos y restricciones por componente
 
 Fecha: 2026-09-21.
-Estado: decisiones adoptadas por delegación del usuario; REG-001 a REG-005 implementados y verificados, REG-006 a REG-014 pendientes.
+Estado: decisiones adoptadas por delegación del usuario; REG-001 a REG-006 implementados y verificados, REG-007 a REG-014 pendientes.
 Tracker: [issues](issues/tracker.md).
 
 ## 1. Objetivo y decisiones de la entrevista

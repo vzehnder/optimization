@@ -11,7 +11,7 @@ from types import MappingProxyType
 sys.path.insert(0, "/runtime")
 from symbolic import Flow, Periods, collector, temporal_error
 
-SDK = "reg-005.1"
+SDK = "reg-006.1"
 
 
 class LogLimit(ValueError):
@@ -164,7 +164,7 @@ def main(payload):
     values = {"parametros": FrozenContext(parameters)}
     if "grid" in payload:
         count = len(payload["grid"])
-        if not 1 <= count <= 8784:
+        if count > 8784 or (count == 0 and not payload.get("windows")):
             raise ValueError("Cuota de períodos excedida")
         obj["caudal"] = Flow(obj["id"], count)
         objects = {}
@@ -200,6 +200,10 @@ def main(payload):
                 yield FrozenContext({"periodo": t, "actual": series[t], "anterior": previous_value,
                                      "inicio": current, "inicio_anterior": previous, "horas": Quantity(hours, "h")})
         values["transiciones"] = transitions
+        def windows():
+            from windows import Window, build_windows
+            return tuple(Window.from_snapshot(w, payload["grid"]) for w in build_windows(payload["grid"], payload.get("windows")))
+        values["ventanas"] = windows
         entries = {}
         for entry in payload.get("inputs", []):
             if len(entry["values"]) != count or entry["alias"] in entries:
@@ -239,7 +243,7 @@ def main(payload):
         if result is not None:
             raise ValueError("Usa ctx.restriccion para emitir filas; no retornes un valor")
         extended = bool(payload.get("aliases")) or any(term["variable"] != "caudal" or term["object_id"] != obj["id"] for row in rows for term in row["terms"]) or any(row["unit"] != "m3_per_s" for row in rows)
-        version = "affine_temporal.v1" if payload.get("temporal") else "affine_hydraulic.v1" if extended else "affine_flow.v1"
+        version = "affine_budget.v1" if payload.get("windows") else "affine_temporal.v1" if payload.get("temporal") else "affine_hydraulic.v1" if extended else "affine_flow.v1"
         return {"status": "succeeded", "ir": {"version": version, "rows": rows}, "outputs": outputs, "logs": "".join(logs)}
     if not isinstance(result, Quantity) or result.unit != "m3_per_s" or not math.isfinite(result.value):
         raise ValueError("El resultado debe ser un caudal finito con unidad m3_per_s")

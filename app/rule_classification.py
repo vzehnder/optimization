@@ -29,6 +29,9 @@ def seed_rule_classification(store):
 
     volume = ensure("measurement_dimensions", {"dimension_key": "volume"}, {"value_kind": "numeric"}, {"display_name": "Volume"})
     ensure("measurement_units", {"unit_key": "hm3"}, {"dimension_id": volume, "physical_dimension": "volume"}, {"symbol": "hm³"})
+    ensure("measurement_units", {"unit_key": "m3"}, {"dimension_id": volume, "physical_dimension": "volume"}, {"symbol": "m³"})
+    energy = ensure("measurement_dimensions", {"dimension_key": "energy"}, {"value_kind": "numeric"}, {"display_name": "Energy"})
+    ensure("measurement_units", {"unit_key": "mwh"}, {"dimension_id": energy, "physical_dimension": "energy"}, {"symbol": "MWh"})
     for key, unit_key, symbol in (("time", "h", "h"), ("power_ramp", "mw_per_h", "MW/h"),
                                   ("flow_ramp", "m3_per_s_per_h", "m³/s por hora")):
         dimension_id = ensure("measurement_dimensions", {"dimension_key": key}, {"value_kind": "numeric"}, {"display_name": key})

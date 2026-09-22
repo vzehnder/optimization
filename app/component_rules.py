@@ -92,6 +92,23 @@ class RuleTemporalPolicy(BaseModel):
         return self
 
 
+class RuleWindowPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["horizon", "civil_day"]
+    timezone: str = Field(min_length=1, max_length=100)
+    partial: Literal["reject", "allow"]
+
+    @field_validator("timezone")
+    @classmethod
+    def iana_zone(cls, value):
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise ValueError("Selecciona una zona horaria IANA conocida") from None
+        return value
+
+
 class RuleDraftRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=200)
@@ -101,6 +118,7 @@ class RuleDraftRequest(BaseModel):
     aliases: list[RuleObjectAlias] = Field(default_factory=list, max_length=50)
     scenario_id: int | None = Field(default=None, gt=0)
     temporal: RuleTemporalPolicy | None = None
+    windows: RuleWindowPolicy | None = None
     expected_revision: int = Field(ge=0)
 
 
@@ -229,6 +247,7 @@ class RuleRepository:
             document["aliases"] = draft.get("aliases", [])
             document["scenario_id"] = draft.get("scenario_id")
             document["temporal"] = draft.get("temporal")
+            document["windows"] = draft.get("windows")
             document["sdk"] = SDK_VERSION
             self.store.connection.execute("INSERT INTO component_rule_publications VALUES (?, ?, ?, ?, ?, ?)",
                                           (identity, rule_id, expected_revision, encode(document), actor, timestamp()))
@@ -275,7 +294,8 @@ class RuleRepository:
                 raise HTTPException(429, "Cola completa o ya tienes una prueba pendiente")
             job_id = uuid.uuid4().hex
             context = {"object": {"id": object_id, "key": obj["object_key"], "project_id": project_id},
-                       "parameters": draft["parameters"], "runtime": runtime, "temporal": draft.get("temporal")}
+                       "parameters": draft["parameters"], "runtime": runtime, "temporal": draft.get("temporal"),
+                       "windows": draft.get("windows")}
             if compilation:
                 from app.rule_applications import latest_publication
                 from app.rule_inputs import freeze_inputs

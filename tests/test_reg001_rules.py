@@ -162,7 +162,7 @@ class RuleApiTests(unittest.TestCase):
             rule = post_json_with_csrf(self.client, self.root, PAYLOAD).json()
             started = post_json_with_csrf(self.client, f"{self.root}/{rule['id']}/tests", {"expected_revision": 1})
             self.assertEqual(started.status_code, 202, started.text)
-            self.assertEqual(started.json()["runtime"]["sdk"], "reg-005.1")
+            self.assertEqual(started.json()["runtime"]["sdk"], "reg-006.1")
             self.assertIn("sha256:", started.json()["runtime"]["image"])
             path = f"{self.root}/{rule['id']}/tests/{started.json()['id']}"
             deadline = time.monotonic() + 20

@@ -11,6 +11,7 @@ import { ruleErrorMessage } from "./ruleErrors";
 import type { RuleAlias, RuleObject } from "./RuleObjects";
 import { ruleUnit } from "./ruleUnits";
 import type { TemporalPolicy } from "./RuleTemporal";
+import type { WindowPolicy } from "./RuleWindows";
 
 interface Scope {
   scenario_id: number;
@@ -25,11 +26,19 @@ interface Row {
   relation: string;
   constant: number;
   unit: string;
+  window?: {
+    start: string;
+    end: string;
+    duration_hours: number;
+    periods: number[];
+    partial: boolean;
+  };
   terms: {
     coefficient: number;
     object_id?: number;
     variable?: string;
     period?: number;
+    unit?: string;
   }[];
 }
 interface Job {
@@ -45,6 +54,7 @@ interface Job {
     bounds?: HourlyBound[];
     outputs?: NumericOutput[];
     temporal?: TemporalPolicy & { omitted_periods: number[] };
+    windows?: WindowPolicy;
     error?: {
       code: string;
       message: string;
@@ -122,6 +132,7 @@ export function RuleApplications({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [page, setPage] = useState(0);
+  const [termPages, setTermPages] = useState<Record<string, number>>({});
   const requestId = useRef<string | undefined>(undefined);
   const jobId = search.get("constraint_test");
   const job = useQuery({
@@ -347,6 +358,36 @@ export function RuleApplications({
                         <td>{row.name}</td>
                         <td>
                           {row.period + 1}
+                          {row.window && (
+                            <>
+                              <div>Inicio UTC: {row.window.start}</div>
+                              <div>Fin UTC: {row.window.end}</div>
+                              <div>
+                                Duración real: {row.window.duration_hours} h
+                              </div>
+                              <div>
+                                {row.window.periods.length} períodos ·{" "}
+                                {row.terms.length} términos
+                              </div>
+                              <div>
+                                {job.data?.result?.windows?.kind === "horizon"
+                                  ? "Horizonte completo"
+                                  : row.window.partial
+                                    ? "Día parcial aceptado"
+                                    : "Día completo"}{" "}
+                                · {job.data?.result?.windows?.timezone}
+                              </div>
+                              <div>
+                                Presupuesto efectivo:{" "}
+                                {row.relation === "<="
+                                  ? "≤"
+                                  : row.relation === ">="
+                                    ? "≥"
+                                    : "="}{" "}
+                                {-row.constant} {ruleUnit(row.unit)}
+                              </div>
+                            </>
+                          )}
                           {temporal && (
                             <>
                               <div>
@@ -380,18 +421,86 @@ export function RuleApplications({
                         </td>
                         <td>
                           {row.terms
+                            .slice(
+                              row.window
+                                ? (termPages[`${row.name}-${row.period}`] ??
+                                    0) * 20
+                                : 0,
+                              row.window
+                                ? ((termPages[`${row.name}-${row.period}`] ??
+                                    0) +
+                                    1) *
+                                    20
+                                : undefined,
+                            )
                             .map((term) => {
                               const object = job.data?.objects?.find(
                                 (o) => o.id === term.object_id,
                               );
                               const reference =
-                                temporal && term.period !== undefined
+                                (temporal || row.window) &&
+                                term.period !== undefined
                                   ? `[${term.period + 1} · ${job.data?.grid?.[term.period]?.timestamp}]`
                                   : "";
-                              return `${term.coefficient} × ${object ? `${object.display_name}.` : term.object_id ? `Objeto ${term.object_id}.` : ""}${term.variable ?? "caudal"}${reference}`;
+                              return `${term.coefficient}${row.window && term.unit ? ` ${ruleUnit(term.unit)}` : ""} × ${object ? `${object.display_name}.` : term.object_id ? `Objeto ${term.object_id}.` : ""}${term.variable ?? "caudal"}${reference}`;
                             })
                             .join(" + ") || "0"}{" "}
                           {row.relation} {-row.constant} {ruleUnit(row.unit)}
+                          {row.window && row.terms.length > 20 && (
+                            <nav aria-label={`Términos de ${row.name}`}>
+                              <button
+                                type="button"
+                                disabled={
+                                  !(termPages[`${row.name}-${row.period}`] ?? 0)
+                                }
+                                onClick={() =>
+                                  setTermPages({
+                                    ...termPages,
+                                    [`${row.name}-${row.period}`]:
+                                      (termPages[`${row.name}-${row.period}`] ??
+                                        0) - 1,
+                                  })
+                                }
+                              >
+                                Términos anteriores de {row.name}
+                              </button>
+                              <span>
+                                Mostrando{" "}
+                                {(termPages[`${row.name}-${row.period}`] ?? 0) *
+                                  20 +
+                                  1}
+                                –
+                                {Math.min(
+                                  ((termPages[`${row.name}-${row.period}`] ??
+                                    0) +
+                                    1) *
+                                    20,
+                                  row.terms.length,
+                                )}{" "}
+                                de {row.terms.length}
+                              </span>
+                              <button
+                                type="button"
+                                disabled={
+                                  ((termPages[`${row.name}-${row.period}`] ??
+                                    0) +
+                                    1) *
+                                    20 >=
+                                  row.terms.length
+                                }
+                                onClick={() =>
+                                  setTermPages({
+                                    ...termPages,
+                                    [`${row.name}-${row.period}`]:
+                                      (termPages[`${row.name}-${row.period}`] ??
+                                        0) + 1,
+                                  })
+                                }
+                              >
+                                Más términos de {row.name}
+                              </button>
+                            </nav>
+                          )}
                         </td>
                         <td>{row.line}</td>
                       </tr>

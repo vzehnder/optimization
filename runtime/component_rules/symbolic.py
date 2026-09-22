@@ -35,7 +35,7 @@ class Affine:
     def lift(value):
         if isinstance(value, Affine):
             return value
-        if getattr(value, "unit", None) in {"m3_per_s", "mw", "hm3"}:
+        if getattr(value, "unit", None) in {"m3_per_s", "mw", "hm3", "mwh", "m3"}:
             return Affine((), value.value, value.unit)
         raise ValueError("La expresión requiere una cantidad con unidad compatible")
 
@@ -66,6 +66,13 @@ class Affine:
         return Affine(tuple((oid, variable, t, c * value) for oid, variable, t, c in self.terms), self.constant * value, self.unit)
 
     __rmul__ = __mul__
+
+    def a(self, unit):
+        factors = {("m3", "hm3"): 1e-6, ("hm3", "m3"): 1e6}
+        if (self.unit, unit) not in factors:
+            raise ValueError("Conversión explícita de volumen incompatible")
+        converted = self * factors[self.unit, unit]
+        return Affine(converted.terms, converted.constant, unit)
 
     def __truediv__(self, value):
         if getattr(value, "unit", None) == "dimensionless":
@@ -118,16 +125,24 @@ class Flow:
 
 def collector(rows, count, temporal=False):
     def emit(name, period, relation):
+        from windows import Window
+        window = period._snapshot() if isinstance(period, Window) else None
+        if window:
+            period = window["periods"][-1]
         if not isinstance(name, str) or not name or len(name) > 200:
             raise ValueError("Nombre de restricción inválido")
         if type(period) is not int or not 0 <= period < count or not isinstance(relation, Relation):
             raise ValueError("Restricción o período inválido")
         if len(rows) >= 100000:
             raise ValueError("Cuota de restricciones excedida")
-        if any(t > period or (not temporal and t != period) for _, _, t, _ in relation.terms):
+        if any(t > period or (not temporal and not window and t != period) for _, _, t, _ in relation.terms):
             temporal_error("Referencia temporal fuera del horizonte anterior o sin política inicial declarada", period)
         rows.append({"name": name, "period": period, "line": inspect.currentframe().f_back.f_lineno,
                      "relation": relation.relation, "unit": relation.unit, "constant": relation.constant,
                      "terms": [{"object_id": oid, "period": t, "variable": variable, "coefficient": c,
-                                "unit": "dimensionless"} for oid, variable, t, c in relation.terms]})
+                                "unit": "h" if relation.unit == "mwh" and variable == "potencia" else
+                                        "s" if relation.unit == "m3" and variable in {"caudal", "vertimiento"} else
+                                        "hm3_per_m3_per_s" if relation.unit == "hm3" and variable in {"caudal", "vertimiento"} else "dimensionless"}
+                               for oid, variable, t, c in relation.terms],
+                     **({"window": window} if window else {})})
     return emit

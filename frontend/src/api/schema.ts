@@ -3838,6 +3838,7 @@ export interface components {
             /** Scenario Id */
             scenario_id?: number | null;
             temporal?: components["schemas"]["RuleTemporalPolicy"] | null;
+            windows?: components["schemas"]["RuleWindowPolicy"] | null;
         };
         /** RuleInitialValue */
         RuleInitialValue: {
@@ -3932,6 +3933,21 @@ export interface components {
             /** Publication Id */
             publication_id?: string | null;
             scope?: components["schemas"]["RuleScope"] | null;
+        };
+        /** RuleWindowPolicy */
+        RuleWindowPolicy: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "horizon" | "civil_day";
+            /**
+             * Partial
+             * @enum {string}
+             */
+            partial: "reject" | "allow";
+            /** Timezone */
+            timezone: string;
         };
         /** RunDueSchedulesRequest */
         RunDueSchedulesRequest: {

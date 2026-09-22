@@ -19,6 +19,7 @@ import { RuleInputs, type RuleInput } from "./RuleInputs";
 import { ruleErrorMessage } from "./ruleErrors";
 import { RuleObjects, type RuleAlias, type RuleObject } from "./RuleObjects";
 import { RuleTemporal, type TemporalPolicy } from "./RuleTemporal";
+import { RuleWindows, type WindowPolicy } from "./RuleWindows";
 
 export interface RuleParameter {
   name: string;
@@ -39,6 +40,7 @@ interface RuleDraft {
   aliases?: RuleAlias[];
   scenario_id?: number | null;
   temporal?: TemporalPolicy | null;
+  windows?: WindowPolicy | null;
 }
 interface RuleList {
   enabled?: boolean;
@@ -157,6 +159,7 @@ function PythonEditor({
                 "ctx.restriccion",
                 "ctx.salida",
                 "ctx.transiciones",
+                "ctx.ventanas",
                 "construir",
                 "range",
                 "sum",
@@ -301,6 +304,7 @@ function RuleForm({
   const [inputs, setInputs] = useState(initial?.inputs ?? []);
   const [aliases, setAliases] = useState(initial?.aliases ?? []);
   const [temporal, setTemporal] = useState(initial?.temporal ?? null);
+  const [windows, setWindows] = useState(initial?.windows ?? null);
   const [search] = useSearchParams();
   const scenarioId =
     initial?.scenario_id ?? (Number(search.get("scenario_id")) || null);
@@ -333,6 +337,9 @@ function RuleForm({
     !sameRows(aliases, saved.aliases ?? []) ||
     !sameRows(inputs, saved.inputs ?? []) ||
     JSON.stringify(temporal) !== JSON.stringify(saved.temporal ?? null) ||
+    windows?.kind !== saved.windows?.kind ||
+    windows?.timezone !== saved.windows?.timezone ||
+    windows?.partial !== saved.windows?.partial ||
     !sameRows(parameters, saved.parameters);
   function parameterChange(index: number, patch: Partial<RuleParameter>) {
     setParameters((rows) =>
@@ -363,6 +370,7 @@ function RuleForm({
           inputs,
           aliases,
           temporal,
+          windows,
           scenario_id: scenarioId,
           expected_revision: saved?.revision ?? 0,
         },
@@ -434,6 +442,7 @@ function RuleForm({
           references.some((ref) => ref.object_id === o.id),
         )}
       />
+      <RuleWindows policy={windows} onChange={setWindows} />
       <details>
         <summary>Ejemplo de potencia conjunta</summary>
         <p>

@@ -2,7 +2,7 @@
 
 Fecha de creación: 2026-09-21.
 Fuente normativa de este paquete: [plan](../plan.md).
-Estado: REG-001 a REG-005 implementados y verificados; siguiente issue por orden: REG-006.
+Estado: REG-001 a REG-006 implementados y verificados; siguiente issue por orden: REG-007.
 
 ## Vocabulario y reglas de trabajo
 
@@ -32,7 +32,7 @@ de aislamiento, permisos, snapshots y capacidades se exigen desde su primer uso.
 | 3 | [REG-003: Límites horarios desde series](REG-003-limites-horarios-series.md) | AFK | Done | REG-002 | HU-03, HU-09 |
 | 4 | [REG-004: Relacionar objetos hidráulicos](REG-004-relacionar-componentes-hidraulicos.md) | AFK | Done | REG-003 | HU-04 |
 | 5 | [REG-005: Rampas y períodos anteriores](REG-005-rampas-y-periodos.md) | AFK | Done | REG-004 | HU-05 |
-| 6 | [REG-006: Presupuestos de agua/energía](REG-006-presupuestos-agua-energia.md) | AFK | Todo | REG-004 | HU-06 |
+| 6 | [REG-006: Presupuestos de agua/energía](REG-006-presupuestos-agua-energia.md) | AFK | Done | REG-004 | HU-06 |
 | 7 | [REG-007: Publicar serie calculada](REG-007-publicar-serie-calculada.md) | AFK | Todo | REG-003 | HU-03, HU-07 |
 | 8 | [REG-008: Reutilizar reglas](REG-008-reutilizar-reglas.md) | AFK | Todo | REG-004 | HU-08 |
 | 9 | [REG-009: Comparar revisiones y recuperar](REG-009-revisiones-y-obsolescencia.md) | AFK | Todo | REG-003, REG-008 | HU-09 |
@@ -88,3 +88,4 @@ proyectos reales. No alterar ni cerrar issues previos de TS-6/TS-7 por completar
 | 2026-09-22 | REG-003 implementado con TDD; REG-004 y REG-007 quedan disponibles | 102 pruebas Python sobre SQLite/PostgreSQL/OCI y clasificación, 21 comprobaciones Julia, 67 pruebas React y Chromium real: límites horarios, obsolescencia, huecos y cruces. Año de 8784 períodos completo en 4,103 s; detalles en REG-003. |
 | 2026-09-22 | REG-004 implementado con TDD; REG-005 es el siguiente por orden | 121 pruebas Python, 29 comprobaciones Julia y 69 pruebas React. Chromium real demuestra 10 MW compartidos, expansión de planta, bloqueo por membresía e historial intacto; también pasan los recorridos REG-001 y REG-003. Detalles en REG-004. |
 | 2026-09-22 | REG-005 implementado con TDD; REG-006 es el siguiente por orden | 136 pruebas Python de reglas/catálogo y 53 de corridas/resultados, 39 comprobaciones Julia de reglas y 532 generales, 72 pruebas React. Chromium real compara ambas políticas iniciales con duraciones variables: [4, 5, 1] frente a [6, 5, 1] m³/s; también pasa REG-004 tras corregir una carrera en la publicación de resultados. Detalles en REG-005. |
+| 2026-09-22 | REG-006 implementado con TDD; REG-007 es el siguiente por orden | 147 pruebas Python de reglas/catálogo y 53 de corridas/resultados, 50 comprobaciones Julia de reglas y 532 generales, 75 pruebas React. Chromium real verifica 12 MWh, 36.000 m³ diarios y recuperación de 105 MWh / 504.000 m³, con historial intacto. OCI cubre días de 23/25 horas en Santiago/Nueva York, conversiones y rechazo de bordes desalineados. Detalles en REG-006. |

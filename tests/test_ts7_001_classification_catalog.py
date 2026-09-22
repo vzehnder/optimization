@@ -36,7 +36,7 @@ class PersistentClassificationCatalogTests(unittest.TestCase):
 
         self.assertEqual(
             [row["dimension_key"] for row in catalog["measurement_dimensions"]],
-            ["currency_per_energy", "dimensionless", "flow", "flow_ramp", "power", "power_ramp", "time", "volume"],
+            ["currency_per_energy", "dimensionless", "energy", "flow", "flow_ramp", "power", "power_ramp", "time", "volume"],
         )
 
     def test_a_new_store_exposes_the_complete_initial_classification_contract(self):
@@ -67,7 +67,7 @@ class PersistentClassificationCatalogTests(unittest.TestCase):
                 "role_columns": sorted(catalog["time_series_binding_roles"][0]),
             },
             {
-                "units": ["dimensionless", "h", "hm3", "m3_per_s", "m3_per_s_per_h", "mw", "mw_per_h", "usd_per_mwh"],
+                "units": ["dimensionless", "h", "hm3", "m3", "m3_per_s", "m3_per_s_per_h", "mw", "mw_per_h", "mwh", "usd_per_mwh"],
                 "data_classes": [
                     "derived",
                     "forecast",

@@ -1,10 +1,12 @@
-# Operación y verificación de REG-001 a REG-005
+# Operación y verificación de REG-001 a REG-006
 
 REG-001 guarda borradores y calcula un máximo escalar de caudal. REG-002 incorpora
 publicación, aplicaciones a variantes y restricciones afines en el optimizador
 hidráulico v3. REG-003 calcula límites horarios desde entradas canónicas fijadas.
 REG-004 relaciona unidades, plantas y embalses del mismo modelo.
 REG-005 añade rampas y referencias a períodos anteriores con política inicial explícita.
+REG-006 integra potencia y caudal por horizonte o día civil, con zona IANA y
+aceptación explícita de días parciales.
 Las revisiones `sealed_preview` son copias inmutables
 de pruebas; el estado de la definición editable sigue siendo `draft`.
 
@@ -17,7 +19,7 @@ def construir(ctx):
 
 `capacidad` declara tipo `number`, unidad canónica `m3_per_s` y valor 80;
 `disponibilidad` declara `number`, unidad `dimensionless`, valor 0.75 y rango
-0–1. El resultado es 60 m³/s. El SDK `reg-005.1` conserva la unidad en la
+0–1. El resultado es 60 m³/s. El SDK `reg-006.1` conserva la unidad en la
 multiplicación, acepta funciones, bucles y comprensiones, y exige una cantidad
 finita de caudal como retorno. El contexto expone identidad del objeto y
 parámetros inmutables. La prueba escalar de REG-001 se conserva.
@@ -166,7 +168,7 @@ filas se distinguen por aplicación. Cambios de membresía o referencias ausente
 marcan la aplicación obsoleta y bloquean nuevas corridas; las históricas conservan
 sus snapshots. Un motor sin la capacidad requerida no puede omitir las filas.
 
-El SDK `reg-005.1` exige reconstruir la imagen y reiniciar el worker con su digest.
+El SDK `reg-006.1` exige reconstruir la imagen y reiniciar el worker con su digest.
 Las publicaciones/aplicaciones de un SDK anterior necesitan publicar, probar y
 aplicar de nuevo antes de ejecutar; los datos históricos siguen legibles.
 
@@ -228,9 +230,57 @@ conservan línea y período. Cambiar horizonte requiere nueva prueba y aplicaci�
 sin modificar snapshots anteriores.
 
 Julia interpreta `Z` y offsets como UTC para resolver, y conserva las cadenas
-originales de la grilla en el documento resuelto. El SDK `reg-005.1` requiere
+originales de la grilla en el documento resuelto. El SDK `reg-006.1` requiere
 reconstruir la imagen, fijar su digest y reiniciar el worker; las publicaciones
 de SDK anteriores requieren publicar, probar y aplicar nuevamente.
+
+## Presupuestos por ventana (REG-006)
+
+En «Presupuestos de agua y energía», elegir **Horizonte completo** o **Días
+civiles**, indicar una zona IANA y, si corresponde, aceptar explícitamente días
+parciales. Esta política `windows` se guarda en el borrador, publicación,
+aplicación, snapshot y lineage de la corrida. Cada regla tiene una política;
+para combinar presupuestos diarios y de horizonte, aplicar dos reglas.
+
+```python
+def construir(ctx):
+    for ventana in ctx.ventanas():
+        agua = ventana.integral(ctx.objeto.caudal).a("hm3")
+        ctx.restriccion("agua", ventana, agua <= ctx.parametros.agua)
+```
+
+`agua` declara unidad `hm3`. Sin `.a("hm3")`, la integral de caudal queda en
+`m3`: cada término usa la duración en segundos. La conversión explícita inversa
+es `.a("m3")`. Para energía, `ventana.integral(ctx.objeto.potencia)` produce
+`mwh`, con coeficientes en horas. La suma de potencia o caudal sin duración no
+es una integral y no se puede comparar con energía o volumen. Se pueden sumar
+integrales de varios alias; la potencia de planta expande sus unidades y el
+vertimiento de un embalse se integra como caudal. No se integra almacenamiento.
+
+La ventana expone `inicio`, `fin`, `horas`, `periodos` y `parcial`. Los índices
+son los mismos de la grilla UTC. Un día civil puede contener 23 o 25 horas,
+incluidos cambios a medianoche. La agrupación usa
+[ZoneInfo y datos IANA](https://docs.python.org/3/library/zoneinfo.html); Windows
+requiere `tzdata`, declarado en `requirements.txt`. El contenedor usa los datos
+incluidos en su imagen fijada por digest. Un solve consume las ventanas congeladas.
+
+Los intervalos deben ser contiguos, positivos y coincidir con los bordes de día.
+Una ventana parcial bloquea salvo `partial: "allow"`; esa aceptación conserva
+el presupuesto completo. No se dividen intervalos ni se prorratean límites.
+Los errores de ventanas vacías, unidades incompatibles o bordes desalineados
+incluyen la línea y el período. Cambiar rango exige probar y aplicar de nuevo.
+
+La preview muestra inicio/fin UTC, duración, cantidad de períodos y términos,
+unidad, presupuesto efectivo y aceptación parcial. Las filas se paginan de 20
+en 20 y las expresiones extensas muestran 20 términos por página; se compila y
+valida siempre el horizonte completo.
+
+`affine_budget.v1` conserva una ventana en cada fila de presupuesto y usa
+coeficientes con unidad `h`, `s` o `hm3_per_m3_per_s` (hm³ por m³/s). Servidor y
+Julia validan referencias y dimensiones; el servidor reconstruye las ventanas
+con la política fijada y Julia verifica su correspondencia con la grilla y
+duración. Las filas se añaden al mismo modelo físico y objetivo. El motor debe
+declarar esta capacidad antes de encolar; no se pueden descartar sus restricciones.
 
 ## Runtime Linux compartido por desarrollo y CI
 
@@ -239,8 +289,8 @@ el repositorio completo como contexto. El Dockerfile fija CPython 3.12.14 por
 digest. El SDK está incluido en la imagen y su digest final fija ambos.
 
 ```sh
-docker build -t component-rules:reg-005 runtime/component_rules
-export RULE_RUNTIME_IMAGE="$(docker image inspect component-rules:reg-005 --format '{{.Id}}')"
+docker build -t component-rules:reg-006 runtime/component_rules
+export RULE_RUNTIME_IMAGE="$(docker image inspect component-rules:reg-006 --format '{{.Id}}')"
 export RULE_RUNTIME_COMMAND='["docker"]'
 export RULE_ENABLED_PROJECTS='*'
 python -m app.rule_worker
@@ -258,8 +308,8 @@ En Windows, Docker Desktop con contenedores Linux usa los mismos comandos,
 con variables PowerShell:
 
 ```powershell
-docker build -t component-rules:reg-005 runtime/component_rules
-$env:RULE_RUNTIME_IMAGE = (docker image inspect component-rules:reg-005 --format '{{.Id}}').Trim()
+docker build -t component-rules:reg-006 runtime/component_rules
+$env:RULE_RUNTIME_IMAGE = (docker image inspect component-rules:reg-006 --format '{{.Id}}').Trim()
 $env:RULE_RUNTIME_COMMAND = '["docker"]'
 $env:RULE_ENABLED_PROJECTS = '*'
 .venv/Scripts/python.exe -m app.rule_worker
@@ -330,13 +380,13 @@ export DATABASE_URL=sqlite:///:memory:
 export POSTGRES_TEST_DATABASE_URL=postgresql://test:test@127.0.0.1:5432/rules_test
 # Configurar RULE_RUNTIME_COMMAND / RULE_RUNTIME_IMAGE como arriba; no levantar
 # un worker adicional: las pruebas administran sus propios workers.
-python -m unittest tests.test_reg001_rules tests.test_reg001_runtime tests.test_reg002_rules tests.test_reg002_runtime tests.test_reg003_rules tests.test_reg003_runtime tests.test_reg003_classification tests.test_reg004_rules tests.test_reg004_runtime tests.test_reg005_rules tests.test_reg005_runtime tests.test_ts7_001_classification_catalog -v
+python -m unittest tests.test_reg001_rules tests.test_reg001_runtime tests.test_reg002_rules tests.test_reg002_runtime tests.test_reg003_rules tests.test_reg003_runtime tests.test_reg003_classification tests.test_reg004_rules tests.test_reg004_runtime tests.test_reg005_rules tests.test_reg005_runtime tests.test_reg006_rules tests.test_reg006_runtime tests.test_ts7_001_classification_catalog -v
 julia --project=. test/component_rules.jl
 cd frontend
 npm ci
 npm run api:generate
 npm run api:check
-npm test -- --run src/ComponentRules.test.tsx src/HourlyRules.test.tsx src/RelatedRules.test.tsx src/TemporalRules.test.tsx src/RunExperience.test.tsx src/ProtectedMutationJourney.test.tsx
+npm test -- --run src/ComponentRules.test.tsx src/HourlyRules.test.tsx src/RelatedRules.test.tsx src/TemporalRules.test.tsx src/BudgetRules.test.tsx src/RunExperience.test.tsx src/ProtectedMutationJourney.test.tsx
 npm run build
 npx playwright test e2e/component-rules.spec.ts
 # Requiere Julia disponible (PATH o variable JULIA) y la imagen OCI configurada.
@@ -344,6 +394,7 @@ RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-execution.spec.
 RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-hourly.spec.ts
 RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-related.spec.ts
 RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-temporal.spec.ts
+RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-budgets.spec.ts
 ```
 
 El smoke de navegador usa el servidor aislado existente, comprueba la entrada
@@ -363,7 +414,9 @@ la equivalencia del alias de planta y el bloqueo tras cambiar sus miembros,
 conservando el mapa de alias y el resultado histórico. REG-005 compara ambas políticas
 iniciales con tres intervalos de 0,5, 2 y 1 horas, comprueba las rampas de caudal
 y conserva el resultado histórico al cambiar la política y el rango. CI incluye
-los cinco recorridos y la prueba Julia.
+los seis recorridos y la prueba Julia. REG-006 compara un presupuesto de 12 MWh,
+uno diario de 36.000 m³ aceptando la ventana parcial y el caso libre de 105 MWh
+y 504.000 m³, con duraciones de 0,5, 2 y 1 horas e historial intacto.
 
 Referencia del mecanismo OCI: [Docker, ejecución de contenedores](https://docs.docker.com/engine/containers/run/).
 Los tests de esta entrega no constituyen una auditoría de escapes del kernel.

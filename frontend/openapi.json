@@ -3037,6 +3037,16 @@
                 "type": "null"
               }
             ]
+          },
+          "windows": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuleWindowPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -3342,6 +3352,40 @@
           "expected_revision"
         ],
         "title": "RuleTestRequest",
+        "type": "object"
+      },
+      "RuleWindowPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "horizon",
+              "civil_day"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "partial": {
+            "enum": [
+              "reject",
+              "allow"
+            ],
+            "title": "Partial",
+            "type": "string"
+          },
+          "timezone": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "timezone",
+          "partial"
+        ],
+        "title": "RuleWindowPolicy",
         "type": "object"
       },
       "RunDueSchedulesRequest": {

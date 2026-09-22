@@ -54,6 +54,7 @@ def main():
         temporal_nodes[0]["natural_inflow_series"] = {"points": [{**p, "value_m3s": 0} for p in GRID]}
         store.save_hydraulic_diagram(scenario_id=temporal["id"], revision=temporal_diagram["revision"], nodes=temporal_nodes,
             reaches=[{"technical_key": "temporal_reach", "display_name": "Tramo", "from_node_key": "reservoir_alpha", "to_node_key": "junction_in", "reach_type": "river"}])
+        budget_base = store.create_scenario_version(scenario_id=temporal["id"], system_case_json=store.generate_hydraulic_v3_preview(temporal["id"]), validation_payload={"status": "ok"})
         app = create_app(store=store, auth_enabled=True, artifact_root=Path(temporary) / "artifacts", input_source_root=Path(temporary) / "sources")
         original_lifespan = app.router.lifespan_context
 
@@ -84,6 +85,10 @@ def main():
         @app.get("/api/auth/reg005-fixture", include_in_schema=False)
         def temporal_fixture():
             return {"scenario_id": temporal["id"]}
+
+        @app.get("/api/auth/reg006-fixture", include_in_schema=False)
+        def budget_fixture():
+            return {"scenario_id": temporal["id"], "base_version_id": budget_base["id"]}
 
         @app.post("/api/auth/reg004-membership", include_in_schema=False)
         def change_membership():

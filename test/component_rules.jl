@@ -21,6 +21,50 @@ function solve_rule_case(document, dir, name)
     BESSDispatch.run_system_case(path; output_root=joinpath(dir, name))
 end
 
+@testset "Duration-weighted budgets constrain energy and water without changing balances" begin
+    mktempdir() do dir
+        document = rule_case()
+        document["time_series"] = [Dict("timestamp" => stamp, "duration_hours" => hours, "natural_inflow_m3s" => Dict("reservoir" => 0))
+                                  for (stamp, hours) in (("2026-01-01T00:00:00Z", 0.5), ("2026-01-01T00:30:00Z", 2.0), ("2026-01-01T02:30:00Z", 1.0))]
+        block = document["component_rules"]
+        block["version"] = "affine_budget.v1"
+        block["grid"] = [Dict("timestamp" => p["timestamp"], "duration_hours" => p["duration_hours"]) for p in document["time_series"]]
+        block["applications"] = [Dict{String,Any}("id" => "a1", "windows" => Dict("kind" => "horizon", "timezone" => "UTC", "partial" => "reject"))]
+        window = Dict{String,Any}("start" => "2026-01-01T00:00:00Z", "end" => "2026-01-01T03:30:00Z",
+                                 "duration_hours" => 3.5, "periods" => [0, 1, 2], "partial" => false)
+        term(t, c, variable, unit) = Dict{String,Any}("object_id" => 7, "variable" => variable, "period" => t, "coefficient" => c, "unit" => unit)
+        block["rows"] = [Dict{String,Any}("application_id" => "a1", "revision_id" => "r1", "name" => "energia", "line" => 3,
+            "period" => 2, "relation" => "<=", "unit" => "mwh", "constant" => -12, "window" => window,
+            "terms" => [term(0, 0.5, "potencia", "h"), term(1, 2.0, "potencia", "h"), term(2, 1.0, "potencia", "h")])]
+        base = deepcopy(document)
+        delete!(base, "component_rules")
+        baseline = solve_rule_case(base, dir, "budget_baseline")
+        energy = solve_rule_case(document, dir, "energy_budget")
+        @test sum(r.total_hydro_power_mw * r.duration_hours for r in CSV.File(baseline.dispatch_path)) ≈ 105
+        @test sum(r.total_hydro_power_mw * r.duration_hours for r in CSV.File(energy.dispatch_path)) ≈ 12
+        @test JSON3.read(read(energy.system_case_resolved_path, String), Dict{String,Any})["component_rules"] == block
+        row = block["rows"][1]
+        row["unit"], row["constant"], row["name"] = "hm3", -0.036, "agua"
+        row["terms"] = [term(0, 0.0018, "caudal", "hm3_per_m3_per_s"), term(1, 0.0072, "caudal", "hm3_per_m3_per_s"), term(2, 0.0036, "caudal", "hm3_per_m3_per_s")]
+        block["applications"][1]["windows"] = Dict("kind" => "civil_day", "timezone" => "UTC", "partial" => "allow")
+        window["partial"] = true
+        water = solve_rule_case(document, dir, "daily_water")
+        @test sum(r.total_hydro_turbine_flow_m3s * r.duration_hours * 3600 for r in CSV.File(water.dispatch_path)) ≈ 36000
+        @test last(CSV.File(water.dispatch_path)).total_hydro_storage_hm3 +
+              sum((r.total_hydro_turbine_flow_m3s + r.total_hydro_spill_flow_m3s) * r.duration_hours * 0.0036 for r in CSV.File(water.dispatch_path)) ≈ 10
+        for mutate! in (d -> delete!(d["component_rules"]["applications"][1], "windows"),
+                        d -> d["component_rules"]["applications"][1]["windows"]["partial"] = "reject",
+                        d -> d["component_rules"]["rows"][1]["window"]["periods"] = [0, 2],
+                        d -> d["component_rules"]["rows"][1]["window"]["duration_hours"] = 24,
+                        d -> d["component_rules"]["rows"][1]["terms"][1]["unit"] = "dimensionless",
+                        d -> d["component_rules"]["rows"][1]["terms"][1]["period"] = 3)
+            invalid = deepcopy(document)
+            mutate!(invalid)
+            @test_throws ArgumentError BESSDispatch.validate_hydraulic_v3_system_case_document(invalid)
+        end
+    end
+end
+
 @testset "Temporal ramps use unequal start distances and both initial policies" begin
     mktempdir() do dir
         document = rule_case()

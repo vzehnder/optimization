@@ -9,7 +9,7 @@ import subprocess
 import threading
 import time
 
-SDK_VERSION = "reg-005.1"
+SDK_VERSION = "reg-006.1"
 POLICY_VERSION = "reg-001.1"
 
 
@@ -128,10 +128,12 @@ class OCIExecutor:
                 if result["status"] == "succeeded":
                     if "grid" in payload:
                         from app.rule_ir import validate_ir, validate_outputs, validate_bounds, validate_model_bounds, RuleBoundsError
-                        value = {"ir": validate_ir(result["ir"], payload["object"]["id"], len(payload["grid"]), payload.get("objects")),
+                        value = {"ir": validate_ir(result["ir"], payload["object"]["id"], len(payload["grid"]), payload.get("objects"), grid=payload["grid"], windows=payload.get("windows"), temporal=payload.get("temporal")),
                                  "outputs": validate_outputs(result["outputs"], len(payload["grid"]))}
                         if payload.get("temporal"):
                             value["temporal"] = {**payload["temporal"], "omitted_periods": [0] if payload["temporal"]["first_period"] == "omit" else []}
+                        if payload.get("windows"):
+                            value["windows"] = payload["windows"]
                         if "compilation" in payload:
                             compilation = payload["compilation"]
                             unit = next(u for u in compilation["system_case"]["hydraulic_network"]["units"] if u["id"] == compilation["unit_key"])

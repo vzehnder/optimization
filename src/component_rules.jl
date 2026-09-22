@@ -1,15 +1,47 @@
 const COMPONENT_RULE_VERSION = "affine_flow.v1"
 const HYDRAULIC_RULE_VERSION = "affine_hydraulic.v1"
 const TEMPORAL_RULE_VERSION = "affine_temporal.v1"
+const BUDGET_RULE_VERSION = "affine_budget.v1"
+
+function validate_budget_window(row, policy, grid)
+    policy isa AbstractDict || throw(ArgumentError("budget window requires an explicit policy"))
+    get(policy, "kind", nothing) in ("horizon", "civil_day") || throw(ArgumentError("invalid budget window kind"))
+    !isempty(required_string(policy, "timezone")) || throw(ArgumentError("missing budget timezone"))
+    get(policy, "partial", nothing) in ("reject", "allow") || throw(ArgumentError("invalid partial window policy"))
+    window = required_dict(row, "window")
+    Set(keys(window)) == Set(("start", "end", "duration_hours", "periods", "partial")) || throw(ArgumentError("invalid window fields"))
+    indices = required_vector(window, "periods")
+    !isempty(indices) && all(t -> t isa Integer && !(t isa Bool) && 0 <= t < length(grid), indices) || throw(ArgumentError("empty or invalid budget periods"))
+    indices == collect(first(indices):last(indices)) && row["period"] == last(indices) || throw(ArgumentError("noncontiguous budget window"))
+    start = parse_required_datetime(window["start"], "window.start")
+    finish = parse_required_datetime(window["end"], "window.end")
+    cursor = start
+    for t in indices
+        point = grid[t + 1]
+        cursor == parse_required_datetime(point["timestamp"], "grid.timestamp") || throw(ArgumentError("misaligned budget window"))
+        cursor += Millisecond(round(Int, point["duration_hours"] * 3600000))
+    end
+    cursor == finish || throw(ArgumentError("misaligned budget end"))
+    hours = get(window, "duration_hours", nothing)
+    hours isa Real && !(hours isa Bool) && isfinite(hours) && hours > 0 &&
+        isapprox(hours, Dates.value(finish - start) / 3600000; atol=1e-9, rtol=0) || throw(ArgumentError("incorrect window duration"))
+    get(window, "partial", nothing) isa Bool || throw(ArgumentError("missing partial window flag"))
+    window["partial"] && policy["partial"] != "allow" && throw(ArgumentError("partial day not accepted"))
+    if policy["kind"] == "horizon"
+        indices == collect(0:length(grid)-1) && !window["partial"] || throw(ArgumentError("incomplete horizon window"))
+    end
+    return Set(indices)
+end
 
 function validate_component_rules(document)
     haskey(document, "component_rules") || return
     rules = required_dict(document, "component_rules")
     required_string(document, "schema_version") == SYSTEM_SCHEMA_VERSION_V3 ||
         throw(ArgumentError("component rules require hydraulic v3"))
-    get(rules, "version", nothing) in (COMPONENT_RULE_VERSION, HYDRAULIC_RULE_VERSION, TEMPORAL_RULE_VERSION) ||
+    get(rules, "version", nothing) in (COMPONENT_RULE_VERSION, HYDRAULIC_RULE_VERSION, TEMPORAL_RULE_VERSION, BUDGET_RULE_VERSION) ||
         throw(ArgumentError("unsupported component rules version"))
-    temporal = rules["version"] == TEMPORAL_RULE_VERSION
+    budget = rules["version"] == BUDGET_RULE_VERSION
+    temporal = rules["version"] == TEMPORAL_RULE_VERSION || budget
     extended = rules["version"] != COMPONENT_RULE_VERSION
     periods = required_vector(document, "time_series")
     1 <= length(periods) <= 8784 || throw(ArgumentError("component rules period quota exceeded"))
@@ -26,8 +58,9 @@ function validate_component_rules(document)
             (policy["first_period"] == "initial") == !isempty(initial_values) || throw(ArgumentError("initial values do not match temporal policy"))
             temporal_policies[required_string(application, "id")] = policy
         end
-        isempty(temporal_policies) && throw(ArgumentError("temporal rules require an explicit initial period policy"))
+        !budget && isempty(temporal_policies) && throw(ArgumentError("temporal rules require an explicit initial period policy"))
     end
+    window_policies = budget ? Dict(a["id"] => get(a, "windows", nothing) for a in rules["applications"]) : Dict()
     units = Set(u["id"] for u in document["hydraulic_network"]["units"])
     network = document["hydraulic_network"]
     reservoirs = Set(n["id"] for n in network["nodes"] if n["type"] == "reservoir")
@@ -73,7 +106,10 @@ function validate_component_rules(document)
         name in names && throw(ArgumentError("duplicate component rules row"))
         push!(names, name)
         get(row, "relation", nothing) in ("<=", ">=", "==") || throw(ArgumentError("invalid component rules relation"))
-        get(row, "unit", nothing) in (extended ? ("m3_per_s", "mw", "hm3") : ("m3_per_s",)) || throw(ArgumentError("invalid component rules unit"))
+        window = haskey(row, "window")
+        window && !budget && throw(ArgumentError("budget capability required"))
+        window_periods = window ? validate_budget_window(row, get(window_policies, row["application_id"], nothing), grid) : Set()
+        get(row, "unit", nothing) in (window ? ("mwh", "m3", "hm3") : extended ? ("m3_per_s", "mw", "hm3") : ("m3_per_s",)) || throw(ArgumentError("invalid component rules unit"))
         constant = get(row, "constant", nothing)
         constant isa Real && !(constant isa Bool) && isfinite(constant) || throw(ArgumentError("nonfinite component rules constant"))
         terms = required_vector(row, "terms")
@@ -96,11 +132,20 @@ function validate_component_rules(document)
             else
                 nothing
             end
-            expected_unit == row["unit"] || throw(ArgumentError("unsupported component rules variable or unit"))
+            coefficient_unit = if window
+                get(Dict(("mw", "mwh") => "h", ("m3_per_s", "m3") => "s", ("m3_per_s", "hm3") => "hm3_per_m3_per_s"), (expected_unit, row["unit"]), nothing)
+            else
+                expected_unit == row["unit"] ? "dimensionless" : nothing
+            end
+            coefficient_unit !== nothing || throw(ArgumentError("unsupported component rules variable or unit"))
             period = get(term, "period", nothing)
             period isa Integer && !(period isa Bool) && 0 <= period <= row_period && (temporal || period == row_period) || throw(ArgumentError("unsupported component rules period reference"))
-            period == row_period || haskey(temporal_policies, row["application_id"]) || throw(ArgumentError("previous period reference requires an initial policy"))
-            get(term, "unit", nothing) == "dimensionless" || throw(ArgumentError("invalid component rules coefficient unit"))
+            if window
+                period in window_periods || throw(ArgumentError("term outside budget window"))
+            else
+                period == row_period || haskey(temporal_policies, row["application_id"]) || throw(ArgumentError("previous period reference requires an initial policy"))
+            end
+            get(term, "unit", nothing) == coefficient_unit || throw(ArgumentError("invalid component rules coefficient unit"))
             coefficient = get(term, "coefficient", nothing)
             coefficient isa Real && !(coefficient isa Bool) && isfinite(coefficient) || throw(ArgumentError("nonfinite component rules coefficient"))
             key = (id, variable, period)

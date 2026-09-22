@@ -2,6 +2,7 @@ ARG PYTHON_IMAGE=python@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e7053
 FROM ${PYTHON_IMAGE}
 COPY entry.py /runtime/entry.py
 COPY symbolic.py /runtime/symbolic.py
+COPY windows.py /runtime/windows.py
 USER 65532:65532
 WORKDIR /runtime
 ENTRYPOINT ["python", "-I", "-B", "/runtime/entry.py"]
