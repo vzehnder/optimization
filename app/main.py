@@ -989,6 +989,8 @@ def create_app(
             analyst_store.close()
 
     app = FastAPI(title="BESS Analyst App", lifespan=lifespan)
+    from app.component_rules import rule_router
+    app.include_router(rule_router(analyst_store))
     app.state.analyst_store = analyst_store
     app.state.auth_enabled = auth_required
     authorization = AuthorizationService(analyst_store)

@@ -238,6 +238,13 @@ def validate_signal_registry_contract(registry: Mapping[str, Any]) -> None:
 
 MEASUREMENT_DIMENSION_SEED = (
     {
+        "id": 4,
+        "dimension_key": "dimensionless",
+        "display_name": "Dimensionless",
+        "value_kind": "numeric",
+        "status": "active",
+    },
+    {
         "id": 1,
         "dimension_key": "currency_per_energy",
         "display_name": "Currency per energy",
@@ -262,6 +269,14 @@ MEASUREMENT_DIMENSION_SEED = (
 
 
 MEASUREMENT_UNIT_SEED = (
+    {
+        "id": 4,
+        "unit_key": "dimensionless",
+        "symbol": "1",
+        "dimension_id": 4,
+        "physical_dimension": "dimensionless",
+        "status": "active",
+    },
     {
         "id": 1,
         "unit_key": "usd_per_mwh",

@@ -20,7 +20,7 @@ export function safeReturnPath(
   const path = url.pathname;
   if (
     url.origin !== "http://workspace.local" ||
-    !/^(\/time-series\/catalog|\/scenarios\/[1-9]\d*|\/projects\/[1-9]\d*(\/linkable-objects\/[1-9]\d*\/time-series|\/time-series-sets\/[1-9]\d*)?)$/.test(
+    !/^(\/time-series\/catalog|\/scenarios\/[1-9]\d*(\/hydraulic-diagram)?|\/projects\/[1-9]\d*(\/linkable-objects\/[1-9]\d*\/time-series|\/time-series-sets\/[1-9]\d*)?)$/.test(
       path,
     )
   )

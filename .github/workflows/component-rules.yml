@@ -1,0 +1,42 @@
+name: Component rules
+on:
+  push:
+    paths: ['app/**', 'runtime/component_rules/**', 'tests/test_reg001*', 'frontend/**', '.github/workflows/component-rules.yml']
+  pull_request:
+    paths: ['app/**', 'runtime/component_rules/**', 'tests/test_reg001*', 'frontend/**', '.github/workflows/component-rules.yml']
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: rules_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      POSTGRES_TEST_DATABASE_URL: 'postgresql://test:test@127.0.0.1:5432/rules_test'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pip install -r requirements.txt
+      - name: Build the same Linux sandbox used in development
+        run: |
+          docker build -t component-rules:reg-001 runtime/component_rules
+          echo "RULE_RUNTIME_IMAGE=$(docker image inspect component-rules:reg-001 --format '{{.Id}}')" >> "$GITHUB_ENV"
+      - run: python -m unittest tests.test_reg001_rules tests.test_reg001_runtime -v
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run api:check && npm test -- --run src/ComponentRules.test.tsx && npm run build
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium && npx playwright test e2e/component-rules.spec.ts
+        working-directory: frontend

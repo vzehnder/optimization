@@ -5,7 +5,14 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { FormEvent, ReactNode, useEffect, useState } from "react";
+import {
+  FormEvent,
+  ReactNode,
+  Suspense,
+  lazy,
+  useEffect,
+  useState,
+} from "react";
 import {
   createBrowserRouter,
   RouterProvider,
@@ -47,6 +54,17 @@ import {
   OperatorConsoleEditorView,
 } from "./OperatorConsole";
 import "./styles.css";
+
+const ComponentRulesView = lazy(() =>
+  import("./ComponentRules").then((module) => ({
+    default: module.ComponentRulesView,
+  })),
+);
+const HydraulicRulesEntryView = lazy(() =>
+  import("./ComponentRules").then((module) => ({
+    default: module.HydraulicRulesEntryView,
+  })),
+);
 import {
   ForbiddenView,
   HydraulicDiagramEditorView,
@@ -500,6 +518,22 @@ function AuthenticatedRoutes({
             ) : (
               <NotFoundView />
             )
+          }
+        />
+        <Route
+          path="projects/:projectId/linkable-objects/:linkableObjectId/rules"
+          element={
+            <Suspense fallback={<p role="status">Cargando editor…</p>}>
+              <ComponentRulesView />
+            </Suspense>
+          }
+        />
+        <Route
+          path="scenarios/:scenarioId/hydraulic-plants/:plantKey/units/:unitKey/rules"
+          element={
+            <Suspense fallback={<p role="status">Cargando editor…</p>}>
+              <HydraulicRulesEntryView />
+            </Suspense>
           }
         />
         <Route path="system" element={<SystemStatus />} />

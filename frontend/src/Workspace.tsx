@@ -6649,6 +6649,7 @@ function HydraulicUnitSubeditor({
     curve: HydraulicCurveWrite,
   ) => void;
 }) {
+  const { scenarioId } = useParams();
   const key = unit.technical_key;
   const curve = unit.flow_power_curve ?? emptyCurve();
   const points = curve.points;
@@ -6688,6 +6689,11 @@ function HydraulicUnitSubeditor({
 
   return (
     <li className="hydraulic-unit" data-testid={`hydraulic-unit-${key}`}>
+      <Link
+        to={`/scenarios/${scenarioId}/hydraulic-plants/${encodeURIComponent(plantKey)}/units/${encodeURIComponent(key)}/rules`}
+      >
+        Cálculos y restricciones · {key}
+      </Link>
       <div className="draft-field-grid">
         <label htmlFor={`unit-label-${key}`}>
           <span>Etiqueta unidad {key}</span>

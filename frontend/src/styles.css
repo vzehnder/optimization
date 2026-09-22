@@ -2482,3 +2482,77 @@ button:focus-visible {
   font-weight: 700;
   color: #075d83;
 }
+.rule-form {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.rules-surface {
+  padding: 1.5rem;
+}
+
+.rules-surface h1 {
+  max-width: none;
+  font-size: 2rem;
+}
+
+.rules-surface [role="status"],
+.rules-surface [role="alert"] {
+  width: auto;
+  margin: 0.75rem 0;
+  padding: 0.75rem;
+  box-shadow: none;
+  background: #f0f6fa;
+}
+
+.rules-surface button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.rules-surface nav {
+  margin: 1rem 0;
+}
+
+.rule-code-editor {
+  border: 1px solid #b8c4d2;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.rule-code-editor .cm-editor {
+  min-height: 180px;
+  font-size: 0.95rem;
+}
+
+.rule-parameter {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid #dbe2ea;
+}
+
+.rule-form label {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.rule-form input,
+.rule-form select {
+  min-width: 0;
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #b8c4d2;
+  border-radius: 0.35rem;
+  font: inherit;
+}
+
+.rule-form code,
+.rule-form pre {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}

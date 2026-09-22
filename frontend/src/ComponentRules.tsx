@@ -1,0 +1,567 @@
+import { useQuery } from "@tanstack/react-query";
+import { autocompletion, completeFromList } from "@codemirror/autocomplete";
+import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { python } from "@codemirror/lang-python";
+import { EditorState } from "@codemirror/state";
+import { EditorView, keymap, lineNumbers } from "@codemirror/view";
+import { useEffect, useRef, useState } from "react";
+import {
+  Link,
+  Navigate,
+  useLocation,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
+import { getCsrfToken, requestJson } from "./api/client";
+import { safeReturnPath } from "./journeyRoutes";
+
+export interface RuleParameter {
+  name: string;
+  type: "number" | "integer" | "boolean";
+  unit: string;
+  value: number | boolean;
+  min: number | null;
+  max: number | null;
+}
+interface RuleDraft {
+  id: string;
+  name: string;
+  code: string;
+  revision: number;
+  parameters: RuleParameter[];
+}
+interface RuleList {
+  enabled?: boolean;
+  object: { display_name: string };
+  items: { id: string; name: string; revision: number }[];
+  runtime: { image: string; sdk: string } | null;
+}
+const DEFAULT_CODE =
+  "def construir(ctx):\n    return ctx.parametros.capacidad * ctx.parametros.disponibilidad\n";
+const DEFAULT_PARAMETERS: RuleParameter[] = [
+  {
+    name: "capacidad",
+    type: "number",
+    unit: "m3_per_s",
+    value: 80,
+    min: 0,
+    max: null,
+  },
+  {
+    name: "disponibilidad",
+    type: "number",
+    unit: "dimensionless",
+    value: 0.75,
+    min: 0,
+    max: 1,
+  },
+];
+
+async function mutate<T>(path: string, body: unknown, method = "POST") {
+  return requestJson<T>(path, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": await getCsrfToken(),
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+function PythonEditor({
+  initialCode,
+  onChange,
+}: {
+  initialCode: string;
+  onChange: (code: string) => void;
+}) {
+  const element = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const view = new EditorView({
+      parent: element.current!,
+      state: EditorState.create({
+        doc: initialCode,
+        extensions: [
+          python(),
+          lineNumbers(),
+          history(),
+          keymap.of([...defaultKeymap, ...historyKeymap]),
+          autocompletion({
+            override: [
+              completeFromList([
+                { label: "ctx.parametros", type: "property" },
+                { label: "ctx.objeto", type: "property" },
+                { label: "construir", type: "function" },
+                { label: "range", type: "function" },
+              ]),
+            ],
+          }),
+          EditorView.contentAttributes.of({
+            "aria-label": "Código Python",
+            role: "textbox",
+            "aria-multiline": "true",
+          }),
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged) onChange(update.state.doc.toString());
+          }),
+          EditorView.lineWrapping,
+        ],
+      }),
+    });
+    return () => view.destroy();
+  }, [initialCode, onChange]);
+  return <div className="rule-code-editor" ref={element} />;
+}
+
+export function ComponentRulesView() {
+  const location = useLocation();
+  return <RulesContent key={location.pathname} />;
+}
+
+export function HydraulicRulesEntryView() {
+  const { scenarioId, plantKey, unitKey } = useParams();
+  const endpoint = `/api/scenarios/${scenarioId}/hydraulic-plants/${encodeURIComponent(plantKey ?? "")}/units/${encodeURIComponent(unitKey ?? "")}/rule-context`;
+  const context = useQuery({
+    queryKey: [endpoint],
+    queryFn: () =>
+      requestJson<{ project_id: number; object_id: number }>(endpoint),
+    retry: false,
+  });
+  const returnTo = `/scenarios/${scenarioId}/hydraulic-diagram`;
+  if (context.data)
+    return (
+      <Navigate
+        replace
+        to={`/projects/${context.data.project_id}/linkable-objects/${context.data.object_id}/rules?${new URLSearchParams({ return_to: returnTo, scenario_id: scenarioId! })}`}
+      />
+    );
+  return (
+    <section className="content-panel rules-surface">
+      <h1>Cálculos y restricciones</h1>
+      <p role={context.isError ? "alert" : "status"}>
+        {context.isError ? String(context.error) : "Abriendo la unidad…"}
+      </p>
+      <Link to={returnTo}>Volver a la unidad</Link>
+    </section>
+  );
+}
+
+function RulesContent() {
+  const { projectId, linkableObjectId } = useParams();
+  const [search, setSearch] = useSearchParams();
+  const root = `/api/projects/${projectId}/linkable-objects/${linkableObjectId}/rules`;
+  const list = useQuery({
+    queryKey: [root],
+    queryFn: () => requestJson<RuleList>(root),
+    retry: false,
+  });
+  const selected = search.get("rule") ?? list.data?.items[0]?.id;
+  const draft = useQuery({
+    queryKey: [root, selected],
+    queryFn: () => requestJson<RuleDraft>(`${root}/${selected}`),
+    enabled: !!selected,
+    retry: false,
+  });
+  const returnTo = safeReturnPath(search.get("return_to"));
+  return (
+    <section className="content-panel rules-surface">
+      <h1>Cálculos y restricciones</h1>
+      <p>
+        Las pruebas no modifican corridas ni series. Este borrador todavía no se
+        aplica a la optimización.
+      </p>
+      {returnTo && <Link to={returnTo}>Volver a la unidad</Link>}
+      {list.data && (
+        <p>
+          Unidad: {list.data.object.display_name} · Proyecto {projectId}
+        </p>
+      )}
+      {list.isError || draft.isError ? (
+        <p role="alert">{String(list.error ?? draft.error)}</p>
+      ) : null}
+      {list.data && !list.data.runtime && (
+        <p role="status">
+          {list.data.enabled === false
+            ? "Pruebas deshabilitadas en este proyecto."
+            : "Ejecutor aislado no disponible."}{" "}
+          Puedes guardar el borrador.
+        </p>
+      )}
+      {list.data && (
+        <nav aria-label="Reglas del objeto">
+          {list.data.items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => {
+                const next = new URLSearchParams(search);
+                next.set("rule", item.id);
+                setSearch(next);
+              }}
+            >
+              {item.name}
+            </button>
+          ))}
+        </nav>
+      )}
+      {list.data && (!selected || draft.data) && (
+        <RuleForm
+          key={selected ?? "new"}
+          root={root}
+          initial={draft.data}
+          available={!!list.data.runtime}
+          onSaved={(saved) => {
+            const next = new URLSearchParams(search);
+            next.set("rule", saved.id);
+            setSearch(next, { replace: true });
+            void list.refetch();
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+function RuleForm({
+  root,
+  initial,
+  available,
+  onSaved,
+}: {
+  root: string;
+  initial?: RuleDraft;
+  available: boolean;
+  onSaved: (rule: RuleDraft) => void;
+}) {
+  const [name, setName] = useState(
+    initial?.name ?? "Capacidad por disponibilidad",
+  );
+  const [code, setCode] = useState(initial?.code ?? DEFAULT_CODE);
+  const [parameters, setParameters] = useState(
+    initial?.parameters ?? DEFAULT_PARAMETERS,
+  );
+  const [saved, setSaved] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const dirty =
+    !saved ||
+    code !== saved.code ||
+    name !== saved.name ||
+    JSON.stringify(parameters) !== JSON.stringify(saved.parameters);
+  function parameterChange(index: number, patch: Partial<RuleParameter>) {
+    setParameters((rows) =>
+      rows.map((row, i) => (i === index ? { ...row, ...patch } : row)),
+    );
+  }
+  async function save() {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await mutate<RuleDraft>(
+        saved ? `${root}/${saved.id}` : root,
+        { name, code, parameters, expected_revision: saved?.revision ?? 0 },
+        saved ? "PUT" : "POST",
+      );
+      setSaved(result);
+      onSaved(result);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "No se pudo guardar");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="rule-form">
+      <label>
+        Nombre de la regla
+        <input
+          value={name}
+          maxLength={200}
+          onChange={(event) => setName(event.target.value)}
+        />
+      </label>
+      <p>
+        Define <code>construir(ctx)</code> y devuelve una cantidad en m³/s. El
+        contexto y los parámetros conservan sus unidades.
+      </p>
+      <PythonEditor
+        initialCode={initial?.code ?? DEFAULT_CODE}
+        onChange={setCode}
+      />
+      <fieldset>
+        <legend>Parámetros tipados</legend>
+        {parameters.map((p, index) => (
+          <div className="rule-parameter" key={index}>
+            <label>
+              Parámetro {index + 1}
+              <input
+                value={p.name}
+                onChange={(e) =>
+                  parameterChange(index, { name: e.target.value })
+                }
+              />
+            </label>
+            <label>
+              Tipo {p.name}
+              <select
+                value={p.type}
+                onChange={(e) =>
+                  parameterChange(index, {
+                    type: e.target.value as RuleParameter["type"],
+                    value: e.target.value === "boolean" ? false : 0,
+                    unit:
+                      e.target.value === "boolean" ? "dimensionless" : p.unit,
+                  })
+                }
+              >
+                <option value="number">Número</option>
+                <option value="integer">Entero</option>
+                <option value="boolean">Booleano</option>
+              </select>
+            </label>
+            <label>
+              Unidad {p.name}
+              <input
+                value={p.unit}
+                onChange={(e) =>
+                  parameterChange(index, { unit: e.target.value })
+                }
+              />
+            </label>
+            <label>
+              Valor {p.name}
+              {p.type === "boolean" ? (
+                <input
+                  type="checkbox"
+                  checked={Boolean(p.value)}
+                  onChange={(e) =>
+                    parameterChange(index, { value: e.target.checked })
+                  }
+                />
+              ) : (
+                <input
+                  type="number"
+                  value={Number(p.value)}
+                  onChange={(e) =>
+                    parameterChange(index, { value: Number(e.target.value) })
+                  }
+                />
+              )}
+            </label>
+            <label>
+              Mínimo {p.name}
+              <input
+                type="number"
+                value={p.min ?? ""}
+                onChange={(e) =>
+                  parameterChange(index, {
+                    min: e.target.value === "" ? null : Number(e.target.value),
+                  })
+                }
+              />
+            </label>
+            <label>
+              Máximo {p.name}
+              <input
+                type="number"
+                value={p.max ?? ""}
+                onChange={(e) =>
+                  parameterChange(index, {
+                    max: e.target.value === "" ? null : Number(e.target.value),
+                  })
+                }
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() =>
+                setParameters(parameters.filter((_, i) => i !== index))
+              }
+            >
+              Quitar parámetro {index + 1}
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          disabled={parameters.length >= 50}
+          onClick={() =>
+            setParameters([
+              ...parameters,
+              {
+                name: `parametro${parameters.length + 1}`,
+                type: "number",
+                value: 1,
+                unit: "dimensionless",
+                min: null,
+                max: null,
+              },
+            ])
+          }
+        >
+          Agregar parámetro
+        </button>
+      </fieldset>
+      <button type="button" disabled={busy} onClick={() => void save()}>
+        Guardar borrador
+      </button>
+      {saved && (
+        <p role="status">
+          Borrador guardado · revisión {saved.revision}
+          {dirty ? " · cambios sin guardar" : ""}
+        </p>
+      )}
+      <RulePreview
+        root={root}
+        saved={saved}
+        disabled={dirty || busy || !available}
+      />
+      {error && <p role="alert">{error}</p>}
+    </div>
+  );
+}
+
+interface RuleJob {
+  id: string;
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+  draft_revision: number;
+  code_hash: string;
+  context_hash: string;
+  result: {
+    output?: { value: number; unit: string };
+    error?: { code: string; message: string; line?: number };
+    runtime?: { image: string; sdk: string; python: string };
+    logs?: string;
+  } | null;
+}
+const STATUS = {
+  queued: "En cola",
+  running: "Ejecutando",
+  succeeded: "Terminada",
+  failed: "Fallida",
+  cancelled: "Cancelada",
+};
+
+function RulePreview({
+  root,
+  saved,
+  disabled,
+}: {
+  root: string;
+  saved?: RuleDraft;
+  disabled: boolean;
+}) {
+  const [search, setSearch] = useSearchParams();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const jobId = search.get("test");
+  const path = `${root}/${saved?.id}/tests`;
+  const job = useQuery({
+    queryKey: [path, jobId],
+    queryFn: () => requestJson<RuleJob>(`${path}/${jobId}`),
+    enabled: !!jobId && !!saved,
+    retry: false,
+    refetchInterval: (query) =>
+      ["queued", "running"].includes(query.state.data?.status ?? "")
+        ? 350
+        : false,
+  });
+  const running = job.data && ["queued", "running"].includes(job.data.status);
+  async function start() {
+    setBusy(true);
+    setError("");
+    try {
+      const started = await mutate<RuleJob>(path, {
+        expected_revision: saved?.revision,
+      });
+      const next = new URLSearchParams(search);
+      next.set("test", started.id);
+      setSearch(next, { replace: true });
+    } catch (error) {
+      setError(
+        error instanceof Error ? error.message : "No se pudo iniciar la prueba",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function cancel() {
+    setBusy(true);
+    setError("");
+    try {
+      await mutate(`${path}/${jobId}/cancel`, {});
+      await job.refetch();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "No se pudo cancelar");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section aria-label="Prueba de la regla">
+      <button
+        type="button"
+        disabled={disabled || busy || !!running}
+        onClick={() => void start()}
+      >
+        Probar borrador
+      </button>
+      {running && (
+        <button type="button" disabled={busy} onClick={() => void cancel()}>
+          Cancelar prueba
+        </button>
+      )}
+      {(error || job.isError) && (
+        <p role="alert">{error || String(job.error)}</p>
+      )}
+      {job.data && (
+        <>
+          <p role="status">{STATUS[job.data.status]}</p>
+          {job.data.draft_revision !== saved?.revision && (
+            <p>
+              Resultado de una revisión anterior. Vuelve a probar el borrador.
+            </p>
+          )}
+          {job.data.result?.output && (
+            <p>
+              Máximo calculado:{" "}
+              <strong>{job.data.result.output.value} m³/s</strong>
+            </p>
+          )}
+          {job.data.result?.error && (
+            <p role="alert">
+              {job.data.result.error.code}
+              {job.data.result.error.line
+                ? ` · línea ${job.data.result.error.line}`
+                : ""}
+              : {job.data.result.error.message}
+            </p>
+          )}
+          <details>
+            <summary>Identidad de la prueba</summary>
+            <p>Revisión {job.data.draft_revision}</p>
+            <p>
+              Código: <code>{job.data.code_hash}</code>
+            </p>
+            <p>
+              Contexto: <code>{job.data.context_hash}</code>
+            </p>
+            <p>
+              SDK {job.data.result?.runtime?.sdk} · Python{" "}
+              {job.data.result?.runtime?.python}
+            </p>
+            <p>
+              <code>{job.data.result?.runtime?.image}</code>
+            </p>
+          </details>
+          {job.data.result?.logs && (
+            <details>
+              <summary>Logs de la prueba</summary>
+              <pre>{job.data.result.logs}</pre>
+            </details>
+          )}
+        </>
+      )}
+    </section>
+  );
+}

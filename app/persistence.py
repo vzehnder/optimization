@@ -26619,6 +26619,10 @@ class AnalystStore:
                     ),
                 )
             self.connection.commit()
+            self._register_project_hydraulic_objects(
+                project_id=int(context["hydraulic_system"]["project_id"]), actor=updated_by
+            )
+            self.connection.commit()
             updated_context = self._get_hydraulic_diagram_context(scenario_id)
             if updated_context is None:
                 raise KeyError(f"hydraulic diagram for scenario {scenario_id} not found")

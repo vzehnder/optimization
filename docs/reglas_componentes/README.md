@@ -1,22 +1,25 @@
 # Cálculos y restricciones por componente con Python
 
 Fecha: 2026-09-21.
-Estado: plan de implementación; ninguna funcionalidad de este paquete está implementada.
+Estado: REG-001 implementado y verificado; REG-002 es la siguiente entrega.
 
 El usuario eligió Python con una API de modelado propia y delegó las respuestas
 restantes en las recomendaciones del asistente: «vamos con tu recomendación en
 todas las preguntas». Las decisiones y la granularidad siguientes se adoptan
 por esa delegación; no representan respuestas individuales a una entrevista
-completada. El alcance autorizado de esta entrega es documentación local.
+completada. El alcance original fue documentación local; posteriormente el usuario
+autorizó implementar la siguiente issue mediante TDD.
 
 - [Plan y decisiones](plan.md): alcance, contratos, integración y comprobaciones.
 - [Registro de issues](issues/tracker.md): orden, dependencias, historias y avances.
 - [Primer issue](issues/REG-001-probar-regla-python.md): guardar y probar una regla
   Python en un entorno aislado desde el contexto de una unidad hidráulica.
+- [Runtime y operación](runtime.md): configuración del worker, Docker Linux,
+  desarrollo Windows y verificación.
 
 Se aplicaron `grill-me`/`grilling` para identificar las decisiones y `to-issues`
 para dividirlas en entregas verticales. El destino solicitado es este directorio,
-no un tracker remoto. Todos los issues están en `Todo`; `AFK` indica que el plan
+no un tracker remoto. REG-001 está en `Done` y los restantes en `Todo`; `AFK` indica que el plan
 resuelve sus decisiones de producto y permite implementarlos sin otra entrevista,
 siempre que sus bloqueadores estén completados.
 
@@ -36,5 +39,5 @@ especifica las dependencias reales. Cada issue incluye su UI, API, persistencia,
 ejecución aplicable y pruebas de comportamiento. Permisos, aislamiento y snapshots
 son parte de las primeras entregas, no tareas pospuestas al cierre.
 
-Para comenzar, leer el plan y REG-001. No es necesario implementar todos los
+Para continuar, leer el plan y REG-002. No es necesario implementar todos los
 issues para obtener un primer resultado útil.
