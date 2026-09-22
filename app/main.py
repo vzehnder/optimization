@@ -5150,6 +5150,18 @@ def create_app(
                 "display_name": "Internal analyst",
                 "role": "analyst",
             }
+            from app.component_rules import RuleRepository
+            from app.rule_applications import active_applications, has_run_request, materialize_run
+            if active_applications(analyst_store, variant_id=variant_id) or has_run_request(analyst_store, variant_id, actor_user["id"], request_id):
+                run, created = materialize_run(
+                    RuleRepository(analyst_store),
+                    {"scenario_id": scenario_id, "variant_id": variant_id, "range_start": payload.range_start, "range_end": payload.range_end},
+                    actor_user, request_id, service.validate_text,
+                    expected_bindings_revision=payload.expected_bindings_revision,
+                )
+                if created:
+                    local_run_queue.enqueue(run["id"])
+                return run
             canonical = analyst_store.materialize_run_from_canonical_bindings(
                 scenario_id=scenario_id,
                 variant_id=variant_id,

@@ -183,6 +183,8 @@ function load_system_case(path::AbstractString)::SystemGraphData
         throw(ArgumentError("system_case JSON could not be parsed: $(sprint(showerror, error))"))
     end
 
+    validate_component_rules(document)
+
     system_case = SystemGraphData(
         required_string(document, "schema_version"),
         required_string(document, "case_name"),
@@ -254,6 +256,7 @@ function validate_system_case(system_case::SystemGraphData)::SystemGraphData
 end
 
 function validate_hydraulic_v3_system_case_document(document)::Dict{String,Any}
+    validate_component_rules(document)
     schema_version = required_string(document, "schema_version")
     if schema_version != SYSTEM_SCHEMA_VERSION_V3
         throw(ArgumentError("schema_version must be $(SYSTEM_SCHEMA_VERSION_V3); got $(schema_version)"))
@@ -469,6 +472,7 @@ function validate_hydraulic_v3_system_case_document(document)::Dict{String,Any}
             "units" => length(units),
             "required_time_series" => length(required_time_series),
         ),
+        "component_rule_versions" => [COMPONENT_RULE_VERSION],
     )
 end
 
@@ -1580,6 +1584,24 @@ function run_hydraulic_v3_system_case(
     @variable(model, hydro_power[1:n_units, 1:n_periods] >= 0)
     @variable(model, spill_flow[1:n_reservoirs, 1:n_periods] >= 0)
     @variable(model, storage[1:n_reservoirs, 1:n_periods])
+
+    if haskey(document, "component_rules")
+        rules = document["component_rules"]
+        object_units = Dict(object["id"] => findfirst(==(object["unit_key"]), unit_ids) for object in rules["objects"])
+        for row in rules["rows"]
+            expression = AffExpr(Float64(row["constant"]))
+            for term in row["terms"]
+                add_to_expression!(expression, Float64(term["coefficient"]), turbine_flow[object_units[term["object_id"]], term["period"] + 1])
+            end
+            if row["relation"] == "<="
+                @constraint(model, expression <= 0)
+            elseif row["relation"] == ">="
+                @constraint(model, expression >= 0)
+            else
+                @constraint(model, expression == 0)
+            end
+        end
+    end
 
     for unit_index in 1:n_units, period_index in 1:n_periods
         @constraint(model, turbine_flow[unit_index, period_index] >= unit_flow_min[unit_index])

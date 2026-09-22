@@ -424,6 +424,8 @@ class AnalystStore:
         self.database_backend, self.database_path, self.connection = connect_database(self.database_url)
         try:
             self._initialize_schema()
+            from app.component_rules import RuleRepository
+            RuleRepository(self)
         except Exception:
             self.close()
             raise
@@ -13629,6 +13631,16 @@ class AnalystStore:
             with self.connection.transaction():
                 yield
             return
+        if self.connection.in_transaction:
+            self.connection.execute("SAVEPOINT rule_materialization")
+            try:
+                yield
+            except Exception:
+                self.connection.execute("ROLLBACK TO SAVEPOINT rule_materialization")
+                raise
+            finally:
+                self.connection.execute("RELEASE SAVEPOINT rule_materialization")
+            return
         self.connection.execute("BEGIN IMMEDIATE")
         try:
             yield
@@ -13723,6 +13735,7 @@ class AnalystStore:
         actor_user: Mapping[str, Any],
         request_id: str,
         expected_bindings_revision: int | None = None,
+        prepare_only: bool = False,
     ) -> dict[str, Any] | None:
         """Create the immutable input snapshot and queued run in one transaction.
 
@@ -13730,6 +13743,9 @@ class AnalystStore:
         pre-cutover legacy materializer remains authoritative.
         """
 
+        if not prepare_only:
+            from app.rule_applications import guard_uncompiled_run
+            guard_uncompiled_run(self, variant_id=variant_id)
         with self._lock:
             with self._run_materialization_transaction():
                 self._canonical_binding_context(
@@ -14032,6 +14048,8 @@ class AnalystStore:
                     "actor": actor,
                     "request_id": request_id,
                 }
+                if prepare_only:
+                    return {"system_case": system_case, "generation_metadata": lineage_metadata}
                 fingerprint_payload = {
                     "system_case": system_case,
                     "lineage": lineage_metadata,
@@ -27254,7 +27272,8 @@ class AnalystStore:
         materialized_lineage: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         with self._lock:
-            self.get_scenario_version(scenario_version_id, include_document=False)
+            from app.rule_applications import guard_version_run
+            guard_version_run(self, self.get_scenario_version(scenario_version_id), trigger_type)
             created_at = utc_now_iso()
             cursor = self.connection.execute(
                 """
@@ -31140,6 +31159,9 @@ class AnalystStore:
 
         console = self.get_operator_console(console_id)
         location = self.get_operator_console_location(console_id)
+        from app.rule_applications import active_applications
+        if active_applications(self, scenario_id=int(location["scenario_id"])):
+            raise ValueError("El caso tiene reglas activas y requiere revisión del analista antes de ejecutar desde una consola.")
         materialized = self.materialize_system_case_for_variant(
             scenario_id=int(location["scenario_id"]),
             case_input_variant_id=int(console["owned_variant_id"]),
@@ -31917,6 +31939,7 @@ class AnalystStore:
         case_input_variant_id: int,
         range_start: str,
         range_end: str,
+        record_validation: bool = True,
     ) -> dict[str, Any]:
         scenario = self.get_scenario(scenario_id)
         base_system_case = self._generate_base_system_case_for_variant(scenario_id)
@@ -32002,7 +32025,8 @@ class AnalystStore:
                     "hash": matching["content_hash"],
                 }
             )
-        self._record_case_input_variant_validation(case_input_variant_id, dependencies)
+        if record_validation:
+            self._record_case_input_variant_validation(case_input_variant_id, dependencies)
 
         return {"system_case": system_case, "series_bindings": series_bindings}
 
@@ -32013,6 +32037,7 @@ class AnalystStore:
         case_input_variant_id: int,
         range_start: str,
         range_end: str,
+        record_validation: bool = True,
     ) -> dict[str, Any]:
         staleness = self.evaluate_case_input_variant_staleness(
             scenario_id=scenario_id, case_input_variant_id=case_input_variant_id
@@ -32024,6 +32049,7 @@ class AnalystStore:
             case_input_variant_id=case_input_variant_id,
             range_start=range_start,
             range_end=range_end,
+            record_validation=record_validation,
         )
 
     def validate_case_input_variant(

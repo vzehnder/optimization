@@ -1,0 +1,23 @@
+{
+  "schema_version": "bess_system_dispatch.v3",
+  "case_name": "reg002_four_periods",
+  "solver": {"name": "HiGHS", "options": {}},
+  "time_series": [
+    {"timestamp": "2026-01-01T00:00:00", "duration_hours": 1, "natural_inflow_m3s": {"reservoir": 0}},
+    {"timestamp": "2026-01-01T01:00:00", "duration_hours": 1, "natural_inflow_m3s": {"reservoir": 0}},
+    {"timestamp": "2026-01-01T02:00:00", "duration_hours": 1, "natural_inflow_m3s": {"reservoir": 0}},
+    {"timestamp": "2026-01-01T03:00:00", "duration_hours": 1, "natural_inflow_m3s": {"reservoir": 0}}
+  ],
+  "hydraulic_network": {
+    "nodes": [
+      {"id": "reservoir", "type": "reservoir", "reservoir": {"storage_min_hm3": 0, "storage_max_hm3": 20, "initial_storage_hm3": 10, "terminal_condition": "none"}, "curves": {"storage_elevation": [{"storage_hm3": 0, "elevation_masl": 700}, {"storage_hm3": 20, "elevation_masl": 750}]}},
+      {"id": "intake", "type": "junction"},
+      {"id": "tailrace", "type": "junction"}
+    ],
+    "reaches": [{"id": "reach", "from_node": "reservoir", "to_node": "intake", "type": "river", "routing_method": "none", "travel_time_hours": 0}],
+    "plants": [{"id": "plant", "non_modeled": false, "units": ["unit"], "max_power_mw": 30}],
+    "units": [{"id": "unit", "plant_id": "plant", "intake_node": "intake", "discharge_node": "tailrace", "min_flow_m3s": 0, "max_flow_m3s": 40, "max_power_mw": 30, "curves": {"flow_power": [{"flow_m3s": 0, "power_mw": 0}, {"flow_m3s": 40, "power_mw": 30}]}}],
+    "curves": [],
+    "required_time_series": []
+  }
+}

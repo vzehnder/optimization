@@ -10,6 +10,123 @@ function json(data: unknown, status = 200) {
   });
 }
 
+it("publishes, previews and applies a flow restriction to the selected variant", async () => {
+  window.history.replaceState(
+    {},
+    "",
+    "/react/projects/1/linkable-objects/7/rules?rule=r1&scenario_id=4",
+  );
+  let applied = false;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input), "http://localhost").pathname;
+      if (path === "/api/auth/me")
+        return json({
+          user: { id: 3, role: "analyst", is_active: true },
+          bootstrap_required: false,
+        });
+      if (path === "/api/auth/csrf") return json({ csrf_token: "test" });
+      if (path.endsWith("/rules"))
+        return json({
+          object: { display_name: "Unidad" },
+          items: [{ id: "r1", name: "Máximo", revision: 1 }],
+          runtime: { sdk: "reg-002.1" },
+        });
+      if (path.endsWith("/rules/scope"))
+        return json({
+          variants: [{ id: 2, display_name: "Invierno" }],
+          range_start: "2026-01-01T00:00:00",
+          range_end: "2026-01-01T04:00:00",
+        });
+      if (path.endsWith("/rules/r1"))
+        return json({
+          id: "r1",
+          name: "Máximo",
+          revision: 1,
+          code: "def construir(ctx): pass",
+          parameters: [],
+        });
+      if (path.endsWith("/publications"))
+        return json({ id: "pub1", draft_revision: 1 }, 201);
+      if (path.endsWith("/tests")) return json({ id: "job1" }, 202);
+      if (path.endsWith("/tests/job1"))
+        return json({
+          id: "job1",
+          status: "succeeded",
+          publication_id: "pub1",
+          compilation_scope: {
+            scenario_id: 4,
+            variant_id: 2,
+            range_start: "2026-01-01T00:00:00",
+            range_end: "2026-01-01T04:00:00",
+          },
+          result: {
+            ir: {
+              rows: [
+                {
+                  name: "maximo",
+                  line: 3,
+                  period: 0,
+                  relation: "<=",
+                  constant: -5,
+                  unit: "m3_per_s",
+                  terms: [{ coefficient: 1 }],
+                },
+              ],
+            },
+          },
+        });
+      if (path.endsWith("/applications")) {
+        if (init?.method === "POST") {
+          applied = true;
+          return json(
+            {
+              id: "a1",
+              status: "active",
+              variant_id: 2,
+              publication_id: "pub1",
+              revision: 1,
+            },
+            201,
+          );
+        }
+        return json({
+          items: applied
+            ? [
+                {
+                  id: "a1",
+                  status: "active",
+                  variant_id: 2,
+                  publication_id: "pub1",
+                  revision: 1,
+                },
+              ]
+            : [],
+        });
+      }
+      return json({ detail: path }, 404);
+    }),
+  );
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(
+    await screen.findByRole("button", { name: "Publicar revisión" }),
+  );
+  await user.click(
+    await screen.findByRole("button", { name: "Probar restricciones" }),
+  );
+  expect(await screen.findByText("maximo")).toBeVisible();
+  expect(screen.getByText(/1 restricción/)).toBeVisible();
+  expect(applied).toBe(false);
+  await user.type(
+    screen.getByLabelText("Motivo de aplicación o desactivación"),
+    "Límite operativo",
+  );
+  await user.click(screen.getByRole("button", { name: "Aplicar a variante" }));
+  expect(await screen.findByText(/Revisión pub1 aplicada/)).toBeVisible();
+});
+
 it.each([
   {
     status: "succeeded",

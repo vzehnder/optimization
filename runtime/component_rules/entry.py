@@ -7,8 +7,10 @@ import sys
 import traceback
 from dataclasses import dataclass
 from types import MappingProxyType
+sys.path.insert(0, "/runtime")
+from symbolic import Flow, collector
 
-SDK = "reg-001.1"
+SDK = "reg-002.1"
 
 
 class LogLimit(ValueError):
@@ -25,6 +27,9 @@ class Quantity:
             raise ValueError("La cantidad debe ser finita")
 
     def __mul__(self, other):
+        from symbolic import Affine
+        if isinstance(other, Affine):
+            return other * self
         if isinstance(other, (int, float)):
             return Quantity(self.value * other, self.unit)
         if isinstance(other, Quantity) and other.unit == "dimensionless":
@@ -34,6 +39,65 @@ class Quantity:
         raise ValueError("Producto dimensional no admitido en esta capacidad")
 
     __rmul__ = __mul__
+
+    def __neg__(self):
+        return Quantity(-self.value, self.unit)
+
+    def compatible_value(self, other):
+        if isinstance(other, Quantity) and other.unit == self.unit:
+            return other.value
+        if self.unit == "dimensionless" and type(other) in (int, float):
+            return other
+        raise ValueError("Las cantidades requieren unidades compatibles")
+
+    def __add__(self, other):
+        from symbolic import Affine
+        if isinstance(other, Affine):
+            return other + self
+        return Quantity(self.value + self.compatible_value(other), self.unit)
+
+    __radd__ = __add__
+
+    def __sub__(self, other):
+        from symbolic import Affine
+        if isinstance(other, Affine):
+            return Affine.lift(self) - other
+        return Quantity(self.value - self.compatible_value(other), self.unit)
+
+    def __truediv__(self, other):
+        if isinstance(other, Quantity):
+            if other.unit == self.unit:
+                return Quantity(self.value / other.value, "dimensionless")
+            if other.unit == "dimensionless":
+                return Quantity(self.value / other.value, self.unit)
+        if type(other) in (int, float):
+            return Quantity(self.value / other, self.unit)
+        raise ValueError("Divisor dimensional incompatible")
+
+    def __lt__(self, other):
+        return self.value < self.compatible_value(other)
+
+    def __gt__(self, other):
+        return self.value > self.compatible_value(other)
+
+    def __le__(self, other):
+        from symbolic import Affine
+        return other >= self if isinstance(other, Affine) else self.value <= self.compatible_value(other)
+
+    def __ge__(self, other):
+        from symbolic import Affine
+        return other <= self if isinstance(other, Affine) else self.value >= self.compatible_value(other)
+
+    def __bool__(self):
+        return bool(self.value)
+
+    def __float__(self):
+        if self.unit != "dimensionless":
+            raise ValueError("No se pueden eliminar unidades de una cantidad dimensional")
+        return float(self.value)
+
+    def __int__(self):
+        return int(float(self))
 
 
 class FrozenContext:
@@ -65,7 +129,17 @@ def main(payload):
         p["name"]: p["value"] if p["type"] == "boolean" else Quantity(p["value"], p["unit"])
         for p in payload["parameters"]
     }
-    ctx = FrozenContext({"parametros": FrozenContext(parameters), "objeto": FrozenContext(payload["object"])})
+    rows = []
+    obj = dict(payload["object"])
+    values = {"parametros": FrozenContext(parameters)}
+    if "grid" in payload:
+        count = len(payload["grid"])
+        if not 1 <= count <= 8784:
+            raise ValueError("Cuota de períodos excedida")
+        obj["caudal"] = Flow(obj["id"], count)
+        values.update(periodos=tuple(range(count)), restriccion=collector(rows, count))
+    values["objeto"] = FrozenContext(obj)
+    ctx = FrozenContext(values)
     tree = ast.parse(payload["code"], filename="regla.py")
     for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom, ast.Global, ast.Nonlocal, ast.ClassDef)):
@@ -83,6 +157,10 @@ def main(payload):
                                 "int": int, "bool": bool, "print": limited_print}}
     exec(compile(tree, "regla.py", "exec"), namespace)
     result = namespace["construir"](ctx)
+    if "grid" in payload:
+        if result is not None:
+            raise ValueError("Usa ctx.restriccion para emitir filas; no retornes un valor")
+        return {"status": "succeeded", "ir": {"version": "affine_flow.v1", "rows": rows}, "logs": "".join(logs)}
     if not isinstance(result, Quantity) or result.unit != "m3_per_s" or not math.isfinite(result.value):
         raise ValueError("El resultado debe ser un caudal finito con unidad m3_per_s")
     return {"status": "succeeded", "output": {"value": result.value, "unit": result.unit}, "logs": "".join(logs)}

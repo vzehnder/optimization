@@ -2556,3 +2556,41 @@ button:focus-visible {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
+
+.rule-applications {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  padding-top: 1.5rem;
+  border-top: 1px solid #dbe2ea;
+}
+
+.rule-applications fieldset {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid #b8c4d2;
+  border-radius: 0.5rem;
+}
+
+.rule-applications .table-scroll {
+  overflow-x: auto;
+}
+
+.rule-applications table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.rule-applications th,
+.rule-applications td {
+  padding: 0.6rem;
+  text-align: left;
+  border-bottom: 1px solid #dbe2ea;
+}
+
+.rule-applications input[type="checkbox"] {
+  width: auto;
+  justify-self: start;
+}

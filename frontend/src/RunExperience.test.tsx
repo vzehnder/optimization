@@ -139,6 +139,36 @@ function serveResults(
 }
 
 describe("results experience", () => {
+  it("identifies the frozen rule revision and effective parameters used by a run", async () => {
+    window.history.replaceState({}, "", "/react/runs/99");
+    serveResults((path) =>
+      path === "/api/scenario-versions/41"
+        ? Response.json({
+            scenario_version: {
+              ...version,
+              system_case_json: {
+                component_rules: {
+                  applications: [
+                    {
+                      id: "a1",
+                      name: "Máximo operativo",
+                      publication_id: "revision-5",
+                      parameters: [
+                        { name: "limite", value: 5, unit: "m3_per_s" },
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          })
+        : undefined,
+    );
+    render(<App />);
+    expect(await screen.findByText("Máximo operativo")).toBeVisible();
+    expect(screen.getByText("revision-5")).toBeVisible();
+    expect(screen.getByText("limite: 5 m³/s")).toBeVisible();
+  });
   it("keeps comparison and artifact access when a successful execution has no result sections", async () => {
     window.history.replaceState({}, "", "/react/runs/99");
     serveResults((path) =>

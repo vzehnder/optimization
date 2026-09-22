@@ -9,7 +9,7 @@ import subprocess
 import threading
 import time
 
-SDK_VERSION = "reg-001.1"
+SDK_VERSION = "reg-002.1"
 POLICY_VERSION = "reg-001.1"
 
 
@@ -126,13 +126,18 @@ class OCIExecutor:
                 if runtime["sdk"] != SDK_VERSION or not re.fullmatch(r"3\.12\.\d+", runtime["python"]):
                     raise ValueError()
                 if result["status"] == "succeeded":
-                    value = result["output"]
-                    if value["unit"] != "m3_per_s" or type(value["value"]) not in {int, float} or not math.isfinite(value["value"]):
-                        raise ValueError()
+                    if "grid" in payload:
+                        from app.rule_ir import validate_ir
+                        value = {"ir": validate_ir(result["ir"], payload["object"]["id"], len(payload["grid"]))}
+                    else:
+                        output_value = result["output"]
+                        if output_value["unit"] != "m3_per_s" or type(output_value["value"]) not in {int, float} or not math.isfinite(output_value["value"]):
+                            raise ValueError()
+                        value = {"output": output_value}
                     logs = result.get("logs", "")
                     if not isinstance(logs, str) or len(logs.encode()) > 65536:
                         raise ValueError()
-                    return {"status": "succeeded", "output": value, "logs": logs, "runtime": {**runtime, "image": self.image, "policy": POLICY_VERSION}}
+                    return {"status": "succeeded", **value, "logs": logs, "runtime": {**runtime, "image": self.image, "policy": POLICY_VERSION}}
                 error = result["error"]
                 code = error.get("code") if error.get("code") in {"RULE_LOG_LIMIT", "RULE_CODE_ERROR"} else "RULE_CODE_ERROR"
                 return {"status": "failed", "error": {"code": code, "message": str(error["message"])[:1000],

@@ -4,6 +4,7 @@ import json
 import math
 from datetime import datetime, timedelta
 from typing import Any, Iterable, Protocol
+from fastapi import HTTPException
 
 from app.draft_editor import DraftGenerationError
 from app.input_variants import InputVariantRangeError
@@ -166,6 +167,9 @@ def execute_fixed_range_schedule(
     )
 
     try:
+        from app.rule_applications import active_applications
+        if active_applications(store, variant_id=int(schedule["case_input_variant_id"])):
+            raise ValueError("Las programaciones con reglas activas requieren soporte de REG-014")
         variant = store.get_case_input_variant_for_case(
             int(schedule["case_id"]), int(schedule["case_input_variant_id"])
         )
@@ -215,6 +219,7 @@ def execute_fixed_range_schedule(
         MissingRequiredSignalsError,
         VariantStaleError,
         ValueError,
+        HTTPException,
     ) as error:
         tick = store.mark_run_schedule_tick_failed(
             tick["id"],

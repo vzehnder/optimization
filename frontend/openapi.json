@@ -2922,6 +2922,56 @@
         "title": "ResultCleanupRequest",
         "type": "object"
       },
+      "RuleApplyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "accept_empty": {
+            "default": false,
+            "title": "Accept Empty",
+            "type": "boolean"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "reason"
+        ],
+        "title": "RuleApplyRequest",
+        "type": "object"
+      },
+      "RuleDeactivateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "reason"
+        ],
+        "title": "RuleDeactivateRequest",
+        "type": "object"
+      },
       "RuleDraftRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3025,6 +3075,39 @@
         "title": "RuleParameter",
         "type": "object"
       },
+      "RuleScope": {
+        "additionalProperties": false,
+        "properties": {
+          "range_end": {
+            "maxLength": 64,
+            "title": "Range End",
+            "type": "string"
+          },
+          "range_start": {
+            "maxLength": 64,
+            "title": "Range Start",
+            "type": "string"
+          },
+          "scenario_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Scenario Id",
+            "type": "integer"
+          },
+          "variant_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Variant Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scenario_id",
+          "variant_id",
+          "range_start",
+          "range_end"
+        ],
+        "title": "RuleScope",
+        "type": "object"
+      },
       "RuleTestRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3032,6 +3115,27 @@
             "minimum": 1.0,
             "title": "Expected Revision",
             "type": "integer"
+          },
+          "publication_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publication Id"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuleScope"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -7734,6 +7838,64 @@
         ]
       }
     },
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/scope": {
+      "get": {
+        "operationId": "get_rule_scope_api_projects__project_id__linkable_objects__object_id__rules_scope_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Rule Scope",
+        "tags": [
+          "component-rules"
+        ]
+      }
+    },
     "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}": {
       "get": {
         "operationId": "get_rule_api_projects__project_id__linkable_objects__object_id__rules__rule_id__get",
@@ -7853,6 +8015,342 @@
           }
         },
         "summary": "Update Rule",
+        "tags": [
+          "component-rules"
+        ]
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/applications": {
+      "get": {
+        "operationId": "get_applications_api_projects__project_id__linkable_objects__object_id__rules__rule_id__applications_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Applications",
+        "tags": [
+          "component-rules"
+        ]
+      },
+      "post": {
+        "operationId": "apply_rule_api_projects__project_id__linkable_objects__object_id__rules__rule_id__applications_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Rule",
+        "tags": [
+          "component-rules"
+        ]
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/applications/{application_id}/deactivate": {
+      "post": {
+        "operationId": "deactivate_rule_api_projects__project_id__linkable_objects__object_id__rules__rule_id__applications__application_id__deactivate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleDeactivateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Deactivate Rule",
+        "tags": [
+          "component-rules"
+        ]
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/publications": {
+      "post": {
+        "operationId": "publish_rule_api_projects__project_id__linkable_objects__object_id__rules__rule_id__publications_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Publish Rule",
+        "tags": [
+          "component-rules"
+        ]
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/publications/{publication_id}": {
+      "get": {
+        "operationId": "get_publication_api_projects__project_id__linkable_objects__object_id__rules__rule_id__publications__publication_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "publication_id",
+            "required": true,
+            "schema": {
+              "title": "Publication Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Publication",
         "tags": [
           "component-rules"
         ]

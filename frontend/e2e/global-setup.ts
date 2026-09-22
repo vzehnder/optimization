@@ -59,7 +59,14 @@ async function waitForServer(server: ChildProcess): Promise<void> {
 export default async function globalSetup() {
   const server = spawn(
     pythonExecutable(),
-    [resolve(repoRoot, "scripts/run_react_smoke_app.py")],
+    [
+      resolve(
+        repoRoot,
+        process.env.RULE_ACCEPTANCE_SERVER
+          ? "scripts/run_rule_acceptance_app.py"
+          : "scripts/run_react_smoke_app.py",
+      ),
+    ],
     {
       cwd: repoRoot,
       env: {

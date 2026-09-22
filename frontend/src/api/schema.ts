@@ -1065,6 +1065,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/scope": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Rule Scope */
+        get: operations["get_rule_scope_api_projects__project_id__linkable_objects__object_id__rules_scope_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}": {
         parameters: {
             query?: never;
@@ -1076,6 +1093,75 @@ export interface paths {
         get: operations["get_rule_api_projects__project_id__linkable_objects__object_id__rules__rule_id__get"];
         /** Update Rule */
         put: operations["update_rule_api_projects__project_id__linkable_objects__object_id__rules__rule_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/applications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Applications */
+        get: operations["get_applications_api_projects__project_id__linkable_objects__object_id__rules__rule_id__applications_get"];
+        put?: never;
+        /** Apply Rule */
+        post: operations["apply_rule_api_projects__project_id__linkable_objects__object_id__rules__rule_id__applications_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/applications/{application_id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Deactivate Rule */
+        post: operations["deactivate_rule_api_projects__project_id__linkable_objects__object_id__rules__rule_id__applications__application_id__deactivate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/publications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish Rule */
+        post: operations["publish_rule_api_projects__project_id__linkable_objects__object_id__rules__rule_id__publications_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/publications/{publication_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Publication */
+        get: operations["get_publication_api_projects__project_id__linkable_objects__object_id__rules__rule_id__publications__publication_id__get"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -3682,6 +3768,25 @@ export interface components {
             /** Targets */
             targets?: string[];
         };
+        /** RuleApplyRequest */
+        RuleApplyRequest: {
+            /**
+             * Accept Empty
+             * @default false
+             */
+            accept_empty: boolean;
+            /** Job Id */
+            job_id: string;
+            /** Reason */
+            reason: string;
+        };
+        /** RuleDeactivateRequest */
+        RuleDeactivateRequest: {
+            /** Expected Revision */
+            expected_revision: number;
+            /** Reason */
+            reason: string;
+        };
         /** RuleDraftRequest */
         RuleDraftRequest: {
             /** Code */
@@ -3711,10 +3816,24 @@ export interface components {
             /** Value */
             value: number | boolean;
         };
+        /** RuleScope */
+        RuleScope: {
+            /** Range End */
+            range_end: string;
+            /** Range Start */
+            range_start: string;
+            /** Scenario Id */
+            scenario_id: number;
+            /** Variant Id */
+            variant_id: number;
+        };
         /** RuleTestRequest */
         RuleTestRequest: {
             /** Expected Revision */
             expected_revision: number;
+            /** Publication Id */
+            publication_id?: string | null;
+            scope?: components["schemas"]["RuleScope"] | null;
         };
         /** RunDueSchedulesRequest */
         RunDueSchedulesRequest: {
@@ -6514,6 +6633,40 @@ export interface operations {
             };
         };
     };
+    get_rule_scope_api_projects__project_id__linkable_objects__object_id__rules_scope_get: {
+        parameters: {
+            query: {
+                scenario_id: number;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+                object_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_rule_api_projects__project_id__linkable_objects__object_id__rules__rule_id__get: {
         parameters: {
             query?: never;
@@ -6563,6 +6716,185 @@ export interface operations {
                 "application/json": components["schemas"]["RuleDraftRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_applications_api_projects__project_id__linkable_objects__object_id__rules__rule_id__applications_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                object_id: number;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_rule_api_projects__project_id__linkable_objects__object_id__rules__rule_id__applications_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                object_id: number;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuleApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deactivate_rule_api_projects__project_id__linkable_objects__object_id__rules__rule_id__applications__application_id__deactivate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                object_id: number;
+                rule_id: string;
+                application_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuleDeactivateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_rule_api_projects__project_id__linkable_objects__object_id__rules__rule_id__publications_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                object_id: number;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuleTestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_publication_api_projects__project_id__linkable_objects__object_id__rules__rule_id__publications__publication_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                object_id: number;
+                rule_id: string;
+                publication_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

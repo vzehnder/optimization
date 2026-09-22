@@ -14,6 +14,7 @@ import {
 } from "react-router-dom";
 import { getCsrfToken, requestJson } from "./api/client";
 import { safeReturnPath } from "./journeyRoutes";
+import { RuleApplications } from "./RuleApplications";
 
 export interface RuleParameter {
   name: string;
@@ -91,6 +92,9 @@ function PythonEditor({
               completeFromList([
                 { label: "ctx.parametros", type: "property" },
                 { label: "ctx.objeto", type: "property" },
+                { label: "ctx.objeto.caudal", type: "property" },
+                { label: "ctx.periodos", type: "property" },
+                { label: "ctx.restriccion", type: "function" },
                 { label: "construir", type: "function" },
                 { label: "range", type: "function" },
               ]),
@@ -167,8 +171,8 @@ function RulesContent() {
     <section className="content-panel rules-surface">
       <h1>Cálculos y restricciones</h1>
       <p>
-        Las pruebas no modifican corridas ni series. Este borrador todavía no se
-        aplica a la optimización.
+        Las pruebas no modifican corridas ni series. Para incorporar
+        restricciones, publica, prueba y aplica una revisión a la variante.
       </p>
       {returnTo && <Link to={returnTo}>Volver a la unidad</Link>}
       {list.data && (
@@ -281,9 +285,18 @@ function RuleForm({
         />
       </label>
       <p>
-        Define <code>construir(ctx)</code> y devuelve una cantidad en m³/s. El
-        contexto y los parámetros conservan sus unidades.
+        Define <code>construir(ctx)</code>. Para un cálculo numérico, devuelve
+        una cantidad en m³/s. Para restringir caudal, recorre{" "}
+        <code>ctx.periodos</code>y emite filas con <code>ctx.restriccion</code>.
       </p>
+      <details>
+        <summary>Ejemplo de máximo de caudal</summary>
+        <pre>
+          {
+            'def construir(ctx):\n    for t in ctx.periodos:\n        ctx.restriccion("maximo", t, ctx.objeto.caudal[t] <= ctx.parametros.capacidad * ctx.parametros.disponibilidad)'
+          }
+        </pre>
+      </details>
       <PythonEditor
         initialCode={initial?.code ?? DEFAULT_CODE}
         onChange={setCode}
@@ -416,6 +429,15 @@ function RuleForm({
         saved={saved}
         disabled={dirty || busy || !available}
       />
+      {saved && (
+        <RuleApplications
+          root={root}
+          ruleId={saved.id}
+          revision={saved.revision}
+          disabled={dirty || busy}
+          available={available}
+        />
+      )}
       {error && <p role="alert">{error}</p>}
     </div>
   );

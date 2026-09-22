@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.linkable_objects import LinkableObjectError
 
@@ -50,9 +50,38 @@ class RuleDraftRequest(BaseModel):
     expected_revision: int = Field(ge=0)
 
 
+class RuleScope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    scenario_id: int = Field(gt=0)
+    variant_id: int = Field(gt=0)
+    range_start: str = Field(max_length=64)
+    range_end: str = Field(max_length=64)
+
+    @field_validator("range_start", "range_end")
+    @classmethod
+    def valid_instant(cls, value):
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return value
+
+
 class RuleTestRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expected_revision: int = Field(ge=1)
+    publication_id: str | None = None
+    scope: RuleScope | None = None
+
+
+class RuleApplyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    job_id: str
+    reason: str = Field(min_length=1, max_length=1000, pattern=r"\S")
+    accept_empty: bool = False
+
+
+class RuleDeactivateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=1)
+    reason: str = Field(min_length=1, max_length=1000, pattern=r"\S")
 
 
 class RuleRepository:
@@ -104,6 +133,48 @@ class RuleRepository:
                 )
             """)
             store.connection.execute("CREATE INDEX IF NOT EXISTS component_rule_jobs_queue ON component_rule_jobs(status, queued_at)")
+            store.connection.execute("""
+                CREATE TABLE IF NOT EXISTS component_rule_publications (
+                    id TEXT PRIMARY KEY,
+                    rule_id TEXT NOT NULL REFERENCES component_rule_drafts(id),
+                    draft_revision INTEGER NOT NULL,
+                    document TEXT NOT NULL,
+                    created_by INTEGER NOT NULL REFERENCES users(id),
+                    created_at TEXT NOT NULL,
+                    UNIQUE (rule_id, draft_revision)
+                )
+            """)
+        from app.rule_applications import initialize
+        initialize(store)
+
+    def publication(self, rule_id, publication_id):
+        row = self.store.connection.execute(
+            "SELECT * FROM component_rule_publications WHERE id = ? AND rule_id = ?", (publication_id, rule_id),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, "Revisión publicada no encontrada")
+        result = dict(row)
+        result.update(json.loads(result.pop("document")))
+        return {**result, "status": "published"}
+
+    def publish(self, rule_id, project_id, object_id, expected_revision, actor):
+        from app.rule_runtime import SDK_VERSION
+        with self.store._lock, self.store._database_transaction():
+            self.store.connection.execute("UPDATE component_rule_drafts SET revision = revision WHERE id = ?", (rule_id,))
+            draft = self.get(rule_id, project_id, object_id)
+            if draft["revision"] != expected_revision:
+                raise HTTPException(409, "El borrador cambió. Recarga antes de publicar.")
+            previous = self.store.connection.execute(
+                "SELECT id FROM component_rule_publications WHERE rule_id = ? AND draft_revision = ?", (rule_id, expected_revision),
+            ).fetchone()
+            if previous:
+                return self.publication(rule_id, previous["id"])
+            identity = uuid.uuid4().hex
+            document = {key: draft[key] for key in ("code", "parameters", "name", "code_hash")}
+            document["sdk"] = SDK_VERSION
+            self.store.connection.execute("INSERT INTO component_rule_publications VALUES (?, ?, ?, ?, ?, ?)",
+                                          (identity, rule_id, expected_revision, encode(document), actor, timestamp()))
+            return self.publication(rule_id, identity)
 
     def runtime(self):
         with self.store._lock:
@@ -112,9 +183,20 @@ class RuleRepository:
             return None
         return json.loads(row["runtime"])
 
-    def enqueue(self, rule_id, project_id, object_id, expected_revision, actor, obj):
+    def enqueue(self, rule_id, project_id, object_id, expected_revision, actor, obj, *, publication_id=None, scope=None):
         if not project_enabled(project_id):
             raise HTTPException(503, {"code": "RULE_PROJECT_DISABLED", "message": "Las pruebas están deshabilitadas en este proyecto"})
+        compilation = None
+        if scope is not None:
+            from app.rule_applications import compile_context
+            try:
+                compilation = compile_context(self.store, project_id, object_id, scope)
+            except KeyError as error:
+                raise HTTPException(404, "Contexto de regla no encontrado") from error
+            except ValueError as error:
+                raise HTTPException(422, str(error)) from error
+        if bool(publication_id) != bool(compilation):
+            raise HTTPException(422, "Selecciona revisión publicada y variante para probar restricciones")
         with self.store._lock, self.store._database_transaction():
             self.store.connection.execute("UPDATE component_rule_worker SET heartbeat = heartbeat WHERE id = 1")
             runtime = self.runtime()
@@ -123,6 +205,10 @@ class RuleRepository:
             draft = self.get(rule_id, project_id, object_id)
             if draft["revision"] != expected_revision:
                 raise HTTPException(409, "El borrador cambió. Guarda o recarga antes de probar.")
+            if publication_id:
+                draft = self.publication(rule_id, publication_id)
+                if draft["sdk"] != runtime["sdk"]:
+                    raise HTTPException(409, "La revisión publicada usa otro SDK; vuelve a publicar")
             active = self.store.connection.execute(
                 "SELECT actor, status FROM component_rule_jobs WHERE status IN ('queued', 'running')"
             ).fetchall()
@@ -131,6 +217,10 @@ class RuleRepository:
             job_id = uuid.uuid4().hex
             context = {"object": {"id": object_id, "key": obj["object_key"], "project_id": project_id},
                        "parameters": draft["parameters"], "runtime": runtime}
+            if compilation:
+                from app.rule_applications import latest_publication
+                context.update(compilation=compilation, grid=compilation["grid"], publication_id=publication_id)
+                context["publication_head"] = latest_publication(self.store, rule_id)
             payload = {"code": draft["code"], **context}
             self.store.connection.execute(
                 "INSERT INTO component_rule_snapshots VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -154,7 +244,11 @@ class RuleRepository:
             raise HTTPException(404, "Prueba no encontrada")
         result = dict(row)
         result.pop("worker_owner")
-        result["runtime"] = json.loads(result.pop("payload"))["runtime"]
+        payload = json.loads(result.pop("payload"))
+        result["runtime"] = payload["runtime"]
+        if "compilation" in payload:
+            result["compilation_scope"] = payload["compilation"]["scope"]
+            result["publication_id"] = payload["publication_id"]
         result["result"] = json.loads(result["result"]) if result["result"] else None
         if result["result"] is not None:
             result["result"]["runtime"] = {**result["runtime"], **result["result"].get("runtime", {})}
@@ -258,6 +352,29 @@ def rule_router(store):
                 "runtime": repository.runtime() if project_enabled(project_id) else None,
                 "enabled": project_enabled(project_id)}
 
+    @router.get("/scope")
+    def get_rule_scope(project_id: int, object_id: int, scenario_id: int, request: Request):
+        from app.rule_applications import instant
+        from datetime import timedelta
+        context(request, project_id, object_id)
+        try:
+            scenario = store.get_scenario(scenario_id)
+            if scenario["project_id"] != project_id:
+                raise HTTPException(404, "Escenario fuera del proyecto")
+            case = store.get_or_create_case_for_scenario(scenario_id)
+            store.get_or_create_default_input_variant(case["id"])
+            variants = store.list_case_input_variants(case["id"])
+            result = {"variants": variants, "range_start": "", "range_end": ""}
+            periods = store.generate_hydraulic_v3_preview(scenario_id)["time_series"]
+            if periods:
+                result["range_start"] = periods[0]["timestamp"]
+                result["range_end"] = (instant(periods[-1]["timestamp"]) + timedelta(hours=periods[-1]["duration_hours"])).replace(tzinfo=None).isoformat()
+            return result
+        except KeyError:
+            raise HTTPException(404, "Contexto del escenario no encontrado") from None
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+
     @router.get("/{rule_id}")
     def get_rule(project_id: int, object_id: int, rule_id: str, request: Request):
         context(request, project_id, object_id)
@@ -271,7 +388,39 @@ def rule_router(store):
     @router.post("/{rule_id}/tests", status_code=202)
     def start_test(project_id: int, object_id: int, rule_id: str, body: RuleTestRequest, request: Request):
         user, obj = context(request, project_id, object_id)
-        return repository.enqueue(rule_id, project_id, object_id, body.expected_revision, user["id"], obj)
+        return repository.enqueue(rule_id, project_id, object_id, body.expected_revision, user["id"], obj,
+                                  publication_id=body.publication_id, scope=body.scope.model_dump() if body.scope else None)
+
+    @router.post("/{rule_id}/applications", status_code=201)
+    def apply_rule(project_id: int, object_id: int, rule_id: str, body: RuleApplyRequest, request: Request):
+        from app.rule_applications import apply
+        user, _ = context(request, project_id, object_id)
+        return apply(repository, rule_id, project_id, object_id, body, user["id"])
+
+    @router.get("/{rule_id}/applications")
+    def get_applications(project_id: int, object_id: int, rule_id: str, request: Request):
+        from app.rule_applications import list_applications
+        context(request, project_id, object_id)
+        repository.get(rule_id, project_id, object_id)
+        return {"items": list_applications(repository, rule_id)}
+
+    @router.post("/{rule_id}/applications/{application_id}/deactivate")
+    def deactivate_rule(project_id: int, object_id: int, rule_id: str, application_id: str, body: RuleDeactivateRequest, request: Request):
+        from app.rule_applications import deactivate
+        user, _ = context(request, project_id, object_id)
+        repository.get(rule_id, project_id, object_id)
+        return deactivate(repository, rule_id, application_id, body, user["id"])
+
+    @router.post("/{rule_id}/publications", status_code=201)
+    def publish_rule(project_id: int, object_id: int, rule_id: str, body: RuleTestRequest, request: Request):
+        user, _ = context(request, project_id, object_id)
+        return repository.publish(rule_id, project_id, object_id, body.expected_revision, user["id"])
+
+    @router.get("/{rule_id}/publications/{publication_id}")
+    def get_publication(project_id: int, object_id: int, rule_id: str, publication_id: str, request: Request):
+        context(request, project_id, object_id)
+        repository.get(rule_id, project_id, object_id)
+        return repository.publication(rule_id, publication_id)
 
     @router.get("/{rule_id}/tests/{job_id}")
     def get_test(project_id: int, object_id: int, rule_id: str, job_id: str, request: Request):

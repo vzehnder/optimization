@@ -163,6 +163,7 @@ import {
   PortalPublicationReport,
 } from "./PortalResults";
 import { RunArtifactsSection, RunResultsSection } from "./RunResults";
+import { RunRuleSummary } from "./RuleApplications";
 import {
   findSuggestedCatalogColumn,
   isRecord,
@@ -10782,6 +10783,7 @@ export function RunDetailView() {
             Reintentando consulta de la ejecución.
           </p>
         ) : null}
+        <RunRuleSummary document={version.data?.system_case_json} />
         {runData.status === "failed" ? (
           <section
             className="workspace-section"

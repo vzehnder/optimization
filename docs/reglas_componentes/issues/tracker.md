@@ -2,7 +2,7 @@
 
 Fecha de creación: 2026-09-21.
 Fuente normativa de este paquete: [plan](../plan.md).
-Estado: REG-001 implementado y verificado; siguiente issue disponible: REG-002.
+Estado: REG-001 y REG-002 implementados y verificados; siguiente issue disponible: REG-003.
 
 ## Vocabulario y reglas de trabajo
 
@@ -28,7 +28,7 @@ de aislamiento, permisos, snapshots y capacidades se exigen desde su primer uso.
 | Orden | Issue | Type | Status | Bloqueado por | Historias |
 | --- | --- | --- | --- | --- | --- |
 | 1 | [REG-001: Guardar y probar Python](REG-001-probar-regla-python.md) | AFK | Done | Ninguno | HU-01 |
-| 2 | [REG-002: Aplicar máximo de caudal](REG-002-aplicar-limite-caudal.md) | AFK | Todo | REG-001 | HU-01, HU-02, HU-09 |
+| 2 | [REG-002: Aplicar máximo de caudal](REG-002-aplicar-limite-caudal.md) | AFK | Done | REG-001 | HU-01, HU-02, HU-09 |
 | 3 | [REG-003: Límites horarios desde series](REG-003-limites-horarios-series.md) | AFK | Todo | REG-002 | HU-03, HU-09 |
 | 4 | [REG-004: Relacionar objetos hidráulicos](REG-004-relacionar-componentes-hidraulicos.md) | AFK | Todo | REG-003 | HU-04 |
 | 5 | [REG-005: Rampas y períodos anteriores](REG-005-rampas-y-periodos.md) | AFK | Todo | REG-004 | HU-05 |
@@ -84,3 +84,4 @@ proyectos reales. No alterar ni cerrar issues previos de TS-6/TS-7 por completar
 | --- | --- | --- |
 | 2026-09-21 | Creado el plan y REG-001 a REG-014 en estado Todo | Opción 3 elegida por el usuario y autorización para adoptar las recomendaciones restantes; revisión de código y contratos existentes. |
 | 2026-09-21 | REG-001 implementado con TDD; REG-002 queda disponible | 32 pruebas HTTP/SQLite/PostgreSQL/OCI reales, UI y smoke Chromium; detalles y limitaciones en REG-001. |
+| 2026-09-21 | REG-002 implementado con TDD; REG-003 queda disponible | 58 pruebas HTTP/SQLite/PostgreSQL/OCI, 18 comprobaciones Julia, 23 pruebas React y recorrido Chromium real: 40 → 5 → 40 m³/s; detalles en REG-002. |

@@ -1,9 +1,9 @@
 name: Component rules
 on:
   push:
-    paths: ['app/**', 'runtime/component_rules/**', 'tests/test_reg001*', 'frontend/**', '.github/workflows/component-rules.yml']
+    paths: ['app/**', 'src/**', 'test/**', 'scripts/**', 'runtime/component_rules/**', 'tests/test_reg00*', 'tests/fixtures/**', 'frontend/**', '.github/workflows/component-rules.yml']
   pull_request:
-    paths: ['app/**', 'runtime/component_rules/**', 'tests/test_reg001*', 'frontend/**', '.github/workflows/component-rules.yml']
+    paths: ['app/**', 'src/**', 'test/**', 'scripts/**', 'runtime/component_rules/**', 'tests/test_reg00*', 'tests/fixtures/**', 'frontend/**', '.github/workflows/component-rules.yml']
 jobs:
   contracts:
     runs-on: ubuntu-latest
@@ -28,15 +28,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.11'
+      - uses: julia-actions/cache@v2
+      - run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
+      - run: julia --project=. test/component_rules.jl
       - run: pip install -r requirements.txt
       - name: Build the same Linux sandbox used in development
         run: |
-          docker build -t component-rules:reg-001 runtime/component_rules
-          echo "RULE_RUNTIME_IMAGE=$(docker image inspect component-rules:reg-001 --format '{{.Id}}')" >> "$GITHUB_ENV"
-      - run: python -m unittest tests.test_reg001_rules tests.test_reg001_runtime -v
+          docker build -t component-rules:reg-002 runtime/component_rules
+          echo "RULE_RUNTIME_IMAGE=$(docker image inspect component-rules:reg-002 --format '{{.Id}}')" >> "$GITHUB_ENV"
+      - run: python -m unittest tests.test_reg001_rules tests.test_reg001_runtime tests.test_reg002_rules tests.test_reg002_runtime -v
       - run: npm ci
         working-directory: frontend
-      - run: npm run api:check && npm test -- --run src/ComponentRules.test.tsx && npm run build
+      - run: npm run api:check && npm test -- --run src/ComponentRules.test.tsx src/RunExperience.test.tsx && npm run build
         working-directory: frontend
       - run: npx playwright install --with-deps chromium && npx playwright test e2e/component-rules.spec.ts
         working-directory: frontend
+      - run: npx playwright test e2e/component-rules-execution.spec.ts
+        working-directory: frontend
+        env:
+          RULE_ACCEPTANCE_SERVER: '1'
