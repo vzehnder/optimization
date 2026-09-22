@@ -29,6 +29,15 @@ def main():
         store.save_hydraulic_diagram(scenario_id=scenario["id"], revision=diagram["revision"], nodes=nodes,
                                     reaches=[{"technical_key": "reach", "display_name": "Tramo", "from_node_key": "reservoir_alpha", "to_node_key": "junction_in", "reach_type": "river"}])
         version = store.create_scenario_version(scenario_id=scenario["id"], system_case_json=store.generate_hydraulic_v3_preview(scenario["id"]), validation_payload={"status": "ok"})
+        def source(name, semantic, unit, values):
+            return store.publish_canonical_set_revision(project_id=project["id"], name=name, data_class_key="real", timezone="UTC",
+                signals=[{"series_key": "input", "display_name": name, "semantic_type_key": semantic, "unit_key": unit, "signal_role": "input", "aggregation": "mean"}],
+                periods=[{"timestamp_start": f"2026-01-01T0{t}:00:00", "timestamp_end": f"2026-01-01T0{t+1}:00:00", "duration_hours": 1} for t in range(len(values))],
+                values={"input": values}, actor="reg003-browser")
+        source("Afluente operativo", "natural_inflow", "m3_per_s", [8, 12, 16, 20])
+        source("Disponibilidad programada", "availability_factor", "dimensionless", [1, 0.5, 0.75, 1])
+        source("Afluente incompleto", "natural_inflow", "m3_per_s", [8, 12, 16])
+        source("Afluente con cruce", "natural_inflow", "m3_per_s", [8, 12, 80, 20])
         app = create_app(store=store, auth_enabled=True, artifact_root=Path(temporary) / "artifacts", input_source_root=Path(temporary) / "sources")
         original_lifespan = app.router.lifespan_context
 
@@ -47,6 +56,10 @@ def main():
         @app.get("/api/auth/reg002-fixture", include_in_schema=False)
         def fixture():
             return {"scenario_id": scenario["id"], "base_version_id": version["id"]}
+
+        @app.post("/api/auth/reg003-republish", include_in_schema=False)
+        def republish():
+            return source("Disponibilidad programada", "availability_factor", "dimensionless", [0.5, 0.5, 0.5, 0.5])
 
         uvicorn.run(app, host="127.0.0.1", port=int(os.environ.get("REACT_SMOKE_PORT", "8123")), log_level="warning")
 

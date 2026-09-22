@@ -2594,3 +2594,53 @@ button:focus-visible {
   width: auto;
   justify-self: start;
 }
+
+.rule-inputs {
+  border: 1px solid #b8c4d2;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  min-width: 0;
+}
+
+.rule-inputs section,
+.rule-inputs section > div,
+.rule-input-pin {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  margin-block: 0.75rem;
+}
+
+.rule-inputs input[type="radio"] {
+  width: auto;
+  justify-self: start;
+}
+
+.rule-input-actions,
+.rule-hourly-preview figcaption {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.rule-input-hash {
+  overflow-wrap: anywhere;
+}
+
+.rule-hourly-preview {
+  min-width: 0;
+}
+
+.rule-hourly-preview figure {
+  margin: 1rem 0;
+  padding: 0.75rem;
+  border: 1px solid #dbe2ea;
+  border-radius: 0.5rem;
+}
+
+.rule-hourly-preview svg {
+  display: block;
+  width: 100%;
+  max-width: 900px;
+  font-size: 12px;
+}

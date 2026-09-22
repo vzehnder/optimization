@@ -1765,6 +1765,9 @@ class AnalystStore:
             [tuple(row.values()) for row in TIME_SERIES_ROLE_COMPATIBILITY_SEED],
         )
 
+        from app.rule_classification import seed_rule_classification
+        seed_rule_classification(self)
+
     def _assert_persisted_time_series_classification_contract(self) -> None:
         for table_name, key_column, seed_rows, immutable_fields in CLASSIFICATION_SEED_TABLES:
             for expected in seed_rows:

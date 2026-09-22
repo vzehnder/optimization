@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.linkable_objects import LinkableObjectError
@@ -42,11 +42,24 @@ class RuleParameter(BaseModel):
     max: float | None = None
 
 
+class RuleInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    alias: str = Field(pattern=r"^[a-zA-Z][a-zA-Z0-9_]{0,63}$")
+    dimension_key: str = Field(max_length=64)
+    semantic_type_key: str = Field(max_length=64)
+    binding_role_key: Literal["rule_inflow", "rule_availability"]
+    object_id: int = Field(gt=0)
+    signal_id: int = Field(gt=0)
+    revision_id: int = Field(gt=0)
+    content_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 class RuleDraftRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=200)
     code: str = Field(min_length=1, max_length=65536)
     parameters: list[RuleParameter] = Field(max_length=50)
+    inputs: list[RuleInput] = Field(default_factory=list, max_length=20)
     expected_revision: int = Field(ge=0)
 
 
@@ -171,6 +184,7 @@ class RuleRepository:
                 return self.publication(rule_id, previous["id"])
             identity = uuid.uuid4().hex
             document = {key: draft[key] for key in ("code", "parameters", "name", "code_hash")}
+            document["inputs"] = draft.get("inputs", [])
             document["sdk"] = SDK_VERSION
             self.store.connection.execute("INSERT INTO component_rule_publications VALUES (?, ?, ?, ?, ?, ?)",
                                           (identity, rule_id, expected_revision, encode(document), actor, timestamp()))
@@ -219,8 +233,12 @@ class RuleRepository:
                        "parameters": draft["parameters"], "runtime": runtime}
             if compilation:
                 from app.rule_applications import latest_publication
+                from app.rule_inputs import freeze_inputs
                 context.update(compilation=compilation, grid=compilation["grid"], publication_id=publication_id)
                 context["publication_head"] = latest_publication(self.store, rule_id)
+                context["inputs"] = freeze_inputs(self.store, project_id, object_id, draft.get("inputs", []), compilation)
+            elif draft.get("inputs"):
+                raise HTTPException(422, "Las entradas horarias requieren revisión publicada, variante y horizonte")
             payload = {"code": draft["code"], **context}
             self.store.connection.execute(
                 "INSERT INTO component_rule_snapshots VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -248,6 +266,7 @@ class RuleRepository:
         result["runtime"] = payload["runtime"]
         if "compilation" in payload:
             result["compilation_scope"] = payload["compilation"]["scope"]
+            result["grid"] = payload["grid"]
             result["publication_id"] = payload["publication_id"]
         result["result"] = json.loads(result["result"]) if result["result"] else None
         if result["result"] is not None:
@@ -269,10 +288,10 @@ class RuleRepository:
     def create(self, project_id, object_id, body, actor):
         if body.expected_revision != 0:
             raise HTTPException(409, "La creación requiere revisión 0")
-        self.validate(body)
         rule_id, now = uuid.uuid4().hex, timestamp()
         document = body.model_dump(exclude={"expected_revision"})
         with self.store._lock, self.store._database_transaction():
+            self.validate(body, project_id, object_id)
             self.store.connection.execute(
                 "INSERT INTO component_rule_drafts VALUES (?, ?, ?, 1, ?, ?, ?, ?)",
                 (rule_id, project_id, object_id, encode(document), now, now, actor),
@@ -280,9 +299,9 @@ class RuleRepository:
         return self.get(rule_id, project_id, object_id)
 
     def update(self, rule_id, project_id, object_id, body, actor):
-        self.validate(body)
         document = body.model_dump(exclude={"expected_revision"})
         with self.store._lock, self.store._database_transaction():
+            self.validate(body, project_id, object_id)
             self.get(rule_id, project_id, object_id)
             changed = self.store.connection.execute(
                 "UPDATE component_rule_drafts SET document = ?, revision = revision + 1, "
@@ -293,7 +312,9 @@ class RuleRepository:
                 raise HTTPException(409, "El borrador cambió. Recarga antes de guardar.")
             return self.get(rule_id, project_id, object_id)
 
-    def validate(self, body):
+    def validate(self, body, project_id, object_id):
+        from app.rule_inputs import validate_inputs
+        validate_inputs(self.store, project_id, object_id, [p.model_dump() for p in body.inputs])
         if len(body.code.encode("utf-8")) > 65536:
             raise HTTPException(422, "El código excede 64 KiB")
         names = set()
@@ -325,7 +346,8 @@ def rule_router(store):
         if user["role"] not in {"analyst", "admin"}:
             raise HTTPException(403, "Acceso denegado")
         try:
-            obj = store.get_linkable_object(object_id)
+            with store._lock:
+                obj = store.get_linkable_object(object_id)
         except LinkableObjectError:
             raise HTTPException(404, "Objeto no encontrado") from None
         if obj["project_id"] != project_id:
@@ -374,6 +396,14 @@ def rule_router(store):
             raise HTTPException(404, "Contexto del escenario no encontrado") from None
         except ValueError as error:
             raise HTTPException(422, str(error)) from error
+
+    @router.get("/input-candidates")
+    def get_input_candidates(project_id: int, object_id: int, request: Request,
+                             after: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
+        from app.rule_inputs import input_candidates
+        context(request, project_id, object_id)
+        with store._lock:
+            return input_candidates(store, project_id, object_id, after, limit)
 
     @router.get("/{rule_id}")
     def get_rule(project_id: int, object_id: int, rule_id: str, request: Request):

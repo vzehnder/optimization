@@ -2,6 +2,12 @@ import { useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { getCsrfToken, requestJson } from "./api/client";
+import {
+  RuleHourlyPreview,
+  type HourlyBound,
+  type NumericOutput,
+} from "./RuleHourlyPreview";
+import { ruleErrorMessage } from "./ruleErrors";
 
 interface Scope {
   scenario_id: number;
@@ -23,9 +29,18 @@ interface Job {
   status: string;
   publication_id: string;
   compilation_scope: Scope;
+  grid?: { timestamp: string }[];
   result?: {
     ir?: { rows: Row[] };
-    error?: { code: string; message: string; line?: number };
+    bounds?: HourlyBound[];
+    outputs?: NumericOutput[];
+    error?: {
+      code: string;
+      message: string;
+      line?: number;
+      period?: number;
+      alias?: string;
+    };
   };
 }
 interface Application {
@@ -35,6 +50,8 @@ interface Application {
   publication_id: string;
   variant_id: number;
   compilation?: { scope: Scope };
+  validation_status?: string;
+  validation_error?: { message: string };
 }
 async function post<T>(path: string, body: unknown, requestId?: string) {
   return requestJson<T>(path, {
@@ -130,11 +147,7 @@ export function RuleApplications({
     try {
       await action();
     } catch (error) {
-      setError(
-        error instanceof Error
-          ? error.message
-          : "No se pudo completar la acción",
-      );
+      setError(ruleErrorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -255,6 +268,9 @@ export function RuleApplications({
       )}
       {job.data?.result?.error && (
         <p role="alert">
+          {job.data.result.error.alias && `${job.data.result.error.alias} · `}
+          {job.data.result.error.period !== undefined &&
+            `período ${job.data.result.error.period + 1} · `}
           {job.data.result.error.code} · línea {job.data.result.error.line}:{" "}
           {job.data.result.error.message}
         </p>
@@ -333,6 +349,14 @@ export function RuleApplications({
           )}
         </>
       )}
+      {job.data?.status === "succeeded" && (
+        <RuleHourlyPreview
+          key={jobId}
+          bounds={job.data.result?.bounds ?? []}
+          outputs={job.data.result?.outputs ?? []}
+          grid={job.data.grid}
+        />
+      )}
       <label>
         Motivo de aplicación o desactivación
         <input
@@ -370,6 +394,36 @@ export function RuleApplications({
           <p role="status">
             Revisión {active.publication_id} aplicada a esta variante.
           </p>
+          {active.validation_error && (
+            <p role="alert">{active.validation_error.message}</p>
+          )}
+          {active.validation_status === "stale" && (
+            <>
+              <p>
+                Prueba la revisión fijada. Si es válida, desactiva la aplicación
+                anterior y aplica la nueva prueba con motivo.
+              </p>
+              <button
+                type="button"
+                disabled={busy || disabled || running || !available}
+                onClick={() =>
+                  void act(async () => {
+                    const started = await post<Job>(`${path}/tests`, {
+                      expected_revision: revision,
+                      publication_id: active.publication_id,
+                      scope: selectedScope,
+                    });
+                    const next = new URLSearchParams(search);
+                    next.set("constraint_test", started.id);
+                    setSearch(next, { replace: true });
+                    setPage(0);
+                  })
+                }
+              >
+                Probar revisión fijada
+              </button>
+            </>
+          )}
           <button
             type="button"
             disabled={busy || !reason.trim()}
@@ -388,7 +442,7 @@ export function RuleApplications({
           </button>
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || active.validation_status === "stale"}
             onClick={() =>
               void act(async () => {
                 requestId.current ??= crypto.randomUUID();

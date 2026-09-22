@@ -9,8 +9,9 @@ from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 
 from app.component_rules import digest, encode, timestamp, project_enabled
-from app.rule_ir import validate_ir
+from app.rule_ir import validate_ir, validate_outputs
 from app.rule_runtime import SDK_VERSION
+from app.rule_inputs import assert_inputs_current
 
 
 def initialize(store):
@@ -135,7 +136,15 @@ def decode_application(row):
 
 def list_applications(repository, rule_id):
     rows = repository.store.connection.execute("SELECT * FROM component_rule_applications WHERE rule_id = ? ORDER BY id", (rule_id,)).fetchall()
-    return [decode_application(row) for row in rows]
+    applications = [decode_application(row) for row in rows]
+    for application in applications:
+        application["validation_status"] = "valid"
+        try:
+            assert_inputs_current(repository.store, application["project_id"], application["object_id"], application.get("inputs", []))
+        except HTTPException as error:
+            application["validation_status"] = "stale"
+            application["validation_error"] = error.detail
+    return applications
 
 
 def latest_publication(store, rule_id):
@@ -163,6 +172,7 @@ def apply(repository, rule_id, project_id, object_id, body, actor):
         store.connection.execute("UPDATE case_input_variants SET updated_at = updated_at WHERE id = ?", (frozen["scope"]["variant_id"],))
         if latest_publication(store, rule_id) != payload["publication_head"]:
             raise HTTPException(409, "Cambió la revisión publicada durante la prueba; vuelve a probar")
+        assert_inputs_current(store, project_id, object_id, payload.get("inputs", []))
         current = compile_context(store, project_id, object_id, frozen["scope"])
         if current["fingerprint"] != frozen["fingerprint"]:
             raise HTTPException(409, "El contexto cambió durante la prueba; vuelve a compilar")
@@ -174,6 +184,8 @@ def apply(repository, rule_id, project_id, object_id, body, actor):
         document = {"project_id": project_id, "object_id": object_id, "compilation": frozen, "code": publication["code"],
                     "name": publication["name"], "parameters": publication["parameters"], "code_hash": publication["code_hash"],
                     "context_hash": job["context_hash"], "runtime": job["runtime"], "ir": ir, "ir_hash": digest(ir),
+                    "inputs": payload.get("inputs", []),
+                    "outputs": validate_outputs(job["result"].get("outputs", []), len(frozen["grid"])),
                     "observed_publication": payload["publication_head"], "accept_empty": body.accept_empty,
                     "events": [{"action": "apply", "actor": actor, "reason": body.reason.strip(), "at": timestamp()}]}
         store.connection.execute("INSERT INTO component_rule_applications VALUES (?, ?, ?, ?, ?, 1, 'active', ?)",
@@ -272,6 +284,7 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
         rows, objects, snapshots = [], {}, []
         runtime = repository.runtime()
         for application in applications:
+            assert_inputs_current(store, project_id, application["object_id"], application.get("inputs", []))
             if application["compilation"]["fingerprint"] != frozen["fingerprint"] or application["compilation"]["scope"] != scope:
                 raise HTTPException(409, "Regla obsoleta: cambió el modelo, las entradas o el rango; vuelve a probar y aplicar con motivo")
             if latest_publication(store, application["rule_id"]) != application["observed_publication"]:
@@ -286,7 +299,8 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
             objects[application["object_id"]] = {"id": application["object_id"], "unit_key": application["compilation"]["unit_key"]}
             snapshots.append({key: application[key] for key in (
                 "id", "rule_id", "publication_id", "revision", "object_id", "name", "code", "parameters", "code_hash",
-                "context_hash", "runtime", "ir", "ir_hash", "events", "accept_empty")})
+                "context_hash", "runtime", "ir", "ir_hash", "events", "accept_empty")}
+                             | {"inputs": application.get("inputs", []), "outputs": application.get("outputs", [])})
         if len(rows) > 100000 or sum(len(row["terms"]) for row in rows) > 500000:
             raise HTTPException(422, "Cuota de restricciones excedida")
         block = {"version": IR_VERSION, "objects": list(objects.values()), "grid": frozen["grid"], "timezone": "UTC",
@@ -316,6 +330,10 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
             raise HTTPException(409, "El contexto cambió al materializar; vuelve a compilar")
         if any(latest_publication(store, item["rule_id"]) != item["observed_publication"] for item in applications):
             raise HTTPException(409, "Una regla cambió al materializar")
+        for set_id in sorted({source["set_id"] for item in applications for source in item.get("inputs", [])}):
+            store._lock_canonical_set(set_id)
+        for item in applications:
+            assert_inputs_current(store, project_id, item["object_id"], item.get("inputs", []))
         metadata = extract_system_case_metadata(document)
         generation = {**frozen["lineage"], "kind": "case_input_variant", "input_variant": {
                           "id": scope["variant_id"], "display_name": store.get_case_input_variant(scope["variant_id"])["display_name"]},

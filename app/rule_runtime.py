@@ -9,7 +9,7 @@ import subprocess
 import threading
 import time
 
-SDK_VERSION = "reg-002.1"
+SDK_VERSION = "reg-003.1"
 POLICY_VERSION = "reg-001.1"
 
 
@@ -127,8 +127,16 @@ class OCIExecutor:
                     raise ValueError()
                 if result["status"] == "succeeded":
                     if "grid" in payload:
-                        from app.rule_ir import validate_ir
-                        value = {"ir": validate_ir(result["ir"], payload["object"]["id"], len(payload["grid"]))}
+                        from app.rule_ir import validate_ir, validate_outputs, validate_bounds, RuleBoundsError
+                        value = {"ir": validate_ir(result["ir"], payload["object"]["id"], len(payload["grid"])),
+                                 "outputs": validate_outputs(result["outputs"], len(payload["grid"]))}
+                        if "compilation" in payload:
+                            compilation = payload["compilation"]
+                            unit = next(u for u in compilation["system_case"]["hydraulic_network"]["units"] if u["id"] == compilation["unit_key"])
+                            try:
+                                value["bounds"] = validate_bounds(value["ir"]["rows"], unit, len(payload["grid"]))
+                            except RuleBoundsError as error:
+                                return {"status": "failed", "error": error.problem, "runtime": runtime}
                     else:
                         output_value = result["output"]
                         if output_value["unit"] != "m3_per_s" or type(output_value["value"]) not in {int, float} or not math.isfinite(output_value["value"]):

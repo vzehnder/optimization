@@ -224,6 +224,19 @@ function JourneyDestination({ rail }: { rail: RailContext }) {
   );
 }
 
+export function ProtectedJourneyProgress({ step }: { step: number }) {
+  return (
+    <ol className="journey-steps" aria-label="Pasos del recorrido">
+      {STEPS.map((entry, index) => (
+        <li key={entry.id} aria-current={index === step ? "step" : undefined}>
+          <span className="journey-step-number">{index + 1}</span>
+          <span>{entry.label}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 function JourneyRail({ step, rail }: { step: StepId; rail: RailContext }) {
   return (
     <aside className="journey-rail" aria-label="Contexto del recorrido">
@@ -242,17 +255,9 @@ function JourneyRail({ step, rail }: { step: StepId; rail: RailContext }) {
         <dt>Accion</dt>
         <dd>{rail.action}</dd>
       </dl>
-      <ol className="journey-steps" aria-label="Pasos del recorrido">
-        {STEPS.map((entry, index) => (
-          <li
-            key={entry.id}
-            aria-current={entry.id === step ? "step" : undefined}
-          >
-            <span className="journey-step-number">{index + 1}</span>
-            <span>{entry.label}</span>
-          </li>
-        ))}
-      </ol>
+      <ProtectedJourneyProgress
+        step={STEPS.findIndex((entry) => entry.id === step)}
+      />
     </aside>
   );
 }

@@ -1,8 +1,9 @@
-# Operación y verificación de REG-001 y REG-002
+# Operación y verificación de REG-001 a REG-003
 
 REG-001 guarda borradores y calcula un máximo escalar de caudal. REG-002 incorpora
 publicación, aplicaciones a variantes y restricciones afines en el optimizador
-hidráulico v3. Las revisiones `sealed_preview` son copias inmutables
+hidráulico v3. REG-003 calcula límites horarios desde entradas canónicas fijadas.
+Las revisiones `sealed_preview` son copias inmutables
 de pruebas; el estado de la definición editable sigue siendo `draft`.
 
 ## Contrato del primer SDK
@@ -14,7 +15,7 @@ def construir(ctx):
 
 `capacidad` declara tipo `number`, unidad canónica `m3_per_s` y valor 80;
 `disponibilidad` declara `number`, unidad `dimensionless`, valor 0.75 y rango
-0–1. El resultado es 60 m³/s. El SDK `reg-002.1` conserva la unidad en la
+0–1. El resultado es 60 m³/s. El SDK `reg-003.1` conserva la unidad en la
 multiplicación, acepta funciones, bucles y comprensiones, y exige una cantidad
 finita de caudal como retorno. El contexto expone identidad del objeto y
 parámetros inmutables. La prueba escalar de REG-001 se conserva.
@@ -72,6 +73,49 @@ del usuario. Incluye utilidades deterministas de Python (`range`, `len`, `sum`,
 a los tipos que soporta este SDK. No permite paquetes arbitrarios. El filtro
 de sintaxis complementa el contenedor; no constituye la frontera de aislamiento.
 
+## Entradas y límites horarios (REG-003)
+
+Cada puerto declara alias, objeto, dimensión, semántica y rol, y fija señal,
+revisión sellada y hash. El selector distingue catálogo y series específicas de
+la unidad; la API comprueba de nuevo propiedad y compatibilidad. Los roles
+`rule_inflow` y `rule_availability` admiten respectivamente afluente en `m3_per_s`
+y disponibilidad `dimensionless` entre 0 y 1. El catálogo añade la semántica
+`availability_factor` por clave, sin reutilizar IDs de tipos personalizados.
+
+```python
+def construir(ctx):
+    for t in ctx.periodos:
+        minimo = ctx.entradas.afluente[t] * ctx.parametros.fraccion
+        maximo = ctx.parametros.capacidad * ctx.entradas.disponibilidad[t]
+        ctx.restriccion("minimo", t, ctx.objeto.caudal[t] >= minimo)
+        ctx.restriccion("maximo", t, ctx.objeto.caudal[t] <= maximo)
+        ctx.salida("minimo", t, minimo)
+        ctx.salida("maximo", t, maximo)
+```
+
+Los valores conocidos permiten cálculos Python no lineales; las decisiones
+siguen sujetas al contrato afín. Solo se aceptan medias con inicio de intervalo
+y unidad canónica compatible. La grilla completa debe coincidir en instantes y
+duraciones: faltantes, duplicados y valores inválidos bloquean con alias/período.
+Las zonas distintas de UTC necesitan offsets explícitos; no se completa ni
+transforma una serie durante la compilación.
+
+La preview presenta límites efectivos y salidas numéricas con unidades, tabla
+y gráficos de 20 períodos por página. La paginación solo afecta la presentación:
+se valida el horizonte completo. Se detectan cruces de mínimo/máximo contra las
+filas de la regla y los límites físicos conocidos antes del solve; esto no
+sustituye la comprobación de factibilidad global de Julia. `ctx.salida` conserva
+cálculos en la preview y snapshot; publicar series derivadas corresponde a REG-007.
+
+Publicar una entrada nueva invalida la evidencia anterior y bloquea la corrida,
+sin mover el pin. Para conservar una revisión antigua: **Probar revisión fijada**,
+desactivar la aplicación anterior con motivo y aplicar la nueva evidencia con
+motivo. Para usar otra revisión, cambiar la selección, guardar, publicar y probar.
+Se vuelven a comprobar las entradas al aplicar y antes de confirmar la corrida,
+incluyendo cambios ocurridos durante la validación Julia. El snapshot conserva
+valores, identidad/hash de las fuentes, compatibilidad, parámetros, salidas e IR;
+una publicación posterior no modifica corridas guardadas.
+
 ## Runtime Linux compartido por desarrollo y CI
 
 La imagen se construye únicamente con `runtime/component_rules/`, sin enviar
@@ -79,8 +123,8 @@ el repositorio completo como contexto. El Dockerfile fija CPython 3.12.14 por
 digest. El SDK está incluido en la imagen y su digest final fija ambos.
 
 ```sh
-docker build -t component-rules:reg-002 runtime/component_rules
-export RULE_RUNTIME_IMAGE="$(docker image inspect component-rules:reg-002 --format '{{.Id}}')"
+docker build -t component-rules:reg-003 runtime/component_rules
+export RULE_RUNTIME_IMAGE="$(docker image inspect component-rules:reg-003 --format '{{.Id}}')"
 export RULE_RUNTIME_COMMAND='["docker"]'
 export RULE_ENABLED_PROJECTS='*'
 python -m app.rule_worker
@@ -98,8 +142,8 @@ En Windows, Docker Desktop con contenedores Linux usa los mismos comandos,
 con variables PowerShell:
 
 ```powershell
-docker build -t component-rules:reg-002 runtime/component_rules
-$env:RULE_RUNTIME_IMAGE = (docker image inspect component-rules:reg-002 --format '{{.Id}}').Trim()
+docker build -t component-rules:reg-003 runtime/component_rules
+$env:RULE_RUNTIME_IMAGE = (docker image inspect component-rules:reg-003 --format '{{.Id}}').Trim()
 $env:RULE_RUNTIME_COMMAND = '["docker"]'
 $env:RULE_ENABLED_PROJECTS = '*'
 .venv/Scripts/python.exe -m app.rule_worker
@@ -125,8 +169,16 @@ es privado, no ejecutable y está limitado a 16 MiB.
 Límites: 1 CPU, 512 MiB sin swap adicional, 32 procesos, 64 descriptores, sin
 core dumps, 64 KiB de código/logs y 64 MiB de entrada/salida. La ejecución
 de preview dura como máximo 5 segundos, además de operaciones de control OCI
-acotadas a 15 segundos cada una. REG-002 admite hasta 8784 períodos, 50 aplicaciones
-por corrida, 100000 filas y 500000 términos, con snapshot máximo de 64 MiB.
+acotadas a 15 segundos cada una. Se admiten hasta 8784 períodos, 20 entradas por
+regla, 50 aplicaciones por corrida, 100000 filas, 100000 salidas numéricas y
+500000 términos, con snapshot máximo de 64 MiB. La lectura de cada entrada
+también está acotada a 100000 intervalos en el rango consultado.
+
+Medición local del 2026-09-22, OCI real sobre WSL: 8784 períodos con 17568 filas
+y 17568 salidas se completaron en 4,103 s; 8785 períodos fueron rechazados en
+3,281 s. Son tiempos de pared del ejecutor, incluyendo operaciones OCI, y no una
+garantía de latencia. La cancelación anual devuelve un estado cancelado sin
+resultados parciales.
 
 Hay dos ejecuciones globales, una prueba pendiente por usuario y como máximo
 20 trabajos esperando. La espera expira a los 30 segundos. `RuleWorker` permite
@@ -162,17 +214,18 @@ export DATABASE_URL=sqlite:///:memory:
 export POSTGRES_TEST_DATABASE_URL=postgresql://test:test@127.0.0.1:5432/rules_test
 # Configurar RULE_RUNTIME_COMMAND / RULE_RUNTIME_IMAGE como arriba; no levantar
 # un worker adicional: las pruebas administran sus propios workers.
-python -m unittest tests.test_reg001_rules tests.test_reg001_runtime tests.test_reg002_rules tests.test_reg002_runtime -v
+python -m unittest tests.test_reg001_rules tests.test_reg001_runtime tests.test_reg002_rules tests.test_reg002_runtime tests.test_reg003_rules tests.test_reg003_runtime tests.test_reg003_classification tests.test_ts7_001_classification_catalog -v
 julia --project=. test/component_rules.jl
 cd frontend
 npm ci
 npm run api:generate
 npm run api:check
-npm test -- --run src/ComponentRules.test.tsx src/RunExperience.test.tsx
+npm test -- --run src/ComponentRules.test.tsx src/HourlyRules.test.tsx src/RunExperience.test.tsx src/ProtectedMutationJourney.test.tsx
 npm run build
 npx playwright test e2e/component-rules.spec.ts
 # Requiere Julia disponible (PATH o variable JULIA) y la imagen OCI configurada.
 RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-execution.spec.ts
+RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-hourly.spec.ts
 ```
 
 El smoke de navegador usa el servidor aislado existente, comprueba la entrada
@@ -184,7 +237,10 @@ El segundo recorrido arranca `scripts/run_rule_acceptance_app.py` con una base y
 artefactos temporales, un worker OCI real y Julia. Verifica 5 m³/s en cuatro horas,
 desactiva la aplicación, recupera 40 m³/s y consulta el resultado histórico intacto.
 En PowerShell, establecer `$env:RULE_ACCEPTANCE_SERVER = '1'` antes de ese comando
-y eliminar la variable al terminar. CI incluye ambos recorridos y la prueba Julia.
+y eliminar la variable al terminar. El recorrido horario añade selección de
+afluente/disponibilidad, solución `[20, 10, 15, 20]`, publicación nueva,
+revalidación con motivo, hueco y cruce de límites, conservando el resultado
+histórico. CI incluye los tres recorridos y la prueba Julia.
 
 Referencia del mecanismo OCI: [Docker, ejecución de contenedores](https://docs.docker.com/engine/containers/run/).
 Los tests de esta entrega no constituyen una auditoría de escapes del kernel.

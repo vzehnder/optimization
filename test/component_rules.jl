@@ -15,6 +15,36 @@ function rule_case()
     return document
 end
 
+function solve_rule_case(document, dir, name)
+    path = joinpath(dir, "$name.json")
+    write(path, JSON3.write(document))
+    BESSDispatch.run_system_case(path; output_root=joinpath(dir, name))
+end
+
+@testset "Hourly minima and maxima both affect the hydraulic solution" begin
+    mktempdir() do dir
+        document = rule_case()
+        rows = document["component_rules"]["rows"]
+        maxima, minima = [20.0, 10.0, 15.0, 20.0], [2.0, 3.0, 4.0, 5.0]
+        for (i, row) in enumerate(rows)
+            row["constant"] = -maxima[i]
+        end
+        for (i, row) in enumerate(deepcopy(rows))
+            row["name"], row["relation"], row["constant"] = "minimo", ">=", -minima[i]
+            push!(rows, row)
+        end
+        # Generation is valuable, so the maximum is binding in each period.
+        upper = solve_rule_case(document, dir, "hourly_upper")
+        @test [row.total_hydro_turbine_flow_m3s for row in CSV.File(upper.dispatch_path)] ≈ maxima
+        # A high terminal water value makes saving water preferable to generation.
+        document["hydraulic_network"]["nodes"][1]["reservoir"]["terminal_water_value_usd_per_hm3"] = 1e6
+        lower = solve_rule_case(document, dir, "hourly_lower")
+        @test [row.total_hydro_turbine_flow_m3s for row in CSV.File(lower.dispatch_path)] ≈ minima
+        frozen = JSON3.read(read(lower.system_case_resolved_path, String), Dict{String,Any})
+        @test frozen["component_rules"] == document["component_rules"]
+    end
+end
+
 @testset "Unsupported or malformed rules fail before optimization" begin
     for mutate! in (
         d -> d["component_rules"]["version"] = "future.v9",
@@ -33,12 +63,6 @@ end
         mutate!(document)
         @test_throws ArgumentError BESSDispatch.validate_hydraulic_v3_system_case_document(document)
     end
-end
-
-function solve_rule_case(document, dir, name)
-    path = joinpath(dir, "$name.json")
-    write(path, JSON3.write(document))
-    BESSDispatch.run_system_case(path; output_root=joinpath(dir, name))
 end
 
 @testset "A frozen maximum changes all four periods and survives the resolved snapshot" begin

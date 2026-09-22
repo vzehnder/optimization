@@ -1065,6 +1065,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/input-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Input Candidates */
+        get: operations["get_input_candidates_api_projects__project_id__linkable_objects__object_id__rules_input_candidates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/linkable-objects/{object_id}/rules/scope": {
         parameters: {
             query?: never;
@@ -3793,10 +3810,34 @@ export interface components {
             code: string;
             /** Expected Revision */
             expected_revision: number;
+            /** Inputs */
+            inputs?: components["schemas"]["RuleInput"][];
             /** Name */
             name: string;
             /** Parameters */
             parameters: components["schemas"]["RuleParameter"][];
+        };
+        /** RuleInput */
+        RuleInput: {
+            /** Alias */
+            alias: string;
+            /**
+             * Binding Role Key
+             * @enum {string}
+             */
+            binding_role_key: "rule_inflow" | "rule_availability";
+            /** Content Hash */
+            content_hash: string;
+            /** Dimension Key */
+            dimension_key: string;
+            /** Object Id */
+            object_id: number;
+            /** Revision Id */
+            revision_id: number;
+            /** Semantic Type Key */
+            semantic_type_key: string;
+            /** Signal Id */
+            signal_id: number;
         };
         /** RuleParameter */
         RuleParameter: {
@@ -6615,6 +6656,41 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_input_candidates_api_projects__project_id__linkable_objects__object_id__rules_input_candidates_get: {
+        parameters: {
+            query?: {
+                after?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+                object_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -2986,6 +2986,14 @@
             "title": "Expected Revision",
             "type": "integer"
           },
+          "inputs": {
+            "items": {
+              "$ref": "#/components/schemas/RuleInput"
+            },
+            "maxItems": 20,
+            "title": "Inputs",
+            "type": "array"
+          },
           "name": {
             "maxLength": 200,
             "minLength": 1,
@@ -3008,6 +3016,66 @@
           "expected_revision"
         ],
         "title": "RuleDraftRequest",
+        "type": "object"
+      },
+      "RuleInput": {
+        "additionalProperties": false,
+        "properties": {
+          "alias": {
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_]{0,63}$",
+            "title": "Alias",
+            "type": "string"
+          },
+          "binding_role_key": {
+            "enum": [
+              "rule_inflow",
+              "rule_availability"
+            ],
+            "title": "Binding Role Key",
+            "type": "string"
+          },
+          "content_hash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "dimension_key": {
+            "maxLength": 64,
+            "title": "Dimension Key",
+            "type": "string"
+          },
+          "object_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Object Id",
+            "type": "integer"
+          },
+          "revision_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Revision Id",
+            "type": "integer"
+          },
+          "semantic_type_key": {
+            "maxLength": 64,
+            "title": "Semantic Type Key",
+            "type": "string"
+          },
+          "signal_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Signal Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "alias",
+          "dimension_key",
+          "semantic_type_key",
+          "binding_role_key",
+          "object_id",
+          "signal_id",
+          "revision_id",
+          "content_hash"
+        ],
+        "title": "RuleInput",
         "type": "object"
       },
       "RuleParameter": {
@@ -7833,6 +7901,78 @@
           }
         },
         "summary": "Create Rule",
+        "tags": [
+          "component-rules"
+        ]
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/input-candidates": {
+      "get": {
+        "operationId": "get_input_candidates_api_projects__project_id__linkable_objects__object_id__rules_input_candidates_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Input Candidates",
         "tags": [
           "component-rules"
         ]

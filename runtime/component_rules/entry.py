@@ -10,7 +10,7 @@ from types import MappingProxyType
 sys.path.insert(0, "/runtime")
 from symbolic import Flow, collector
 
-SDK = "reg-002.1"
+SDK = "reg-003.1"
 
 
 class LogLimit(ValueError):
@@ -43,6 +43,14 @@ class Quantity:
     def __neg__(self):
         return Quantity(-self.value, self.unit)
 
+    def __abs__(self):
+        return Quantity(abs(self.value), self.unit)
+
+    def __pow__(self, exponent):
+        if self.unit != "dimensionless" or type(exponent) not in (int, float):
+            raise ValueError("Las potencias numéricas requieren una base adimensional y exponente conocido")
+        return Quantity(self.value ** exponent, "dimensionless")
+
     def compatible_value(self, other):
         if isinstance(other, Quantity) and other.unit == self.unit:
             return other.value
@@ -63,6 +71,9 @@ class Quantity:
         if isinstance(other, Affine):
             return Affine.lift(self) - other
         return Quantity(self.value - self.compatible_value(other), self.unit)
+
+    def __rsub__(self, other):
+        return -self + other
 
     def __truediv__(self, other):
         if isinstance(other, Quantity):
@@ -114,6 +125,19 @@ class FrozenContext:
         raise ValueError("El contexto es inmutable")
 
 
+@dataclass(frozen=True)
+class NumericSeries:
+    alias: str
+    values: tuple
+
+    def __getitem__(self, period):
+        if type(period) is not int or not 0 <= period < len(self.values):
+            error = ValueError(f"Entrada {self.alias}: período fuera de la grilla")
+            error.alias, error.period = self.alias, period
+            raise error
+        return self.values[period]
+
+
 def main(payload):
     logs = []
     log_bytes = 0
@@ -129,7 +153,7 @@ def main(payload):
         p["name"]: p["value"] if p["type"] == "boolean" else Quantity(p["value"], p["unit"])
         for p in payload["parameters"]
     }
-    rows = []
+    rows, outputs = [], []
     obj = dict(payload["object"])
     values = {"parametros": FrozenContext(parameters)}
     if "grid" in payload:
@@ -138,6 +162,22 @@ def main(payload):
             raise ValueError("Cuota de períodos excedida")
         obj["caudal"] = Flow(obj["id"], count)
         values.update(periodos=tuple(range(count)), restriccion=collector(rows, count))
+        entries = {}
+        for entry in payload.get("inputs", []):
+            if len(entry["values"]) != count or entry["alias"] in entries:
+                raise ValueError("Entrada duplicada o sin cobertura completa")
+            entries[entry["alias"]] = NumericSeries(entry["alias"], tuple(Quantity(v, entry["unit_key"]) for v in entry["values"]))
+        def output(name, period, value):
+            if not isinstance(name, str) or not 1 <= len(name) <= 200 or type(period) is not int or not 0 <= period < count:
+                raise ValueError("Nombre o período de salida inválido")
+            if len(outputs) >= 100000:
+                raise ValueError("Cuota de salidas excedida")
+            if type(value) in (float, int):
+                value = Quantity(value, "dimensionless")
+            if not isinstance(value, Quantity):
+                raise ValueError("La salida debe ser numérica, no una decisión simbólica")
+            outputs.append({"name": name, "period": period, "value": value.value, "unit": value.unit})
+        values.update(entradas=FrozenContext(entries), salida=output)
     values["objeto"] = FrozenContext(obj)
     ctx = FrozenContext(values)
     tree = ast.parse(payload["code"], filename="regla.py")
@@ -160,7 +200,7 @@ def main(payload):
     if "grid" in payload:
         if result is not None:
             raise ValueError("Usa ctx.restriccion para emitir filas; no retornes un valor")
-        return {"status": "succeeded", "ir": {"version": "affine_flow.v1", "rows": rows}, "logs": "".join(logs)}
+        return {"status": "succeeded", "ir": {"version": "affine_flow.v1", "rows": rows}, "outputs": outputs, "logs": "".join(logs)}
     if not isinstance(result, Quantity) or result.unit != "m3_per_s" or not math.isfinite(result.value):
         raise ValueError("El resultado debe ser un caudal finito con unidad m3_per_s")
     return {"status": "succeeded", "output": {"value": result.value, "unit": result.unit}, "logs": "".join(logs)}

@@ -4,6 +4,41 @@ import math
 IR_VERSION = "affine_flow.v1"
 
 
+class RuleBoundsError(ValueError):
+    def __init__(self, row):
+        super().__init__(f"Mínimo mayor que máximo conocido en {row['name']}, período {row['period'] + 1}")
+        self.problem = {"code": "RULE_BOUNDS_CONFLICT", "message": str(self), "period": row["period"],
+                        "line": row["line"], "name": row["name"]}
+
+
+def validate_bounds(rows, unit, period_count):
+    curve = unit["curves"]["flow_power"]
+    lower, upper = curve[0]["flow_m3s"], curve[-1]["flow_m3s"]
+    lower = max(lower, unit.get("min_flow_m3s") if unit.get("min_flow_m3s") is not None else lower)
+    upper = min(upper, unit.get("max_flow_m3s") if unit.get("max_flow_m3s") is not None else upper)
+    bounds = [[lower, upper] for _ in range(period_count)]
+    for row in rows:
+        lo, hi = bounds[row["period"]]
+        coefficient = sum(t["coefficient"] for t in row["terms"])
+        relation, constant = row["relation"], row["constant"]
+        if not coefficient:
+            valid = constant <= 0 if relation == "<=" else constant >= 0 if relation == ">=" else constant == 0
+            if not valid:
+                raise RuleBoundsError(row)
+            continue
+        bound = finite(-constant / coefficient)
+        if relation == "==":
+            lo, hi = max(lo, bound), min(hi, bound)
+        elif (relation == "<=" and coefficient > 0) or (relation == ">=" and coefficient < 0):
+            hi = min(hi, bound)
+        else:
+            lo = max(lo, bound)
+        if lo > hi:
+            raise RuleBoundsError(row)
+        bounds[row["period"]] = [lo, hi]
+    return [{"period": t, "minimum": lo, "maximum": hi, "unit": "m3_per_s"} for t, (lo, hi) in enumerate(bounds)]
+
+
 def validate_ir(ir, object_id, period_count):
     if not isinstance(ir, dict) or set(ir) != {"version", "rows"} or ir["version"] != IR_VERSION:
         raise ValueError("Contrato de restricciones desconocido")
@@ -48,3 +83,22 @@ def finite(value):
     if type(value) not in {int, float} or not math.isfinite(value):
         raise ValueError("Coeficientes y constantes deben ser finitos")
     return value
+
+
+def validate_outputs(outputs, period_count):
+    if not isinstance(outputs, list) or len(outputs) > 100000:
+        raise ValueError("Cuota de salidas numéricas excedida")
+    names, units = set(), {}
+    for row in outputs:
+        if not isinstance(row, dict) or set(row) != {"name", "period", "value", "unit"}:
+            raise ValueError("Salida numérica inválida")
+        name, period = row["name"], row["period"]
+        if not isinstance(name, str) or not 1 <= len(name) <= 200 or type(period) is not int or not 0 <= period < period_count:
+            raise ValueError("Nombre o período de salida inválido")
+        if (name, period) in names or row["unit"] not in {"m3_per_s", "dimensionless", "mw", "usd_per_mwh"}:
+            raise ValueError("Salida duplicada o unidad desconocida")
+        if units.setdefault(name, row["unit"]) != row["unit"]:
+            raise ValueError("La unidad de una salida no puede cambiar entre períodos")
+        names.add((name, period))
+        finite(row["value"])
+    return sorted(outputs, key=lambda row: (row["period"], row["name"]))

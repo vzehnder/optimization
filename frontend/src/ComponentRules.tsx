@@ -15,6 +15,8 @@ import {
 import { getCsrfToken, requestJson } from "./api/client";
 import { safeReturnPath } from "./journeyRoutes";
 import { RuleApplications } from "./RuleApplications";
+import { RuleInputs, type RuleInput } from "./RuleInputs";
+import { ruleErrorMessage } from "./ruleErrors";
 
 export interface RuleParameter {
   name: string;
@@ -30,6 +32,7 @@ interface RuleDraft {
   code: string;
   revision: number;
   parameters: RuleParameter[];
+  inputs?: RuleInput[];
 }
 interface RuleList {
   enabled?: boolean;
@@ -69,6 +72,17 @@ async function mutate<T>(path: string, body: unknown, method = "POST") {
   });
 }
 
+function sameRows<T extends object>(left: T[], right: T[]) {
+  return (
+    left.length === right.length &&
+    left.every((row, index) =>
+      (Object.keys(row) as (keyof T)[]).every(
+        (key) => row[key] === right[index][key],
+      ),
+    )
+  );
+}
+
 function PythonEditor({
   initialCode,
   onChange,
@@ -95,6 +109,8 @@ function PythonEditor({
                 { label: "ctx.objeto.caudal", type: "property" },
                 { label: "ctx.periodos", type: "property" },
                 { label: "ctx.restriccion", type: "function" },
+                { label: "ctx.entradas", type: "property" },
+                { label: "ctx.salida", type: "function" },
                 { label: "construir", type: "function" },
                 { label: "range", type: "function" },
               ]),
@@ -245,13 +261,15 @@ function RuleForm({
     initial?.parameters ?? DEFAULT_PARAMETERS,
   );
   const [saved, setSaved] = useState(initial);
+  const [inputs, setInputs] = useState(initial?.inputs ?? []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const dirty =
     !saved ||
     code !== saved.code ||
     name !== saved.name ||
-    JSON.stringify(parameters) !== JSON.stringify(saved.parameters);
+    !sameRows(inputs, saved.inputs ?? []) ||
+    !sameRows(parameters, saved.parameters);
   function parameterChange(index: number, patch: Partial<RuleParameter>) {
     setParameters((rows) =>
       rows.map((row, i) => (i === index ? { ...row, ...patch } : row)),
@@ -263,13 +281,19 @@ function RuleForm({
     try {
       const result = await mutate<RuleDraft>(
         saved ? `${root}/${saved.id}` : root,
-        { name, code, parameters, expected_revision: saved?.revision ?? 0 },
+        {
+          name,
+          code,
+          parameters,
+          inputs,
+          expected_revision: saved?.revision ?? 0,
+        },
         saved ? "PUT" : "POST",
       );
       setSaved(result);
       onSaved(result);
     } catch (error) {
-      setError(error instanceof Error ? error.message : "No se pudo guardar");
+      setError(ruleErrorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -294,6 +318,18 @@ function RuleForm({
         <pre>
           {
             'def construir(ctx):\n    for t in ctx.periodos:\n        ctx.restriccion("maximo", t, ctx.objeto.caudal[t] <= ctx.parametros.capacidad * ctx.parametros.disponibilidad)'
+          }
+        </pre>
+      </details>
+      <details>
+        <summary>Ejemplo de límites horarios con series</summary>
+        <p>
+          Selecciona entradas con alias afluente y disponibilidad; agrega un
+          parámetro adimensional fraccion.
+        </p>
+        <pre>
+          {
+            'def construir(ctx):\n    for t in ctx.periodos:\n        minimo = ctx.entradas.afluente[t] * ctx.parametros.fraccion\n        maximo = ctx.parametros.capacidad * ctx.entradas.disponibilidad[t]\n        ctx.restriccion("minimo", t, ctx.objeto.caudal[t] >= minimo)\n        ctx.restriccion("maximo", t, ctx.objeto.caudal[t] <= maximo)\n        ctx.salida("limite_calculado", t, maximo)'
           }
         </pre>
       </details>
@@ -415,6 +451,7 @@ function RuleForm({
           Agregar parámetro
         </button>
       </fieldset>
+      <RuleInputs root={root} inputs={inputs} onChange={setInputs} />
       <button type="button" disabled={busy} onClick={() => void save()}>
         Guardar borrador
       </button>
@@ -427,7 +464,7 @@ function RuleForm({
       <RulePreview
         root={root}
         saved={saved}
-        disabled={dirty || busy || !available}
+        disabled={dirty || busy || !available || inputs.length > 0}
       />
       {saved && (
         <RuleApplications
