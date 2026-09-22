@@ -1082,6 +1082,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/object-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Object Candidates */
+        get: operations["get_object_candidates_api_projects__project_id__linkable_objects__object_id__rules_object_candidates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/linkable-objects/{object_id}/rules/scope": {
         parameters: {
             query?: never;
@@ -3806,6 +3823,8 @@ export interface components {
         };
         /** RuleDraftRequest */
         RuleDraftRequest: {
+            /** Aliases */
+            aliases?: components["schemas"]["RuleObjectAlias"][];
             /** Code */
             code: string;
             /** Expected Revision */
@@ -3816,6 +3835,8 @@ export interface components {
             name: string;
             /** Parameters */
             parameters: components["schemas"]["RuleParameter"][];
+            /** Scenario Id */
+            scenario_id?: number | null;
         };
         /** RuleInput */
         RuleInput: {
@@ -3839,6 +3860,13 @@ export interface components {
             /** Signal Id */
             signal_id: number;
         };
+        /** RuleObjectAlias */
+        RuleObjectAlias: {
+            /** Alias */
+            alias: string;
+            /** Object Id */
+            object_id: number;
+        };
         /** RuleParameter */
         RuleParameter: {
             /** Max */
@@ -3847,6 +3875,8 @@ export interface components {
             min?: number | null;
             /** Name */
             name: string;
+            /** Object Id */
+            object_id?: number | null;
             /**
              * Type
              * @enum {string}
@@ -6679,6 +6709,42 @@ export interface operations {
             query?: {
                 after?: number;
                 limit?: number;
+                reference_object_id?: number | null;
+                scenario_id?: number | null;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+                object_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_object_candidates_api_projects__project_id__linkable_objects__object_id__rules_object_candidates_get: {
+        parameters: {
+            query: {
+                scenario_id: number;
             };
             header?: never;
             path: {

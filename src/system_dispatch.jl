@@ -472,7 +472,7 @@ function validate_hydraulic_v3_system_case_document(document)::Dict{String,Any}
             "units" => length(units),
             "required_time_series" => length(required_time_series),
         ),
-        "component_rule_versions" => [COMPONENT_RULE_VERSION],
+        "component_rule_versions" => [COMPONENT_RULE_VERSION, HYDRAULIC_RULE_VERSION],
     )
 end
 
@@ -1587,11 +1587,21 @@ function run_hydraulic_v3_system_case(
 
     if haskey(document, "component_rules")
         rules = document["component_rules"]
-        object_units = Dict(object["id"] => findfirst(==(object["unit_key"]), unit_ids) for object in rules["objects"])
+        object_units = Dict(object["id"] => findfirst(==(object["unit_key"]), unit_ids) for object in rules["objects"] if haskey(object, "unit_key"))
+        object_reservoirs = Dict(object["id"] => reservoir_index_by_id[object["node_key"]] for object in rules["objects"] if haskey(object, "node_key"))
         for row in rules["rows"]
             expression = AffExpr(Float64(row["constant"]))
             for term in row["terms"]
-                add_to_expression!(expression, Float64(term["coefficient"]), turbine_flow[object_units[term["object_id"]], term["period"] + 1])
+                variable, indices = if term["variable"] == "caudal"
+                    turbine_flow, object_units
+                elseif term["variable"] == "potencia"
+                    hydro_power, object_units
+                elseif term["variable"] == "almacenamiento"
+                    storage, object_reservoirs
+                else
+                    spill_flow, object_reservoirs
+                end
+                add_to_expression!(expression, Float64(term["coefficient"]), variable[indices[term["object_id"]], term["period"] + 1])
             end
             if row["relation"] == "<="
                 @constraint(model, expression <= 0)

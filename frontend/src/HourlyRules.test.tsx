@@ -34,6 +34,7 @@ it("selects an exact input through the protected steps and saves it only in the 
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(String(input), "http://localhost").pathname;
+      if (path.endsWith("/object-candidates")) return json({ items: [] });
       if (path === "/api/auth/me")
         return json({
           user: { id: 3, role: "analyst", is_active: true },
@@ -100,6 +101,7 @@ it("shows hourly bounds and numeric outputs with units, pagination and stale val
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const path = new URL(String(input), "http://localhost").pathname;
+      if (path.endsWith("/object-candidates")) return json({ items: [] });
       if (path === "/api/auth/me")
         return json({
           user: { id: 3, role: "analyst", is_active: true },
@@ -202,6 +204,7 @@ it("locates an input grid refusal by alias and period before application", async
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const path = new URL(String(input), "http://localhost").pathname;
+      if (path.endsWith("/object-candidates")) return json({ items: [] });
       if (path === "/api/auth/me")
         return json({
           user: { id: 3, role: "analyst", is_active: true },

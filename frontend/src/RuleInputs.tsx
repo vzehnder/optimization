@@ -24,21 +24,26 @@ export function RuleInputs({
   root,
   inputs,
   onChange,
+  scenarioId,
+  objects = [],
 }: {
   root: string;
   inputs: RuleInput[];
   onChange: (inputs: RuleInput[]) => void;
+  scenarioId?: number | null;
+  objects?: { id: number; label: string }[];
 }) {
   const [step, setStep] = useState<number | null>(null);
   const [kind, setKind] = useState("catalog");
   const [after, setAfter] = useState(0);
   const [selection, setSelection] = useState<Candidate>();
   const [alias, setAlias] = useState("");
+  const [objectId, setObjectId] = useState(Number(root.split("/").at(-2)));
   const candidates = useQuery({
-    queryKey: [root, "input-candidates", after],
+    queryKey: [root, "input-candidates", after, objectId, scenarioId],
     queryFn: () =>
       requestJson<{ items: Candidate[]; next_cursor: number | null }>(
-        `${root}/input-candidates?after=${after}`,
+        `${root}/input-candidates?after=${after}${scenarioId ? `&scenario_id=${scenarioId}&reference_object_id=${objectId}` : ""}`,
       ),
     enabled: step !== null,
     retry: false,
@@ -50,7 +55,7 @@ export function RuleInputs({
     <fieldset className="rule-inputs">
       <legend>Entradas horarias</legend>
       <p>
-        Selecciona series de afluente o disponibilidad para esta unidad. Cada
+        Selecciona series de afluente o disponibilidad para el objeto. Cada
         entrada conserva su revisión.
       </p>
       {inputs.map((port, index) => (
@@ -86,6 +91,25 @@ export function RuleInputs({
           <ProtectedJourneyProgress step={step} />
           {step === 0 && (
             <div>
+              {scenarioId && (
+                <label>
+                  Objeto de la entrada
+                  <select
+                    value={objectId}
+                    onChange={(e) => {
+                      setObjectId(Number(e.target.value));
+                      setSelection(undefined);
+                      setAfter(0);
+                    }}
+                  >
+                    {objects.map((obj, index) => (
+                      <option key={index} value={obj.id}>
+                        {obj.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <label>
                 <input
                   type="radio"

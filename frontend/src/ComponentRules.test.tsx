@@ -21,6 +21,7 @@ it("publishes, previews and applies a flow restriction to the selected variant",
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(String(input), "http://localhost").pathname;
+      if (path.endsWith("/object-candidates")) return json({ items: [] });
       if (path === "/api/auth/me")
         return json({
           user: { id: 3, role: "analyst", is_active: true },
@@ -156,6 +157,7 @@ it.each([
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const path = new URL(String(input), "http://localhost").pathname;
+        if (path.endsWith("/object-candidates")) return json({ items: [] });
         if (path === "/api/auth/me")
           return json({
             user: { id: 3, role: "analyst", is_active: true },
@@ -203,6 +205,7 @@ it("saves and reopens a contextual Python draft with units and a return link", a
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(String(input), "http://localhost").pathname;
+      if (path.endsWith("/object-candidates")) return json({ items: [] });
       if (path === "/api/auth/me")
         return json({
           user: {
@@ -268,6 +271,7 @@ it("starts an asynchronous preview and lets the analyst cancel it", async () => 
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(String(input), "http://localhost").pathname;
+      if (path.endsWith("/object-candidates")) return json({ items: [] });
       if (path === "/api/auth/me")
         return json({
           user: { id: 3, role: "analyst", is_active: true },
@@ -326,6 +330,7 @@ it("opens rules from the saved hydraulic unit and retains its diagram as return 
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const path = new URL(String(input), "http://localhost").pathname;
+      if (path.endsWith("/object-candidates")) return json({ items: [] });
       if (path === "/api/auth/me")
         return json({
           user: { id: 3, role: "analyst", is_active: true },

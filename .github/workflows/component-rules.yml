@@ -37,12 +37,12 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Build the same Linux sandbox used in development
         run: |
-          docker build -t component-rules:reg-003 runtime/component_rules
-          echo "RULE_RUNTIME_IMAGE=$(docker image inspect component-rules:reg-003 --format '{{.Id}}')" >> "$GITHUB_ENV"
-      - run: python -m unittest tests.test_reg001_rules tests.test_reg001_runtime tests.test_reg002_rules tests.test_reg002_runtime tests.test_reg003_rules tests.test_reg003_runtime tests.test_reg003_classification tests.test_ts7_001_classification_catalog -v
+          docker build -t component-rules:reg-004 runtime/component_rules
+          echo "RULE_RUNTIME_IMAGE=$(docker image inspect component-rules:reg-004 --format '{{.Id}}')" >> "$GITHUB_ENV"
+      - run: python -m unittest tests.test_reg001_rules tests.test_reg001_runtime tests.test_reg002_rules tests.test_reg002_runtime tests.test_reg003_rules tests.test_reg003_runtime tests.test_reg003_classification tests.test_reg004_rules tests.test_reg004_runtime tests.test_ts7_001_classification_catalog -v
       - run: npm ci
         working-directory: frontend
-      - run: npm run api:check && npm test -- --run src/ComponentRules.test.tsx src/HourlyRules.test.tsx src/RunExperience.test.tsx src/ProtectedMutationJourney.test.tsx && npm run build
+      - run: npm run api:check && npm test -- --run src/ComponentRules.test.tsx src/HourlyRules.test.tsx src/RelatedRules.test.tsx src/RunExperience.test.tsx src/ProtectedMutationJourney.test.tsx && npm run build
         working-directory: frontend
       - run: npx playwright install --with-deps chromium && npx playwright test e2e/component-rules.spec.ts
         working-directory: frontend
@@ -51,6 +51,10 @@ jobs:
         env:
           RULE_ACCEPTANCE_SERVER: '1'
       - run: npx playwright test e2e/component-rules-hourly.spec.ts
+        working-directory: frontend
+        env:
+          RULE_ACCEPTANCE_SERVER: '1'
+      - run: npx playwright test e2e/component-rules-related.spec.ts
         working-directory: frontend
         env:
           RULE_ACCEPTANCE_SERVER: '1'

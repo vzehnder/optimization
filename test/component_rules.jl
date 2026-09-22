@@ -21,6 +21,33 @@ function solve_rule_case(document, dir, name)
     BESSDispatch.run_system_case(path; output_root=joinpath(dir, name))
 end
 
+@testset "A shared 10 MW limit constrains the sum of two real units" begin
+    mktempdir() do dir
+        document = rule_case()
+        network = document["hydraulic_network"]
+        second = deepcopy(network["units"][1])
+        second["id"] = "second"
+        push!(network["units"], second)
+        push!(network["plants"][1]["units"], "second")
+        block = document["component_rules"]
+        block["version"] = "affine_hydraulic.v1"
+        block["objects"] = [Dict("id" => 7, "unit_key" => "unit"), Dict("id" => 8, "unit_key" => "second")]
+        for row in block["rows"]
+            row["unit"], row["constant"] = "mw", -10.0
+            row["terms"] = [Dict("object_id" => id, "variable" => "potencia", "period" => row["period"], "coefficient" => 1.0, "unit" => "dimensionless") for id in (7, 8)]
+        end
+        result = solve_rule_case(document, dir, "shared_power")
+        @test [row.total_hydro_power_mw for row in CSV.File(result.dispatch_path)] ≈ [10, 10, 10, 10]
+        @test JSON3.read(read(result.system_case_resolved_path, String), Dict{String,Any})["component_rules"] == block
+        for row in deepcopy(block["rows"])
+            row["application_id"], row["constant"] = "a2", -8.0
+            push!(block["rows"], row)
+        end
+        combined = solve_rule_case(document, dir, "intersected_rules")
+        @test [row.total_hydro_power_mw for row in CSV.File(combined.dispatch_path)] ≈ [8, 8, 8, 8]
+    end
+end
+
 @testset "Hourly minima and maxima both affect the hydraulic solution" begin
     mktempdir() do dir
         document = rule_case()
@@ -42,6 +69,38 @@ end
         @test [row.total_hydro_turbine_flow_m3s for row in CSV.File(lower.dispatch_path)] ≈ minima
         frozen = JSON3.read(read(lower.system_case_resolved_path, String), Dict{String,Any})
         @test frozen["component_rules"] == document["component_rules"]
+    end
+end
+
+@testset "Reservoir relations use real storage and spill; plant membership is checked" begin
+    mktempdir() do dir
+        document = rule_case()
+        block = document["component_rules"]
+        block["version"] = "affine_hydraulic.v1"
+        block["objects"] = [Dict{String,Any}("id" => 7, "unit_key" => "unit"),
+                            Dict{String,Any}("id" => 9, "plant_key" => "plant", "member_ids" => [7]),
+                            Dict{String,Any}("id" => 10, "node_key" => "reservoir")]
+        for row in block["rows"]
+            row["unit"], row["constant"], row["relation"] = "hm3", -14.925, ">="
+            row["terms"] = [Dict("object_id" => 10, "variable" => "almacenamiento", "period" => row["period"], "coefficient" => 1.5, "unit" => "dimensionless")]
+        end
+        result = solve_rule_case(document, dir, "storage_relation")
+        dispatch = CSV.File(result.dispatch_path)
+        @test last(dispatch).total_hydro_storage_hm3 ≈ 9.95
+        @test sum(row.total_hydro_turbine_flow_m3s for row in dispatch) ≈ 13.8888888889
+        invalid = deepcopy(document)
+        invalid["component_rules"]["objects"][2]["member_ids"] = [99]
+        @test_throws ArgumentError BESSDispatch.validate_hydraulic_v3_system_case_document(invalid)
+        for row in deepcopy(block["rows"])
+            row["name"], row["unit"], row["constant"] = "spill", "m3_per_s", -2.0
+            row["terms"][1]["variable"], row["terms"][1]["coefficient"] = "vertimiento", 1.0
+            push!(block["rows"], row)
+        end
+        spilled = solve_rule_case(document, dir, "spill_relation")
+        @test sum(row.total_hydro_turbine_flow_m3s for row in CSV.File(spilled.dispatch_path)) ≈ 5.8888888889
+        impossible = deepcopy(document)
+        impossible["component_rules"]["rows"][1]["constant"] = -40.0
+        @test_throws ArgumentError BESSDispatch.validate_hydraulic_v3_system_case_document(impossible)
     end
 end
 

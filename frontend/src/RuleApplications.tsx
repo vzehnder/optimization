@@ -8,6 +8,8 @@ import {
   type NumericOutput,
 } from "./RuleHourlyPreview";
 import { ruleErrorMessage } from "./ruleErrors";
+import type { RuleAlias, RuleObject } from "./RuleObjects";
+import { ruleUnit } from "./ruleUnits";
 
 interface Scope {
   scenario_id: number;
@@ -22,7 +24,7 @@ interface Row {
   relation: string;
   constant: number;
   unit: string;
-  terms: { coefficient: number }[];
+  terms: { coefficient: number; object_id?: number; variable?: string }[];
 }
 interface Job {
   id: string;
@@ -30,6 +32,8 @@ interface Job {
   publication_id: string;
   compilation_scope: Scope;
   grid?: { timestamp: string }[];
+  objects?: RuleObject[];
+  aliases?: RuleAlias[];
   result?: {
     ir?: { rows: Row[] };
     bounds?: HourlyBound[];
@@ -51,7 +55,7 @@ interface Application {
   variant_id: number;
   compilation?: { scope: Scope };
   validation_status?: string;
-  validation_error?: { message: string };
+  validation_error?: { message: string; alias?: string };
 }
 async function post<T>(path: string, body: unknown, requestId?: string) {
   return requestJson<T>(path, {
@@ -279,7 +283,11 @@ export function RuleApplications({
         <>
           <p>
             {rows.length} {rows.length === 1 ? "restricción" : "restricciones"}{" "}
-            · unidad m³/s · {job.data?.compilation_scope.range_start} a{" "}
+            · unidad{" "}
+            {Array.from(new Set(rows.map((row) => ruleUnit(row.unit)))).join(
+              ", ",
+            )}{" "}
+            · {job.data?.compilation_scope.range_start} a{" "}
             {job.data?.compilation_scope.range_end} UTC
           </p>
           {rows.length > 0 ? (
@@ -301,9 +309,14 @@ export function RuleApplications({
                         <td>{row.period + 1}</td>
                         <td>
                           {row.terms
-                            .map((term) => `${term.coefficient} × caudal`)
+                            .map((term) => {
+                              const object = job.data?.objects?.find(
+                                (o) => o.id === term.object_id,
+                              );
+                              return `${term.coefficient} × ${object ? `${object.display_name}.` : term.object_id ? `Objeto ${term.object_id}.` : ""}${term.variable ?? "caudal"}`;
+                            })
                             .join(" + ") || "0"}{" "}
-                          {row.relation} {-row.constant} m³/s
+                          {row.relation} {-row.constant} {ruleUnit(row.unit)}
                         </td>
                         <td>{row.line}</td>
                       </tr>
@@ -395,7 +408,11 @@ export function RuleApplications({
             Revisión {active.publication_id} aplicada a esta variante.
           </p>
           {active.validation_error && (
-            <p role="alert">{active.validation_error.message}</p>
+            <p role="alert">
+              {active.validation_error.alias &&
+                `${active.validation_error.alias}: `}
+              {active.validation_error.message}
+            </p>
           )}
           {active.validation_status === "stale" && (
             <>

@@ -40,6 +40,7 @@ class RuleParameter(BaseModel):
     value: float | bool
     min: float | None = None
     max: float | None = None
+    object_id: int | None = Field(default=None, gt=0)
 
 
 class RuleInput(BaseModel):
@@ -54,12 +55,20 @@ class RuleInput(BaseModel):
     content_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
+class RuleObjectAlias(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    alias: str = Field(pattern=r"^[a-zA-Z][a-zA-Z0-9_]{0,63}$")
+    object_id: int = Field(gt=0)
+
+
 class RuleDraftRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=200)
     code: str = Field(min_length=1, max_length=65536)
     parameters: list[RuleParameter] = Field(max_length=50)
     inputs: list[RuleInput] = Field(default_factory=list, max_length=20)
+    aliases: list[RuleObjectAlias] = Field(default_factory=list, max_length=50)
+    scenario_id: int | None = Field(default=None, gt=0)
     expected_revision: int = Field(ge=0)
 
 
@@ -185,6 +194,8 @@ class RuleRepository:
             identity = uuid.uuid4().hex
             document = {key: draft[key] for key in ("code", "parameters", "name", "code_hash")}
             document["inputs"] = draft.get("inputs", [])
+            document["aliases"] = draft.get("aliases", [])
+            document["scenario_id"] = draft.get("scenario_id")
             document["sdk"] = SDK_VERSION
             self.store.connection.execute("INSERT INTO component_rule_publications VALUES (?, ?, ?, ?, ?, ?)",
                                           (identity, rule_id, expected_revision, encode(document), actor, timestamp()))
@@ -204,7 +215,8 @@ class RuleRepository:
         if scope is not None:
             from app.rule_applications import compile_context
             try:
-                compilation = compile_context(self.store, project_id, object_id, scope)
+                with self.store._lock:
+                    compilation = compile_context(self.store, project_id, object_id, scope)
             except KeyError as error:
                 raise HTTPException(404, "Contexto de regla no encontrado") from error
             except ValueError as error:
@@ -234,6 +246,13 @@ class RuleRepository:
             if compilation:
                 from app.rule_applications import latest_publication
                 from app.rule_inputs import freeze_inputs
+                from app.rule_objects import resolve_aliases, object_error
+                aliases = draft.get("aliases", [])
+                if draft.get("scenario_id") not in (None, scope["scenario_id"]):
+                    object_error("objeto", object_id)
+                objects = resolve_aliases(self.store, project_id, object_id, scope["scenario_id"], aliases, compilation["system_case"], draft["code"])
+                compilation.update(objects=objects, aliases=aliases)
+                context.update(objects=objects, aliases=aliases)
                 context.update(compilation=compilation, grid=compilation["grid"], publication_id=publication_id)
                 context["publication_head"] = latest_publication(self.store, rule_id)
                 context["inputs"] = freeze_inputs(self.store, project_id, object_id, draft.get("inputs", []), compilation)
@@ -268,6 +287,8 @@ class RuleRepository:
             result["compilation_scope"] = payload["compilation"]["scope"]
             result["grid"] = payload["grid"]
             result["publication_id"] = payload["publication_id"]
+            result["objects"] = payload.get("objects", [])
+            result["aliases"] = payload.get("aliases", [])
         result["result"] = json.loads(result["result"]) if result["result"] else None
         if result["result"] is not None:
             result["result"]["runtime"] = {**result["runtime"], **result["result"].get("runtime", {})}
@@ -313,12 +334,17 @@ class RuleRepository:
             return self.get(rule_id, project_id, object_id)
 
     def validate(self, body, project_id, object_id):
+        from app.rule_objects import resolve_aliases, object_error
+        resolve_aliases(self.store, project_id, object_id, body.scenario_id, [a.model_dump() for a in body.aliases], code=body.code)
+        allowed = {object_id, *(a.object_id for a in body.aliases)}
         from app.rule_inputs import validate_inputs
-        validate_inputs(self.store, project_id, object_id, [p.model_dump() for p in body.inputs])
+        validate_inputs(self.store, project_id, allowed, [p.model_dump() for p in body.inputs])
         if len(body.code.encode("utf-8")) > 65536:
             raise HTTPException(422, "El código excede 64 KiB")
         names = set()
         for parameter in body.parameters:
+            if parameter.object_id is not None and parameter.object_id not in allowed:
+                object_error(parameter.name, parameter.object_id)
             value = parameter.value
             invalid = parameter.name in names
             names.add(parameter.name)
@@ -379,31 +405,46 @@ def rule_router(store):
         from app.rule_applications import instant
         from datetime import timedelta
         context(request, project_id, object_id)
-        try:
-            scenario = store.get_scenario(scenario_id)
-            if scenario["project_id"] != project_id:
-                raise HTTPException(404, "Escenario fuera del proyecto")
-            case = store.get_or_create_case_for_scenario(scenario_id)
-            store.get_or_create_default_input_variant(case["id"])
-            variants = store.list_case_input_variants(case["id"])
-            result = {"variants": variants, "range_start": "", "range_end": ""}
-            periods = store.generate_hydraulic_v3_preview(scenario_id)["time_series"]
-            if periods:
-                result["range_start"] = periods[0]["timestamp"]
-                result["range_end"] = (instant(periods[-1]["timestamp"]) + timedelta(hours=periods[-1]["duration_hours"])).replace(tzinfo=None).isoformat()
-            return result
-        except KeyError:
-            raise HTTPException(404, "Contexto del escenario no encontrado") from None
-        except ValueError as error:
-            raise HTTPException(422, str(error)) from error
+        with store._lock:
+            try:
+                scenario = store.get_scenario(scenario_id)
+                if scenario["project_id"] != project_id:
+                    raise HTTPException(404, "Escenario fuera del proyecto")
+                case = store.get_or_create_case_for_scenario(scenario_id)
+                store.get_or_create_default_input_variant(case["id"])
+                variants = store.list_case_input_variants(case["id"])
+                result = {"variants": variants, "range_start": "", "range_end": ""}
+                periods = store.generate_hydraulic_v3_preview(scenario_id)["time_series"]
+                if periods:
+                    result["range_start"] = periods[0]["timestamp"]
+                    result["range_end"] = (instant(periods[-1]["timestamp"]) + timedelta(hours=periods[-1]["duration_hours"])).replace(tzinfo=None).isoformat()
+                return result
+            except KeyError:
+                raise HTTPException(404, "Contexto del escenario no encontrado") from None
+            except ValueError as error:
+                raise HTTPException(422, str(error)) from error
+
+    @router.get("/object-candidates")
+    def get_object_candidates(project_id: int, object_id: int, scenario_id: int, request: Request):
+        from app.rule_objects import model_objects, object_error
+        context(request, project_id, object_id)
+        with store._lock:
+            items = model_objects(store, project_id, scenario_id)
+            if object_id not in {item["id"] for item in items}:
+                object_error("objeto", object_id)
+            return {"items": items}
 
     @router.get("/input-candidates")
     def get_input_candidates(project_id: int, object_id: int, request: Request,
-                             after: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
+                             after: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
+                             reference_object_id: int | None = Query(None, gt=0), scenario_id: int | None = Query(None, gt=0)):
         from app.rule_inputs import input_candidates
         context(request, project_id, object_id)
         with store._lock:
-            return input_candidates(store, project_id, object_id, after, limit)
+            if reference_object_id is not None and reference_object_id != object_id:
+                from app.rule_objects import resolve_aliases
+                resolve_aliases(store, project_id, object_id, scenario_id, [{"alias": "entrada", "object_id": reference_object_id}])
+            return input_candidates(store, project_id, reference_object_id or object_id, after, limit)
 
     @router.get("/{rule_id}")
     def get_rule(project_id: int, object_id: int, rule_id: str, request: Request):

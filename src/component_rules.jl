@@ -1,32 +1,51 @@
 const COMPONENT_RULE_VERSION = "affine_flow.v1"
+const HYDRAULIC_RULE_VERSION = "affine_hydraulic.v1"
 
 function validate_component_rules(document)
     haskey(document, "component_rules") || return
     rules = required_dict(document, "component_rules")
     required_string(document, "schema_version") == SYSTEM_SCHEMA_VERSION_V3 ||
         throw(ArgumentError("component rules require hydraulic v3"))
-    get(rules, "version", nothing) == COMPONENT_RULE_VERSION ||
+    get(rules, "version", nothing) in (COMPONENT_RULE_VERSION, HYDRAULIC_RULE_VERSION) ||
         throw(ArgumentError("unsupported component rules version"))
+    extended = rules["version"] == HYDRAULIC_RULE_VERSION
     periods = required_vector(document, "time_series")
     1 <= length(periods) <= 8784 || throw(ArgumentError("component rules period quota exceeded"))
     grid = required_vector(rules, "grid")
     expected_grid = [Dict("timestamp" => p["timestamp"], "duration_hours" => p["duration_hours"]) for p in periods]
     grid == expected_grid || throw(ArgumentError("component rules grid differs from snapshot"))
     units = Set(u["id"] for u in document["hydraulic_network"]["units"])
+    network = document["hydraulic_network"]
+    reservoirs = Set(n["id"] for n in network["nodes"] if n["type"] == "reservoir")
+    plants = Set(p["id"] for p in network["plants"])
     objects = required_vector(rules, "objects")
     object_ids = Set{Int}()
     for object in objects
         id = get(object, "id", nothing)
         id isa Integer && !(id isa Bool) && id > 0 && !(id in object_ids) ||
             throw(ArgumentError("invalid component rules object identity"))
-        get(object, "unit_key", nothing) in units || throw(ArgumentError("component rules unit outside snapshot"))
+        keys_present = [key for key in ("unit_key", "node_key", "plant_key") if haskey(object, key)]
+        length(keys_present) == 1 || throw(ArgumentError("ambiguous component rules object"))
+        key = only(keys_present)
+        valid = key == "unit_key" ? object[key] in units : extended && (key == "node_key" ? object[key] in reservoirs : object[key] in plants)
+        valid || throw(ArgumentError("component rules object outside snapshot"))
         push!(object_ids, id)
+    end
+    by_id = Dict(o["id"] => o for o in objects)
+    for object in objects
+        haskey(object, "plant_key") || continue
+        members = required_vector(object, "member_ids")
+        all(id -> id isa Integer && !(id isa Bool) && haskey(by_id, id) && haskey(by_id[id], "unit_key"), members) ||
+            throw(ArgumentError("invalid component rules plant members"))
+        expected = Set(u["id"] for u in network["units"] if u["plant_id"] == object["plant_key"])
+        length(members) == length(expected) && Set(by_id[id]["unit_key"] for id in members) == expected ||
+            throw(ArgumentError("component rules plant membership differs from snapshot"))
     end
     rows = required_vector(rules, "rows")
     length(rows) <= 100000 || throw(ArgumentError("component rules row quota exceeded"))
     names = Set()
-    object_units = Dict(object["id"] => only(filter(u -> u["id"] == object["unit_key"], document["hydraulic_network"]["units"])) for object in objects)
-    bounds = Dict{Tuple{Int,Int},Tuple{Float64,Float64}}()
+    object_units = Dict(object["id"] => only(filter(u -> u["id"] == object["unit_key"], network["units"])) for object in objects if haskey(object, "unit_key"))
+    bounds = Dict{Tuple{Int,String,Int},Tuple{Float64,Float64}}()
     term_count = 0
     for row in rows
         for key in ("application_id", "revision_id", "name")
@@ -40,42 +59,69 @@ function validate_component_rules(document)
         name in names && throw(ArgumentError("duplicate component rules row"))
         push!(names, name)
         get(row, "relation", nothing) in ("<=", ">=", "==") || throw(ArgumentError("invalid component rules relation"))
-        get(row, "unit", nothing) == "m3_per_s" || throw(ArgumentError("invalid component rules unit"))
+        get(row, "unit", nothing) in (extended ? ("m3_per_s", "mw", "hm3") : ("m3_per_s",)) || throw(ArgumentError("invalid component rules unit"))
         constant = get(row, "constant", nothing)
         constant isa Real && !(constant isa Bool) && isfinite(constant) || throw(ArgumentError("nonfinite component rules constant"))
         terms = required_vector(row, "terms")
         term_count += length(terms)
         term_count <= 500000 || throw(ArgumentError("component rules term quota exceeded"))
         row_objects = Set()
+        coefficients = Dict{Tuple{Int,String},Float64}()
         for term in terms
             Set(keys(term)) == Set(("object_id", "variable", "period", "coefficient", "unit")) ||
                 throw(ArgumentError("unsupported component rules term fields"))
             id = get(term, "object_id", nothing)
             id isa Integer && !(id isa Bool) && id in object_ids || throw(ArgumentError("component rules object outside snapshot"))
             push!(row_objects, id)
-            get(term, "variable", nothing) == "caudal" || throw(ArgumentError("unsupported component rules variable"))
+            variable = get(term, "variable", nothing)
+            object = by_id[id]
+            expected_unit = if haskey(object, "unit_key")
+                variable == "caudal" ? "m3_per_s" : extended && variable == "potencia" ? "mw" : nothing
+            elseif extended && haskey(object, "node_key")
+                variable == "almacenamiento" ? "hm3" : variable == "vertimiento" ? "m3_per_s" : nothing
+            else
+                nothing
+            end
+            expected_unit == row["unit"] || throw(ArgumentError("unsupported component rules variable or unit"))
             period = get(term, "period", nothing)
             period isa Integer && !(period isa Bool) && period == row_period || throw(ArgumentError("unsupported component rules period reference"))
             get(term, "unit", nothing) == "dimensionless" || throw(ArgumentError("invalid component rules coefficient unit"))
             coefficient = get(term, "coefficient", nothing)
             coefficient isa Real && !(coefficient isa Bool) && isfinite(coefficient) || throw(ArgumentError("nonfinite component rules coefficient"))
+            key = (id, variable)
+            coefficients[key] = get(coefficients, key, 0.0) + Float64(coefficient)
+            isfinite(coefficients[key]) || throw(ArgumentError("nonfinite normalized component rules coefficient"))
         end
-        length(row_objects) <= 1 || throw(ArgumentError("multiple objects require a later capability"))
-        coefficient = sum((Float64(term["coefficient"]) for term in terms); init=0.0)
+        extended || length(row_objects) <= 1 || throw(ArgumentError("multiple objects require hydraulic capability"))
+        filter!(pair -> pair.second != 0, coefficients)
+        length(coefficients) > 1 && continue
+        coefficient = sum(values(coefficients); init=0.0)
         isfinite(coefficient) || throw(ArgumentError("nonfinite normalized component rules coefficient"))
         relation = row["relation"]
         if coefficient == 0
             valid = relation == "<=" ? constant <= 0 : relation == ">=" ? constant >= 0 : constant == 0
             valid || throw(ArgumentError("contradictory constant component rule $(row["name"])"))
         else
-            id = only(row_objects)
-            unit = object_units[id]
-            curve = unit["curves"]["flow_power"]
-            lower = get(unit, "min_flow_m3s", nothing)
-            upper = get(unit, "max_flow_m3s", nothing)
-            physical = (lower === nothing ? Float64(first(curve)["flow_m3s"]) : Float64(lower),
-                        upper === nothing ? Float64(last(curve)["flow_m3s"]) : Float64(upper))
-            lower, upper = get(bounds, (id, row_period), physical)
+            (id, variable) = only(keys(coefficients))
+            physical = if variable in ("caudal", "potencia")
+                unit = object_units[id]
+                curve = unit["curves"]["flow_power"]
+                if variable == "caudal"
+                    lower = get(unit, "min_flow_m3s", nothing)
+                    upper = get(unit, "max_flow_m3s", nothing)
+                    (max(Float64(first(curve)["flow_m3s"]), lower === nothing ? 0.0 : Float64(lower)),
+                     min(Float64(last(curve)["flow_m3s"]), upper === nothing ? Inf : Float64(upper)))
+                else
+                    upper = get(unit, "max_power_mw", nothing)
+                    (0.0, min(Float64(last(curve)["power_mw"]), upper === nothing ? Inf : Float64(upper)))
+                end
+            elseif variable == "almacenamiento"
+                reservoir = only(filter(n -> n["id"] == by_id[id]["node_key"], network["nodes"]))["reservoir"]
+                (Float64(reservoir["storage_min_hm3"]), Float64(reservoir["storage_max_hm3"]))
+            else
+                (0.0, Inf)
+            end
+            lower, upper = get(bounds, (id, variable, row_period), physical)
             bound = -Float64(constant) / coefficient
             isfinite(bound) || throw(ArgumentError("nonfinite normalized component rule bound"))
             if relation == "=="
@@ -86,7 +132,7 @@ function validate_component_rules(document)
                 lower = max(lower, bound)
             end
             lower <= upper || throw(ArgumentError("contradictory component rule $(row["name"]) at period $(row_period + 1)"))
-            bounds[(id, row_period)] = (lower, upper)
+            bounds[(id, variable, row_period)] = (lower, upper)
         end
     end
 end

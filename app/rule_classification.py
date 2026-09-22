@@ -5,7 +5,7 @@ from app.time_series_classification import ClassificationContractDriftError
 def seed_rule_classification(store):
     tables = ("time_series_semantic_types", "time_series_binding_roles", "time_series_role_compatibilities")
     if store.database_backend == "postgresql":
-        store.connection.execute("LOCK TABLE " + ", ".join(tables) + " IN SHARE ROW EXCLUSIVE MODE")
+        store.connection.execute("LOCK TABLE " + ", ".join((*tables, "measurement_dimensions", "measurement_units")) + " IN SHARE ROW EXCLUSIVE MODE")
     at = "2026-09-22T00:00:00+00:00"
     audit = {"created_at": at, "created_by": "reg-003"}
 
@@ -26,6 +26,9 @@ def seed_rule_classification(store):
 
     def identity(table, key, value):
         return store.connection.execute(f"SELECT id FROM {table} WHERE {key} = ?", (value,)).fetchone()["id"]
+
+    volume = ensure("measurement_dimensions", {"dimension_key": "volume"}, {"value_kind": "numeric"}, {"display_name": "Volume"})
+    ensure("measurement_units", {"unit_key": "hm3"}, {"dimension_id": volume, "physical_dimension": "volume"}, {"symbol": "hm³"})
 
     dimension = identity("measurement_dimensions", "dimension_key", "dimensionless")
     unit = identity("measurement_units", "unit_key", "dimensionless")

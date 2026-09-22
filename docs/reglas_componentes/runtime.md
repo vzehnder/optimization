@@ -1,8 +1,9 @@
-# Operación y verificación de REG-001 a REG-003
+# Operación y verificación de REG-001 a REG-004
 
 REG-001 guarda borradores y calcula un máximo escalar de caudal. REG-002 incorpora
 publicación, aplicaciones a variantes y restricciones afines en el optimizador
 hidráulico v3. REG-003 calcula límites horarios desde entradas canónicas fijadas.
+REG-004 relaciona unidades, plantas y embalses del mismo modelo.
 Las revisiones `sealed_preview` son copias inmutables
 de pruebas; el estado de la definición editable sigue siendo `draft`.
 
@@ -15,7 +16,7 @@ def construir(ctx):
 
 `capacidad` declara tipo `number`, unidad canónica `m3_per_s` y valor 80;
 `disponibilidad` declara `number`, unidad `dimensionless`, valor 0.75 y rango
-0–1. El resultado es 60 m³/s. El SDK `reg-003.1` conserva la unidad en la
+0–1. El resultado es 60 m³/s. El SDK `reg-004.1` conserva la unidad en la
 multiplicación, acepta funciones, bucles y comprensiones, y exige una cantidad
 finita de caudal como retorno. El contexto expone identidad del objeto y
 parámetros inmutables. La prueba escalar de REG-001 se conserva.
@@ -37,7 +38,7 @@ Los períodos usan índices desde cero en Python/IR; la UI los presenta desde un
 Se admiten `<=`, `>=`, `==`, suma/resta y multiplicación/división por datos
 adimensionales conocidos. Las condiciones Python solo pueden usar datos conocidos:
 una decisión simbólica como booleano, los productos de decisiones y referencias
-a otros períodos/objetos se rechazan. `construir` no devuelve un escalar en este
+a otros períodos u objetos sin alias se rechazan. `construir` no devuelve un escalar en este
 modo: emite filas con nombre, unidad, período y línea de origen.
 
 La UI muestra todas las filas paginadas. Aplicar exige motivo y fija revisión,
@@ -116,6 +117,58 @@ incluyendo cambios ocurridos durante la validación Julia. El snapshot conserva
 valores, identidad/hash de las fuentes, compatibilidad, parámetros, salidas e IR;
 una publicación posterior no modifica corridas guardadas.
 
+## Relaciones entre objetos hidráulicos (REG-004)
+
+Desde la unidad, «Objetos y variables del modelo» permite declarar alias hacia
+unidades, plantas y embalses activos del mismo caso. `ctx.objetos.<alias>` conserva
+la identidad estable; la selección, guardado, prueba, aplicación y corrida
+vuelven a comprobar pertenencia y membresía. No basta compartir proyecto.
+
+| Objeto | Variables | Unidades |
+| --- | --- | --- |
+| Unidad | `caudal`, `potencia` | `m3_per_s`, `mw` |
+| Planta | `potencia`, expandida a sus unidades activas | `mw` |
+| Embalse | `almacenamiento` al final del intervalo, `vertimiento` | `hm3`, `m3_per_s` |
+
+No se ofrecen caudal de tramo ni cota como decisiones. La dimensión `volume` y
+la unidad `hm3` se incorporan al catálogo existente por clave, sin reservar IDs.
+Las sumas/restas y comparaciones exigen la misma unidad; los coeficientes son
+datos adimensionales conocidos. Se conservan los rechazos a productos de
+variables, condiciones simbólicas y referencias a otros períodos.
+
+```python
+def construir(ctx):
+    for t in ctx.periodos:
+        ctx.restriccion("generacion", t,
+            ctx.objeto.potencia[t] + ctx.objetos.segunda.potencia[t]
+            <= ctx.parametros.limite)
+        ctx.restriccion("reserva", t,
+            ctx.objetos.agua.almacenamiento[t] >= ctx.parametros.reserva)
+```
+
+`limite` puede ser 10 `mw` y `reserva` una cantidad en `hm3`. Usar
+`ctx.objetos.central.potencia[t]` emite los términos de todas las unidades de la
+planta; Julia no crea otra variable física. La preview identifica cada objeto y
+variable de los términos expandidos. Una regla de potencia no muestra curvas de
+caudal que no haya emitido.
+
+Los parámetros pueden declarar `object_id`; los puertos se seleccionan desde el
+objeto actual o un alias explícito. Los permisos, propiedad y compatibilidad se
+comprueban con el objeto de ese puerto. Las series específicas conservan su dueño.
+Los roles disponibles siguen siendo los autorizados por la matriz TS-7: declarar
+un alias no añade compatibilidades nuevas para plantas o embalses.
+
+Las relaciones ampliadas usan `affine_hydraulic.v1`; el motor sigue aceptando
+`affine_flow.v1`. La corrida conserva objetos, alias, miembros de planta, código,
+entradas, parámetros e IR. Todas las aplicaciones activas se intersectan y sus
+filas se distinguen por aplicación. Cambios de membresía o referencias ausentes
+marcan la aplicación obsoleta y bloquean nuevas corridas; las históricas conservan
+sus snapshots. Un motor sin la capacidad requerida no puede omitir las filas.
+
+El SDK `reg-004.1` exige reconstruir la imagen y reiniciar el worker con su digest.
+Las publicaciones/aplicaciones de un SDK anterior necesitan publicar, probar y
+aplicar de nuevo antes de ejecutar; los datos históricos siguen legibles.
+
 ## Runtime Linux compartido por desarrollo y CI
 
 La imagen se construye únicamente con `runtime/component_rules/`, sin enviar
@@ -123,8 +176,8 @@ el repositorio completo como contexto. El Dockerfile fija CPython 3.12.14 por
 digest. El SDK está incluido en la imagen y su digest final fija ambos.
 
 ```sh
-docker build -t component-rules:reg-003 runtime/component_rules
-export RULE_RUNTIME_IMAGE="$(docker image inspect component-rules:reg-003 --format '{{.Id}}')"
+docker build -t component-rules:reg-004 runtime/component_rules
+export RULE_RUNTIME_IMAGE="$(docker image inspect component-rules:reg-004 --format '{{.Id}}')"
 export RULE_RUNTIME_COMMAND='["docker"]'
 export RULE_ENABLED_PROJECTS='*'
 python -m app.rule_worker
@@ -142,8 +195,8 @@ En Windows, Docker Desktop con contenedores Linux usa los mismos comandos,
 con variables PowerShell:
 
 ```powershell
-docker build -t component-rules:reg-003 runtime/component_rules
-$env:RULE_RUNTIME_IMAGE = (docker image inspect component-rules:reg-003 --format '{{.Id}}').Trim()
+docker build -t component-rules:reg-004 runtime/component_rules
+$env:RULE_RUNTIME_IMAGE = (docker image inspect component-rules:reg-004 --format '{{.Id}}').Trim()
 $env:RULE_RUNTIME_COMMAND = '["docker"]'
 $env:RULE_ENABLED_PROJECTS = '*'
 .venv/Scripts/python.exe -m app.rule_worker
@@ -214,18 +267,19 @@ export DATABASE_URL=sqlite:///:memory:
 export POSTGRES_TEST_DATABASE_URL=postgresql://test:test@127.0.0.1:5432/rules_test
 # Configurar RULE_RUNTIME_COMMAND / RULE_RUNTIME_IMAGE como arriba; no levantar
 # un worker adicional: las pruebas administran sus propios workers.
-python -m unittest tests.test_reg001_rules tests.test_reg001_runtime tests.test_reg002_rules tests.test_reg002_runtime tests.test_reg003_rules tests.test_reg003_runtime tests.test_reg003_classification tests.test_ts7_001_classification_catalog -v
+python -m unittest tests.test_reg001_rules tests.test_reg001_runtime tests.test_reg002_rules tests.test_reg002_runtime tests.test_reg003_rules tests.test_reg003_runtime tests.test_reg003_classification tests.test_reg004_rules tests.test_reg004_runtime tests.test_ts7_001_classification_catalog -v
 julia --project=. test/component_rules.jl
 cd frontend
 npm ci
 npm run api:generate
 npm run api:check
-npm test -- --run src/ComponentRules.test.tsx src/HourlyRules.test.tsx src/RunExperience.test.tsx src/ProtectedMutationJourney.test.tsx
+npm test -- --run src/ComponentRules.test.tsx src/HourlyRules.test.tsx src/RelatedRules.test.tsx src/RunExperience.test.tsx src/ProtectedMutationJourney.test.tsx
 npm run build
 npx playwright test e2e/component-rules.spec.ts
 # Requiere Julia disponible (PATH o variable JULIA) y la imagen OCI configurada.
 RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-execution.spec.ts
 RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-hourly.spec.ts
+RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-related.spec.ts
 ```
 
 El smoke de navegador usa el servidor aislado existente, comprueba la entrada
@@ -240,7 +294,10 @@ En PowerShell, establecer `$env:RULE_ACCEPTANCE_SERVER = '1'` antes de ese coman
 y eliminar la variable al terminar. El recorrido horario añade selección de
 afluente/disponibilidad, solución `[20, 10, 15, 20]`, publicación nueva,
 revalidación con motivo, hueco y cruce de límites, conservando el resultado
-histórico. CI incluye los tres recorridos y la prueba Julia.
+histórico. El recorrido de REG-004 comprueba la suma de dos unidades a 10 MW,
+la equivalencia del alias de planta y el bloqueo tras cambiar sus miembros,
+conservando el mapa de alias y el resultado histórico. CI incluye los cuatro
+recorridos y la prueba Julia.
 
 Referencia del mecanismo OCI: [Docker, ejecución de contenedores](https://docs.docker.com/engine/containers/run/).
 Los tests de esta entrega no constituyen una auditoría de escapes del kernel.

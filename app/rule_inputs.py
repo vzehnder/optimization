@@ -11,6 +11,14 @@ def input_error(port, message, *, code="RULE_INPUT_INVALID", period=None, status
 
 
 def resolve_input(store, project_id, object_id, port):
+    from app.linkable_objects import LinkableObjectError
+    try:
+        obj = store.get_linkable_object(port["object_id"])
+    except LinkableObjectError:
+        input_error(port, "Objeto de entrada no disponible")
+    allowed = object_id if isinstance(object_id, set) else {object_id}
+    if port["object_id"] not in allowed or obj["project_id"] != project_id or obj["status"] != "active":
+        input_error(port, "El puerto debe pertenecer al objeto de la regla o a un alias declarado")
     tables = store.canonical_table_names()
     row = store.connection.execute(f"""
         SELECT s.id AS set_id, s.owner_project_id, s.visibility_scope, s.series_kind,
@@ -31,17 +39,15 @@ def resolve_input(store, project_id, object_id, port):
     if row is None or row["state"] != "sealed" or row["content_hash"] != port["content_hash"]:
         input_error(port, "La señal, revisión sellada y hash no coinciden")
     item = dict(row)
-    if port["object_id"] != object_id:
-        input_error(port, "El puerto debe pertenecer a la unidad de esta regla")
     if (item["set_status"] != "validated" or item["signal_status"] != "active"
             or (item["visibility_scope"] != "global" and item["owner_project_id"] != project_id)
-            or (item["series_kind"] == "object_specific" and item["owner_linkable_object_id"] != object_id)):
+            or (item["series_kind"] == "object_specific" and item["owner_linkable_object_id"] != port["object_id"])):
         input_error(port, "La entrada no está disponible para este objeto")
     if item["semantic_key"] != port["semantic_type_key"] or item["dimension_key"] != port["dimension_key"]:
         input_error(port, "La dimensión o semántica no coincide con la revisión")
     decision = store.evaluate_time_series_compatibility(
         semantic_type_key=item["semantic_key"], binding_role_key=port["binding_role_key"],
-        object_type_key="hydraulic_unit", unit_key=item["unit_key"], usage="execution",
+        object_type_key=obj["object_type_key"], unit_key=item["unit_key"], usage="execution",
     )
     if not decision["allowed"] or item["signal_role"] != "input" or item["aggregation"] != "mean":
         input_error(port, "La semántica, unidad o agregación no es compatible con este puerto")
@@ -62,6 +68,7 @@ def freeze_inputs(store, project_id, object_id, ports, compilation):
     tables = store.canonical_table_names()
     start, end = (instant(compilation["scope"][key]) for key in ("range_start", "range_end"))
     frozen = []
+    object_id = {object_id, *(a["object_id"] for a in compilation.get("aliases", []))}
     validate_inputs(store, project_id, object_id, ports)
     for port in ports:
         source = resolve_input(store, project_id, object_id, port)
@@ -111,7 +118,8 @@ def freeze_inputs(store, project_id, object_id, ports, compilation):
     return frozen
 
 
-def assert_inputs_current(store, project_id, object_id, inputs):
+def assert_inputs_current(store, project_id, object_id, inputs, aliases=()):
+    object_id = {object_id, *(a["object_id"] for a in aliases)}
     keys = ("current_revision_id", "scope_revision", "visibility_scope", "owner_project_id",
             "owner_linkable_object_id", "set_status", "signal_status", "compatibility")
     for source in inputs:
@@ -126,6 +134,7 @@ def assert_inputs_current(store, project_id, object_id, inputs):
 
 def input_candidates(store, project_id, object_id, after=0, limit=50):
     tables = store.canonical_table_names()
+    object_type = store.get_linkable_object(object_id)["object_type_key"]
     rows = store.connection.execute(f"""
         SELECT sig.id AS signal_id, rev.id AS revision_id, rev.content_hash,
                sem.semantic_key AS semantic_type_key, dim.dimension_key, roles.role_key AS binding_role_key
@@ -142,10 +151,10 @@ def input_candidates(store, project_id, object_id, after=0, limit=50):
         WHERE sig.id > ? AND s.status = 'validated' AND sig.status = 'active' AND rev.state = 'sealed'
           AND (s.visibility_scope = 'global' OR s.owner_project_id = ?)
           AND (s.series_kind = 'catalog' OR s.owner_linkable_object_id = ?)
-          AND roles.role_key IN ('rule_inflow', 'rule_availability') AND ot.object_type_key = 'hydraulic_unit'
+          AND roles.role_key IN ('rule_inflow', 'rule_availability') AND ot.object_type_key = ?
           AND compat.status = 'active' AND compat.execution_allowed = 1
         ORDER BY sig.id LIMIT ?
-    """, (after, project_id, object_id, limit + 1)).fetchall()
+    """, (after, project_id, object_id, object_type, limit + 1)).fetchall()
     items = []
     for row in rows[:limit]:
         port = {**dict(row), "object_id": object_id, "alias": "entrada"}

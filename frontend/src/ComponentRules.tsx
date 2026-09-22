@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { autocompletion, completeFromList } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { python } from "@codemirror/lang-python";
-import { EditorState } from "@codemirror/state";
+import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -17,6 +17,7 @@ import { safeReturnPath } from "./journeyRoutes";
 import { RuleApplications } from "./RuleApplications";
 import { RuleInputs, type RuleInput } from "./RuleInputs";
 import { ruleErrorMessage } from "./ruleErrors";
+import { RuleObjects, type RuleAlias, type RuleObject } from "./RuleObjects";
 
 export interface RuleParameter {
   name: string;
@@ -25,6 +26,7 @@ export interface RuleParameter {
   value: number | boolean;
   min: number | null;
   max: number | null;
+  object_id?: number | null;
 }
 interface RuleDraft {
   id: string;
@@ -33,6 +35,8 @@ interface RuleDraft {
   revision: number;
   parameters: RuleParameter[];
   inputs?: RuleInput[];
+  aliases?: RuleAlias[];
+  scenario_id?: number | null;
 }
 interface RuleList {
   enabled?: boolean;
@@ -86,11 +90,15 @@ function sameRows<T extends object>(left: T[], right: T[]) {
 function PythonEditor({
   initialCode,
   onChange,
+  completions,
 }: {
   initialCode: string;
   onChange: (code: string) => void;
+  completions: string[];
 }) {
   const element = useRef<HTMLDivElement>(null);
+  const editor = useRef<EditorView | null>(null);
+  const [completionConfig] = useState(() => new Compartment());
   useEffect(() => {
     const view = new EditorView({
       parent: element.current!,
@@ -101,21 +109,22 @@ function PythonEditor({
           lineNumbers(),
           history(),
           keymap.of([...defaultKeymap, ...historyKeymap]),
-          autocompletion({
-            override: [
-              completeFromList([
-                { label: "ctx.parametros", type: "property" },
-                { label: "ctx.objeto", type: "property" },
-                { label: "ctx.objeto.caudal", type: "property" },
-                { label: "ctx.periodos", type: "property" },
-                { label: "ctx.restriccion", type: "function" },
-                { label: "ctx.entradas", type: "property" },
-                { label: "ctx.salida", type: "function" },
-                { label: "construir", type: "function" },
-                { label: "range", type: "function" },
-              ]),
-            ],
-          }),
+          completionConfig.of(
+            autocompletion({
+              override: [
+                completeFromList([
+                  { label: "ctx.parametros", type: "property" },
+                  { label: "ctx.objeto", type: "property" },
+                  { label: "ctx.periodos", type: "property" },
+                  { label: "ctx.restriccion", type: "function" },
+                  { label: "ctx.entradas", type: "property" },
+                  { label: "ctx.salida", type: "function" },
+                  { label: "construir", type: "function" },
+                  { label: "range", type: "function" },
+                ]),
+              ],
+            }),
+          ),
           EditorView.contentAttributes.of({
             "aria-label": "Código Python",
             role: "textbox",
@@ -128,8 +137,33 @@ function PythonEditor({
         ],
       }),
     });
+    editor.current = view;
     return () => view.destroy();
-  }, [initialCode, onChange]);
+  }, [initialCode, onChange, completionConfig]);
+  useEffect(() => {
+    editor.current?.dispatch({
+      effects: completionConfig.reconfigure(
+        autocompletion({
+          override: [
+            completeFromList([
+              ...completions.map((label) => ({ label, type: "property" })),
+              ...[
+                "ctx.periodos",
+                "ctx.parametros",
+                "ctx.entradas",
+                "ctx.objetos",
+                "ctx.restriccion",
+                "ctx.salida",
+                "construir",
+                "range",
+                "sum",
+              ].map((label) => ({ label, type: "variable" })),
+            ]),
+          ],
+        }),
+      ),
+    });
+  }, [completions, completionConfig]);
   return <div className="rule-code-editor" ref={element} />;
 }
 
@@ -262,12 +296,37 @@ function RuleForm({
   );
   const [saved, setSaved] = useState(initial);
   const [inputs, setInputs] = useState(initial?.inputs ?? []);
+  const [aliases, setAliases] = useState(initial?.aliases ?? []);
+  const [search] = useSearchParams();
+  const scenarioId =
+    initial?.scenario_id ?? (Number(search.get("scenario_id")) || null);
+  const objectId = Number(root.split("/").at(-2));
+  const candidates = useQuery({
+    queryKey: [root, "object-candidates", scenarioId],
+    queryFn: () =>
+      requestJson<{ items: RuleObject[] }>(
+        `${root}/object-candidates?scenario_id=${scenarioId}`,
+      ),
+    enabled: !!scenarioId,
+    retry: false,
+  });
+  const objects = candidates.data?.items ?? [];
+  const references = [{ alias: "", object_id: objectId }, ...aliases];
+  const completions = references.flatMap((ref) =>
+    Object.keys(
+      objects.find((o) => o.id === ref.object_id)?.variables ?? {},
+    ).map(
+      (variable) =>
+        `ctx.${ref.alias ? `objetos.${ref.alias}` : "objeto"}.${variable}`,
+    ),
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const dirty =
     !saved ||
     code !== saved.code ||
     name !== saved.name ||
+    !sameRows(aliases, saved.aliases ?? []) ||
     !sameRows(inputs, saved.inputs ?? []) ||
     !sameRows(parameters, saved.parameters);
   function parameterChange(index: number, patch: Partial<RuleParameter>) {
@@ -286,6 +345,8 @@ function RuleForm({
           code,
           parameters,
           inputs,
+          aliases,
+          scenario_id: scenarioId,
           expected_revision: saved?.revision ?? 0,
         },
         saved ? "PUT" : "POST",
@@ -310,7 +371,7 @@ function RuleForm({
       </label>
       <p>
         Define <code>construir(ctx)</code>. Para un cálculo numérico, devuelve
-        una cantidad en m³/s. Para restringir caudal, recorre{" "}
+        una cantidad en m³/s. Para relacionar variables, recorre{" "}
         <code>ctx.periodos</code>y emite filas con <code>ctx.restriccion</code>.
       </p>
       <details>
@@ -336,7 +397,31 @@ function RuleForm({
       <PythonEditor
         initialCode={initial?.code ?? DEFAULT_CODE}
         onChange={setCode}
+        completions={completions}
       />
+      {scenarioId && (
+        <RuleObjects
+          objects={objects}
+          objectId={objectId}
+          aliases={aliases}
+          onChange={setAliases}
+        />
+      )}
+      {candidates.isError && (
+        <p role="alert">{ruleErrorMessage(candidates.error)}</p>
+      )}
+      <details>
+        <summary>Ejemplo de potencia conjunta</summary>
+        <p>
+          Selecciona la planta con alias central y define un parámetro limite de
+          10 MW.
+        </p>
+        <pre>
+          {
+            'def construir(ctx):\n    for t in ctx.periodos:\n        ctx.restriccion("conjunto", t, ctx.objetos.central.potencia[t] <= ctx.parametros.limite)'
+          }
+        </pre>
+      </details>
       <fieldset>
         <legend>Parámetros tipados</legend>
         {parameters.map((p, index) => (
@@ -377,6 +462,28 @@ function RuleForm({
                 }
               />
             </label>
+            {scenarioId && (
+              <label>
+                Objeto del parámetro {p.name}
+                <select
+                  value={p.object_id ?? ""}
+                  onChange={(e) =>
+                    parameterChange(index, {
+                      object_id: Number(e.target.value) || null,
+                    })
+                  }
+                >
+                  <option value="">Parámetro de la regla</option>
+                  {references.map((ref) => (
+                    <option key={ref.alias} value={ref.object_id}>
+                      {ref.alias || "Objeto actual"} ·{" "}
+                      {objects.find((o) => o.id === ref.object_id)
+                        ?.display_name ?? ref.object_id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <label>
               Valor {p.name}
               {p.type === "boolean" ? (
@@ -451,7 +558,16 @@ function RuleForm({
           Agregar parámetro
         </button>
       </fieldset>
-      <RuleInputs root={root} inputs={inputs} onChange={setInputs} />
+      <RuleInputs
+        root={root}
+        inputs={inputs}
+        onChange={setInputs}
+        scenarioId={scenarioId}
+        objects={references.map((ref) => ({
+          id: ref.object_id,
+          label: ref.alias || "Objeto actual",
+        }))}
+      />
       <button type="button" disabled={busy} onClick={() => void save()}>
         Guardar borrador
       </button>

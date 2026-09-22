@@ -7,18 +7,23 @@ from dataclasses import dataclass
 class Affine:
     terms: tuple
     constant: float = 0.0
+    unit: str = "m3_per_s"
 
     @staticmethod
     def lift(value):
         if isinstance(value, Affine):
             return value
-        if getattr(value, "unit", None) == "m3_per_s":
-            return Affine((), value.value)
-        raise ValueError("La expresión debe tener unidad m3_per_s")
+        if getattr(value, "unit", None) in {"m3_per_s", "mw", "hm3"}:
+            return Affine((), value.value, value.unit)
+        raise ValueError("La expresión requiere una cantidad con unidad compatible")
 
     def __add__(self, other):
+        if type(other) in (int, float) and other == 0:
+            return self
         other = self.lift(other)
-        return Affine(self.terms + other.terms, self.constant + other.constant)
+        if self.unit != other.unit:
+            raise ValueError("Las expresiones requieren unidades compatibles")
+        return Affine(self.terms + other.terms, self.constant + other.constant, self.unit)
 
     __radd__ = __add__
 
@@ -36,7 +41,7 @@ class Affine:
             value = value.value
         if type(value) not in (int, float):
             raise ValueError("Solo se permite multiplicar decisiones por datos adimensionales")
-        return Affine(tuple((oid, t, c * value) for oid, t, c in self.terms), self.constant * value)
+        return Affine(tuple((oid, variable, t, c * value) for oid, variable, t, c in self.terms), self.constant * value, self.unit)
 
     __rmul__ = __mul__
 
@@ -49,7 +54,7 @@ class Affine:
 
     def compare(self, other, relation):
         difference = self - other
-        return Relation(difference.terms, difference.constant, relation)
+        return Relation(difference.terms, difference.constant, relation, difference.unit)
 
     def __le__(self, other):
         return self.compare(other, "<=")
@@ -69,6 +74,7 @@ class Relation:
     terms: tuple
     constant: float
     relation: str
+    unit: str
 
     def __bool__(self):
         raise ValueError("Una restricción simbólica no es un booleano")
@@ -78,11 +84,14 @@ class Relation:
 class Flow:
     object_id: int
     count: int
+    variable: str = "caudal"
+    unit: str = "m3_per_s"
+    member_ids: tuple = ()
 
     def __getitem__(self, period):
         if type(period) is not int or not 0 <= period < self.count:
             raise ValueError("Período fuera de la grilla")
-        return Affine(((self.object_id, period, 1.0),))
+        return Affine(tuple((identity, self.variable, period, 1.0) for identity in (self.member_ids or (self.object_id,))), unit=self.unit)
 
 
 def collector(rows, count):
@@ -94,7 +103,7 @@ def collector(rows, count):
         if len(rows) >= 100000:
             raise ValueError("Cuota de restricciones excedida")
         rows.append({"name": name, "period": period, "line": inspect.currentframe().f_back.f_lineno,
-                     "relation": relation.relation, "unit": "m3_per_s", "constant": relation.constant,
-                     "terms": [{"object_id": oid, "period": t, "variable": "caudal", "coefficient": c,
-                                "unit": "dimensionless"} for oid, t, c in relation.terms]})
+                     "relation": relation.relation, "unit": relation.unit, "constant": relation.constant,
+                     "terms": [{"object_id": oid, "period": t, "variable": variable, "coefficient": c,
+                                "unit": "dimensionless"} for oid, variable, t, c in relation.terms]})
     return emit

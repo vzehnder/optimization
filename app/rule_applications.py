@@ -12,6 +12,7 @@ from app.component_rules import digest, encode, timestamp, project_enabled
 from app.rule_ir import validate_ir, validate_outputs
 from app.rule_runtime import SDK_VERSION
 from app.rule_inputs import assert_inputs_current
+from app.rule_objects import resolve_aliases
 
 
 def initialize(store):
@@ -135,16 +136,24 @@ def decode_application(row):
 
 
 def list_applications(repository, rule_id):
-    rows = repository.store.connection.execute("SELECT * FROM component_rule_applications WHERE rule_id = ? ORDER BY id", (rule_id,)).fetchall()
-    applications = [decode_application(row) for row in rows]
-    for application in applications:
-        application["validation_status"] = "valid"
-        try:
-            assert_inputs_current(repository.store, application["project_id"], application["object_id"], application.get("inputs", []))
-        except HTTPException as error:
-            application["validation_status"] = "stale"
-            application["validation_error"] = error.detail
-    return applications
+    with repository.store._lock:
+        rows = repository.store.connection.execute("SELECT * FROM component_rule_applications WHERE rule_id = ? ORDER BY id", (rule_id,)).fetchall()
+        applications = [decode_application(row) for row in rows]
+        for application in applications:
+            application["validation_status"] = "valid"
+            try:
+                assert_inputs_current(repository.store, application["project_id"], application["object_id"], application.get("inputs", []), application.get("aliases", []))
+                current = compile_context(repository.store, application["project_id"], application["object_id"], application["compilation"]["scope"])
+                assert_objects_current(repository.store, application["project_id"], application["object_id"], application["compilation"], current, application["code"])
+                if current["fingerprint"] != application["compilation"]["fingerprint"]:
+                    raise HTTPException(409, "Cambió el modelo o sus entradas; vuelve a probar y aplicar")
+            except HTTPException as error:
+                application["validation_status"] = "stale"
+                application["validation_error"] = error.detail if isinstance(error.detail, dict) else {"message": error.detail}
+            except (KeyError, ValueError) as error:
+                application["validation_status"] = "stale"
+                application["validation_error"] = {"message": str(error)}
+        return applications
 
 
 def latest_publication(store, rule_id):
@@ -162,7 +171,7 @@ def apply(repository, rule_id, project_id, object_id, body, actor):
     if job["status"] != "succeeded" or "compilation" not in payload:
         raise HTTPException(409, "Prueba una revisión publicada en la variante antes de aplicar")
     frozen = payload["compilation"]
-    ir = validate_ir(job["result"]["ir"], object_id, len(frozen["grid"]))
+    ir = validate_ir(job["result"]["ir"], object_id, len(frozen["grid"]), frozen.get("objects"))
     if not ir["rows"] and not body.accept_empty:
         raise HTTPException(422, "La regla no emite restricciones; requiere aceptación explícita")
     publication = repository.publication(rule_id, payload["publication_id"])
@@ -172,8 +181,9 @@ def apply(repository, rule_id, project_id, object_id, body, actor):
         store.connection.execute("UPDATE case_input_variants SET updated_at = updated_at WHERE id = ?", (frozen["scope"]["variant_id"],))
         if latest_publication(store, rule_id) != payload["publication_head"]:
             raise HTTPException(409, "Cambió la revisión publicada durante la prueba; vuelve a probar")
-        assert_inputs_current(store, project_id, object_id, payload.get("inputs", []))
+        assert_inputs_current(store, project_id, object_id, payload.get("inputs", []), payload.get("aliases", []))
         current = compile_context(store, project_id, object_id, frozen["scope"])
+        assert_objects_current(store, project_id, object_id, frozen, current, publication["code"])
         if current["fingerprint"] != frozen["fingerprint"]:
             raise HTTPException(409, "El contexto cambió durante la prueba; vuelve a compilar")
         previous = store.connection.execute("SELECT id FROM component_rule_applications WHERE rule_id = ? AND variant_id = ? AND status = 'active'",
@@ -185,12 +195,19 @@ def apply(repository, rule_id, project_id, object_id, body, actor):
                     "name": publication["name"], "parameters": publication["parameters"], "code_hash": publication["code_hash"],
                     "context_hash": job["context_hash"], "runtime": job["runtime"], "ir": ir, "ir_hash": digest(ir),
                     "inputs": payload.get("inputs", []),
+                    "aliases": payload.get("aliases", []), "objects": payload.get("objects", []),
                     "outputs": validate_outputs(job["result"].get("outputs", []), len(frozen["grid"])),
                     "observed_publication": payload["publication_head"], "accept_empty": body.accept_empty,
                     "events": [{"action": "apply", "actor": actor, "reason": body.reason.strip(), "at": timestamp()}]}
         store.connection.execute("INSERT INTO component_rule_applications VALUES (?, ?, ?, ?, ?, 1, 'active', ?)",
                                  (identity, rule_id, publication["id"], body.job_id, frozen["scope"]["variant_id"], encode(document)))
         return next(item for item in list_applications(repository, rule_id) if item["id"] == identity)
+
+
+def assert_objects_current(store, project_id, object_id, frozen, current, code=None):
+    objects = resolve_aliases(store, project_id, object_id, frozen["scope"]["scenario_id"], frozen.get("aliases", []), current["system_case"], code)
+    if "objects" in frozen and objects != frozen["objects"]:
+        raise HTTPException(409, "Los objetos o miembros de planta cambiaron; vuelve a probar y aplicar")
 
 
 def deactivate(repository, rule_id, application_id, body, actor):
@@ -242,11 +259,11 @@ def guard_version_run(store, version, trigger_type):
     if block is None:
         guard_uncompiled_run(store, scenario_id=version["scenario_id"])
         return
-    from app.rule_ir import IR_VERSION
+    from app.rule_ir import IR_VERSION, HYDRAULIC_IR_VERSION
     project = store.get_scenario(version["scenario_id"])["project_id"]
     if trigger_type != "manual" or not project_enabled(project):
         raise HTTPException(409, "Este recorrido no permite ejecutar las reglas del snapshot")
-    if block.get("version") != IR_VERSION or version["generation_metadata"].get("component_rules_hash") != digest(block):
+    if block.get("version") not in {IR_VERSION, HYDRAULIC_IR_VERSION} or version["generation_metadata"].get("component_rules_hash") != digest(block):
         raise HTTPException(409, "El snapshot de reglas no fue materializado con el contrato soportado")
     if any(item["runtime"]["sdk"] != SDK_VERSION for item in block.get("applications", [])):
         raise HTTPException(409, "El SDK del snapshot no está soportado")
@@ -254,7 +271,7 @@ def guard_version_run(store, version, trigger_type):
 
 def materialize_run(repository, scope, actor, request_id, validate_text, expected_bindings_revision=None):
     from app.persistence import extract_system_case_metadata
-    from app.rule_ir import IR_VERSION
+    from app.rule_ir import IR_VERSION, HYDRAULIC_IR_VERSION
     store = repository.store
     scenario = store.get_scenario(scope["scenario_id"])
     project_id = scenario["project_id"]
@@ -284,26 +301,30 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
         rows, objects, snapshots = [], {}, []
         runtime = repository.runtime()
         for application in applications:
-            assert_inputs_current(store, project_id, application["object_id"], application.get("inputs", []))
+            assert_inputs_current(store, project_id, application["object_id"], application.get("inputs", []), application.get("aliases", []))
             if application["compilation"]["fingerprint"] != frozen["fingerprint"] or application["compilation"]["scope"] != scope:
                 raise HTTPException(409, "Regla obsoleta: cambió el modelo, las entradas o el rango; vuelve a probar y aplicar con motivo")
             if latest_publication(store, application["rule_id"]) != application["observed_publication"]:
                 raise HTTPException(409, "Hay una nueva revisión publicada; revalida la aplicación con motivo")
             if application["runtime"]["sdk"] != SDK_VERSION or (runtime and runtime != application["runtime"]):
                 raise HTTPException(409, "El runtime cambió; vuelve a probar la regla")
-            compile_context(store, project_id, application["object_id"], scope)
-            ir = validate_ir(application["ir"], application["object_id"], len(frozen["grid"]))
+            current = compile_context(store, project_id, application["object_id"], scope)
+            assert_objects_current(store, project_id, application["object_id"], application["compilation"], current, application["code"])
+            ir = validate_ir(application["ir"], application["object_id"], len(frozen["grid"]), application.get("objects"))
             if digest(ir) != application["ir_hash"] or digest(application["code"]) != application["code_hash"]:
                 raise HTTPException(409, "La integridad de la regla no coincide")
             rows.extend({**row, "application_id": application["id"], "revision_id": application["publication_id"]} for row in ir["rows"])
-            objects[application["object_id"]] = {"id": application["object_id"], "unit_key": application["compilation"]["unit_key"]}
+            for obj in application.get("objects", [{"id": application["object_id"], "unit_key": application["compilation"]["unit_key"]}]):
+                objects[obj["id"]] = obj
             snapshots.append({key: application[key] for key in (
                 "id", "rule_id", "publication_id", "revision", "object_id", "name", "code", "parameters", "code_hash",
                 "context_hash", "runtime", "ir", "ir_hash", "events", "accept_empty")}
-                             | {"inputs": application.get("inputs", []), "outputs": application.get("outputs", [])})
+                             | {"inputs": application.get("inputs", []), "outputs": application.get("outputs", []),
+                                "aliases": application.get("aliases", []), "objects": application.get("objects", [])})
         if len(rows) > 100000 or sum(len(row["terms"]) for row in rows) > 500000:
             raise HTTPException(422, "Cuota de restricciones excedida")
-        block = {"version": IR_VERSION, "objects": list(objects.values()), "grid": frozen["grid"], "timezone": "UTC",
+        block_version = HYDRAULIC_IR_VERSION if any(a["ir"]["version"] == HYDRAULIC_IR_VERSION for a in applications) else IR_VERSION
+        block = {"version": block_version, "objects": list(objects.values()), "grid": frozen["grid"], "timezone": "UTC",
                  "rows": rows, "applications": snapshots, "context_hash": frozen["fingerprint"], "ir_hash": digest(rows)}
         document = {**frozen["system_case"], "component_rules": block}
         text = encode(document)
@@ -315,7 +336,7 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
     validation = validate_text(text)
     if not validation.ok:
         raise HTTPException(422, validation.message)
-    if IR_VERSION not in validation.payload.get("component_rule_versions", []):
+    if block_version not in validation.payload.get("component_rule_versions", []):
         raise HTTPException(409, "El motor no declara soporte para estas reglas")
 
     with store._lock, snapshot_transaction(store):
@@ -333,7 +354,8 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
         for set_id in sorted({source["set_id"] for item in applications for source in item.get("inputs", [])}):
             store._lock_canonical_set(set_id)
         for item in applications:
-            assert_inputs_current(store, project_id, item["object_id"], item.get("inputs", []))
+            assert_objects_current(store, project_id, item["object_id"], item["compilation"], current, item["code"])
+            assert_inputs_current(store, project_id, item["object_id"], item.get("inputs", []), item.get("aliases", []))
         metadata = extract_system_case_metadata(document)
         generation = {**frozen["lineage"], "kind": "case_input_variant", "input_variant": {
                           "id": scope["variant_id"], "display_name": store.get_case_input_variant(scope["variant_id"])["display_name"]},

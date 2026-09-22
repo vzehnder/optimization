@@ -10,7 +10,7 @@ from types import MappingProxyType
 sys.path.insert(0, "/runtime")
 from symbolic import Flow, collector
 
-SDK = "reg-003.1"
+SDK = "reg-004.1"
 
 
 class LogLimit(ValueError):
@@ -161,6 +161,14 @@ def main(payload):
         if not 1 <= count <= 8784:
             raise ValueError("Cuota de períodos excedida")
         obj["caudal"] = Flow(obj["id"], count)
+        objects = {}
+        for item in payload.get("objects", []):
+            objects[item["id"]] = {"id": item["id"], **{
+                name: Flow(item["id"], count, name, unit, tuple(item.get("member_ids", [])))
+                for name, unit in item["variables"].items()}}
+        if objects:
+            obj = objects[obj["id"]]
+        values["objetos"] = FrozenContext({ref["alias"]: FrozenContext(objects[ref["object_id"]]) for ref in payload.get("aliases", [])})
         values.update(periodos=tuple(range(count)), restriccion=collector(rows, count))
         entries = {}
         for entry in payload.get("inputs", []):
@@ -200,23 +208,35 @@ def main(payload):
     if "grid" in payload:
         if result is not None:
             raise ValueError("Usa ctx.restriccion para emitir filas; no retornes un valor")
-        return {"status": "succeeded", "ir": {"version": "affine_flow.v1", "rows": rows}, "outputs": outputs, "logs": "".join(logs)}
+        extended = bool(payload.get("aliases")) or any(term["variable"] != "caudal" or term["object_id"] != obj["id"] for row in rows for term in row["terms"]) or any(row["unit"] != "m3_per_s" for row in rows)
+        return {"status": "succeeded", "ir": {"version": "affine_hydraulic.v1" if extended else "affine_flow.v1", "rows": rows}, "outputs": outputs, "logs": "".join(logs)}
     if not isinstance(result, Quantity) or result.unit != "m3_per_s" or not math.isfinite(result.value):
         raise ValueError("El resultado debe ser un caudal finito con unidad m3_per_s")
     return {"status": "succeeded", "output": {"value": result.value, "unit": result.unit}, "logs": "".join(logs)}
 
 
 if __name__ == "__main__":
+    payload = {}
     try:
         raw = sys.stdin.buffer.read(64 * 1024 * 1024 + 1)
         if len(raw) > 64 * 1024 * 1024:
             raise ValueError("Payload excesivo")
-        result = main(json.loads(raw))
+        payload = json.loads(raw)
+        result = main(payload)
     except BaseException as error:
         line = getattr(error, "rule_line", None) or getattr(error, "lineno", None)
         for frame in traceback.extract_tb(error.__traceback__):
             if frame.filename == "regla.py":
                 line = frame.lineno
         result = {"status": "failed", "error": {"code": "RULE_LOG_LIMIT" if isinstance(error, LogLimit) else "RULE_CODE_ERROR", "message": str(error)[:1000], "line": line}}
+        try:
+            aliases = sorted({node.attr for node in ast.walk(ast.parse(payload.get("code", "")))
+                              if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Attribute)
+                              and isinstance(node.value.value, ast.Name) and node.value.value.id == "ctx"
+                              and node.value.attr == "objetos" and node.lineno <= line <= node.end_lineno})
+            if aliases:
+                result["error"]["alias"] = ", ".join(aliases)[:1000]
+        except (SyntaxError, TypeError, AttributeError):
+            pass
     result["runtime"] = {"sdk": SDK, "python": platform.python_version()}
     sys.stdout.write(json.dumps(result, allow_nan=False))

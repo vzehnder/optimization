@@ -10,11 +10,13 @@ export function ruleErrorMessage(error: unknown): string {
       message?: unknown;
       alias?: unknown;
       period?: unknown;
+      line?: unknown;
     };
     if (typeof detail.message === "string") {
       const location = [
         typeof detail.alias === "string" ? detail.alias : "",
         typeof detail.period === "number" ? `período ${detail.period + 1}` : "",
+        typeof detail.line === "number" ? `línea ${detail.line}` : "",
       ]
         .filter(Boolean)
         .join(" · ");
