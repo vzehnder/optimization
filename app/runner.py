@@ -194,6 +194,14 @@ class JuliaRunExecutor:
                     )
                     return failed
 
+                # A visible succeeded status must already have its result files registered.
+                self._register_audit_artifacts(
+                    run_id,
+                    input_snapshot_path=input_snapshot_path,
+                    stdout_log_path=stdout_log_path,
+                    stderr_log_path=stderr_log_path,
+                    output_dir=output_dir,
+                )
                 succeeded = self.store.mark_run_succeeded(
                     run_id,
                     exit_code=completed.returncode,
@@ -204,13 +212,6 @@ class JuliaRunExecutor:
                     summary_path=summary_path,
                     stdout_log_path=str(stdout_log_path),
                     stderr_log_path=str(stderr_log_path),
-                )
-                self._register_audit_artifacts(
-                    run_id,
-                    input_snapshot_path=input_snapshot_path,
-                    stdout_log_path=stdout_log_path,
-                    stderr_log_path=stderr_log_path,
-                    output_dir=output_dir,
                 )
                 self._index_succeeded_run_results(succeeded)
                 return succeeded
