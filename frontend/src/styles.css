@@ -756,6 +756,7 @@ button:focus-visible {
 }
 
 .hydraulic-canvas-node {
+  scroll-margin: 12px;
   position: absolute;
   display: grid;
   align-content: center;

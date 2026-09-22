@@ -5441,6 +5441,13 @@ function HydraulicDiagramCanvas({
   focusedEntityKey: string | null;
 }) {
   const surfaceRef = useRef<HTMLDivElement>(null);
+  const focusedNodeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    focusedNodeRef.current?.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+    });
+  }, [focusedEntityKey]);
   const [draggingNode, setDraggingNode] = useState<{
     technicalKey: string;
     offsetX: number;
@@ -5723,6 +5730,11 @@ function HydraulicDiagramCanvas({
                   key={node.technical_key}
                   className={`hydraulic-canvas-node hydraulic-canvas-node-${node.component_type}`}
                   data-testid={`hydraulic-canvas-node-${node.technical_key}`}
+                  ref={
+                    focusedEntityKey === node.technical_key
+                      ? focusedNodeRef
+                      : undefined
+                  }
                   data-focused={
                     focusedEntityKey === node.technical_key ? "true" : undefined
                   }
@@ -7357,8 +7369,8 @@ function HydraulicDiagramEditor({
   }
 
   function addNode(componentType: HydraulicComponentType) {
+    const technicalKey = nextHydraulicNodeKey(nodes, componentType);
     setNodes((current) => {
-      const technicalKey = nextHydraulicNodeKey(current, componentType);
       const nextNode: HydraulicDiagramNodeWrite = {
         component_type: componentType,
         technical_key: technicalKey,
@@ -7380,6 +7392,7 @@ function HydraulicDiagramEditor({
       }
       return [...current, nextNode];
     });
+    setFocusedEntityKey(technicalKey);
     markDirty();
   }
 

@@ -7,6 +7,10 @@ import { Fragment, ReactNode, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { ObjectSeriesFileImport } from "./ObjectSeriesFileImport";
+import {
+  objectSeriesDefaults,
+  type ObjectSeriesDraft,
+} from "./objectSeriesDefaults";
 import { safeReturnPath } from "./journeyRoutes";
 import {
   ApiError,
@@ -344,11 +348,11 @@ function MutationRefusal({ error }: { error: unknown }) {
   );
 }
 
-function useObjectName(
+function useObjectContext(
   projectId: number | null,
   linkableObjectId: number | null,
-): string {
-  const context = useQuery({
+) {
+  return useQuery({
     queryKey: ["journey-object", projectId, linkableObjectId],
     queryFn: ({ signal }) =>
       getObjectTimeSeriesContext(
@@ -360,6 +364,13 @@ function useObjectName(
     enabled: projectId !== null && linkableObjectId !== null,
     retry: false,
   });
+}
+
+function useObjectName(
+  projectId: number | null,
+  linkableObjectId: number | null,
+): string {
+  const context = useObjectContext(projectId, linkableObjectId);
   return context.data?.meta.object.display_name ?? "Sin objeto";
 }
 
@@ -878,32 +889,6 @@ function linkReviewFacts(
 // revision is what makes the series selectable. `Solo este objeto` accompanies
 // every step, because the whole point is that this series never leaves.
 
-interface ObjectSeriesDraft {
-  objectSeriesKey: string;
-  displayName: string;
-  description: string;
-  semanticTypeKey: string;
-  unitKey: string;
-  dataClassKey: string;
-  timezone: string;
-  resolutionSeconds: number;
-  pointsText: string;
-  reasonText: string;
-}
-
-const EMPTY_OBJECT_SERIES_DRAFT: ObjectSeriesDraft = {
-  objectSeriesKey: "",
-  displayName: "",
-  description: "",
-  semanticTypeKey: "",
-  unitKey: "",
-  dataClassKey: "",
-  timezone: "UTC",
-  resolutionSeconds: 3600,
-  pointsText: "",
-  reasonText: "",
-};
-
 function DescriptorSelect({
   id,
   label,
@@ -961,16 +946,27 @@ function ObjectSeriesDefinitionStep({
         {roleKey}, no entra al catalogo global y ningun otro objeto puede
         elegirla.
       </p>
+      <p>
+        Valores sugeridos según el objeto y la necesidad. Puedes cambiar todos
+        los campos. Revisa la clase de dato y la zona horaria antes de cargar
+        tus datos.
+      </p>
       <div className="field-row">
         <label htmlFor="object-series-key">Clave local</label>
         <input
           id="object-series-key"
           type="text"
+          maxLength={96}
+          aria-describedby="object-series-key-help"
           value={draft.objectSeriesKey}
           onChange={(event) =>
             onChange({ objectSeriesKey: event.target.value })
           }
         />
+        <small id="object-series-key-help">
+          Empieza con una letra minúscula. Usa minúsculas, números y guiones
+          bajos; máximo 96 caracteres.
+        </small>
       </div>
       <div className="field-row">
         <label htmlFor="object-series-name">Nombre visible</label>
@@ -1285,8 +1281,11 @@ function LinkFlow({
   const [commitPending, setCommitPending] = useState(false);
   // The object-specific branch of the same journey (chapter 7.5). It keeps its
   // own draft and its own three server moves: define, stage, seal.
-  const [objectDraft, setObjectDraft] = useState<ObjectSeriesDraft>(
-    EMPTY_OBJECT_SERIES_DRAFT,
+  const [objectEdits, setObjectEdits] = useState<Partial<ObjectSeriesDraft>>(
+    {},
+  );
+  const [browserTimezone] = useState(
+    () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
   );
   const [objectSeries, setObjectSeries] =
     useState<ObjectSeriesDefinition | null>(null);
@@ -1304,7 +1303,9 @@ function LinkFlow({
   const [stagingPending, setStagingPending] = useState(false);
   const [publishPending, setPublishPending] = useState(false);
 
-  const objectName = useObjectName(projectId, linkableObjectId);
+  const objectContext = useObjectContext(projectId, linkableObjectId);
+  const objectName =
+    objectContext.data?.meta.object.display_name ?? "Sin objeto";
   const usage = intent === "use_revision" ? "execution" : "association";
   const roles = useQuery({
     queryKey: ["catalog-descriptors", "binding_role", linkableObjectId, usage],
@@ -1407,13 +1408,26 @@ function LinkFlow({
     staleTime: 5 * 60_000,
   });
 
+  const objectDraft = objectSeriesDefaults({
+    objectName,
+    role: roles.data?.items.find((role) => role.key === draft.bindingRoleKey),
+    scenarioId: draft.scenarioId,
+    variantId: draft.variantId,
+    existing: objectContext.data?.items ?? [],
+    semanticTypes: semanticTypes.data?.items ?? [],
+    units: units.data?.items ?? [],
+    dataClasses: dataClasses.data?.items ?? [],
+    edits: objectEdits,
+    browserTimezone,
+  });
+
   const parsedLocalPoints = parsePoints(
     objectDraft.pointsText,
     objectDraft.objectSeriesKey,
   );
 
   function updateObject(patch: Partial<ObjectSeriesDraft>) {
-    setObjectDraft((current) => ({ ...current, ...patch }));
+    setObjectEdits((current) => ({ ...current, ...patch }));
     // A changed draft can never keep a staging computed for the old one.
     setObjectIngestion(null);
     setObjectPublication(null);
@@ -1423,6 +1437,8 @@ function LinkFlow({
 
   async function saveObjectDefinition() {
     if (projectId === null || linkableObjectId === null) return;
+    // Keep the reviewed definition stable once it is submitted to the server.
+    setObjectEdits(objectDraft);
     setDefinitionPending(true);
     setDefinitionError(null);
     try {
@@ -1701,7 +1717,7 @@ function LinkFlow({
           (entry) => entry.variant.id === draft.variantId,
         )));
   const objectDefinitionComplete =
-    objectDraft.objectSeriesKey.trim().length > 0 &&
+    /^[a-z][a-z0-9_]{0,95}$/.test(objectDraft.objectSeriesKey.trim()) &&
     objectDraft.displayName.trim().length > 0 &&
     Boolean(objectDraft.semanticTypeKey) &&
     Boolean(objectDraft.unitKey) &&
@@ -1954,7 +1970,7 @@ function LinkFlow({
           publishError={publishError}
           publishPending={publishPending}
           onReason={(reasonText) =>
-            setObjectDraft((current) => ({ ...current, reasonText }))
+            setObjectEdits((current) => ({ ...current, reasonText }))
           }
           onPublish={publishObjectRevision}
         />

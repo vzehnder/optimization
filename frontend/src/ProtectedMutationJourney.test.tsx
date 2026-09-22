@@ -668,6 +668,7 @@ const BINDING_ROLES = {
       id: 1,
       key: "grid_import_price",
       display_name: "Precio de compra a la red",
+      canonical_unit_key: "usd_per_mwh",
       status: "active",
     },
   ],
@@ -705,7 +706,9 @@ function journeyFetch(
   });
 }
 
-function descriptorPage(items: { key: string; display_name: string }[]) {
+function descriptorPage(
+  items: { key: string; display_name: string; canonical_unit_key?: string }[],
+) {
   return {
     items: items.map((item, index) => ({
       id: index + 1,
@@ -720,12 +723,270 @@ function descriptorPage(items: { key: string; display_name: string }[]) {
 }
 
 const SEMANTIC_TYPES = descriptorPage([
-  { key: "energy_price", display_name: "Energy price" },
+  {
+    key: "energy_price",
+    display_name: "Energy price",
+    canonical_unit_key: "usd_per_mwh",
+  },
 ]);
 const UNITS = descriptorPage([{ key: "usd_per_mwh", display_name: "USD/MWh" }]);
 const DATA_CLASSES = descriptorPage([
   { key: "forecast", display_name: "Forecast" },
 ]);
+
+const DEFAULT_ROLES = [
+  ["grid_import_price", "usd_per_mwh"],
+  ["grid_export_price", "usd_per_mwh"],
+  ["load_demand", "mw"],
+  ["renewable_available_power", "mw"],
+  ["hydro_inflow", "m3_per_s"],
+  ["natural_inflow", "m3_per_s"],
+  ["minimum_flow", "m3_per_s"],
+] as const;
+
+function defaultsFetch(
+  extra?: (url: URL, init?: RequestInit) => Response | null,
+) {
+  return journeyFetch((url, init) => {
+    const answered = extra?.(url, init);
+    if (answered) return answered;
+    if (url.pathname === "/api/time-series/catalog/descriptors") {
+      const kind = url.searchParams.get("kind");
+      if (kind === "binding_role" || kind === "semantic_type")
+        return json(
+          descriptorPage(
+            DEFAULT_ROLES.map(([key, unit]) => ({
+              key,
+              display_name: key,
+              canonical_unit_key: unit,
+            })),
+          ),
+        );
+      if (kind === "unit")
+        return json(
+          descriptorPage(
+            ["usd_per_mwh", "mw", "m3_per_s"].map((key) => ({
+              key,
+              display_name: key,
+            })),
+          ),
+        );
+      if (kind === "data_class")
+        return json(
+          descriptorPage([
+            { key: "forecast", display_name: "Forecast" },
+            { key: "real", display_name: "Real" },
+          ]),
+        );
+    }
+    return null;
+  });
+}
+
+function openLocalJourney(role = "grid_export_price") {
+  window.history.replaceState(
+    {},
+    "",
+    `/react/time-series/journey?entry=object&project_id=1&object_id=7&intent=associate&scenario_id=4&variant_id=9&binding_role_key=${role}`,
+  );
+}
+
+async function enterLocalDefinition(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(
+    await screen.findByRole("radio", {
+      name: "Crear especifica para este objeto",
+    }),
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Siguiente" })).toBeEnabled(),
+  );
+  await user.click(screen.getByRole("button", { name: "Siguiente" }));
+  await screen.findByLabelText("Clave local");
+}
+
+it.each(DEFAULT_ROLES)(
+  "suggests an editable definition for %s and submits the displayed defaults",
+  async (role, unit) => {
+    openLocalJourney(role);
+    let definition: Record<string, unknown> | undefined;
+    vi.stubGlobal(
+      "fetch",
+      defaultsFetch((url, init) => {
+        if (url.pathname === "/api/auth/csrf")
+          return json({ csrf_token: "csrf" });
+        if (url.pathname.endsWith("/object-series")) {
+          definition = JSON.parse(String(init?.body));
+          return new Response(
+            JSON.stringify({ object_series: OBJECT_SERIES }),
+            {
+              status: 201,
+              headers: {
+                "Content-Type": "application/json",
+                ETag: '"object-series-41-1"',
+              },
+            },
+          );
+        }
+        return null;
+      }),
+    );
+    const user = userEvent.setup();
+    render(<App />);
+    await enterLocalDefinition(user);
+    await waitFor(() =>
+      expect(screen.getByLabelText("Unidad")).toHaveValue(unit),
+    );
+    expect(screen.getByLabelText("Clave local")).toHaveValue(`sistema_${role}`);
+    expect(screen.getByLabelText("Nombre visible")).not.toHaveValue("");
+    expect(screen.getByLabelText("Descripcion")).not.toHaveValue("");
+    expect(screen.getByLabelText("Tipo semantico")).toHaveValue(role);
+    expect(screen.getByLabelText("Clase de dato")).toHaveValue("forecast");
+    expect(screen.getByLabelText("Zona horaria")).toHaveValue(
+      Intl.DateTimeFormat().resolvedOptions().timeZone,
+    );
+    expect(screen.getByLabelText("Resolucion (segundos)")).toHaveValue(3600);
+    const name = (screen.getByLabelText("Nombre visible") as HTMLInputElement)
+      .value;
+    await user.click(screen.getByRole("button", { name: "Siguiente" }));
+    await user.click(
+      screen.getByRole("button", { name: "Guardar definicion" }),
+    );
+    await screen.findByText("awaiting_data");
+    expect(definition).toMatchObject({
+      object_series_key: `sistema_${role}`,
+      display_name: name,
+      intended_binding_role_key: role,
+      semantic_type_key: role,
+      unit_key: unit,
+      data_class_key: "forecast",
+      temporal_contract: { nominal_resolution_seconds: 3600 },
+    });
+  },
+);
+
+it("preserves edits when context arrives late and inherits untouched fields from the current variant", async () => {
+  openLocalJourney();
+  let resolveContext!: (response: Response) => void;
+  const contextResponse = new Promise<Response>((resolve) => {
+    resolveContext = resolve;
+  });
+  const fetchOther = defaultsFetch();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      return url.pathname === "/api/projects/1/linkable-objects/7/time-series"
+        ? contextResponse
+        : fetchOther(input, init);
+    }),
+  );
+  const user = userEvent.setup();
+  render(<App />);
+  await enterLocalDefinition(user);
+  await user.clear(screen.getByLabelText("Nombre visible"));
+  await user.type(screen.getByLabelText("Nombre visible"), "Mi precio");
+  await user.clear(screen.getByLabelText("Descripcion"));
+  await user.clear(screen.getByLabelText("Zona horaria"));
+  await user.type(screen.getByLabelText("Zona horaria"), "Europe/Madrid");
+  const reference = {
+    source_kind: "object_specific",
+    series_key: "sistema_grid_export_price",
+    semantic_type_key: "grid_export_price",
+    data_class_key: "real",
+    availability: "ready",
+    need: { binding_role_key: "grid_export_price" },
+    temporal_contract: {
+      nominal_resolution_seconds: 900,
+      timezone: "America/Santiago",
+    },
+    binding_summary: {
+      items: [
+        {
+          scenario_id: 4,
+          variant_id: 9,
+          binding_role_key: "grid_export_price",
+          execution_blocked: false,
+        },
+      ],
+    },
+  };
+  resolveContext(
+    json({
+      ...objectSummaryPage(),
+      items: [
+        {
+          ...reference,
+          series_key: "otra_serie",
+          data_class_key: "forecast",
+          temporal_contract: {
+            nominal_resolution_seconds: 1800,
+            timezone: "UTC",
+          },
+          binding_summary: { items: [] },
+        },
+        reference,
+      ],
+    }),
+  );
+  await waitFor(() =>
+    expect(screen.getByLabelText("Resolucion (segundos)")).toHaveValue(900),
+  );
+  expect(screen.getByLabelText("Clave local")).toHaveValue(
+    "sistema_grid_export_price_2",
+  );
+  expect(screen.getByLabelText("Clase de dato")).toHaveValue("real");
+  expect(screen.getByLabelText("Nombre visible")).toHaveValue("Mi precio");
+  expect(screen.getByLabelText("Descripcion")).toHaveValue("");
+  expect(screen.getByLabelText("Zona horaria")).toHaveValue("Europe/Madrid");
+
+  await user.clear(screen.getByLabelText("Clave local"));
+  await user.type(screen.getByLabelText("Clave local"), "precio_manual");
+  await user.selectOptions(screen.getByLabelText("Clase de dato"), "forecast");
+  await user.clear(screen.getByLabelText("Resolucion (segundos)"));
+  await user.type(screen.getByLabelText("Resolucion (segundos)"), "1800");
+  await user.click(screen.getByRole("button", { name: "Siguiente" }));
+  await user.click(screen.getByRole("button", { name: "Paso anterior" }));
+  expect(screen.getByLabelText("Clave local")).toHaveValue("precio_manual");
+  expect(screen.getByLabelText("Clase de dato")).toHaveValue("forecast");
+  expect(screen.getByLabelText("Resolucion (segundos)")).toHaveValue(1800);
+  expect(screen.getByLabelText("Nombre visible")).toHaveValue("Mi precio");
+});
+
+it("updates untouched defaults when the need changes and keeps manual type and unit choices", async () => {
+  openLocalJourney();
+  vi.stubGlobal("fetch", defaultsFetch());
+  const user = userEvent.setup();
+  render(<App />);
+  await enterLocalDefinition(user);
+  await user.click(screen.getByRole("button", { name: "Paso anterior" }));
+  await user.selectOptions(
+    screen.getByLabelText("Necesidad funcional"),
+    "natural_inflow",
+  );
+  await user.click(screen.getByRole("button", { name: "Siguiente" }));
+  expect(screen.getByLabelText("Clave local")).toHaveValue(
+    "sistema_natural_inflow",
+  );
+  expect(screen.getByLabelText("Tipo semantico")).toHaveValue("natural_inflow");
+  expect(screen.getByLabelText("Unidad")).toHaveValue("m3_per_s");
+  await user.selectOptions(
+    screen.getByLabelText("Tipo semantico"),
+    "load_demand",
+  );
+  expect(screen.getByLabelText("Unidad")).toHaveValue("mw");
+  await user.selectOptions(screen.getByLabelText("Unidad"), "usd_per_mwh");
+  await user.click(screen.getByRole("button", { name: "Paso anterior" }));
+  await user.selectOptions(
+    screen.getByLabelText("Necesidad funcional"),
+    "grid_import_price",
+  );
+  await user.click(screen.getByRole("button", { name: "Siguiente" }));
+  expect(screen.getByLabelText("Tipo semantico")).toHaveValue("load_demand");
+  expect(screen.getByLabelText("Unidad")).toHaveValue("usd_per_mwh");
+  await user.clear(screen.getByLabelText("Clave local"));
+  await user.type(screen.getByLabelText("Clave local"), "Test--precio");
+  expect(screen.getByRole("button", { name: "Siguiente" })).toBeDisabled();
+});
 
 // The definition exists before any data does, which is the whole point of
 // chapter 7.2: it is saved, and it is not selectable yet.
@@ -2439,7 +2700,9 @@ describe("single protected mutation journey", () => {
       expect(
         await screen.findByText(/Solo este objeto\. La serie pertenece a/),
       ).toBeVisible();
+      await user.clear(screen.getByLabelText("Clave local"));
       await user.type(screen.getByLabelText("Clave local"), "precio_local");
+      await user.clear(screen.getByLabelText("Nombre visible"));
       await user.type(screen.getByLabelText("Nombre visible"), "Precio local");
       await user.selectOptions(
         screen.getByLabelText("Tipo semantico"),

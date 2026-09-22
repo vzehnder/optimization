@@ -3471,6 +3471,7 @@ export interface CatalogDescriptor {
   key: string;
   display_name: string;
   status: string;
+  canonical_unit_key?: string;
 }
 
 export interface CatalogPreviewPoint {

@@ -3147,7 +3147,10 @@ describe("application shell", () => {
     await user.click(screen.getByRole("button", { name: "Agregar embalse" }));
     await user.click(screen.getByRole("button", { name: "Agregar union" }));
     await user.click(screen.getByRole("button", { name: "Agregar central" }));
-    selectDiagramNode("plant_1");
+    expect(screen.getByTestId("hydraulic-canvas-node-plant_1")).toHaveAttribute(
+      "data-focused",
+      "true",
+    );
     await user.clear(screen.getByLabelText("Etiqueta plant_1"));
     await user.type(screen.getByLabelText("Etiqueta plant_1"), "Plant Laja");
     expect(screen.getByText("Estado: dirty")).toBeVisible();

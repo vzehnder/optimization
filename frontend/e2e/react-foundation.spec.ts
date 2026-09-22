@@ -469,6 +469,58 @@ test("React hydraulic diagram persists reservoir parameters curves junction and 
   ).toHaveValue("3");
 });
 
+test("React hydraulic diagram reveals and selects new components after connecting nodes", async ({
+  page,
+}) => {
+  await ensureAdminSession(page);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const api = page.context().request;
+  const projectResponse = await postWithCsrf(api, "/api/projects", {
+    name: `Hydro visibility ${Date.now()}`,
+    description: "New hydraulic components stay visible",
+  });
+  expect(projectResponse.status()).toBe(201);
+  const project = (await projectResponse.json()) as { id: number };
+  const scenarioResponse = await postWithCsrf(
+    api,
+    `/api/projects/${project.id}/scenarios`,
+    { name: "Connected diagram", description: "Component visibility" },
+  );
+  expect(scenarioResponse.status()).toBe(201);
+  const scenario = (await scenarioResponse.json()) as { id: number };
+
+  await page.goto(`/react/scenarios/${scenario.id}/hydraulic-diagram`);
+  await page.getByRole("button", { name: "Agregar embalse" }).click();
+  await page.getByRole("button", { name: "Agregar union" }).click();
+  await page.getByRole("button", { name: "Salida reservoir_1" }).click();
+  await page.getByRole("button", { name: "Entrada junction_1" }).click();
+
+  const additions = [
+    ...Array.from({ length: 10 }, (_, index) => ({
+      button: "Agregar central",
+      key: `plant_${index + 1}`,
+    })),
+    { button: "Agregar embalse", key: "reservoir_2" },
+    { button: "Agregar union", key: "junction_2" },
+  ];
+  for (const { button, key } of additions) {
+    await page.getByRole("button", { name: button }).click();
+    const node = page.getByTestId(`hydraulic-canvas-node-${key}`);
+    // Visibility alone does not detect a node clipped by the canvas's scroll area.
+    await expect(node).toBeInViewport({ ratio: 1 });
+    await expect(node).toHaveAttribute("data-focused", "true");
+    await expect(page.getByLabel(`Etiqueta ${key}`)).toBeVisible();
+  }
+  await expect(
+    page.getByTestId("hydraulic-link-reach_reservoir_1_junction_1"),
+  ).toHaveCount(1);
+  expect(
+    await page
+      .getByRole("group", { name: "Editor visual de diagrama hidraulico" })
+      .evaluate((canvas) => canvas.scrollLeft),
+  ).toBeGreaterThan(0);
+});
+
 test("React admin users and project access cover assignment, removal, deactivation, and denials", async ({
   page,
 }) => {
