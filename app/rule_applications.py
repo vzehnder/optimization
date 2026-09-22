@@ -196,6 +196,7 @@ def apply(repository, rule_id, project_id, object_id, body, actor):
                     "context_hash": job["context_hash"], "runtime": job["runtime"], "ir": ir, "ir_hash": digest(ir),
                     "inputs": payload.get("inputs", []),
                     "aliases": payload.get("aliases", []), "objects": payload.get("objects", []),
+                    "temporal": payload.get("temporal"),
                     "outputs": validate_outputs(job["result"].get("outputs", []), len(frozen["grid"])),
                     "observed_publication": payload["publication_head"], "accept_empty": body.accept_empty,
                     "events": [{"action": "apply", "actor": actor, "reason": body.reason.strip(), "at": timestamp()}]}
@@ -259,11 +260,11 @@ def guard_version_run(store, version, trigger_type):
     if block is None:
         guard_uncompiled_run(store, scenario_id=version["scenario_id"])
         return
-    from app.rule_ir import IR_VERSION, HYDRAULIC_IR_VERSION
+    from app.rule_ir import IR_VERSION, HYDRAULIC_IR_VERSION, TEMPORAL_IR_VERSION
     project = store.get_scenario(version["scenario_id"])["project_id"]
     if trigger_type != "manual" or not project_enabled(project):
         raise HTTPException(409, "Este recorrido no permite ejecutar las reglas del snapshot")
-    if block.get("version") not in {IR_VERSION, HYDRAULIC_IR_VERSION} or version["generation_metadata"].get("component_rules_hash") != digest(block):
+    if block.get("version") not in {IR_VERSION, HYDRAULIC_IR_VERSION, TEMPORAL_IR_VERSION} or version["generation_metadata"].get("component_rules_hash") != digest(block):
         raise HTTPException(409, "El snapshot de reglas no fue materializado con el contrato soportado")
     if any(item["runtime"]["sdk"] != SDK_VERSION for item in block.get("applications", [])):
         raise HTTPException(409, "El SDK del snapshot no está soportado")
@@ -271,7 +272,7 @@ def guard_version_run(store, version, trigger_type):
 
 def materialize_run(repository, scope, actor, request_id, validate_text, expected_bindings_revision=None):
     from app.persistence import extract_system_case_metadata
-    from app.rule_ir import IR_VERSION, HYDRAULIC_IR_VERSION
+    from app.rule_ir import IR_VERSION, HYDRAULIC_IR_VERSION, TEMPORAL_IR_VERSION
     store = repository.store
     scenario = store.get_scenario(scope["scenario_id"])
     project_id = scenario["project_id"]
@@ -320,10 +321,11 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
                 "id", "rule_id", "publication_id", "revision", "object_id", "name", "code", "parameters", "code_hash",
                 "context_hash", "runtime", "ir", "ir_hash", "events", "accept_empty")}
                              | {"inputs": application.get("inputs", []), "outputs": application.get("outputs", []),
+                                "temporal": application.get("temporal"),
                                 "aliases": application.get("aliases", []), "objects": application.get("objects", [])})
         if len(rows) > 100000 or sum(len(row["terms"]) for row in rows) > 500000:
             raise HTTPException(422, "Cuota de restricciones excedida")
-        block_version = HYDRAULIC_IR_VERSION if any(a["ir"]["version"] == HYDRAULIC_IR_VERSION for a in applications) else IR_VERSION
+        block_version = next((v for v in (TEMPORAL_IR_VERSION, HYDRAULIC_IR_VERSION) if any(a["ir"]["version"] == v for a in applications)), IR_VERSION)
         block = {"version": block_version, "objects": list(objects.values()), "grid": frozen["grid"], "timezone": "UTC",
                  "rows": rows, "applications": snapshots, "context_hash": frozen["fingerprint"], "ir_hash": digest(rows)}
         document = {**frozen["system_case"], "component_rules": block}

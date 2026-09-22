@@ -1,9 +1,10 @@
-# Operación y verificación de REG-001 a REG-004
+# Operación y verificación de REG-001 a REG-005
 
 REG-001 guarda borradores y calcula un máximo escalar de caudal. REG-002 incorpora
 publicación, aplicaciones a variantes y restricciones afines en el optimizador
 hidráulico v3. REG-003 calcula límites horarios desde entradas canónicas fijadas.
 REG-004 relaciona unidades, plantas y embalses del mismo modelo.
+REG-005 añade rampas y referencias a períodos anteriores con política inicial explícita.
 Las revisiones `sealed_preview` son copias inmutables
 de pruebas; el estado de la definición editable sigue siendo `draft`.
 
@@ -16,7 +17,7 @@ def construir(ctx):
 
 `capacidad` declara tipo `number`, unidad canónica `m3_per_s` y valor 80;
 `disponibilidad` declara `number`, unidad `dimensionless`, valor 0.75 y rango
-0–1. El resultado es 60 m³/s. El SDK `reg-004.1` conserva la unidad en la
+0–1. El resultado es 60 m³/s. El SDK `reg-005.1` conserva la unidad en la
 multiplicación, acepta funciones, bucles y comprensiones, y exige una cantidad
 finita de caudal como retorno. El contexto expone identidad del objeto y
 parámetros inmutables. La prueba escalar de REG-001 se conserva.
@@ -38,7 +39,7 @@ Los períodos usan índices desde cero en Python/IR; la UI los presenta desde un
 Se admiten `<=`, `>=`, `==`, suma/resta y multiplicación/división por datos
 adimensionales conocidos. Las condiciones Python solo pueden usar datos conocidos:
 una decisión simbólica como booleano, los productos de decisiones y referencias
-a otros períodos u objetos sin alias se rechazan. `construir` no devuelve un escalar en este
+a otros períodos sin política temporal u objetos sin alias se rechazan. `construir` no devuelve un escalar en este
 modo: emite filas con nombre, unidad, período y línea de origen.
 
 La UI muestra todas las filas paginadas. Aplicar exige motivo y fija revisión,
@@ -134,7 +135,7 @@ No se ofrecen caudal de tramo ni cota como decisiones. La dimensión `volume` y
 la unidad `hm3` se incorporan al catálogo existente por clave, sin reservar IDs.
 Las sumas/restas y comparaciones exigen la misma unidad; los coeficientes son
 datos adimensionales conocidos. Se conservan los rechazos a productos de
-variables, condiciones simbólicas y referencias a otros períodos.
+variables y condiciones simbólicas; las referencias anteriores requieren REG-005.
 
 ```python
 def construir(ctx):
@@ -165,9 +166,71 @@ filas se distinguen por aplicación. Cambios de membresía o referencias ausente
 marcan la aplicación obsoleta y bloquean nuevas corridas; las históricas conservan
 sus snapshots. Un motor sin la capacidad requerida no puede omitir las filas.
 
-El SDK `reg-004.1` exige reconstruir la imagen y reiniciar el worker con su digest.
+El SDK `reg-005.1` exige reconstruir la imagen y reiniciar el worker con su digest.
 Las publicaciones/aplicaciones de un SDK anterior necesitan publicar, probar y
 aplicar de nuevo antes de ejecutar; los datos históricos siguen legibles.
+
+## Rampas y períodos anteriores (REG-005)
+
+En «Referencias temporales y rampas», elegir **Omitir la primera comparación**
+o **Usar condición inicial declarada**. La segunda exige un valor finito con
+unidad y un instante ISO con `Z` u offset para cada variable recorrida. Los
+valores no se rellenan automáticamente. El instante debe preceder al primer
+inicio del horizonte. Una planta usa su valor agregado inicial y expande las
+decisiones de cada período a las unidades de su snapshot.
+
+```python
+def construir(ctx):
+    for paso in ctx.transiciones(ctx.objeto.potencia):
+        diferencia = paso.actual - paso.anterior
+        ctx.restriccion("subida", paso.periodo,
+            diferencia <= ctx.parametros.subida * paso.horas)
+        ctx.restriccion("bajada", paso.periodo,
+            -diferencia <= ctx.parametros.bajada * paso.horas)
+```
+
+`subida` y `bajada` son parámetros `mw_per_h` (MW/h). Para caudal, usar
+`ctx.objeto.caudal` y `m3_per_s_per_h` (m³/s por hora). La cantidad
+`paso.horas` tiene unidad `h`; multiplicarla por la tasa conserva la dimensión
+de la variable. No se permite comparar una rampa de caudal con potencia.
+
+Cada paso expone `periodo` (índice desde cero), `actual`, `anterior`, `inicio`,
+`inicio_anterior` y `horas`. Las horas son la distancia entre **inicios** en UTC,
+no la duración del intervalo actual. La primera comparación utiliza el instante
+inicial declarado o se omite visiblemente. Un horizonte de un período produce
+una comparación inicial por dirección o cero filas; aplicar cero filas sigue
+requiriendo aceptación expresa. También se permiten referencias directas como
+`ctx.objeto.caudal[t - 1]` en períodos válidos, con política temporal declarada.
+Ni las variables ni `ctx.periodos` aceptan índices negativos; no hay wraparound.
+Una fila puede referenciar su período y los anteriores, nunca uno futuro.
+
+El campo HTTP `temporal` se conserva en borrador, publicación, prueba,
+aplicación y snapshot. Ejemplo de condición inicial (el ID debe ser el del objeto):
+
+```json
+{
+  "first_period": "initial",
+  "initial_values": [
+    {"object_id": 7, "variable": "potencia", "value": 2,
+     "unit": "mw", "timestamp": "2025-12-31T23:30:00Z"}
+  ]
+}
+```
+
+Para omitir: `{"first_period":"omit","initial_values":[]}`. Ausencia o `null`
+conserva el modo sin referencias temporales. La capacidad nueva es
+`affine_temporal.v1`: servidor y Julia distinguen términos por objeto, variable
+y período, y el motor debe anunciarla antes de encolar. Los contratos previos
+siguen exigiendo términos del mismo período. La preview presenta la política,
+valores iniciales, cobertura, índices, instantes y distancias de cada comparación;
+las rampas no se presentan como cotas horarias independientes. Los errores
+conservan línea y período. Cambiar horizonte requiere nueva prueba y aplicación,
+sin modificar snapshots anteriores.
+
+Julia interpreta `Z` y offsets como UTC para resolver, y conserva las cadenas
+originales de la grilla en el documento resuelto. El SDK `reg-005.1` requiere
+reconstruir la imagen, fijar su digest y reiniciar el worker; las publicaciones
+de SDK anteriores requieren publicar, probar y aplicar nuevamente.
 
 ## Runtime Linux compartido por desarrollo y CI
 
@@ -176,8 +239,8 @@ el repositorio completo como contexto. El Dockerfile fija CPython 3.12.14 por
 digest. El SDK está incluido en la imagen y su digest final fija ambos.
 
 ```sh
-docker build -t component-rules:reg-004 runtime/component_rules
-export RULE_RUNTIME_IMAGE="$(docker image inspect component-rules:reg-004 --format '{{.Id}}')"
+docker build -t component-rules:reg-005 runtime/component_rules
+export RULE_RUNTIME_IMAGE="$(docker image inspect component-rules:reg-005 --format '{{.Id}}')"
 export RULE_RUNTIME_COMMAND='["docker"]'
 export RULE_ENABLED_PROJECTS='*'
 python -m app.rule_worker
@@ -195,8 +258,8 @@ En Windows, Docker Desktop con contenedores Linux usa los mismos comandos,
 con variables PowerShell:
 
 ```powershell
-docker build -t component-rules:reg-004 runtime/component_rules
-$env:RULE_RUNTIME_IMAGE = (docker image inspect component-rules:reg-004 --format '{{.Id}}').Trim()
+docker build -t component-rules:reg-005 runtime/component_rules
+$env:RULE_RUNTIME_IMAGE = (docker image inspect component-rules:reg-005 --format '{{.Id}}').Trim()
 $env:RULE_RUNTIME_COMMAND = '["docker"]'
 $env:RULE_ENABLED_PROJECTS = '*'
 .venv/Scripts/python.exe -m app.rule_worker
@@ -267,19 +330,20 @@ export DATABASE_URL=sqlite:///:memory:
 export POSTGRES_TEST_DATABASE_URL=postgresql://test:test@127.0.0.1:5432/rules_test
 # Configurar RULE_RUNTIME_COMMAND / RULE_RUNTIME_IMAGE como arriba; no levantar
 # un worker adicional: las pruebas administran sus propios workers.
-python -m unittest tests.test_reg001_rules tests.test_reg001_runtime tests.test_reg002_rules tests.test_reg002_runtime tests.test_reg003_rules tests.test_reg003_runtime tests.test_reg003_classification tests.test_reg004_rules tests.test_reg004_runtime tests.test_ts7_001_classification_catalog -v
+python -m unittest tests.test_reg001_rules tests.test_reg001_runtime tests.test_reg002_rules tests.test_reg002_runtime tests.test_reg003_rules tests.test_reg003_runtime tests.test_reg003_classification tests.test_reg004_rules tests.test_reg004_runtime tests.test_reg005_rules tests.test_reg005_runtime tests.test_ts7_001_classification_catalog -v
 julia --project=. test/component_rules.jl
 cd frontend
 npm ci
 npm run api:generate
 npm run api:check
-npm test -- --run src/ComponentRules.test.tsx src/HourlyRules.test.tsx src/RelatedRules.test.tsx src/RunExperience.test.tsx src/ProtectedMutationJourney.test.tsx
+npm test -- --run src/ComponentRules.test.tsx src/HourlyRules.test.tsx src/RelatedRules.test.tsx src/TemporalRules.test.tsx src/RunExperience.test.tsx src/ProtectedMutationJourney.test.tsx
 npm run build
 npx playwright test e2e/component-rules.spec.ts
 # Requiere Julia disponible (PATH o variable JULIA) y la imagen OCI configurada.
 RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-execution.spec.ts
 RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-hourly.spec.ts
 RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-related.spec.ts
+RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-temporal.spec.ts
 ```
 
 El smoke de navegador usa el servidor aislado existente, comprueba la entrada
@@ -296,8 +360,10 @@ afluente/disponibilidad, solución `[20, 10, 15, 20]`, publicación nueva,
 revalidación con motivo, hueco y cruce de límites, conservando el resultado
 histórico. El recorrido de REG-004 comprueba la suma de dos unidades a 10 MW,
 la equivalencia del alias de planta y el bloqueo tras cambiar sus miembros,
-conservando el mapa de alias y el resultado histórico. CI incluye los cuatro
-recorridos y la prueba Julia.
+conservando el mapa de alias y el resultado histórico. REG-005 compara ambas políticas
+iniciales con tres intervalos de 0,5, 2 y 1 horas, comprueba las rampas de caudal
+y conserva el resultado histórico al cambiar la política y el rango. CI incluye
+los cinco recorridos y la prueba Julia.
 
 Referencia del mecanismo OCI: [Docker, ejecución de contenedores](https://docs.docker.com/engine/containers/run/).
 Los tests de esta entrega no constituyen una auditoría de escapes del kernel.

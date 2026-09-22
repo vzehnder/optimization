@@ -6,11 +6,12 @@ import platform
 import sys
 import traceback
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from types import MappingProxyType
 sys.path.insert(0, "/runtime")
-from symbolic import Flow, collector
+from symbolic import Flow, Periods, collector, temporal_error
 
-SDK = "reg-004.1"
+SDK = "reg-005.1"
 
 
 class LogLimit(ValueError):
@@ -36,6 +37,11 @@ class Quantity:
             return Quantity(self.value * other.value, self.unit)
         if self.unit == "dimensionless" and isinstance(other, Quantity):
             return Quantity(self.value * other.value, other.unit)
+        if isinstance(other, Quantity):
+            units = {("mw_per_h", "h"): "mw", ("m3_per_s_per_h", "h"): "m3_per_s"}
+            unit = units.get((self.unit, other.unit)) or units.get((other.unit, self.unit))
+            if unit:
+                return Quantity(self.value * other.value, unit)
         raise ValueError("Producto dimensional no admitido en esta capacidad")
 
     __rmul__ = __mul__
@@ -169,7 +175,31 @@ def main(payload):
         if objects:
             obj = objects[obj["id"]]
         values["objetos"] = FrozenContext({ref["alias"]: FrozenContext(objects[ref["object_id"]]) for ref in payload.get("aliases", [])})
-        values.update(periodos=tuple(range(count)), restriccion=collector(rows, count))
+        values.update(periodos=Periods(count), restriccion=collector(rows, count, bool(payload.get("temporal"))))
+        def transitions(series):
+            policy = payload.get("temporal")
+            if not policy:
+                raise ValueError("Declara la política del primer período antes de usar referencias temporales")
+            if not isinstance(series, Flow):
+                raise ValueError("Las transiciones requieren una variable del modelo")
+            initial = None
+            if policy["first_period"] == "initial":
+                initial = next((v for v in policy["initial_values"] if v["object_id"] == series.object_id and v["variable"] == series.variable), None)
+                if initial is None or initial["unit"] != series.unit:
+                    temporal_error("Falta un valor inicial con unidad compatible para la variable", 0)
+            for t in range(0 if initial else 1, count):
+                current = payload["grid"][t]["timestamp"]
+                previous = initial["timestamp"] if t == 0 else payload["grid"][t - 1]["timestamp"]
+                def instant(value):
+                    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
+                hours = (instant(current) - instant(previous)).total_seconds() / 3600
+                if hours <= 0:
+                    temporal_error("El instante anterior debe preceder al inicio del período", t)
+                previous_value = Quantity(initial["value"], initial["unit"]) if t == 0 else series[t - 1]
+                yield FrozenContext({"periodo": t, "actual": series[t], "anterior": previous_value,
+                                     "inicio": current, "inicio_anterior": previous, "horas": Quantity(hours, "h")})
+        values["transiciones"] = transitions
         entries = {}
         for entry in payload.get("inputs", []):
             if len(entry["values"]) != count or entry["alias"] in entries:
@@ -209,7 +239,8 @@ def main(payload):
         if result is not None:
             raise ValueError("Usa ctx.restriccion para emitir filas; no retornes un valor")
         extended = bool(payload.get("aliases")) or any(term["variable"] != "caudal" or term["object_id"] != obj["id"] for row in rows for term in row["terms"]) or any(row["unit"] != "m3_per_s" for row in rows)
-        return {"status": "succeeded", "ir": {"version": "affine_hydraulic.v1" if extended else "affine_flow.v1", "rows": rows}, "outputs": outputs, "logs": "".join(logs)}
+        version = "affine_temporal.v1" if payload.get("temporal") else "affine_hydraulic.v1" if extended else "affine_flow.v1"
+        return {"status": "succeeded", "ir": {"version": version, "rows": rows}, "outputs": outputs, "logs": "".join(logs)}
     if not isinstance(result, Quantity) or result.unit != "m3_per_s" or not math.isfinite(result.value):
         raise ValueError("El resultado debe ser un caudal finito con unidad m3_per_s")
     return {"status": "succeeded", "output": {"value": result.value, "unit": result.unit}, "logs": "".join(logs)}
@@ -229,6 +260,8 @@ if __name__ == "__main__":
             if frame.filename == "regla.py":
                 line = frame.lineno
         result = {"status": "failed", "error": {"code": "RULE_LOG_LIMIT" if isinstance(error, LogLimit) else "RULE_CODE_ERROR", "message": str(error)[:1000], "line": line}}
+        if type(getattr(error, "period", None)) is int:
+            result["error"]["period"] = error.period
         try:
             aliases = sorted({node.attr for node in ast.walk(ast.parse(payload.get("code", "")))
                               if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Attribute)

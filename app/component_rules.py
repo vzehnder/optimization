@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.linkable_objects import LinkableObjectError
 
@@ -61,6 +61,37 @@ class RuleObjectAlias(BaseModel):
     object_id: int = Field(gt=0)
 
 
+class RuleInitialValue(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    object_id: int = Field(gt=0)
+    variable: Literal["caudal", "potencia", "almacenamiento", "vertimiento"]
+    value: float
+    unit: str = Field(max_length=64)
+    timestamp: str = Field(max_length=64)
+
+    @field_validator("timestamp")
+    @classmethod
+    def explicit_instant(cls, value):
+        if datetime.fromisoformat(value.replace("Z", "+00:00")).tzinfo is None:
+            raise ValueError("El instante inicial requiere UTC u offset explícito")
+        return value
+
+
+class RuleTemporalPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    first_period: Literal["omit", "initial"]
+    initial_values: list[RuleInitialValue] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def consistent_policy(self):
+        if (self.first_period == "initial") != bool(self.initial_values):
+            raise ValueError("Declara valores iniciales solo con la política de condición inicial")
+        keys = {(v.object_id, v.variable) for v in self.initial_values}
+        if len(keys) != len(self.initial_values):
+            raise ValueError("Cada variable debe tener un único valor inicial")
+        return self
+
+
 class RuleDraftRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=200)
@@ -69,6 +100,7 @@ class RuleDraftRequest(BaseModel):
     inputs: list[RuleInput] = Field(default_factory=list, max_length=20)
     aliases: list[RuleObjectAlias] = Field(default_factory=list, max_length=50)
     scenario_id: int | None = Field(default=None, gt=0)
+    temporal: RuleTemporalPolicy | None = None
     expected_revision: int = Field(ge=0)
 
 
@@ -196,6 +228,7 @@ class RuleRepository:
             document["inputs"] = draft.get("inputs", [])
             document["aliases"] = draft.get("aliases", [])
             document["scenario_id"] = draft.get("scenario_id")
+            document["temporal"] = draft.get("temporal")
             document["sdk"] = SDK_VERSION
             self.store.connection.execute("INSERT INTO component_rule_publications VALUES (?, ?, ?, ?, ?, ?)",
                                           (identity, rule_id, expected_revision, encode(document), actor, timestamp()))
@@ -242,7 +275,7 @@ class RuleRepository:
                 raise HTTPException(429, "Cola completa o ya tienes una prueba pendiente")
             job_id = uuid.uuid4().hex
             context = {"object": {"id": object_id, "key": obj["object_key"], "project_id": project_id},
-                       "parameters": draft["parameters"], "runtime": runtime}
+                       "parameters": draft["parameters"], "runtime": runtime, "temporal": draft.get("temporal")}
             if compilation:
                 from app.rule_applications import latest_publication
                 from app.rule_inputs import freeze_inputs
@@ -335,8 +368,14 @@ class RuleRepository:
 
     def validate(self, body, project_id, object_id):
         from app.rule_objects import resolve_aliases, object_error
-        resolve_aliases(self.store, project_id, object_id, body.scenario_id, [a.model_dump() for a in body.aliases], code=body.code)
+        objects = resolve_aliases(self.store, project_id, object_id, body.scenario_id, [a.model_dump() for a in body.aliases], code=body.code)
         allowed = {object_id, *(a.object_id for a in body.aliases)}
+        if body.temporal:
+            variables = {o["id"]: o["variables"] for o in objects} or {object_id: {"caudal": "m3_per_s", "potencia": "mw"}}
+            for initial in body.temporal.initial_values:
+                if initial.object_id not in allowed or variables.get(initial.object_id, {}).get(initial.variable) != initial.unit:
+                    raise HTTPException(422, {"code": "RULE_INITIAL_INVALID", "message": "Valor inicial: objeto, variable o dimensión incompatible",
+                                              "object_id": initial.object_id, "variable": initial.variable, "period": 0})
         from app.rule_inputs import validate_inputs
         validate_inputs(self.store, project_id, allowed, [p.model_dump() for p in body.inputs])
         if len(body.code.encode("utf-8")) > 65536:

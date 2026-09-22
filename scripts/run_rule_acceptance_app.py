@@ -16,6 +16,7 @@ from app.persistence import AnalystStore
 from app.rule_runtime import OCIExecutor
 from app.rule_worker import RuleWorker
 from tests.test_hydro_diagram_acceptance import complete_v3_nodes
+from tests.test_reg005_runtime import GRID
 
 
 def main():
@@ -47,6 +48,12 @@ def main():
         related_nodes[-1]["units"].append(second)
         store.save_hydraulic_diagram(scenario_id=related["id"], revision=related_diagram["revision"], nodes=related_nodes,
             reaches=[{"technical_key": "related_reach", "display_name": "Tramo", "from_node_key": "reservoir_alpha", "to_node_key": "junction_in", "reach_type": "river"}])
+        temporal = store.create_scenario(project_id=project["id"], name="Rampas con duraciones distintas")
+        temporal_diagram = store.get_or_create_hydraulic_diagram(temporal["id"])
+        temporal_nodes = copy.deepcopy(nodes)
+        temporal_nodes[0]["natural_inflow_series"] = {"points": [{**p, "value_m3s": 0} for p in GRID]}
+        store.save_hydraulic_diagram(scenario_id=temporal["id"], revision=temporal_diagram["revision"], nodes=temporal_nodes,
+            reaches=[{"technical_key": "temporal_reach", "display_name": "Tramo", "from_node_key": "reservoir_alpha", "to_node_key": "junction_in", "reach_type": "river"}])
         app = create_app(store=store, auth_enabled=True, artifact_root=Path(temporary) / "artifacts", input_source_root=Path(temporary) / "sources")
         original_lifespan = app.router.lifespan_context
 
@@ -73,6 +80,10 @@ def main():
         @app.get("/api/auth/reg004-fixture", include_in_schema=False)
         def related_fixture():
             return {"scenario_id": related["id"]}
+
+        @app.get("/api/auth/reg005-fixture", include_in_schema=False)
+        def temporal_fixture():
+            return {"scenario_id": temporal["id"]}
 
         @app.post("/api/auth/reg004-membership", include_in_schema=False)
         def change_membership():

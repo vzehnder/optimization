@@ -20,7 +20,7 @@ class RuleRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "succeeded", result)
         self.assertEqual(result["output"], {"value": 60.0, "unit": "m3_per_s"})
-        self.assertEqual(result["runtime"]["sdk"], "reg-004.1")
+        self.assertEqual(result["runtime"]["sdk"], "reg-005.1")
         self.assertRegex(result["runtime"]["python"], r"^3\.12\.")
 
     def test_excessive_logs_are_bounded_and_reported_as_a_limit_error(self):

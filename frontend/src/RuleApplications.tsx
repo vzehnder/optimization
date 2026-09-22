@@ -10,6 +10,7 @@ import {
 import { ruleErrorMessage } from "./ruleErrors";
 import type { RuleAlias, RuleObject } from "./RuleObjects";
 import { ruleUnit } from "./ruleUnits";
+import type { TemporalPolicy } from "./RuleTemporal";
 
 interface Scope {
   scenario_id: number;
@@ -24,7 +25,12 @@ interface Row {
   relation: string;
   constant: number;
   unit: string;
-  terms: { coefficient: number; object_id?: number; variable?: string }[];
+  terms: {
+    coefficient: number;
+    object_id?: number;
+    variable?: string;
+    period?: number;
+  }[];
 }
 interface Job {
   id: string;
@@ -38,6 +44,7 @@ interface Job {
     ir?: { rows: Row[] };
     bounds?: HourlyBound[];
     outputs?: NumericOutput[];
+    temporal?: TemporalPolicy & { omitted_periods: number[] };
     error?: {
       code: string;
       message: string;
@@ -138,6 +145,9 @@ export function RuleApplications({
     (item) => item.status === "active" && item.variant_id === selected,
   );
   const rows = job.data?.result?.ir?.rows;
+  const temporal = job.data?.result?.temporal;
+  const utcMillis = (stamp: string) =>
+    Date.parse(/(?:Z|[+-]\d{2}:\d{2})$/.test(stamp) ? stamp : `${stamp}Z`);
   const running = ["queued", "running"].includes(job.data?.status ?? "");
   const matchingScope =
     job.data?.compilation_scope &&
@@ -274,13 +284,42 @@ export function RuleApplications({
         <p role="alert">
           {job.data.result.error.alias && `${job.data.result.error.alias} · `}
           {job.data.result.error.period !== undefined &&
-            `período ${job.data.result.error.period + 1} · `}
+            (job.data.result.error.period < 0
+              ? `índice ${job.data.result.error.period} · `
+              : `período ${job.data.result.error.period + 1} · `)}
           {job.data.result.error.code} · línea {job.data.result.error.line}:{" "}
           {job.data.result.error.message}
         </p>
       )}
       {rows && (
         <>
+          {temporal && (
+            <section aria-label="Cobertura temporal">
+              <h3>Comparaciones entre períodos</h3>
+              {temporal.first_period === "omit" ? (
+                <p>
+                  Primera comparación omitida: período 1 ·{" "}
+                  {job.data?.grid?.[0]?.timestamp}.
+                </p>
+              ) : (
+                <>
+                  <p>Primera comparación con condición inicial declarada.</p>
+                  {temporal.initial_values.map((value) => (
+                    <p key={`${value.object_id}:${value.variable}`}>
+                      {job.data?.objects?.find((o) => o.id === value.object_id)
+                        ?.display_name ?? `Objeto ${value.object_id}`}
+                      .{value.variable}: {value.value} {ruleUnit(value.unit)} ·{" "}
+                      {value.timestamp}
+                    </p>
+                  ))}
+                </>
+              )}
+              <p>
+                {new Set(rows.map((row) => row.period)).size} períodos con
+                restricciones en esta prueba.
+              </p>
+            </section>
+          )}
           <p>
             {rows.length} {rows.length === 1 ? "restricción" : "restricciones"}{" "}
             · unidad{" "}
@@ -306,14 +345,50 @@ export function RuleApplications({
                     {rows.slice(page * 20, (page + 1) * 20).map((row) => (
                       <tr key={`${row.name}-${row.period}`}>
                         <td>{row.name}</td>
-                        <td>{row.period + 1}</td>
+                        <td>
+                          {row.period + 1}
+                          {temporal && (
+                            <>
+                              <div>
+                                {job.data?.grid?.[row.period]?.timestamp}
+                              </div>
+                              {[
+                                ...new Set(
+                                  row.terms
+                                    .map((t) => t.period)
+                                    .filter(
+                                      (t): t is number =>
+                                        t !== undefined && t < row.period,
+                                    ),
+                                ),
+                              ].map((previous) => {
+                                const start =
+                                  job.data?.grid?.[row.period]?.timestamp;
+                                const before =
+                                  job.data?.grid?.[previous]?.timestamp;
+                                return start && before ? (
+                                  <div key={previous}>
+                                    Distancia entre inicios:{" "}
+                                    {(utcMillis(start) - utcMillis(before)) /
+                                      3600000}{" "}
+                                    h (período {previous + 1})
+                                  </div>
+                                ) : null;
+                              })}
+                            </>
+                          )}
+                        </td>
                         <td>
                           {row.terms
                             .map((term) => {
                               const object = job.data?.objects?.find(
                                 (o) => o.id === term.object_id,
                               );
-                              return `${term.coefficient} × ${object ? `${object.display_name}.` : term.object_id ? `Objeto ${term.object_id}.` : ""}${term.variable ?? "caudal"}`;
+                              const reference =
+                                temporal && term.period !== undefined
+                                  ? `[${term.period + 1} · ${job.data?.grid?.[term.period]?.timestamp}]`
+                                  : "";
+                              return `${term.coefficient} × ${object ? `${object.display_name}.` : term.object_id ? `Objeto ${term.object_id}.` : ""}${term.variable ?? "caudal"}${reference}`;
                             })
                             .join(" + ") || "0"}{" "}
                           {row.relation} {-row.constant} {ruleUnit(row.unit)}

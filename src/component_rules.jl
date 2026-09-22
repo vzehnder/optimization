@@ -1,19 +1,33 @@
 const COMPONENT_RULE_VERSION = "affine_flow.v1"
 const HYDRAULIC_RULE_VERSION = "affine_hydraulic.v1"
+const TEMPORAL_RULE_VERSION = "affine_temporal.v1"
 
 function validate_component_rules(document)
     haskey(document, "component_rules") || return
     rules = required_dict(document, "component_rules")
     required_string(document, "schema_version") == SYSTEM_SCHEMA_VERSION_V3 ||
         throw(ArgumentError("component rules require hydraulic v3"))
-    get(rules, "version", nothing) in (COMPONENT_RULE_VERSION, HYDRAULIC_RULE_VERSION) ||
+    get(rules, "version", nothing) in (COMPONENT_RULE_VERSION, HYDRAULIC_RULE_VERSION, TEMPORAL_RULE_VERSION) ||
         throw(ArgumentError("unsupported component rules version"))
-    extended = rules["version"] == HYDRAULIC_RULE_VERSION
+    temporal = rules["version"] == TEMPORAL_RULE_VERSION
+    extended = rules["version"] != COMPONENT_RULE_VERSION
     periods = required_vector(document, "time_series")
     1 <= length(periods) <= 8784 || throw(ArgumentError("component rules period quota exceeded"))
     grid = required_vector(rules, "grid")
     expected_grid = [Dict("timestamp" => p["timestamp"], "duration_hours" => p["duration_hours"]) for p in periods]
     grid == expected_grid || throw(ArgumentError("component rules grid differs from snapshot"))
+    temporal_policies = Dict{String,Any}()
+    if temporal
+        for application in required_vector(rules, "applications")
+            policy = get(application, "temporal", nothing)
+            policy === nothing && continue
+            get(policy, "first_period", nothing) in ("omit", "initial") || throw(ArgumentError("invalid initial period policy"))
+            initial_values = required_vector(policy, "initial_values")
+            (policy["first_period"] == "initial") == !isempty(initial_values) || throw(ArgumentError("initial values do not match temporal policy"))
+            temporal_policies[required_string(application, "id")] = policy
+        end
+        isempty(temporal_policies) && throw(ArgumentError("temporal rules require an explicit initial period policy"))
+    end
     units = Set(u["id"] for u in document["hydraulic_network"]["units"])
     network = document["hydraulic_network"]
     reservoirs = Set(n["id"] for n in network["nodes"] if n["type"] == "reservoir")
@@ -66,7 +80,7 @@ function validate_component_rules(document)
         term_count += length(terms)
         term_count <= 500000 || throw(ArgumentError("component rules term quota exceeded"))
         row_objects = Set()
-        coefficients = Dict{Tuple{Int,String},Float64}()
+        coefficients = Dict{Tuple{Int,String,Int},Float64}()
         for term in terms
             Set(keys(term)) == Set(("object_id", "variable", "period", "coefficient", "unit")) ||
                 throw(ArgumentError("unsupported component rules term fields"))
@@ -84,11 +98,12 @@ function validate_component_rules(document)
             end
             expected_unit == row["unit"] || throw(ArgumentError("unsupported component rules variable or unit"))
             period = get(term, "period", nothing)
-            period isa Integer && !(period isa Bool) && period == row_period || throw(ArgumentError("unsupported component rules period reference"))
+            period isa Integer && !(period isa Bool) && 0 <= period <= row_period && (temporal || period == row_period) || throw(ArgumentError("unsupported component rules period reference"))
+            period == row_period || haskey(temporal_policies, row["application_id"]) || throw(ArgumentError("previous period reference requires an initial policy"))
             get(term, "unit", nothing) == "dimensionless" || throw(ArgumentError("invalid component rules coefficient unit"))
             coefficient = get(term, "coefficient", nothing)
             coefficient isa Real && !(coefficient isa Bool) && isfinite(coefficient) || throw(ArgumentError("nonfinite component rules coefficient"))
-            key = (id, variable)
+            key = (id, variable, period)
             coefficients[key] = get(coefficients, key, 0.0) + Float64(coefficient)
             isfinite(coefficients[key]) || throw(ArgumentError("nonfinite normalized component rules coefficient"))
         end
@@ -102,7 +117,7 @@ function validate_component_rules(document)
             valid = relation == "<=" ? constant <= 0 : relation == ">=" ? constant >= 0 : constant == 0
             valid || throw(ArgumentError("contradictory constant component rule $(row["name"])"))
         else
-            (id, variable) = only(keys(coefficients))
+            (id, variable, term_period) = only(keys(coefficients))
             physical = if variable in ("caudal", "potencia")
                 unit = object_units[id]
                 curve = unit["curves"]["flow_power"]
@@ -121,7 +136,7 @@ function validate_component_rules(document)
             else
                 (0.0, Inf)
             end
-            lower, upper = get(bounds, (id, variable, row_period), physical)
+            lower, upper = get(bounds, (id, variable, term_period), physical)
             bound = -Float64(constant) / coefficient
             isfinite(bound) || throw(ArgumentError("nonfinite normalized component rule bound"))
             if relation == "=="
@@ -132,7 +147,7 @@ function validate_component_rules(document)
                 lower = max(lower, bound)
             end
             lower <= upper || throw(ArgumentError("contradictory component rule $(row["name"]) at period $(row_period + 1)"))
-            bounds[(id, variable, row_period)] = (lower, upper)
+            bounds[(id, variable, term_period)] = (lower, upper)
         end
     end
 end

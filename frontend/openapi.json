@@ -3027,6 +3027,16 @@
               }
             ],
             "title": "Scenario Id"
+          },
+          "temporal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuleTemporalPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -3036,6 +3046,49 @@
           "expected_revision"
         ],
         "title": "RuleDraftRequest",
+        "type": "object"
+      },
+      "RuleInitialValue": {
+        "additionalProperties": false,
+        "properties": {
+          "object_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Object Id",
+            "type": "integer"
+          },
+          "timestamp": {
+            "maxLength": 64,
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "unit": {
+            "maxLength": 64,
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          },
+          "variable": {
+            "enum": [
+              "caudal",
+              "potencia",
+              "almacenamiento",
+              "vertimiento"
+            ],
+            "title": "Variable",
+            "type": "string"
+          }
+        },
+        "required": [
+          "object_id",
+          "variable",
+          "value",
+          "unit",
+          "timestamp"
+        ],
+        "title": "RuleInitialValue",
         "type": "object"
       },
       "RuleInput": {
@@ -3227,6 +3280,32 @@
           "range_end"
         ],
         "title": "RuleScope",
+        "type": "object"
+      },
+      "RuleTemporalPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "first_period": {
+            "enum": [
+              "omit",
+              "initial"
+            ],
+            "title": "First Period",
+            "type": "string"
+          },
+          "initial_values": {
+            "items": {
+              "$ref": "#/components/schemas/RuleInitialValue"
+            },
+            "maxItems": 100,
+            "title": "Initial Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "first_period"
+        ],
+        "title": "RuleTemporalPolicy",
         "type": "object"
       },
       "RuleTestRequest": {

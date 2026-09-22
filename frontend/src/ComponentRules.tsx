@@ -18,6 +18,7 @@ import { RuleApplications } from "./RuleApplications";
 import { RuleInputs, type RuleInput } from "./RuleInputs";
 import { ruleErrorMessage } from "./ruleErrors";
 import { RuleObjects, type RuleAlias, type RuleObject } from "./RuleObjects";
+import { RuleTemporal, type TemporalPolicy } from "./RuleTemporal";
 
 export interface RuleParameter {
   name: string;
@@ -37,6 +38,7 @@ interface RuleDraft {
   inputs?: RuleInput[];
   aliases?: RuleAlias[];
   scenario_id?: number | null;
+  temporal?: TemporalPolicy | null;
 }
 interface RuleList {
   enabled?: boolean;
@@ -154,6 +156,7 @@ function PythonEditor({
                 "ctx.objetos",
                 "ctx.restriccion",
                 "ctx.salida",
+                "ctx.transiciones",
                 "construir",
                 "range",
                 "sum",
@@ -297,6 +300,7 @@ function RuleForm({
   const [saved, setSaved] = useState(initial);
   const [inputs, setInputs] = useState(initial?.inputs ?? []);
   const [aliases, setAliases] = useState(initial?.aliases ?? []);
+  const [temporal, setTemporal] = useState(initial?.temporal ?? null);
   const [search] = useSearchParams();
   const scenarioId =
     initial?.scenario_id ?? (Number(search.get("scenario_id")) || null);
@@ -328,6 +332,7 @@ function RuleForm({
     name !== saved.name ||
     !sameRows(aliases, saved.aliases ?? []) ||
     !sameRows(inputs, saved.inputs ?? []) ||
+    JSON.stringify(temporal) !== JSON.stringify(saved.temporal ?? null) ||
     !sameRows(parameters, saved.parameters);
   function parameterChange(index: number, patch: Partial<RuleParameter>) {
     setParameters((rows) =>
@@ -338,6 +343,17 @@ function RuleForm({
     setBusy(true);
     setError("");
     try {
+      if (
+        temporal?.first_period === "initial" &&
+        (!temporal.initial_values.length ||
+          temporal.initial_values.some(
+            (v) => v.value === null || !v.timestamp.trim(),
+          ))
+      ) {
+        throw new Error(
+          "Completa el valor y el instante de cada condición inicial.",
+        );
+      }
       const result = await mutate<RuleDraft>(
         saved ? `${root}/${saved.id}` : root,
         {
@@ -346,6 +362,7 @@ function RuleForm({
           parameters,
           inputs,
           aliases,
+          temporal,
           scenario_id: scenarioId,
           expected_revision: saved?.revision ?? 0,
         },
@@ -410,6 +427,13 @@ function RuleForm({
       {candidates.isError && (
         <p role="alert">{ruleErrorMessage(candidates.error)}</p>
       )}
+      <RuleTemporal
+        policy={temporal}
+        onChange={setTemporal}
+        objects={objects.filter((o) =>
+          references.some((ref) => ref.object_id === o.id),
+        )}
+      />
       <details>
         <summary>Ejemplo de potencia conjunta</summary>
         <p>

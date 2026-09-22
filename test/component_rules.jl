@@ -21,6 +21,50 @@ function solve_rule_case(document, dir, name)
     BESSDispatch.run_system_case(path; output_root=joinpath(dir, name))
 end
 
+@testset "Temporal ramps use unequal start distances and both initial policies" begin
+    mktempdir() do dir
+        document = rule_case()
+        document["time_series"] = [Dict("timestamp" => stamp, "duration_hours" => hours, "natural_inflow_m3s" => Dict("reservoir" => 0))
+                                  for (stamp, hours) in (("2026-01-01T00:00:00", 0.5), ("2026-01-01T00:30:00", 2.0), ("2026-01-01T02:30:00", 1.0))]
+        block = document["component_rules"]
+        block["version"] = "affine_temporal.v1"
+        block["grid"] = [Dict("timestamp" => p["timestamp"], "duration_hours" => p["duration_hours"]) for p in document["time_series"]]
+        block["applications"] = [Dict{String,Any}("id" => "a1", "temporal" => Dict("first_period" => "initial", "initial_values" => [
+            Dict("object_id" => 7, "variable" => "caudal", "value" => 2.0, "unit" => "m3_per_s", "timestamp" => "2025-12-31T23:30:00Z")]))]
+        term(t, c) = Dict("object_id" => 7, "variable" => "caudal", "period" => t, "coefficient" => c, "unit" => "dimensionless")
+        row(name, t, constant, terms) = Dict{String,Any}("application_id" => "a1", "revision_id" => "r1", "name" => name,
+            "line" => 4, "period" => t, "relation" => "<=", "unit" => "m3_per_s", "constant" => constant, "terms" => terms)
+        block["rows"] = [row("subida", 0, -4.0, [term(0, 1.0)]), row("bajada", 0, 1.0, [term(0, -1.0)]),
+                         row("subida", 1, -2.0, [term(0, -1.0), term(1, 1.0)]), row("bajada", 1, -1.0, [term(0, 1.0), term(1, -1.0)]),
+                         row("subida", 2, -8.0, [term(1, -1.0), term(2, 1.0)]), row("bajada", 2, -4.0, [term(1, 1.0), term(2, -1.0)])]
+        rising = solve_rule_case(document, dir, "rising")
+        @test [r.total_hydro_turbine_flow_m3s for r in CSV.File(rising.dispatch_path)] ≈ [4, 6, 14]
+        push!(block["rows"], row("final", 2, -1.0, [term(2, 1.0)]))
+        falling = solve_rule_case(document, dir, "falling")
+        @test [r.total_hydro_turbine_flow_m3s for r in CSV.File(falling.dispatch_path)] ≈ [4, 5, 1]
+        @test JSON3.read(read(falling.system_case_resolved_path, String), Dict{String,Any})["component_rules"] == block
+        filter!(r -> r["period"] != 0, block["rows"])
+        block["applications"][1]["temporal"] = Dict("first_period" => "omit", "initial_values" => [])
+        omitted = solve_rule_case(document, dir, "omitted")
+        @test [r.total_hydro_turbine_flow_m3s for r in CSV.File(omitted.dispatch_path)] ≈ [6, 5, 1]
+        for (period, stamp) in zip(document["time_series"], ("2025-12-31T21:00:00-03:00", "2026-01-01T00:30:00Z", "2026-01-01T04:30:00+02:00"))
+            period["timestamp"] = stamp
+        end
+        block["grid"] = [Dict("timestamp" => p["timestamp"], "duration_hours" => p["duration_hours"]) for p in document["time_series"]]
+        utc = solve_rule_case(document, dir, "utc_offsets")
+        @test [r.total_hydro_turbine_flow_m3s for r in CSV.File(utc.dispatch_path)] ≈ [6, 5, 1]
+        @test string(first(CSV.File(utc.dispatch_path)).timestamp) == "2026-01-01T00:00:00"
+        @test JSON3.read(read(utc.system_case_resolved_path, String), Dict{String,Any})["component_rules"]["grid"] == block["grid"]
+        for mutate! in (d -> delete!(d["component_rules"]["applications"][1], "temporal"),
+                        d -> d["component_rules"]["rows"][1]["terms"][1]["period"] = -1,
+                        d -> d["component_rules"]["rows"][1]["terms"][1]["period"] = 2)
+            invalid = deepcopy(document)
+            mutate!(invalid)
+            @test_throws ArgumentError BESSDispatch.validate_hydraulic_v3_system_case_document(invalid)
+        end
+    end
+end
+
 @testset "A shared 10 MW limit constrains the sum of two real units" begin
     mktempdir() do dir
         document = rule_case()

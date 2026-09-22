@@ -3,6 +3,7 @@ import math
 
 IR_VERSION = "affine_flow.v1"
 HYDRAULIC_IR_VERSION = "affine_hydraulic.v1"
+TEMPORAL_IR_VERSION = "affine_temporal.v1"
 
 
 class RuleBoundsError(ValueError):
@@ -39,7 +40,7 @@ def validate_model_bounds(rows, objects, document):
         elif len(terms) == 1:
             term = terms[0]
             identity = (term["object_id"], term["variable"])
-            key = (*identity, row["period"])
+            key = (*identity, term["period"])
             lo, hi = bounds.get(key, physical[identity])
             coefficient = term["coefficient"]
             bound = finite(-constant / coefficient)
@@ -83,7 +84,7 @@ def validate_bounds(rows, unit, period_count):
 
 
 def validate_ir(ir, object_id, period_count, objects=None):
-    if not isinstance(ir, dict) or set(ir) != {"version", "rows"} or ir["version"] not in {IR_VERSION, HYDRAULIC_IR_VERSION}:
+    if not isinstance(ir, dict) or set(ir) != {"version", "rows"} or ir["version"] not in {IR_VERSION, HYDRAULIC_IR_VERSION, TEMPORAL_IR_VERSION}:
         raise ValueError("Contrato de restricciones desconocido")
     from app.rule_objects import VARIABLES
     allowed = {object_id: {"caudal": "m3_per_s"}} if ir["version"] == IR_VERSION else {
@@ -116,13 +117,13 @@ def validate_ir(ir, object_id, period_count, objects=None):
                 raise ValueError("Término inválido")
             if type(term["object_id"]) is not int or allowed.get(term["object_id"], {}).get(term["variable"]) != row["unit"]:
                 raise ValueError("Objeto o variable fuera del snapshot")
-            if type(term["period"]) is not int or term["period"] != period or term["unit"] != "dimensionless":
+            if type(term["period"]) is not int or not 0 <= term["period"] <= period or (ir["version"] != TEMPORAL_IR_VERSION and term["period"] != period) or term["unit"] != "dimensionless":
                 raise ValueError("Referencia temporal o unidad no soportada")
-            key = (term["object_id"], term["variable"])
+            key = (term["object_id"], term["variable"], term["period"])
             coefficients[key] = finite(coefficients.get(key, 0.0) + finite(term["coefficient"]))
-        normalized.append({**row, "terms": [{"object_id": oid, "variable": variable, "period": period,
+        normalized.append({**row, "terms": [{"object_id": oid, "variable": variable, "period": term_period,
                                             "coefficient": coefficient, "unit": "dimensionless"}
-                                           for (oid, variable), coefficient in sorted(coefficients.items()) if coefficient]})
+                                           for (oid, variable, term_period), coefficient in sorted(coefficients.items()) if coefficient]})
     return {"version": ir["version"], "rows": sorted(normalized, key=lambda row: (row["period"], row["name"]))}
 
 

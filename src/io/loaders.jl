@@ -243,7 +243,15 @@ function parse_required_datetime(value, field::AbstractString)::DateTime
     end
 
     try
-        return DateTime(string(value))
+        text = string(value)
+        zoned = match(r"^(.*?)(Z|([+-])(\d{2}):(\d{2}))$", text)
+        zoned === nothing && return DateTime(text)
+        local_time = DateTime(zoned.captures[1])
+        zoned.captures[2] == "Z" && return local_time
+        hours, minutes = parse(Int, zoned.captures[4]), parse(Int, zoned.captures[5])
+        hours <= 23 && minutes <= 59 || throw(ArgumentError("invalid UTC offset"))
+        offset = (hours * 60 + minutes) * (zoned.captures[3] == "+" ? 1 : -1)
+        return local_time - Minute(offset)
     catch
         throw(ArgumentError("$field must be an ISO-8601 DateTime; got $(repr(value))"))
     end

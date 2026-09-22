@@ -3837,6 +3837,23 @@ export interface components {
             parameters: components["schemas"]["RuleParameter"][];
             /** Scenario Id */
             scenario_id?: number | null;
+            temporal?: components["schemas"]["RuleTemporalPolicy"] | null;
+        };
+        /** RuleInitialValue */
+        RuleInitialValue: {
+            /** Object Id */
+            object_id: number;
+            /** Timestamp */
+            timestamp: string;
+            /** Unit */
+            unit: string;
+            /** Value */
+            value: number;
+            /**
+             * Variable
+             * @enum {string}
+             */
+            variable: "caudal" | "potencia" | "almacenamiento" | "vertimiento";
         };
         /** RuleInput */
         RuleInput: {
@@ -3897,6 +3914,16 @@ export interface components {
             scenario_id: number;
             /** Variant Id */
             variant_id: number;
+        };
+        /** RuleTemporalPolicy */
+        RuleTemporalPolicy: {
+            /**
+             * First Period
+             * @enum {string}
+             */
+            first_period: "omit" | "initial";
+            /** Initial Values */
+            initial_values?: components["schemas"]["RuleInitialValue"][];
         };
         /** RuleTestRequest */
         RuleTestRequest: {

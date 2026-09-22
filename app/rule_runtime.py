@@ -9,7 +9,7 @@ import subprocess
 import threading
 import time
 
-SDK_VERSION = "reg-004.1"
+SDK_VERSION = "reg-005.1"
 POLICY_VERSION = "reg-001.1"
 
 
@@ -130,6 +130,8 @@ class OCIExecutor:
                         from app.rule_ir import validate_ir, validate_outputs, validate_bounds, validate_model_bounds, RuleBoundsError
                         value = {"ir": validate_ir(result["ir"], payload["object"]["id"], len(payload["grid"]), payload.get("objects")),
                                  "outputs": validate_outputs(result["outputs"], len(payload["grid"]))}
+                        if payload.get("temporal"):
+                            value["temporal"] = {**payload["temporal"], "omitted_periods": [0] if payload["temporal"]["first_period"] == "omit" else []}
                         if "compilation" in payload:
                             compilation = payload["compilation"]
                             unit = next(u for u in compilation["system_case"]["hydraulic_network"]["units"] if u["id"] == compilation["unit_key"])
@@ -138,7 +140,7 @@ class OCIExecutor:
                                     validate_model_bounds(value["ir"]["rows"], payload["objects"], compilation["system_case"])
                                 flow_rows = [r for r in value["ir"]["rows"] if r["unit"] == "m3_per_s" and all(
                                     t["object_id"] == payload["object"]["id"] and t["variable"] == "caudal" for t in r["terms"])]
-                                value["bounds"] = validate_bounds(flow_rows, unit, len(payload["grid"])) if flow_rows else []
+                                value["bounds"] = validate_bounds(flow_rows, unit, len(payload["grid"])) if flow_rows and not payload.get("temporal") else []
                             except RuleBoundsError as error:
                                 error.problem["alias"] = next((a["alias"] for a in payload.get("aliases", []) if a["object_id"] == error.problem.get("object_id")), "objeto")
                                 return {"status": "failed", "error": error.problem, "runtime": runtime}
@@ -155,6 +157,7 @@ class OCIExecutor:
                 code = error.get("code") if error.get("code") in {"RULE_LOG_LIMIT", "RULE_CODE_ERROR"} else "RULE_CODE_ERROR"
                 return {"status": "failed", "error": {"code": code, "message": str(error["message"])[:1000],
                         "line": error.get("line") if type(error.get("line")) is int else None,
+                        **({"period": error["period"]} if type(error.get("period")) is int else {}),
                         "alias": error.get("alias", "")[:1000] if isinstance(error.get("alias", ""), str) else ""}, "runtime": runtime}
             except (ValueError, KeyError, TypeError):
                 return {"status": "failed", "error": {"code": "RULE_INVALID_OUTPUT", "message": "Salida del sandbox inválida"}}

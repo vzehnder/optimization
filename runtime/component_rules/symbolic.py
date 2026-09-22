@@ -3,6 +3,28 @@ import inspect
 from dataclasses import dataclass
 
 
+def temporal_error(message, period):
+    error = ValueError(message)
+    error.period = period
+    raise error
+
+
+@dataclass(frozen=True)
+class Periods:
+    count: int
+
+    def __len__(self):
+        return self.count
+
+    def __iter__(self):
+        return iter(range(self.count))
+
+    def __getitem__(self, index):
+        if type(index) is not int or not 0 <= index < self.count:
+            temporal_error("Índice fuera del horizonte; los índices negativos no están permitidos", index)
+        return index
+
+
 @dataclass(frozen=True, eq=False)
 class Affine:
     terms: tuple
@@ -22,7 +44,7 @@ class Affine:
             return self
         other = self.lift(other)
         if self.unit != other.unit:
-            raise ValueError("Las expresiones requieren unidades compatibles")
+            temporal_error("Las expresiones requieren unidades compatibles", max((t[2] for t in self.terms + other.terms), default=0))
         return Affine(self.terms + other.terms, self.constant + other.constant, self.unit)
 
     __radd__ = __add__
@@ -90,11 +112,11 @@ class Flow:
 
     def __getitem__(self, period):
         if type(period) is not int or not 0 <= period < self.count:
-            raise ValueError("Período fuera de la grilla")
+            temporal_error("Período fuera de la grilla; los índices negativos no envuelven el horizonte", period)
         return Affine(tuple((identity, self.variable, period, 1.0) for identity in (self.member_ids or (self.object_id,))), unit=self.unit)
 
 
-def collector(rows, count):
+def collector(rows, count, temporal=False):
     def emit(name, period, relation):
         if not isinstance(name, str) or not name or len(name) > 200:
             raise ValueError("Nombre de restricción inválido")
@@ -102,6 +124,8 @@ def collector(rows, count):
             raise ValueError("Restricción o período inválido")
         if len(rows) >= 100000:
             raise ValueError("Cuota de restricciones excedida")
+        if any(t > period or (not temporal and t != period) for _, _, t, _ in relation.terms):
+            temporal_error("Referencia temporal fuera del horizonte anterior o sin política inicial declarada", period)
         rows.append({"name": name, "period": period, "line": inspect.currentframe().f_back.f_lineno,
                      "relation": relation.relation, "unit": relation.unit, "constant": relation.constant,
                      "terms": [{"object_id": oid, "period": t, "variable": variable, "coefficient": c,
