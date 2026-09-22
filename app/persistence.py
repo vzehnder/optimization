@@ -741,6 +741,26 @@ class AnalystStore:
                 UNIQUE (hydraulic_time_series_set_id, point_index)
             );
 
+            CREATE TABLE IF NOT EXISTS time_series_sets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                version_number INTEGER NOT NULL,
+                version_label TEXT NOT NULL,
+                data_kind TEXT NOT NULL,
+                timezone TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'draft',
+                content_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                UNIQUE (project_id, name, version_number),
+                UNIQUE (project_id, name, version_label),
+                CHECK (status IN ('draft', 'validated', 'archived'))
+            );
+
             CREATE TABLE IF NOT EXISTS case_hydraulic_time_series_bindings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 case_id INTEGER NOT NULL,
@@ -987,26 +1007,6 @@ class AnalystStore:
                 metadata_json TEXT NOT NULL DEFAULT '{}',
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
                 UNIQUE (project_id, source_key)
-            );
-
-            CREATE TABLE IF NOT EXISTS time_series_sets (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER NOT NULL,
-                name TEXT NOT NULL,
-                version_number INTEGER NOT NULL,
-                version_label TEXT NOT NULL,
-                data_kind TEXT NOT NULL,
-                timezone TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'draft',
-                content_hash TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                created_by TEXT NOT NULL,
-                updated_by TEXT NOT NULL,
-                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-                UNIQUE (project_id, name, version_number),
-                UNIQUE (project_id, name, version_label),
-                CHECK (status IN ('draft', 'validated', 'archived'))
             );
 
             CREATE TABLE IF NOT EXISTS time_series_set_revisions (
