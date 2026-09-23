@@ -7755,6 +7755,7 @@ class AnalystStore:
         lineage: list[dict[str, Any]],
         actor: str,
         set_id: int | None,
+        force_revision: bool = False,
     ) -> dict[str, Any]:
         sets_table = self._canonical("time_series_sets")
         signals_table = self._canonical("time_series_signals")
@@ -7957,7 +7958,8 @@ class AnalystStore:
         # 5b. A republication whose content equals the current revision is a
         #     no-op (chapter 9.7): no revision is created, the pointer does not
         #     move, no binding turns stale and the generation does not rise.
-        if previous_revision_id is not None:
+        #     Explicit rule regeneration records a revision even for equal values.
+        if previous_revision_id is not None and not force_revision:
             current_revision = self.connection.execute(
                 f"""
                 SELECT id, revision_number, supersedes_revision_id, content_hash
@@ -17568,6 +17570,9 @@ class AnalystStore:
         reason_text: str,
         if_match: str,
         actor: str,
+        derivation_metadata: dict[str, Any] | None = None,
+        lineage: list[dict[str, Any]] | None = None,
+        force_revision: bool = False,
     ) -> dict[str, Any]:
         set_id = int(row["time_series_set_id"])
         locked = self._lock_canonical_set(set_id)
@@ -17651,7 +17656,8 @@ class AnalystStore:
 
         # A republication whose content equals the current revision is a no-op:
         # no revision, no pointer move, no staleness, no generation (chapter 7.8).
-        if current_pointer is not None:
+        # Explicit rule regeneration records a revision even for equal values.
+        if current_pointer is not None and not force_revision:
             current = self.connection.execute(
                 f"""
                 SELECT id, revision_number, content_hash
@@ -17721,7 +17727,7 @@ class AnalystStore:
                     contract["timestamp_convention"],
                     reason_code,
                     json.dumps(
-                        {"temporal_contract": contract, "reason_text": reason_text},
+                        {"temporal_contract": contract, "reason_text": reason_text, **(derivation_metadata or {})},
                         sort_keys=True,
                     ),
                     now,
@@ -17773,7 +17779,7 @@ class AnalystStore:
                     contract["timestamp_convention"],
                     reason_code,
                     json.dumps(
-                        {"temporal_contract": contract, "reason_text": reason_text},
+                        {"temporal_contract": contract, "reason_text": reason_text, **(derivation_metadata or {})},
                         sort_keys=True,
                     ),
                     now,
@@ -17918,6 +17924,9 @@ class AnalystStore:
                 set_id,
             ),
         )
+        self._record_canonical_lineage(revision_id=revision_id,
+            signal_ids={row["object_series_key"]: int(row["signal_id"])},
+            lineage=lineage or [], actor=actor, now=now)
         self._close_object_series_ingestion(
             ingestion_id=int(ingestion["id"]), revision_id=revision_id, now=now
         )

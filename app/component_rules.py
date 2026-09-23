@@ -156,6 +156,26 @@ class RuleDeactivateRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=1000, pattern=r"\S")
 
 
+class SeriesPublicationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    job_id: str
+    output_name: str = Field(min_length=1, max_length=200)
+    name: str = Field(min_length=1, max_length=200, pattern=r"\S")
+    series_key: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
+    semantic_type_key: str = Field(min_length=1, max_length=64)
+    unit_key: str = Field(min_length=1, max_length=64)
+    series_kind: Literal["catalog", "object_specific"] = "catalog"
+    intended_binding_role_key: str | None = Field(default=None, max_length=64)
+    reason: str = Field(min_length=1, max_length=1000, pattern=r"\S")
+
+
+class SeriesRegenerationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    job_id: str
+    expected_revision_id: int = Field(gt=0)
+    reason: str = Field(min_length=1, max_length=1000, pattern=r"\S")
+
+
 class RuleRepository:
     def __init__(self, store):
         self.store = store
@@ -218,6 +238,8 @@ class RuleRepository:
             """)
         from app.rule_applications import initialize
         initialize(store)
+        from app.rule_series import initialize as initialize_series
+        initialize_series(store)
 
     def publication(self, rule_id, publication_id):
         row = self.store.connection.execute(
@@ -504,6 +526,63 @@ def rule_router(store):
                 from app.rule_objects import resolve_aliases
                 resolve_aliases(store, project_id, object_id, scenario_id, [{"alias": "entrada", "object_id": reference_object_id}])
             return input_candidates(store, project_id, reference_object_id or object_id, after, limit)
+
+    @router.post("/{rule_id}/series-publications", status_code=201)
+    def publish_series(project_id: int, object_id: int, rule_id: str, body: SeriesPublicationRequest, request: Request):
+        from app.rule_series import publish
+        from app.time_series_canonical import CanonicalRevisionError
+        user, _ = context(request, project_id, object_id)
+        repository.get(rule_id, project_id, object_id)
+        key = request.headers.get("Idempotency-Key", "").strip()
+        if not key or len(key) > 200:
+            raise HTTPException(422, "Se requiere una clave idempotente de hasta 200 caracteres")
+        try:
+            return publish(repository, rule_id, project_id, object_id, body, user, key)
+        except CanonicalRevisionError as error:
+            raise HTTPException(409 if "IDEMPOTENCY" in error.code else 422, error.as_problem()) from error
+
+    @router.get("/{rule_id}/tests/{job_id}/series-options")
+    def get_series_options(project_id: int, object_id: int, rule_id: str, job_id: str, request: Request):
+        from app.rule_series import options
+        context(request, project_id, object_id)
+        with store._lock:
+            return options(repository, rule_id, project_id, object_id, job_id)
+
+    @router.get("/{rule_id}/series-publications")
+    def list_series(project_id: int, object_id: int, rule_id: str, request: Request):
+        from app.rule_series import read
+        context(request, project_id, object_id)
+        repository.get(rule_id, project_id, object_id)
+        with store._lock:
+            rows = store.connection.execute("SELECT id FROM component_rule_series WHERE rule_id = ? ORDER BY id", (rule_id,)).fetchall()
+            return {"items": [read(repository, rule_id, row["id"]) for row in rows]}
+
+    @router.get("/{rule_id}/series-publications/{series_id}")
+    def get_series(project_id: int, object_id: int, rule_id: str, series_id: str, request: Request):
+        from app.rule_series import read
+        context(request, project_id, object_id)
+        repository.get(rule_id, project_id, object_id)
+        with store._lock:
+            return read(repository, rule_id, series_id)
+
+    @router.post("/{rule_id}/series-publications/{series_id}/regenerations", status_code=201)
+    def regenerate_series(project_id: int, object_id: int, rule_id: str, series_id: str,
+                          body: SeriesRegenerationRequest, request: Request):
+        from app.rule_series import publish, read
+        from app.time_series_canonical import CanonicalRevisionError
+        user, _ = context(request, project_id, object_id)
+        repository.get(rule_id, project_id, object_id)
+        key = request.headers.get("Idempotency-Key", "").strip()
+        if not key or len(key) > 200:
+            raise HTTPException(422, "Se requiere una clave idempotente de hasta 200 caracteres")
+        with store._lock:
+            previous = read(repository, rule_id, series_id)
+        definition = SeriesPublicationRequest(**{**previous["definition"], "job_id": body.job_id, "reason": body.reason})
+        try:
+            return publish(repository, rule_id, project_id, object_id, definition, user, key,
+                           regeneration={"id": series_id, "expected_revision_id": body.expected_revision_id})
+        except CanonicalRevisionError as error:
+            raise HTTPException(409 if "IDEMPOTENCY" in error.code else 422, error.as_problem()) from error
 
     @router.get("/{rule_id}")
     def get_rule(project_id: int, object_id: int, rule_id: str, request: Request):

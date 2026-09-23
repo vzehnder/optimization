@@ -12,6 +12,7 @@ import type { RuleAlias, RuleObject } from "./RuleObjects";
 import { ruleUnit } from "./ruleUnits";
 import type { TemporalPolicy } from "./RuleTemporal";
 import type { WindowPolicy } from "./RuleWindows";
+import { RuleSeriesPublications } from "./RuleSeriesPublications";
 
 interface Scope {
   scenario_id: number;
@@ -554,6 +555,12 @@ export function RuleApplications({
           grid={job.data.grid}
         />
       )}
+      <RuleSeriesPublications
+        key={`series-${job.data?.id ?? ruleId}`}
+        path={path}
+        job={job.data}
+        disabled={disabled}
+      />
       <label>
         Motivo de aplicación o desactivación
         <input

@@ -3619,6 +3619,112 @@
         "title": "ScopePrevalidationRequest",
         "type": "object"
       },
+      "SeriesPublicationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "intended_binding_role_key": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intended Binding Role Key"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Name",
+            "type": "string"
+          },
+          "output_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Output Name",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Reason",
+            "type": "string"
+          },
+          "semantic_type_key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Semantic Type Key",
+            "type": "string"
+          },
+          "series_key": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "title": "Series Key",
+            "type": "string"
+          },
+          "series_kind": {
+            "default": "catalog",
+            "enum": [
+              "catalog",
+              "object_specific"
+            ],
+            "title": "Series Kind",
+            "type": "string"
+          },
+          "unit_key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Unit Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "output_name",
+          "name",
+          "series_key",
+          "semantic_type_key",
+          "unit_key",
+          "reason"
+        ],
+        "title": "SeriesPublicationRequest",
+        "type": "object"
+      },
+      "SeriesRegenerationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Expected Revision Id",
+            "type": "integer"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "expected_revision_id",
+          "reason"
+        ],
+        "title": "SeriesRegenerationRequest",
+        "type": "object"
+      },
       "SharedSeriesPointsIngestionRequest": {
         "additionalProperties": false,
         "description": "A load aimed at a shared generic source, started from one object.\n\n``expected_base`` is mandatory here: a shared source always has a sealed\nrevision, and a blind overwrite of what other projects consume is exactly\nwhat chapter 7.9 refuses.",
@@ -8831,6 +8937,274 @@
         ]
       }
     },
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/series-publications": {
+      "get": {
+        "operationId": "list_series_api_projects__project_id__linkable_objects__object_id__rules__rule_id__series_publications_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Series",
+        "tags": [
+          "component-rules"
+        ]
+      },
+      "post": {
+        "operationId": "publish_series_api_projects__project_id__linkable_objects__object_id__rules__rule_id__series_publications_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeriesPublicationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Publish Series",
+        "tags": [
+          "component-rules"
+        ]
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/series-publications/{series_id}": {
+      "get": {
+        "operationId": "get_series_api_projects__project_id__linkable_objects__object_id__rules__rule_id__series_publications__series_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "series_id",
+            "required": true,
+            "schema": {
+              "title": "Series Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Series",
+        "tags": [
+          "component-rules"
+        ]
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/series-publications/{series_id}/regenerations": {
+      "post": {
+        "operationId": "regenerate_series_api_projects__project_id__linkable_objects__object_id__rules__rule_id__series_publications__series_id__regenerations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "series_id",
+            "required": true,
+            "schema": {
+              "title": "Series Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeriesRegenerationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Regenerate Series",
+        "tags": [
+          "component-rules"
+        ]
+      }
+    },
     "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/tests": {
       "post": {
         "operationId": "start_test_api_projects__project_id__linkable_objects__object_id__rules__rule_id__tests_post",
@@ -9028,6 +9402,73 @@
           }
         },
         "summary": "Cancel Test",
+        "tags": [
+          "component-rules"
+        ]
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/tests/{job_id}/series-options": {
+      "get": {
+        "operationId": "get_series_options_api_projects__project_id__linkable_objects__object_id__rules__rule_id__tests__job_id__series_options_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Series Options",
         "tags": [
           "component-rules"
         ]

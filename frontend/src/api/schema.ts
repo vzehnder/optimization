@@ -1220,6 +1220,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/series-publications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Series */
+        get: operations["list_series_api_projects__project_id__linkable_objects__object_id__rules__rule_id__series_publications_get"];
+        put?: never;
+        /** Publish Series */
+        post: operations["publish_series_api_projects__project_id__linkable_objects__object_id__rules__rule_id__series_publications_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/series-publications/{series_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Series */
+        get: operations["get_series_api_projects__project_id__linkable_objects__object_id__rules__rule_id__series_publications__series_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/series-publications/{series_id}/regenerations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Regenerate Series */
+        post: operations["regenerate_series_api_projects__project_id__linkable_objects__object_id__rules__rule_id__series_publications__series_id__regenerations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/tests": {
         parameters: {
             query?: never;
@@ -1265,6 +1317,23 @@ export interface paths {
         put?: never;
         /** Cancel Test */
         post: operations["cancel_test_api_projects__project_id__linkable_objects__object_id__rules__rule_id__tests__job_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/tests/{job_id}/series-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Series Options */
+        get: operations["get_series_options_api_projects__project_id__linkable_objects__object_id__rules__rule_id__tests__job_id__series_options_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4036,6 +4105,40 @@ export interface components {
              * @enum {string}
              */
             target_scope: "project" | "global";
+        };
+        /** SeriesPublicationRequest */
+        SeriesPublicationRequest: {
+            /** Intended Binding Role Key */
+            intended_binding_role_key?: string | null;
+            /** Job Id */
+            job_id: string;
+            /** Name */
+            name: string;
+            /** Output Name */
+            output_name: string;
+            /** Reason */
+            reason: string;
+            /** Semantic Type Key */
+            semantic_type_key: string;
+            /** Series Key */
+            series_key: string;
+            /**
+             * Series Kind
+             * @default catalog
+             * @enum {string}
+             */
+            series_kind: "catalog" | "object_specific";
+            /** Unit Key */
+            unit_key: string;
+        };
+        /** SeriesRegenerationRequest */
+        SeriesRegenerationRequest: {
+            /** Expected Revision Id */
+            expected_revision_id: number;
+            /** Job Id */
+            job_id: string;
+            /** Reason */
+            reason: string;
         };
         /**
          * SharedSeriesPointsIngestionRequest
@@ -7135,6 +7238,148 @@ export interface operations {
             };
         };
     };
+    list_series_api_projects__project_id__linkable_objects__object_id__rules__rule_id__series_publications_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                object_id: number;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_series_api_projects__project_id__linkable_objects__object_id__rules__rule_id__series_publications_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                object_id: number;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeriesPublicationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_series_api_projects__project_id__linkable_objects__object_id__rules__rule_id__series_publications__series_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                object_id: number;
+                rule_id: string;
+                series_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    regenerate_series_api_projects__project_id__linkable_objects__object_id__rules__rule_id__series_publications__series_id__regenerations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                object_id: number;
+                rule_id: string;
+                series_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeriesRegenerationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     start_test_api_projects__project_id__linkable_objects__object_id__rules__rule_id__tests_post: {
         parameters: {
             query?: never;
@@ -7207,6 +7452,40 @@ export interface operations {
         };
     };
     cancel_test_api_projects__project_id__linkable_objects__object_id__rules__rule_id__tests__job_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                object_id: number;
+                rule_id: string;
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_series_options_api_projects__project_id__linkable_objects__object_id__rules__rule_id__tests__job_id__series_options_get: {
         parameters: {
             query?: never;
             header?: never;

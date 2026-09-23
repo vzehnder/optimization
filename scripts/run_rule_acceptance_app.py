@@ -17,9 +17,11 @@ from app.rule_runtime import OCIExecutor
 from app.rule_worker import RuleWorker
 from tests.test_hydro_diagram_acceptance import complete_v3_nodes
 from tests.test_reg005_runtime import GRID
+from tests.reg007_fixture import renewable_consumer
 
 
 def main():
+    os.environ["TS_NEXT_CANONICAL_READ_ACCOUNTS"] = "admin@example.local"
     with tempfile.TemporaryDirectory(prefix="reg002-browser-") as temporary:
         store = AnalystStore(f"sqlite:///{temporary}/acceptance.sqlite3")
         project = store.create_project(name="REG-002 · Caudal operativo")
@@ -55,6 +57,7 @@ def main():
         store.save_hydraulic_diagram(scenario_id=temporal["id"], revision=temporal_diagram["revision"], nodes=temporal_nodes,
             reaches=[{"technical_key": "temporal_reach", "display_name": "Tramo", "from_node_key": "reservoir_alpha", "to_node_key": "junction_in", "reach_type": "river"}])
         budget_base = store.create_scenario_version(scenario_id=temporal["id"], system_case_json=store.generate_hydraulic_v3_preview(temporal["id"]), validation_payload={"status": "ok"})
+        calculated_consumer = renewable_consumer(store, project["id"], "reg007-browser")
         app = create_app(store=store, auth_enabled=True, artifact_root=Path(temporary) / "artifacts", input_source_root=Path(temporary) / "sources")
         original_lifespan = app.router.lifespan_context
 
@@ -89,6 +92,10 @@ def main():
         @app.get("/api/auth/reg006-fixture", include_in_schema=False)
         def budget_fixture():
             return {"scenario_id": temporal["id"], "base_version_id": budget_base["id"]}
+
+        @app.get("/api/auth/reg007-fixture", include_in_schema=False)
+        def calculated_fixture():
+            return calculated_consumer
 
         @app.post("/api/auth/reg004-membership", include_in_schema=False)
         def change_membership():

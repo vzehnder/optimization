@@ -29,6 +29,8 @@ it("enables publication after saving an existing window policy returned in canon
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(String(input), "http://localhost").pathname;
+      if (path.endsWith("/series-publications")) return json({ items: [] });
+      if (path.endsWith("/series-options")) return json({ outputs: [] });
       if (path === "/api/auth/me")
         return json({
           user: { id: 3, role: "analyst", is_active: true },
@@ -89,6 +91,8 @@ it("previews actual window duration, full budget and component terms with bounde
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const path = new URL(String(input), "http://localhost").pathname;
+      if (path.endsWith("/series-publications")) return json({ items: [] });
+      if (path.endsWith("/series-options")) return json({ outputs: [] });
       if (path.endsWith("/applications")) return json({ items: [] });
       if (path.endsWith("/scope"))
         return json({ ...scope, variants: [{ id: 2, display_name: "Base" }] });
@@ -193,6 +197,8 @@ it("saves the civil timezone and explicit partial-day consent without applying o
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(String(input), "http://localhost").pathname;
+      if (path.endsWith("/series-publications")) return json({ items: [] });
+      if (path.endsWith("/series-options")) return json({ outputs: [] });
       if (path === "/api/auth/me")
         return json({
           user: { id: 3, role: "analyst", is_active: true },

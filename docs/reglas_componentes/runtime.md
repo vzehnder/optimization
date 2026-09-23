@@ -1,4 +1,4 @@
-# Operación y verificación de REG-001 a REG-006
+# Operación y verificación de REG-001 a REG-007
 
 REG-001 guarda borradores y calcula un máximo escalar de caudal. REG-002 incorpora
 publicación, aplicaciones a variantes y restricciones afines en el optimizador
@@ -7,6 +7,8 @@ REG-004 relaciona unidades, plantas y embalses del mismo modelo.
 REG-005 añade rampas y referencias a períodos anteriores con política inicial explícita.
 REG-006 integra potencia y caudal por horizonte o día civil, con zona IANA y
 aceptación explícita de días parciales.
+REG-007 publica salidas numéricas completas como series derivadas y permite
+regenerarlas explícitamente conservando revisiones, propietarios y consumidores.
 Las revisiones `sealed_preview` son copias inmutables
 de pruebas; el estado de la definición editable sigue siendo `draft`.
 
@@ -109,7 +111,7 @@ y gráficos de 20 períodos por página. La paginación solo afecta la presentac
 se valida el horizonte completo. Se detectan cruces de mínimo/máximo contra las
 filas de la regla y los límites físicos conocidos antes del solve; esto no
 sustituye la comprobación de factibilidad global de Julia. `ctx.salida` conserva
-cálculos en la preview y snapshot; publicar series derivadas corresponde a REG-007.
+cálculos en la preview y snapshot; REG-007 permite publicarlos como series derivadas.
 
 Publicar una entrada nueva invalida la evidencia anterior y bloquea la corrida,
 sin mover el pin. Para conservar una revisión antigua: **Probar revisión fijada**,
@@ -289,8 +291,8 @@ el repositorio completo como contexto. El Dockerfile fija CPython 3.12.14 por
 digest. El SDK está incluido en la imagen y su digest final fija ambos.
 
 ```sh
-docker build -t component-rules:reg-006 runtime/component_rules
-export RULE_RUNTIME_IMAGE="$(docker image inspect component-rules:reg-006 --format '{{.Id}}')"
+docker build -t component-rules:reg-007 runtime/component_rules
+export RULE_RUNTIME_IMAGE="$(docker image inspect component-rules:reg-007 --format '{{.Id}}')"
 export RULE_RUNTIME_COMMAND='["docker"]'
 export RULE_ENABLED_PROJECTS='*'
 python -m app.rule_worker
@@ -308,8 +310,8 @@ En Windows, Docker Desktop con contenedores Linux usa los mismos comandos,
 con variables PowerShell:
 
 ```powershell
-docker build -t component-rules:reg-006 runtime/component_rules
-$env:RULE_RUNTIME_IMAGE = (docker image inspect component-rules:reg-006 --format '{{.Id}}').Trim()
+docker build -t component-rules:reg-007 runtime/component_rules
+$env:RULE_RUNTIME_IMAGE = (docker image inspect component-rules:reg-007 --format '{{.Id}}').Trim()
 $env:RULE_RUNTIME_COMMAND = '["docker"]'
 $env:RULE_ENABLED_PROJECTS = '*'
 .venv/Scripts/python.exe -m app.rule_worker
@@ -324,6 +326,62 @@ la cadena vacía para deshabilitar pruebas, aplicaciones y corridas con reglas. 
 siguen siendo legibles. La autorización existente concede los proyectos a los
 roles internos `analyst`/`admin`; la API verifica además la pertenencia del
 objeto. Los externos no alcanzan estas rutas, aunque conozcan sus URLs.
+
+## Publicar y regenerar series calculadas (REG-007)
+
+Desde una revisión publicada, probar el horizonte completo y abrir **Publicar
+serie calculada**. El recorrido tiene cuatro pasos: destino, salida y clasificación,
+revisión de todos los intervalos e impacto con motivo obligatorio. El destino es
+el catálogo del proyecto o una serie específica del objeto actual. La unidad
+proviene del cálculo; solo se ofrecen semánticas compatibles y, para series
+específicas, roles válidos del propietario. Los datos quedan clasificados como
+`derived`, con intervalos UTC y convención `period_start`.
+
+Ejemplo: declarar `capacidad` como número en `mw` con valor 20 y seleccionar una
+entrada `disponibilidad` con semántica `availability_factor` y unidad
+`dimensionless`:
+
+```python
+def construir(ctx):
+    for t in ctx.periodos:
+        ctx.salida("potencia", t,
+                   ctx.parametros.capacidad * ctx.entradas.disponibilidad[t])
+```
+
+Publicar `potencia` con semántica `renewable_available_power`. Su revisión puede
+seleccionarse en una renovable compatible mediante el recorrido canónico de
+bindings. Una salida parcial o con variables de decisión no puede publicarse.
+La creación no sustituye una fuente existente del mismo nombre.
+
+Las rutas relativas a `/api/projects/{project}/linkable-objects/{object}/rules/{rule}` son:
+
+- `GET /tests/{job}/series-options`: salidas completas, unidades, semánticas y roles.
+- `POST /series-publications`: `job_id`, `output_name`, `name`, `series_key`,
+  `semantic_type_key`, `unit_key`, `series_kind`, `intended_binding_role_key`
+  (para serie específica) y `reason`.
+- `GET /series-publications` y `GET /series-publications/{id}`: recibos,
+  definición, lineage y vigencia de cada receta.
+- `POST /series-publications/{id}/regenerations`: `job_id`,
+  `expected_revision_id` y `reason`; conserva identidad, clasificación y propietario.
+
+Ambos POST exigen sesión interna, CSRF e `Idempotency-Key`. Repetir la misma
+solicitud devuelve su recibo; cambiar la intención con la misma clave devuelve
+409. La escritura canónica, lineage, receta y recibo se confirman en una sola
+transacción. La pausa operativa C6 y el interruptor del proyecto impiden nuevas
+publicaciones. Una colisión concurrente exige reintentar; no quedan sets parciales.
+
+La receta fija código, revisión de regla, SDK/imagen/runtime, parámetros,
+referencias de inputs con revisiones/hash y valores, grilla, política temporal,
+ventanas y hash de salida. Las dependencias enlazan revisiones canónicas y se
+rechazan ciclos, incluidas dependencias históricas. Consultar no ejecuta Python.
+
+Una nueva publicación de la regla o fuente marca la receta obsoleta con explicación.
+Para regenerar: seleccionar o revalidar las entradas, publicar y probar la regla,
+y confirmar **Regenerar** con motivo. Esta acción registra **una revisión nueva
+incluso con valores idénticos**; es la excepción explícita de REG-007 al no-op
+canónico habitual de republicación idéntica. Los bindings conservan sus pins y
+quedan pendientes de revalidación; ninguna corrida histórica cambia. No hay
+regeneración ni selección automática de revisiones.
 
 ## Límites y ciclo de vida
 
@@ -380,13 +438,13 @@ export DATABASE_URL=sqlite:///:memory:
 export POSTGRES_TEST_DATABASE_URL=postgresql://test:test@127.0.0.1:5432/rules_test
 # Configurar RULE_RUNTIME_COMMAND / RULE_RUNTIME_IMAGE como arriba; no levantar
 # un worker adicional: las pruebas administran sus propios workers.
-python -m unittest tests.test_reg001_rules tests.test_reg001_runtime tests.test_reg002_rules tests.test_reg002_runtime tests.test_reg003_rules tests.test_reg003_runtime tests.test_reg003_classification tests.test_reg004_rules tests.test_reg004_runtime tests.test_reg005_rules tests.test_reg005_runtime tests.test_reg006_rules tests.test_reg006_runtime tests.test_ts7_001_classification_catalog -v
+python -m unittest tests.test_reg001_rules tests.test_reg001_runtime tests.test_reg002_rules tests.test_reg002_runtime tests.test_reg003_rules tests.test_reg003_runtime tests.test_reg003_classification tests.test_reg004_rules tests.test_reg004_runtime tests.test_reg005_rules tests.test_reg005_runtime tests.test_reg006_rules tests.test_reg006_runtime tests.test_reg007_rules tests.test_ts7_001_classification_catalog -v
 julia --project=. test/component_rules.jl
 cd frontend
 npm ci
 npm run api:generate
 npm run api:check
-npm test -- --run src/ComponentRules.test.tsx src/HourlyRules.test.tsx src/RelatedRules.test.tsx src/TemporalRules.test.tsx src/BudgetRules.test.tsx src/RunExperience.test.tsx src/ProtectedMutationJourney.test.tsx
+npm test -- --run src/ComponentRules.test.tsx src/HourlyRules.test.tsx src/RelatedRules.test.tsx src/TemporalRules.test.tsx src/BudgetRules.test.tsx src/CalculatedSeries.test.tsx src/RunExperience.test.tsx src/ProtectedMutationJourney.test.tsx
 npm run build
 npx playwright test e2e/component-rules.spec.ts
 # Requiere Julia disponible (PATH o variable JULIA) y la imagen OCI configurada.
@@ -395,6 +453,7 @@ RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-hourly.spec.ts
 RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-related.spec.ts
 RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-temporal.spec.ts
 RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-budgets.spec.ts
+RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-series.spec.ts
 ```
 
 El smoke de navegador usa el servidor aislado existente, comprueba la entrada
@@ -414,9 +473,20 @@ la equivalencia del alias de planta y el bloqueo tras cambiar sus miembros,
 conservando el mapa de alias y el resultado histórico. REG-005 compara ambas políticas
 iniciales con tres intervalos de 0,5, 2 y 1 horas, comprueba las rampas de caudal
 y conserva el resultado histórico al cambiar la política y el rango. CI incluye
-los seis recorridos y la prueba Julia. REG-006 compara un presupuesto de 12 MWh,
+los siete recorridos y la prueba Julia. REG-006 compara un presupuesto de 12 MWh,
 uno diario de 36.000 m³ aceptando la ventana parcial y el caso libre de 105 MWh
 y 504.000 m³, con duraciones de 0,5, 2 y 1 horas e historial intacto.
+REG-007 publica `[20, 10, 15, 20]` MW, abre su inspector en el catálogo y resuelve
+un caso con esa entrada. Tras cambiar la disponibilidad, regenera `[10, 10, 10, 10]`
+MW, comprueba el pin anterior obsoleto y conserva la corrida y su snapshot.
+
+Regresión adicional del escritor canónico:
+
+```sh
+python -m unittest tests.test_ts7_002_canonical_content_model tests.test_ts7_009_run_materialization -v
+# Usar otra base PostgreSQL vacía: esta suite comprueba también el catálogo vacío.
+POSTGRES_TEST_DATABASE_URL=postgresql://test:test@127.0.0.1:5432/object_series_test python -m unittest tests.test_ts7_010_object_specific_series -v
+```
 
 Referencia del mecanismo OCI: [Docker, ejecución de contenedores](https://docs.docker.com/engine/containers/run/).
 Los tests de esta entrega no constituyen una auditoría de escapes del kernel.
