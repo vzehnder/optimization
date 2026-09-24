@@ -163,6 +163,7 @@ import {
   PortalPublicationReport,
 } from "./PortalResults";
 import { RunArtifactsSection, RunResultsSection } from "./RunResults";
+import { RuleCompliance } from "./RuleCompliance";
 import { RunRuleSummary } from "./RuleApplications";
 import {
   findSuggestedCatalogColumn,
@@ -10871,6 +10872,15 @@ export function RunDetailView() {
           </p>
         ) : null}
         <RunRuleSummary document={version.data?.system_case_json} />
+        {version.data?.system_case_json &&
+        typeof version.data.system_case_json === "object" &&
+        "component_rules" in version.data.system_case_json ? (
+          <RuleCompliance
+            key={runData.id}
+            runId={runData.id}
+            status={runData.status}
+          />
+        ) : null}
         {runData.status === "failed" ? (
           <section
             className="workspace-section"

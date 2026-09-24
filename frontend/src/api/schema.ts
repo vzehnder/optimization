@@ -1957,6 +1957,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{run_id}/rule-compliance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Compliance */
+        get: operations["get_compliance_api_runs__run_id__rule_compliance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scenario-versions/{scenario_version_id}": {
         parameters: {
             query?: never;
@@ -3328,6 +3345,174 @@ export interface components {
             reason_code: string;
             /** Reason Text */
             reason_text?: string | null;
+        };
+        /** ComplianceConflict */
+        ComplianceConflict: {
+            /** Application Id */
+            application_id: string;
+            /** Name */
+            name: string;
+            /** Period */
+            period: number;
+            /** Rule Url */
+            rule_url: string;
+        };
+        /** ComplianceDiagnostic */
+        ComplianceDiagnostic: {
+            /** Action */
+            action: string;
+            /** Application Id */
+            application_id?: string | null;
+            /** Category */
+            category: string;
+            /** Code */
+            code?: string | null;
+            /**
+             * Conflicts
+             * @default []
+             */
+            conflicts: components["schemas"]["ComplianceConflict"][];
+            /** Line */
+            line?: number | null;
+            /** Message */
+            message: string;
+            /** Period */
+            period?: number | null;
+            /** Rule Url */
+            rule_url?: string | null;
+        };
+        /** CompliancePage */
+        CompliancePage: {
+            /** Limit */
+            limit: number;
+            /** Next Offset */
+            next_offset: number | null;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
+        /** ComplianceReport */
+        ComplianceReport: {
+            /** Counts */
+            counts: {
+                [key: string]: number;
+            };
+            /** Diagnostics */
+            diagnostics: components["schemas"]["ComplianceDiagnostic"][];
+            page: components["schemas"]["CompliancePage"];
+            /** Period Count */
+            period_count: number;
+            /** Rows */
+            rows: components["schemas"]["ComplianceRow"][];
+            /** Rules */
+            rules: components["schemas"]["ComplianceRule"][];
+            /** Run Id */
+            run_id: number;
+            /** Samples */
+            samples: components["schemas"]["ComplianceSample"][];
+            /** Solution State */
+            solution_state: string;
+            /** Termination Status */
+            termination_status: string | null;
+            /**
+             * Version
+             * @default rule_compliance.v1
+             */
+            version: string;
+        };
+        /** ComplianceRow */
+        ComplianceRow: {
+            /** Absolute Tolerance */
+            absolute_tolerance: number;
+            /** Affected Periods */
+            affected_periods: number[];
+            /** Application Id */
+            application_id: string;
+            /** Components */
+            components: {
+                [key: string]: unknown;
+            }[];
+            /** Constant */
+            constant: number;
+            /** Definition Id */
+            definition_id: string;
+            /** Instance Revision */
+            instance_revision: number;
+            /** Lhs */
+            lhs: number | null;
+            /** Line */
+            line: number;
+            /** Margin */
+            margin: number | null;
+            /** Name */
+            name: string;
+            /** Period */
+            period: number;
+            /** Relation */
+            relation: string;
+            /** Relative Tolerance */
+            relative_tolerance: number;
+            /** Residual */
+            residual: number | null;
+            /** Revision Id */
+            revision_id: string;
+            /** Rhs */
+            rhs: number;
+            /** Row Index */
+            row_index: number;
+            /** Rule Id */
+            rule_id: string;
+            /** Rule Name */
+            rule_name: string;
+            /** Rule Url */
+            rule_url: string;
+            /** Status */
+            status: string;
+            /** Terms */
+            terms: {
+                [key: string]: unknown;
+            }[];
+            /** Timestamp */
+            timestamp: string;
+            /** Tolerance */
+            tolerance: number | null;
+            /** Unit */
+            unit: string;
+            /** Window */
+            window: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** ComplianceRule */
+        ComplianceRule: {
+            /** Application Id */
+            application_id: string;
+            /** Name */
+            name: string;
+            /** Revision Id */
+            revision_id: string;
+            /** Rule Id */
+            rule_id: string;
+            /** Url */
+            url: string;
+        };
+        /** ComplianceSample */
+        ComplianceSample: {
+            /** Margin */
+            margin: number | null;
+            /** Name */
+            name: string;
+            /** Period */
+            period: number;
+            /** Residual */
+            residual: number | null;
+            /** Row Index */
+            row_index: number;
+            /** Status */
+            status: string;
+            /** Unit */
+            unit: string;
         };
         /** ConsoleGroupCellRequest */
         ConsoleGroupCellRequest: {
@@ -9108,6 +9293,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_compliance_api_runs__run_id__rule_compliance_get: {
+        parameters: {
+            query?: {
+                rule_id?: string | null;
+                period?: number | null;
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComplianceReport"];
                 };
             };
             /** @description Validation Error */

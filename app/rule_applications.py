@@ -427,6 +427,16 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
         block = {"version": block_version, "objects": list(objects.values()), "grid": frozen["grid"], "timezone": "UTC",
                  "rows": rows, "applications": snapshots, "context_hash": frozen["fingerprint"], "ir_hash": digest(rows)}
         document = {**frozen["system_case"], "component_rules": block}
+        from app.rule_ir import RuleBoundsError, validate_model_bounds
+        from app.rule_compliance import rule_url
+        try:
+            validate_model_bounds(rows, [dict(o, kind=o.get("kind", "hydraulic_unit")) for o in objects.values()], document)
+        except RuleBoundsError as error:
+            by_id = {a["id"]: a for a in applications}
+            conflicts = [{**origin, "rule_url": rule_url(project_id, scope["scenario_id"], by_id[origin["application_id"]])}
+                         for origin in error.problem["conflicts"]]
+            raise HTTPException(422, {**error.problem, "category": "bounds_conflict", "conflicts": conflicts,
+                                      "action": "Revisar las reglas señaladas junto con los límites físicos."}) from error
         text = encode(document)
         if len(text.encode()) > 64 * 1024 * 1024:
             raise HTTPException(422, "Snapshot de reglas excede 64 MiB")

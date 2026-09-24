@@ -985,6 +985,519 @@
         "title": "CatalogAssociationRevalidateRequest",
         "type": "object"
       },
+      "ComplianceConflict": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "period": {
+            "title": "Period",
+            "type": "integer"
+          },
+          "rule_url": {
+            "title": "Rule Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "period",
+          "application_id",
+          "rule_url"
+        ],
+        "title": "ComplianceConflict",
+        "type": "object"
+      },
+      "ComplianceDiagnostic": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "conflicts": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ComplianceConflict"
+            },
+            "title": "Conflicts",
+            "type": "array"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period"
+          },
+          "rule_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rule Url"
+          }
+        },
+        "required": [
+          "category",
+          "message",
+          "action"
+        ],
+        "title": "ComplianceDiagnostic",
+        "type": "object"
+      },
+      "CompliancePage": {
+        "properties": {
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Offset"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "offset",
+          "limit",
+          "total",
+          "next_offset"
+        ],
+        "title": "CompliancePage",
+        "type": "object"
+      },
+      "ComplianceReport": {
+        "properties": {
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Counts",
+            "type": "object"
+          },
+          "diagnostics": {
+            "items": {
+              "$ref": "#/components/schemas/ComplianceDiagnostic"
+            },
+            "title": "Diagnostics",
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/CompliancePage"
+          },
+          "period_count": {
+            "title": "Period Count",
+            "type": "integer"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ComplianceRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/ComplianceRule"
+            },
+            "title": "Rules",
+            "type": "array"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "integer"
+          },
+          "samples": {
+            "items": {
+              "$ref": "#/components/schemas/ComplianceSample"
+            },
+            "title": "Samples",
+            "type": "array"
+          },
+          "solution_state": {
+            "title": "Solution State",
+            "type": "string"
+          },
+          "termination_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Termination Status"
+          },
+          "version": {
+            "default": "rule_compliance.v1",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "solution_state",
+          "termination_status",
+          "counts",
+          "rows",
+          "diagnostics",
+          "page",
+          "samples",
+          "rules",
+          "period_count"
+        ],
+        "title": "ComplianceReport",
+        "type": "object"
+      },
+      "ComplianceRow": {
+        "properties": {
+          "absolute_tolerance": {
+            "title": "Absolute Tolerance",
+            "type": "number"
+          },
+          "affected_periods": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Affected Periods",
+            "type": "array"
+          },
+          "application_id": {
+            "title": "Application Id",
+            "type": "string"
+          },
+          "components": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Components",
+            "type": "array"
+          },
+          "constant": {
+            "title": "Constant",
+            "type": "number"
+          },
+          "definition_id": {
+            "title": "Definition Id",
+            "type": "string"
+          },
+          "instance_revision": {
+            "title": "Instance Revision",
+            "type": "integer"
+          },
+          "lhs": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lhs"
+          },
+          "line": {
+            "title": "Line",
+            "type": "integer"
+          },
+          "margin": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Margin"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "period": {
+            "title": "Period",
+            "type": "integer"
+          },
+          "relation": {
+            "title": "Relation",
+            "type": "string"
+          },
+          "relative_tolerance": {
+            "title": "Relative Tolerance",
+            "type": "number"
+          },
+          "residual": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual"
+          },
+          "revision_id": {
+            "title": "Revision Id",
+            "type": "string"
+          },
+          "rhs": {
+            "title": "Rhs",
+            "type": "number"
+          },
+          "row_index": {
+            "title": "Row Index",
+            "type": "integer"
+          },
+          "rule_id": {
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "rule_name": {
+            "title": "Rule Name",
+            "type": "string"
+          },
+          "rule_url": {
+            "title": "Rule Url",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "terms": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Terms",
+            "type": "array"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "tolerance": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tolerance"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "window": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window"
+          }
+        },
+        "required": [
+          "row_index",
+          "name",
+          "rule_id",
+          "definition_id",
+          "instance_revision",
+          "revision_id",
+          "application_id",
+          "rule_name",
+          "rule_url",
+          "components",
+          "period",
+          "affected_periods",
+          "window",
+          "timestamp",
+          "line",
+          "unit",
+          "relation",
+          "constant",
+          "terms",
+          "lhs",
+          "rhs",
+          "margin",
+          "residual",
+          "absolute_tolerance",
+          "relative_tolerance",
+          "tolerance",
+          "status"
+        ],
+        "title": "ComplianceRow",
+        "type": "object"
+      },
+      "ComplianceRule": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "revision_id": {
+            "title": "Revision Id",
+            "type": "string"
+          },
+          "rule_id": {
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule_id",
+          "name",
+          "application_id",
+          "revision_id",
+          "url"
+        ],
+        "title": "ComplianceRule",
+        "type": "object"
+      },
+      "ComplianceSample": {
+        "properties": {
+          "margin": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Margin"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "period": {
+            "title": "Period",
+            "type": "integer"
+          },
+          "residual": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual"
+          },
+          "row_index": {
+            "title": "Row Index",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "row_index",
+          "name",
+          "period",
+          "unit",
+          "margin",
+          "residual",
+          "status"
+        ],
+        "title": "ComplianceSample",
+        "type": "object"
+      },
       "ConsoleGroupCellRequest": {
         "additionalProperties": false,
         "properties": {
@@ -11747,6 +12260,104 @@
           }
         },
         "summary": "Get Run Results"
+      }
+    },
+    "/api/runs/{run_id}/rule-compliance": {
+      "get": {
+        "operationId": "get_compliance_api_runs__run_id__rule_compliance_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rule_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Rule Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "period",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Period"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComplianceReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Compliance",
+        "tags": [
+          "component-rules"
+        ]
       }
     },
     "/api/scenario-versions/{scenario_version_id}": {

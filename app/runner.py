@@ -113,7 +113,7 @@ class JuliaRunExecutor:
                 exit_code=validation_result.exit_code,
                 stdout=validation_result.raw_stdout,
                 stderr=validation_result.raw_stderr,
-                error_payload=run_error_payload(validation_result.payload, validation_result.message),
+                error_payload=run_error_payload({"code": "RUN_VALIDATION_ERROR", **validation_result.payload}, validation_result.message),
                 error_message=validation_result.message,
                 stdout_log_path=str(stdout_log_path),
                 stderr_log_path=str(stderr_log_path),
@@ -134,7 +134,7 @@ class JuliaRunExecutor:
                 exit_code=None,
                 stdout="",
                 stderr="",
-                error_payload={"status": "error", "message": f"Julia run timed out after {self.timeout_seconds:g} seconds"},
+                error_payload={"status": "error", "code": "RUN_SOLVER_TIMEOUT", "message": f"Julia run timed out after {self.timeout_seconds:g} seconds"},
             )
             self._register_audit_artifacts(run_id, input_snapshot_path=input_snapshot_path)
             return failed

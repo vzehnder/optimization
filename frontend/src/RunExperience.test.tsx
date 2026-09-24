@@ -142,32 +142,49 @@ describe("results experience", () => {
   it("identifies the frozen rule revision and effective parameters used by a run", async () => {
     window.history.replaceState({}, "", "/react/runs/99");
     serveResults((path) =>
-      path === "/api/scenario-versions/41"
+      path.startsWith("/api/runs/99/rule-compliance")
         ? Response.json({
-            scenario_version: {
-              ...version,
-              system_case_json: {
-                component_rules: {
-                  applications: [
-                    {
-                      id: "a1",
-                      name: "Máximo operativo",
-                      publication_id: "revision-5",
-                      parameters: [
-                        { name: "limite", value: 5, unit: "m3_per_s" },
-                      ],
-                    },
-                  ],
+            run_id: 99,
+            solution_state: "optimal",
+            termination_status: "OPTIMAL",
+            counts: { total: 0, evaluated: 0, violated: 0, unavailable: 0 },
+            rules: [],
+            rows: [],
+            samples: [],
+            diagnostics: [],
+            period_count: 4,
+            page: { offset: 0, limit: 25, total: 0, next_offset: null },
+          })
+        : path === "/api/scenario-versions/41"
+          ? Response.json({
+              scenario_version: {
+                ...version,
+                system_case_json: {
+                  component_rules: {
+                    applications: [
+                      {
+                        id: "a1",
+                        name: "Máximo operativo",
+                        publication_id: "revision-5",
+                        parameters: [
+                          { name: "limite", value: 5, unit: "m3_per_s" },
+                        ],
+                      },
+                    ],
+                  },
                 },
               },
-            },
-          })
-        : undefined,
+            })
+          : undefined,
     );
     render(<App />);
     expect(await screen.findByText("Máximo operativo")).toBeVisible();
     expect(screen.getByText("revision-5")).toBeVisible();
     expect(screen.getByText("limite: 5 m³/s")).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: "Cumplimiento de reglas" }),
+    ).toBeVisible();
+    expect(await screen.findByText("Solución óptima")).toBeVisible();
   });
   it("keeps comparison and artifact access when a successful execution has no result sections", async () => {
     window.history.replaceState({}, "", "/react/runs/99");

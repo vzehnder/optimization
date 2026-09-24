@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { getCsrfToken, requestJson } from "./api/client";
+import { ApiError, getCsrfToken, requestJson } from "./api/client";
 import {
   RuleHourlyPreview,
   type HourlyBound,
@@ -52,6 +52,7 @@ interface Job {
   grid?: { timestamp: string }[];
   objects?: RuleObject[];
   aliases?: RuleAlias[];
+  diagnostic?: { category: string; action: string };
   result?: {
     ir?: { rows: Row[] };
     bounds?: HourlyBound[];
@@ -145,6 +146,9 @@ export function RuleApplications({
   const [busy, setBusy] = useState(false);
   const [libraryPublished, setLibraryPublished] = useState<string>();
   const [error, setError] = useState("");
+  const [conflicts, setConflicts] = useState<
+    { name: string; period: number; rule_url: string }[]
+  >([]);
   const [page, setPage] = useState(0);
   const [termPages, setTermPages] = useState<Record<string, number>>({});
   const requestId = useRef<string | undefined>(undefined);
@@ -183,10 +187,19 @@ export function RuleApplications({
   async function act(action: () => Promise<void>) {
     setBusy(true);
     setError("");
+    setConflicts([]);
     try {
       await action();
     } catch (error) {
       setError(ruleErrorMessage(error));
+      if (
+        error instanceof ApiError &&
+        error.details &&
+        typeof error.details === "object"
+      ) {
+        const details = error.details as { conflicts?: typeof conflicts };
+        if (Array.isArray(details.conflicts)) setConflicts(details.conflicts);
+      }
     } finally {
       setBusy(false);
     }
@@ -335,6 +348,7 @@ export function RuleApplications({
           {job.data.result.error.message}
         </p>
       )}
+      {job.data?.diagnostic && <p>{job.data.diagnostic.action}</p>}
       {rows && (
         <>
           {temporal && (
@@ -728,6 +742,19 @@ export function RuleApplications({
         <p role="alert">
           {error || String(scope.error ?? apps.error ?? job.error)}
         </p>
+      )}
+      {!!conflicts.length && (
+        <nav aria-label="Reglas con cotas contradictorias">
+          <ul>
+            {conflicts.map((c, i) => (
+              <li key={i}>
+                <a href={c.rule_url}>
+                  {c.name} · período {c.period + 1}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
       )}
     </section>
   );

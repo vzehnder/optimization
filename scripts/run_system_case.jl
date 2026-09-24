@@ -58,6 +58,7 @@ function system_cli_success_payload(run_output::BESSDispatch.SystemRunOutput)
         "output_dir" => run_output.output_dir,
         "summary_path" => run_output.summary_path,
         "termination_status" => run_output.result.termination_status,
+        "primal_status" => run_output.result.primal_status,
     )
 end
 
@@ -74,10 +75,19 @@ function main(args::Vector{String})::Int
         println()
         return 0
     catch error
-        JSON3.write(stderr, Dict{String,Any}(
+        payload = Dict{String,Any}(
             "status" => "error",
+            "code" => "SOLVE_ERROR",
             "message" => sprint(showerror, error),
-        ))
+        )
+        if error isa BESSDispatch.NoPrimalSolution
+            payload["termination_status"] = error.termination_status
+            payload["primal_status"] = error.primal_status
+            payload["code"] = error.termination_status == "INFEASIBLE" ? "SOLVER_INFEASIBLE" :
+                error.termination_status == "TIME_LIMIT" ? "SOLVER_TIME_LIMIT" :
+                error.termination_status == "INTERRUPTED" ? "SOLVER_INTERRUPTED" : "SOLVER_NO_PRIMAL"
+        end
+        JSON3.write(stderr, payload)
         println(stderr)
         return 1
     end

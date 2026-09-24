@@ -8,12 +8,15 @@ BUDGET_IR_VERSION = "affine_budget.v1"
 
 
 class RuleBoundsError(ValueError):
-    def __init__(self, row):
+    def __init__(self, row, conflicting_rows=None):
         super().__init__(f"Mínimo mayor que máximo conocido en {row['name']}, período {row['period'] + 1}")
         self.problem = {"code": "RULE_BOUNDS_CONFLICT", "message": str(self), "period": row["period"],
                         "line": row["line"], "name": row["name"]}
         if len(row["terms"]) == 1:
             self.problem.update(object_id=row["terms"][0]["object_id"], variable=row["terms"][0]["variable"])
+        self.conflicting_rows = conflicting_rows or [row]
+        self.problem["conflicts"] = [{key: item[key] for key in ("name", "period", "line", "application_id", "revision_id") if key in item}
+                                     for item in self.conflicting_rows]
 
 
 def validate_model_bounds(rows, objects, document):
@@ -32,7 +35,7 @@ def validate_model_bounds(rows, objects, document):
             reservoir = next(n["reservoir"] for n in network["nodes"] if n["id"] == obj["node_key"])
             physical[obj["id"], "almacenamiento"] = (reservoir["storage_min_hm3"], reservoir["storage_max_hm3"])
             physical[obj["id"], "vertimiento"] = (0, float("inf"))
-    bounds = {}
+    bounds, origins = {}, {}
     for row in rows:
         terms, relation, constant = row["terms"], row["relation"], row["constant"]
         if not terms:
@@ -43,17 +46,27 @@ def validate_model_bounds(rows, objects, document):
             identity = (term["object_id"], term["variable"])
             key = (*identity, term["period"])
             lo, hi = bounds.get(key, physical[identity])
+            lo_row, hi_row = origins.get(key, (None, None))
             coefficient = term["coefficient"]
             bound = finite(-constant / coefficient)
             if relation == "==":
+                if bound > lo:
+                    lo_row = row
+                if bound < hi:
+                    hi_row = row
                 lo, hi = max(lo, bound), min(hi, bound)
             elif (relation == "<=" and coefficient > 0) or (relation == ">=" and coefficient < 0):
+                if bound < hi:
+                    hi_row = row
                 hi = min(hi, bound)
             else:
+                if bound > lo:
+                    lo_row = row
                 lo = max(lo, bound)
             if lo > hi:
-                raise RuleBoundsError(row)
+                raise RuleBoundsError(row, [item for item in (lo_row, hi_row) if item is not None])
             bounds[key] = (lo, hi)
+            origins[key] = (lo_row, hi_row)
 
 
 def validate_bounds(rows, unit, period_count):

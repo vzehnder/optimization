@@ -188,12 +188,26 @@ it.each([
             draft_revision: 1,
             code_hash: "abc",
             context_hash: "def",
+            diagnostic:
+              status === "failed"
+                ? {
+                    category: "code_data",
+                    action:
+                      "Corregir el código o los datos indicados y volver a probar la regla.",
+                  }
+                : undefined,
           });
         return json({ detail: path }, 404);
       }),
     );
     render(<App />);
     expect(await screen.findByText(expected)).toBeVisible();
+    if (status === "failed")
+      expect(
+        screen.getByText(
+          "Corregir el código o los datos indicados y volver a probar la regla.",
+        ),
+      ).toBeVisible();
   },
 );
 

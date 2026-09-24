@@ -137,6 +137,7 @@ struct SystemDispatchResult
     solver_name::String
     solver_status::String
     termination_status::String
+    primal_status::String
     objective_value_usd::Float64
     p_battery_charge_mw::Matrix{Float64}
     p_battery_discharge_mw::Matrix{Float64}
@@ -174,6 +175,14 @@ struct SystemRunOutput
     model_metadata_path::String
     result::SystemDispatchResult
 end
+
+struct NoPrimalSolution <: Exception
+    termination_status::String
+    primal_status::String
+end
+
+Base.showerror(io::IO, error::NoPrimalSolution) = print(io,
+    "optimization finished without primal values; termination_status=$(error.termination_status)")
 
 function load_system_case(path::AbstractString)::SystemGraphData
     resolved_path = resolve_system_case_path(path)
@@ -1311,7 +1320,7 @@ function solve_system_dispatch(data::SystemOptimizationData)::SystemDispatchResu
     termination = string(termination_status(dispatch_model.model))
     solver_status = raw_solver_status(dispatch_model.model, termination)
     if !has_values(dispatch_model.model)
-        throw(ErrorException("optimization finished without primal values; termination_status=$termination"))
+        throw(NoPrimalSolution(termination, string(primal_status(dispatch_model.model))))
     end
 
     p_battery_charge = value.(dispatch_model.p_battery_charge_mw)
@@ -1363,6 +1372,7 @@ function solve_system_dispatch(data::SystemOptimizationData)::SystemDispatchResu
         data.solver.name,
         solver_status,
         termination,
+        string(primal_status(dispatch_model.model)),
         objective_value(dispatch_model.model),
         p_battery_charge,
         p_battery_discharge,
@@ -1691,7 +1701,7 @@ function run_hydraulic_v3_system_case(
     termination = string(termination_status(model))
     solver_status = raw_solver_status(model, termination)
     if !has_values(model)
-        throw(ErrorException("optimization finished without primal values; termination_status=$termination"))
+        throw(NoPrimalSolution(termination, string(primal_status(model))))
     end
 
     turbine_values = value.(turbine_flow)
@@ -1723,6 +1733,7 @@ function run_hydraulic_v3_system_case(
         solver.name,
         solver_status,
         termination,
+        string(primal_status(model)),
         objective_value(model),
         zeros(0, n_periods),
         zeros(0, n_periods),
@@ -1978,6 +1989,7 @@ function hydraulic_v3_summary_dict(
         "solver_name" => result.solver_name,
         "solver_status" => result.solver_status,
         "termination_status" => result.termination_status,
+        "primal_status" => result.primal_status,
         "objective_value_usd" => result.objective_value_usd,
         "run_timestamp" => run_timestamp,
         "source" => source_identifiers,
@@ -2902,6 +2914,7 @@ function system_summary_dict(
         "solver_name" => result.solver_name,
         "solver_status" => result.solver_status,
         "termination_status" => result.termination_status,
+        "primal_status" => result.primal_status,
         "objective_value_usd" => result.objective_value_usd,
         "price_mode" => system_price_mode(data),
         "source_identifiers" => Dict{String,Any}(string(key) => value for (key, value) in pairs(source_identifiers)),

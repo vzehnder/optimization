@@ -709,6 +709,7 @@ interface RuleJob {
   draft_revision: number;
   code_hash: string;
   context_hash: string;
+  diagnostic?: { category: string; action: string };
   result: {
     output?: { value: number; unit: string };
     error?: { code: string; message: string; line?: number };
@@ -819,6 +820,7 @@ function RulePreview({
               : {job.data.result.error.message}
             </p>
           )}
+          {job.data.diagnostic && <p>{job.data.diagnostic.action}</p>}
           <details>
             <summary>Identidad de la prueba</summary>
             <p>Revisión {job.data.draft_revision}</p>

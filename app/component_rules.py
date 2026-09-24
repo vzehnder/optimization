@@ -386,6 +386,10 @@ class RuleRepository:
         result["result"] = json.loads(result["result"]) if result["result"] else None
         if result["result"] is not None:
             result["result"]["runtime"] = {**result["runtime"], **result["result"].get("runtime", {})}
+        if (result["result"] or {}).get("error") or result["status"] == "cancelled":
+            from app.rule_diagnostics import failure_diagnostic
+            result["diagnostic"] = failure_diagnostic((result["result"] or {}).get("error") or {
+                "code": "RULE_CANCELLED", "message": "La prueba fue cancelada."}, status=result["status"])
         return {**result, "applied": False}
 
     def get(self, rule_id, project_id, object_id):

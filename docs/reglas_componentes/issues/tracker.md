@@ -2,7 +2,7 @@
 
 Fecha de creación: 2026-09-21.
 Fuente normativa de este paquete: [plan](../plan.md).
-Estado: REG-001 a REG-008 implementados y verificados; siguiente issue por orden: REG-009.
+Estado: REG-001 a REG-010 implementados y verificados; siguiente issue por orden: REG-011.
 
 ## Vocabulario y reglas de trabajo
 
@@ -36,7 +36,7 @@ de aislamiento, permisos, snapshots y capacidades se exigen desde su primer uso.
 | 7 | [REG-007: Publicar serie calculada](REG-007-publicar-serie-calculada.md) | AFK | Done | REG-003 | HU-03, HU-07 |
 | 8 | [REG-008: Reutilizar reglas](REG-008-reutilizar-reglas.md) | AFK | Done | REG-004 | HU-08 |
 | 9 | [REG-009: Comparar revisiones y recuperar](REG-009-revisiones-y-obsolescencia.md) | AFK | Done | REG-003, REG-008 | HU-09 |
-| 10 | [REG-010: Inspeccionar cumplimiento](REG-010-inspeccionar-cumplimiento.md) | AFK | Todo | REG-004 | HU-10 |
+| 10 | [REG-010: Inspeccionar cumplimiento](REG-010-inspeccionar-cumplimiento.md) | AFK | Done | REG-004 | HU-10 |
 | 11 | [REG-011: Hidro simple v2](REG-011-hidro-simple.md) | AFK | Todo | REG-004 | HU-11 |
 | 12 | [REG-012: Baterías](REG-012-baterias.md) | AFK | Todo | REG-011 | HU-03, HU-11 |
 | 13 | [REG-013: Red y renovables](REG-013-red-y-renovables.md) | AFK | Todo | REG-011 | HU-04, HU-11 |
@@ -92,3 +92,4 @@ proyectos reales. No alterar ni cerrar issues previos de TS-6/TS-7 por completar
 | 2026-09-23 | REG-007 implementado con TDD; REG-008 es el siguiente por orden | 25 pruebas HTTP nuevas SQLite/PostgreSQL/OCI, 172 pruebas distintas de reglas, 73 de persistencia y 77 React aprobadas. Chromium con Julia publica y consume potencia, regenera conservando pins y corridas; detalles y omisiones en REG-007. |
 | 2026-09-24 | REG-008 implementado con TDD; REG-009 es el siguiente por orden | 24 pruebas HTTP nuevas SQLite/PostgreSQL/OCI, 63 de regresión de reglas, 34 de variantes, 81 React y 50 comprobaciones Julia aprobadas. Chromium real resuelve instancias independientes a 17 y 13 m³/s; conserva pins e historial al publicar. Biblioteca, comparación, clonación y remapeo explícito; detalles y omisiones en REG-008. |
 | 2026-09-24 | REG-009 implementado con TDD; REG-010 es el siguiente por orden | 30 pruebas HTTP nuevas SQLite/PostgreSQL/OCI, 75 de regresión, 144 React y 50 comprobaciones Julia aprobadas. Chromium real conserva, actualiza y restaura pins: 17 → 11 → 17 m³/s sin alterar corridas históricas. Archivo, comparación estructurada, remapeo atómico y conflictos de confirmación; detalles y limitaciones en REG-009. |
+| 2026-09-24 | REG-010 implementado con TDD; REG-011 es el siguiente por orden | 36 pruebas HTTP nuevas SQLite/PostgreSQL/OCI, 64 de regresión de reglas, 62 de corridas/resultados/portal/consola/validación, 104 React y 586 comprobaciones Julia aprobadas. Chromium real verifica márgenes/residuos, paginación, historia intacta, ausencia de primal y enlaces de contradicciones; detalles en REG-010. |

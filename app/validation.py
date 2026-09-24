@@ -62,7 +62,7 @@ class JuliaValidationService:
                 ok=False,
                 phase="julia",
                 message=f"Julia validation timed out after {self.timeout_seconds:g} seconds",
-                payload={"status": "error"},
+                payload={"status": "error", "code": "RUN_VALIDATION_TIMEOUT"},
             )
         except FileNotFoundError:
             return ValidationResult(
@@ -91,7 +91,7 @@ class JuliaValidationService:
                 ok=False,
                 phase="julia",
                 message=f"Julia validation timed out after {self.timeout_seconds:g} seconds",
-                payload={"status": "error"},
+                payload={"status": "error", "code": "RUN_VALIDATION_TIMEOUT"},
             )
         except FileNotFoundError:
             return ValidationResult(

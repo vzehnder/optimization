@@ -1,4 +1,4 @@
-# Operación y verificación de REG-001 a REG-009
+# Operación y verificación de REG-001 a REG-010
 
 REG-001 guarda borradores y calcula un máximo escalar de caudal. REG-002 incorpora
 publicación, aplicaciones a variantes y restricciones afines en el optimizador
@@ -13,6 +13,8 @@ REG-008 ofrece una biblioteca del proyecto con revisiones compartidas e instanci
 independientes por unidad y variante, comparación y clonación con remapeo explícito.
 REG-009 compara revisiones y recupera aplicaciones de forma atómica, con motivos,
 archivo, historial y comprobación de cambios entre prueba y confirmación.
+REG-010 reconstruye el cumplimiento de cada restricción desde el snapshot y los
+artefactos del solver, con paginación, muestras, tolerancias y diagnósticos internos.
 Las revisiones `sealed_preview` son copias inmutables
 de pruebas; no cambian por sí solas el estado de la definición editable.
 
@@ -515,6 +517,39 @@ referencian publicaciones y borradores existentes; no duplican el código ejecut
 Esta entrega reutiliza el SDK `reg-006.1` y no modifica la matemática del solver.
 
 ## Comprobaciones reproducibles
+
+### Cumplimiento y diagnóstico (REG-010)
+
+En el detalle interno de una corrida con reglas, **Cumplimiento de reglas**
+permite filtrar por regla/período y **Reconstruir informe**. La consulta es
+`GET /api/runs/{id}/rule-compliance?rule_id=...&period=0&offset=0&limit=25`;
+`period` usa índice desde cero y selecciona también filas de ventanas/rampas que
+afectan ese período. `limit` admite 1–100. La página y las muestras reflejan los
+filtros; los contadores reflejan todas las filas de la corrida.
+
+Se leen directamente la IR y los objetos/revisiones de la versión congelada,
+`summary.json` y `asset_dispatch.csv`. El informe es derivado, no requiere una
+nueva tabla y puede reconstruirse después de limpiar los índices de resultados,
+siempre que se conserven esos artefactos. No compila ni vuelve a ejecutar Python.
+El botón no reintenta el solve. La convención normalizada y la fórmula versionada
+de tolerancia se documentan en [REG-010](issues/REG-010-inspeccionar-cumplimiento.md).
+
+Los estados separan óptimo, factible, valores primales sin certificación y
+ausencia de primal disponible. Los valores no disponibles nunca se sustituyen
+por cero. Las categorías internas son `code_data`, `capacity`, `timeout`,
+`cancelled`, `solve`, `infeasible`, `bounds_conflict` y `result_data`.
+Los códigos existentes de compilación se conservan; Julia agrega estado primal
+y códigos de finalización sin solución, y los timeouts del proceso/validación
+se distinguen. No se incorpora este informe al contrato del portal/consola.
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_reg010_compliance -v
+julia --project=. test/rule_compliance.jl
+# Desde frontend, con RULE_ACCEPTANCE_SERVER=1 y el runtime ya configurado:
+npx playwright test e2e/component-rules-compliance.spec.ts
+```
+
+### Regresión del subsistema
 
 Usar una base PostgreSQL **exclusiva de pruebas**, nunca una base de proyectos.
 La suite crea fixtures con identidades únicas. `POSTGRES_TEST_DATABASE_URL`
