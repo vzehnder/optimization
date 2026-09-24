@@ -103,6 +103,9 @@ def create_instance(repository, project_id, object_id, body, actor):
         """, (body.publication_id, project_id)).fetchone()
         if template is None:
             raise HTTPException(404, "Plantilla no encontrada en este proyecto")
+        store.connection.execute("UPDATE component_rule_drafts SET revision = revision WHERE id = ?", (template["rule_id"],))
+        from app.rule_recovery import require_available
+        require_available(store, template["rule_id"])
         from app.rule_objects import model_objects
         candidates = model_objects(store, project_id, body.scenario_id)
         if not any(o["id"] == object_id and o["kind"] == "hydraulic_unit" for o in candidates):
@@ -150,10 +153,12 @@ def require_clone_destinations(store, project_id, object_id, document, object_ma
 
 def clone_rules(repository, source_variant_id, target_variant_id, actor, object_map=None):
     from app.rule_applications import active_applications, compile_context
+    from app.rule_recovery import require_available
     store = repository.store
     object_map = object_map or {}
     copied_rules = set()
     for application in active_applications(store, variant_id=source_variant_id):
+        require_available(store, application["rule_id"])
         copied_rules.add(application["rule_id"])
         document = copy.deepcopy(application)
         require_clone_destinations(store, application["project_id"], application["object_id"],
@@ -203,6 +208,7 @@ def clone_rules(repository, source_variant_id, target_variant_id, actor, object_
         instance = json.loads(row["document"])
         if row["id"] in copied_rules or not instance.get("template") or instance.get("variant_id") != source_variant_id:
             continue
+        require_available(store, row["id"])
         require_clone_destinations(store, row["project_id"], row["object_id"], instance, object_map)
         target_object = object_map.get(row["object_id"], row["object_id"])
         instance.update(variant_id=target_variant_id, origin={"action": "clone", "source_variant_id": source_variant_id,
@@ -258,6 +264,8 @@ def promote(repository, rule_id, project_id, object_id, publication_id):
     store = repository.store
     with store._lock, store._database_transaction():
         repository.get(rule_id, project_id, object_id)
+        from app.rule_recovery import require_available
+        require_available(store, rule_id)
         publication = repository.publication(rule_id, publication_id)
         contract = contract_for(store, publication, object_id, project_id)
         store.connection.execute("INSERT INTO component_rule_templates VALUES (?, ?, ?) ON CONFLICT (publication_id) DO NOTHING",
@@ -339,8 +347,9 @@ def library_router(repository, context):
                 JOIN component_rule_publications p ON p.id = t.publication_id
                 WHERE d.project_id = ? ORDER BY p.created_at DESC
             """, (project_id,)).fetchall()
+            from app.rule_recovery import lifecycle
             return {"items": [{"rule_id": r["rule_id"], "publication_id": r["publication_id"],
                                "revision": r["draft_revision"], "name": json.loads(r["document"])["name"],
-                               **json.loads(r["contract"])} for r in rows]}
+                               **json.loads(r["contract"])} for r in rows if not any(lifecycle(store, r["rule_id"]).values())]}
 
     return router

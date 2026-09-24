@@ -40,6 +40,16 @@ def initialize(store):
                 PRIMARY KEY (variant_id, actor, request_id)
             )
         """)
+        store.connection.execute("""
+            CREATE TABLE IF NOT EXISTS component_rule_resolution_requests (
+                rule_id TEXT NOT NULL REFERENCES component_rule_drafts(id),
+                actor INTEGER NOT NULL REFERENCES users(id),
+                request_id TEXT NOT NULL,
+                request_hash TEXT NOT NULL,
+                response TEXT NOT NULL,
+                PRIMARY KEY (rule_id, actor, request_id)
+            )
+        """)
 
 
 def instant(value):
@@ -140,23 +150,42 @@ def list_applications(repository, rule_id):
         rows = repository.store.connection.execute("SELECT * FROM component_rule_applications WHERE rule_id = ? ORDER BY id", (rule_id,)).fetchall()
         applications = [decode_application(row) for row in rows]
         for application in applications:
-            application["validation_status"] = "valid"
-            try:
-                assert_instance_current(repository, application)
-                if latest_publication(repository.store, rule_id) != application["observed_publication"]:
-                    raise HTTPException(409, "Hay una nueva revisión publicada; revalida la aplicación con motivo")
-                assert_inputs_current(repository.store, application["project_id"], application["object_id"], application.get("inputs", []), application.get("aliases", []))
-                current = compile_context(repository.store, application["project_id"], application["object_id"], application["compilation"]["scope"])
-                assert_objects_current(repository.store, application["project_id"], application["object_id"], application["compilation"], current, application["code"])
-                if current["fingerprint"] != application["compilation"]["fingerprint"]:
-                    raise HTTPException(409, "Cambió el modelo o sus entradas; vuelve a probar y aplicar")
-            except HTTPException as error:
-                application["validation_status"] = "stale"
-                application["validation_error"] = error.detail if isinstance(error.detail, dict) else {"message": error.detail}
-            except (KeyError, ValueError) as error:
-                application["validation_status"] = "stale"
-                application["validation_error"] = {"message": str(error)}
+            application.update(validation_details(repository, application))
         return applications
+
+
+def validation_details(repository, application):
+    from app.rule_inputs import validate_inputs
+    store = repository.store
+    causes = []
+
+    def check(code, operation):
+        try:
+            return operation()
+        except HTTPException as error:
+            detail = error.detail if isinstance(error.detail, dict) else {"message": error.detail}
+            causes.append({"code": code, **detail, "status": "invalid" if error.status_code in {404, 422} else "stale"})
+        except (KeyError, ValueError) as error:
+            causes.append({"code": code, "message": str(error), "status": "invalid"})
+
+    check("RULE_INSTANCE_CHANGED", lambda: assert_instance_current(repository, application))
+    runtime = repository.runtime()
+    if application["runtime"]["sdk"] != SDK_VERSION or (runtime and runtime != application["runtime"]):
+        causes.append({"code": "RULE_RUNTIME_CHANGED", "message": "El runtime cambió; vuelve a probar la regla", "status": "stale"})
+    if latest_publication(store, application["rule_id"]) != application["observed_publication"]:
+        causes.append({"code": "RULE_PUBLICATION_CHANGED", "message": "Hay una nueva revisión publicada; revalida la aplicación con motivo", "status": "stale"})
+    project_id, object_id = application["project_id"], application["object_id"]
+    inputs, aliases = application.get("inputs", []), application.get("aliases", [])
+    check("RULE_INPUT_INVALID", lambda: validate_inputs(store, project_id, {object_id, *(a["object_id"] for a in aliases)}, inputs))
+    check("RULE_INPUT_STALE", lambda: assert_inputs_current(store, project_id, object_id, inputs, aliases))
+    current = check("RULE_CONTEXT_INVALID", lambda: compile_context(store, project_id, object_id, application["compilation"]["scope"]))
+    if current:
+        check("RULE_OBJECT_CHANGED", lambda: assert_objects_current(store, project_id, object_id, application["compilation"], current, application["code"]))
+        if current["fingerprint"] != application["compilation"]["fingerprint"]:
+            causes.append({"code": "RULE_CONTEXT_CHANGED", "message": "Cambió el modelo o sus entradas; vuelve a probar y aplicar", "status": "stale"})
+    status = "invalid" if any(c["status"] == "invalid" for c in causes) else "stale" if causes else "valid"
+    return {"validation_status": status, "validation_causes": causes,
+            **({"validation_error": next(c for c in causes if c["status"] == status)} if causes else {})}
 
 
 def latest_publication(store, rule_id):
@@ -169,6 +198,10 @@ def latest_publication(store, rule_id):
 
 
 def assert_instance_current(repository, application):
+    from app.rule_recovery import lifecycle
+    current_lifecycle = lifecycle(repository.store, application["rule_id"])
+    if any(current_lifecycle.values()) and current_lifecycle != application.get("observed_lifecycle"):
+        raise HTTPException(409, {"code": "RULE_ARCHIVED", "message": "Definición archivada: revalida con motivo, reemplaza o desactiva esta aplicación"})
     if application.get("requires_revalidation"):
         raise HTTPException(409, "Variante copiada: vuelve a probar y aplicar las reglas con motivo")
     if application.get("template"):
@@ -177,13 +210,22 @@ def assert_instance_current(repository, application):
             raise HTTPException(409, "Cambió la configuración local; vuelve a probar y aplicar con motivo")
 
 
-def apply(repository, rule_id, project_id, object_id, body, actor):
+def apply(repository, rule_id, project_id, object_id, body, actor, *, resolving=False):
+    # Snapshot/publication reads share a connection with HTTP and the worker.
+    with repository.store._lock:
+        return _apply_locked(repository, rule_id, project_id, object_id, body, actor, resolving=resolving)
+
+
+def _apply_locked(repository, rule_id, project_id, object_id, body, actor, *, resolving=False):
     store = repository.store
     if not project_enabled(project_id):
         raise HTTPException(503, "Reglas deshabilitadas en este proyecto")
     job = repository.job(body.job_id, rule_id, project_id, object_id)
     row = store.connection.execute("SELECT payload FROM component_rule_snapshots WHERE id = ?", (body.job_id,)).fetchone()
     payload = json.loads(row["payload"])
+    recovery = payload.get("recovery")
+    if bool(recovery) != resolving:
+        raise HTTPException(409, "Confirma esta prueba mediante el recorrido de recuperación correspondiente")
     if job["status"] != "succeeded" or "compilation" not in payload:
         raise HTTPException(409, "Prueba una revisión publicada en la variante antes de aplicar")
     frozen = payload["compilation"]
@@ -191,13 +233,32 @@ def apply(repository, rule_id, project_id, object_id, body, actor):
                      grid=frozen["grid"], windows=payload.get("windows"), temporal=payload.get("temporal"))
     if not ir["rows"] and not body.accept_empty:
         raise HTTPException(422, "La regla no emite restricciones; requiere aceptación explícita")
-    publication = repository.publication(rule_id, payload["publication_id"])
+    publication = recovery["publication"] if recovery else repository.publication(rule_id, payload["publication_id"])
     if publication["sdk"] != SDK_VERSION or job["runtime"]["sdk"] != SDK_VERSION:
         raise HTTPException(409, "El SDK cambió; vuelve a publicar y probar")
     with store._lock, snapshot_transaction(store):
         store.connection.execute("UPDATE case_input_variants SET updated_at = updated_at WHERE id = ?", (frozen["scope"]["variant_id"],))
-        store.connection.execute("UPDATE component_rule_drafts SET revision = revision WHERE id = ?", (rule_id,))
+        from app.rule_recovery import lifecycle
+        for identity in sorted(lifecycle(store, rule_id)):
+            store.connection.execute("UPDATE component_rule_drafts SET revision = revision WHERE id = ?", (identity,))
+        if resolving:
+            receipt = store.connection.execute("SELECT * FROM component_rule_resolution_requests WHERE rule_id = ? AND actor = ? AND request_id = ?",
+                                               (rule_id, actor, body.request_id)).fetchone()
+            if receipt:
+                if receipt["request_hash"] != digest(body.model_dump()):
+                    raise HTTPException(409, "Solicitud reutilizada con otra resolución")
+                return json.loads(receipt["response"])
+        runtime = repository.runtime()
+        if runtime and runtime != job["runtime"]:
+            raise HTTPException(409, "El runtime cambió; vuelve a probar la regla")
         draft = repository.get(rule_id, project_id, object_id)
+        if not recovery:
+            from app.rule_recovery import require_available
+            require_available(store, rule_id)
+        if recovery:
+            from app.rule_recovery import recovery_state
+            if recovery_state(store, rule_id, frozen["scope"]["variant_id"]) != recovery["state"]:
+                raise HTTPException(409, "La definición o aplicación cambió desde la comparación; vuelve a probar")
         if draft.get("template") and draft["revision"] != job["draft_revision"]:
             raise HTTPException(409, "Cambió la configuración local durante la prueba; vuelve a compilar")
         if latest_publication(store, rule_id) != payload["publication_head"]:
@@ -209,12 +270,16 @@ def apply(repository, rule_id, project_id, object_id, body, actor):
             raise HTTPException(409, "El contexto cambió durante la prueba; vuelve a compilar")
         previous = store.connection.execute("SELECT id FROM component_rule_applications WHERE rule_id = ? AND variant_id = ? AND status = 'active'",
                                             (rule_id, frozen["scope"]["variant_id"])).fetchone()
-        if previous:
+        if previous and not recovery:
             raise HTTPException(409, "Desactiva la aplicación vigente antes de reemplazarla")
+        event = None
+        if recovery:
+            from app.rule_recovery import commit_recovery
+            event = commit_recovery(repository, rule_id, draft, recovery, body, actor)
         identity = uuid.uuid4().hex
         document = {"project_id": project_id, "object_id": object_id, "compilation": frozen, "code": publication["code"],
                     "name": publication["name"], "parameters": payload["parameters"], "code_hash": publication["code_hash"],
-                    "instance_revision": job["draft_revision"] if draft.get("template") else None,
+                    "instance_revision": job["draft_revision"] + int(bool(recovery)) if draft.get("template") else None,
                     "context_hash": job["context_hash"], "runtime": job["runtime"], "ir": ir, "ir_hash": digest(ir),
                     "inputs": payload.get("inputs", []),
                     "aliases": payload.get("aliases", []), "objects": payload.get("objects", []),
@@ -223,10 +288,15 @@ def apply(repository, rule_id, project_id, object_id, body, actor):
                     "template": publication.get("template"), "origin": publication.get("origin"),
                     "outputs": validate_outputs(job["result"].get("outputs", []), len(frozen["grid"])),
                     "observed_publication": payload["publication_head"], "accept_empty": body.accept_empty,
-                    "events": [{"action": "apply", "actor": actor, "reason": body.reason.strip(), "at": timestamp()}]}
+                    "observed_lifecycle": lifecycle(store, rule_id),
+                    "events": [event or {"action": "apply", "actor": actor, "reason": body.reason.strip(), "at": timestamp()}]}
         store.connection.execute("INSERT INTO component_rule_applications VALUES (?, ?, ?, ?, ?, 1, 'active', ?)",
                                  (identity, rule_id, publication["id"], body.job_id, frozen["scope"]["variant_id"], encode(document)))
-        return next(item for item in list_applications(repository, rule_id) if item["id"] == identity)
+        response = next(item for item in list_applications(repository, rule_id) if item["id"] == identity)
+        if resolving:
+            store.connection.execute("INSERT INTO component_rule_resolution_requests VALUES (?, ?, ?, ?, ?)",
+                                     (rule_id, actor, body.request_id, digest(body.model_dump()), encode(response)))
+        return response
 
 
 def assert_objects_current(store, project_id, object_id, frozen, current, code=None):

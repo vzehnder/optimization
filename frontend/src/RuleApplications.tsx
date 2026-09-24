@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { getCsrfToken, requestJson } from "./api/client";
@@ -13,6 +13,8 @@ import { ruleUnit } from "./ruleUnits";
 import type { TemporalPolicy } from "./RuleTemporal";
 import type { WindowPolicy } from "./RuleWindows";
 import { RuleSeriesPublications } from "./RuleSeriesPublications";
+import { RuleRecovery } from "./RuleRecovery";
+import { validationLabel } from "./ruleStatus";
 
 interface Scope {
   scenario_id: number;
@@ -95,6 +97,7 @@ export function RuleApplications({
   available,
   template,
   instanceVariant,
+  onRecovered,
 }: {
   root: string;
   ruleId: string;
@@ -103,7 +106,9 @@ export function RuleApplications({
   available: boolean;
   template?: { rule_id: string; publication_id: string };
   instanceVariant?: number;
+  onRecovered?: () => Promise<void>;
 }) {
+  const queryClient = useQueryClient();
   const [search, setSearch] = useSearchParams();
   const navigate = useNavigate();
   const scenario = search.get("scenario_id");
@@ -130,7 +135,9 @@ export function RuleApplications({
     draft_revision: number;
     instance_revision?: number;
   }>();
-  const [variant, setVariant] = useState<number>();
+  const [variant, setVariant] = useState<number | undefined>(
+    () => Number(search.get("variant_id")) || undefined,
+  );
   const [start, setStart] = useState<string>();
   const [end, setEnd] = useState<string>();
   const [reason, setReason] = useState("");
@@ -622,6 +629,8 @@ export function RuleApplications({
         <>
           <p role="status">
             Revisión {active.publication_id} aplicada a esta variante.
+            {active.validation_status &&
+              ` ${validationLabel(active.validation_status)}.`}
           </p>
           {active.validation_error && (
             <p role="alert">
@@ -633,8 +642,8 @@ export function RuleApplications({
           {active.validation_status === "stale" && (
             <>
               <p>
-                Prueba la revisión fijada. Si es válida, desactiva la aplicación
-                anterior y aplica la nueva prueba con motivo.
+                Usa «Comparar y recuperar revisiones» para revalidar o
+                reemplazar la aplicación con motivo.
               </p>
               <button
                 type="button"
@@ -675,7 +684,10 @@ export function RuleApplications({
           </button>
           <button
             type="button"
-            disabled={busy || active.validation_status === "stale"}
+            disabled={
+              busy ||
+              ["stale", "invalid"].includes(active.validation_status ?? "")
+            }
             onClick={() =>
               void act(async () => {
                 requestId.current ??= crypto.randomUUID();
@@ -698,6 +710,20 @@ export function RuleApplications({
       {apps.data?.items.some((item) => item.status === "inactive") && (
         <p>Las aplicaciones desactivadas se conservan en el historial.</p>
       )}
+      <RuleRecovery
+        root={root}
+        ruleId={ruleId}
+        revision={revision}
+        scope={selectedScope}
+        disabled={disabled || busy}
+        available={available}
+        onResolved={async () => {
+          requestId.current = undefined;
+          await apps.refetch();
+          await queryClient.invalidateQueries({ queryKey: [root] });
+          await onRecovered?.();
+        }}
+      />
       {(error || scope.isError || apps.isError || job.isError) && (
         <p role="alert">
           {error || String(scope.error ?? apps.error ?? job.error)}
@@ -716,6 +742,24 @@ export function RunRuleSummary({ document }: { document: unknown }) {
               id: string;
               name: string;
               publication_id: string;
+              code?: string;
+              code_hash?: string;
+              context_hash?: string;
+              ir_hash?: string;
+              runtime?: { sdk: string; image: string };
+              inputs?: {
+                alias: string;
+                revision_id: number;
+                content_hash: string;
+                unit_key: string;
+              }[];
+              objects?: RuleObject[];
+              events?: {
+                action: string;
+                actor: number;
+                reason?: string;
+                at: string;
+              }[];
               parameters: {
                 name: string;
                 value: number | boolean;
@@ -749,6 +793,47 @@ export function RunRuleSummary({ document }: { document: unknown }) {
                 </li>
               ))}
             </ul>
+            {item.code_hash && (
+              <details>
+                <summary>Ver revisión exacta consumida</summary>
+                <p>Contenido congelado al crear esta corrida.</p>
+                <p>
+                  Hash de código: <code>{item.code_hash}</code>
+                </p>
+                <p>
+                  Hash de contexto: <code>{item.context_hash}</code>
+                </p>
+                <p>
+                  Hash de restricciones: <code>{item.ir_hash}</code>
+                </p>
+                <p>
+                  SDK: {item.runtime?.sdk} · Imagen:{" "}
+                  <code>{item.runtime?.image}</code>
+                </p>
+                <pre>{item.code}</pre>
+                {item.inputs?.map((input) => (
+                  <p key={input.alias}>
+                    {input.alias} · revisión {input.revision_id} ·{" "}
+                    {ruleUnit(input.unit_key)}
+                    <br />
+                    <code>{input.content_hash}</code>
+                  </p>
+                ))}
+                {item.objects?.map((object) => (
+                  <p key={object.id}>
+                    {object.display_name ?? object.key} · objeto {object.id}
+                  </p>
+                ))}
+                <ul>
+                  {item.events?.map((event, i) => (
+                    <li key={i}>
+                      {event.at} · {event.action} · Actor {event.actor} ·{" "}
+                      {event.reason}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
           </li>
         ))}
       </ul>

@@ -126,6 +126,9 @@ it("publishes, previews and applies a flow restriction to the selected variant",
   );
   await user.click(screen.getByRole("button", { name: "Aplicar a variante" }));
   expect(await screen.findByText(/Revisión pub1 aplicada/)).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "Comparar y recuperar revisiones" }),
+  ).toBeVisible();
 });
 
 it.each([

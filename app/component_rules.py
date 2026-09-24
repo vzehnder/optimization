@@ -263,6 +263,8 @@ class RuleRepository:
         with self.store._lock, self.store._database_transaction():
             self.store.connection.execute("UPDATE component_rule_drafts SET revision = revision WHERE id = ?", (rule_id,))
             draft = self.get(rule_id, project_id, object_id)
+            from app.rule_recovery import require_available
+            require_available(self.store, rule_id)
             if draft["revision"] != expected_revision:
                 raise HTTPException(409, "El borrador cambió. Recarga antes de publicar.")
             if draft.get("template"):
@@ -295,7 +297,7 @@ class RuleRepository:
             return None
         return json.loads(row["runtime"])
 
-    def enqueue(self, rule_id, project_id, object_id, expected_revision, actor, obj, *, publication_id=None, scope=None):
+    def enqueue(self, rule_id, project_id, object_id, expected_revision, actor, obj, *, publication_id=None, scope=None, recovery=None):
         if not project_enabled(project_id):
             raise HTTPException(503, {"code": "RULE_PROJECT_DISABLED", "message": "Las pruebas están deshabilitadas en este proyecto"})
         compilation = None
@@ -321,7 +323,7 @@ class RuleRepository:
             if draft.get("template") and (not scope or scope["variant_id"] != draft["variant_id"]):
                 raise HTTPException(422, "Selecciona la variante propia de esta instancia")
             if publication_id:
-                draft = self.publication(rule_id, publication_id)
+                draft = recovery["publication"] if recovery else self.publication(rule_id, publication_id)
                 if draft["sdk"] != runtime["sdk"]:
                     raise HTTPException(409, "La revisión publicada usa otro SDK; vuelve a publicar")
             active = self.store.connection.execute(
@@ -349,6 +351,8 @@ class RuleRepository:
             elif draft.get("inputs"):
                 raise HTTPException(422, "Las entradas horarias requieren revisión publicada, variante y horizonte")
             payload = {"code": draft["code"], **context}
+            if recovery:
+                payload["recovery"] = recovery
             self.store.connection.execute(
                 "INSERT INTO component_rule_snapshots VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (job_id, rule_id, expected_revision, encode(payload), draft["code_hash"], digest(context), timestamp()),
@@ -397,7 +401,7 @@ class RuleRepository:
         if data.get("template"):
             shared = self.publication(data["template"]["rule_id"], data["template"]["publication_id"])
             data["code"] = shared["code"]
-        return {**data, "status": "draft", "code_hash": digest(data["code"])}
+        return {**data, "status": "archived" if data.get("archive") else "draft", "code_hash": digest(data["code"])}
 
     def create(self, project_id, object_id, body, actor):
         if body.expected_revision != 0:
@@ -415,6 +419,8 @@ class RuleRepository:
     def update(self, rule_id, project_id, object_id, body, actor):
         document = body.model_dump(exclude={"expected_revision"})
         with self.store._lock, self.store._database_transaction():
+            from app.rule_recovery import require_available
+            require_available(self.store, rule_id)
             self.validate(body, project_id, object_id)
             previous = self.get(rule_id, project_id, object_id)
             if previous.get("template"):
@@ -501,8 +507,14 @@ def rule_router(store):
                 "SELECT id, revision, document FROM component_rule_drafts WHERE project_id = ? AND object_id = ? ORDER BY created_at",
                 (project_id, object_id),
             ).fetchall()
+            from app.rule_recovery import definition_status
+            from app.rule_applications import list_applications
+            items = [{"id": row["id"], "name": json.loads(row["document"])["name"], "revision": row["revision"],
+                      "status": definition_status(repository, row["id"], row["revision"]),
+                      "applications": [{k: a[k] for k in ("id", "revision", "status", "variant_id", "publication_id", "validation_status", "validation_causes")}
+                                       for a in list_applications(repository, row["id"])]} for row in rows]
         return {"object": {"id": obj["id"], "display_name": obj["display_name"]},
-                "items": [{"id": row["id"], "name": json.loads(row["document"])["name"], "revision": row["revision"]} for row in rows],
+                "items": items,
                 "runtime": repository.runtime() if project_enabled(project_id) else None,
                 "enabled": project_enabled(project_id)}
 
@@ -693,6 +705,8 @@ def rule_router(store):
     routes.include_router(router)
     from app.rule_library import library_router
     routes.include_router(library_router(repository, context))
+    from app.rule_recovery import recovery_router
+    routes.include_router(recovery_router(repository, context))
 
     @routes.get("/api/scenarios/{scenario_id}/hydraulic-plants/{plant_key}/units/{unit_key}/rule-context", tags=["component-rules"])
     def hydraulic_context(scenario_id: int, plant_key: str, unit_key: str, request: Request):

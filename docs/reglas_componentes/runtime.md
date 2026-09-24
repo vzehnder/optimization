@@ -1,4 +1,4 @@
-# Operación y verificación de REG-001 a REG-008
+# Operación y verificación de REG-001 a REG-009
 
 REG-001 guarda borradores y calcula un máximo escalar de caudal. REG-002 incorpora
 publicación, aplicaciones a variantes y restricciones afines en el optimizador
@@ -11,8 +11,10 @@ REG-007 publica salidas numéricas completas como series derivadas y permite
 regenerarlas explícitamente conservando revisiones, propietarios y consumidores.
 REG-008 ofrece una biblioteca del proyecto con revisiones compartidas e instancias
 independientes por unidad y variante, comparación y clonación con remapeo explícito.
+REG-009 compara revisiones y recupera aplicaciones de forma atómica, con motivos,
+archivo, historial y comprobación de cambios entre prueba y confirmación.
 Las revisiones `sealed_preview` son copias inmutables
-de pruebas; el estado de la definición editable sigue siendo `draft`.
+de pruebas; no cambian por sí solas el estado de la definición editable.
 
 ## Contrato del primer SDK
 
@@ -50,8 +52,9 @@ modo: emite filas con nombre, unidad, período y línea de origen.
 
 La UI muestra todas las filas paginadas. Aplicar exige motivo y fija revisión,
 objeto, parámetros, variante y horizonte; cero filas requiere aceptación explícita.
-Para reemplazar una aplicación, desactivar con motivo, volver a publicar/probar
-y aplicar. Se conservan las aplicaciones anteriores y sus actores/motivos. Editar
+Para reemplazar una aplicación, usar «Comparar y recuperar revisiones»: elegir la
+aplicación de origen, revisión y mapeos, comparar, probar y confirmar con motivo.
+La sustitución es atómica. Se conservan las aplicaciones anteriores y sus actores/motivos. Editar
 un borrador no cambia pins; una publicación nueva, cambio de modelo, entradas,
 rango o runtime exige probar y aplicar otra vez. Se puede probar una publicación
 histórica explícita por API para conservar un pin con un motivo nuevo.
@@ -80,6 +83,37 @@ del usuario. Incluye utilidades deterministas de Python (`range`, `len`, `sum`,
 `min`, `max`, `abs`, `enumerate`, `zip`, conversiones y `print` acotado), sujetas
 a los tipos que soporta este SDK. No permite paquetes arbitrarios. El filtro
 de sintaxis complementa el contenedor; no constituye la frontera de aislamiento.
+
+## Recuperación de revisiones (REG-009)
+
+En `/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}`:
+
+- `GET /history` devuelve revisiones publicadas y sus contratos, aplicaciones,
+  eventos, estado de archivo y enlaces identificables a consumidores vigentes.
+- `POST /comparisons` compara una aplicación de origen con la publicación y
+  mapeos propuestos: código/SDK, parámetros/unidades, fuentes fijadas, objetos,
+  grilla y políticas temporales. No modifica el borrador ni la aplicación.
+- `POST /recovery-previews` sella esa propuesta y la compila en OCI. Exige
+  revisiones esperadas de la definición y de la aplicación de origen.
+- `POST /resolutions` exige `job_id`, `reason` y `request_id`; sustituye la
+  aplicación y sus mapeos en una transacción. La misma clave y contenido devuelven
+  el resultado original; reutilizarla con otro contenido produce HTTP 409.
+- `POST /archive` exige revisión esperada y motivo. Conserva las publicaciones
+  y snapshots, impide nuevos consumidores y deja los existentes pendientes de
+  revalidación explícita o desactivación. Clonar una variante tampoco permite
+  crear consumidores de una definición archivada.
+
+Los estados `draft`/`published`/`archived` describen la definición;
+`valid`/`stale`/`invalid` describen cada aplicación y se calculan en servidor con
+causas concretas. Una incompatibilidad de objeto o entrada exige corregir el
+mapeo antes de probar. Conservar un pin antiguo requiere recompilar contra el
+contexto actual y confirmar con motivo; no basta con aceptar una advertencia.
+Cambios de definición, aplicación, publicación, fuente, objeto, horizonte o
+runtime entre prueba y confirmación bloquean la sustitución.
+
+La restauración parte de una aplicación histórica y crea una nueva aplicación/evento.
+La pantalla de corrida muestra código, revisiones, fuentes y hashes congelados
+en esa corrida, sin reconstruirlos desde la definición actual.
 
 ## Entradas y límites horarios (REG-003)
 
@@ -493,13 +527,13 @@ export DATABASE_URL=sqlite:///:memory:
 export POSTGRES_TEST_DATABASE_URL=postgresql://test:test@127.0.0.1:5432/rules_test
 # Configurar RULE_RUNTIME_COMMAND / RULE_RUNTIME_IMAGE como arriba; no levantar
 # un worker adicional: las pruebas administran sus propios workers.
-python -m unittest tests.test_reg001_rules tests.test_reg001_runtime tests.test_reg002_rules tests.test_reg002_runtime tests.test_reg003_rules tests.test_reg003_runtime tests.test_reg003_classification tests.test_reg004_rules tests.test_reg004_runtime tests.test_reg005_rules tests.test_reg005_runtime tests.test_reg006_rules tests.test_reg006_runtime tests.test_reg007_rules tests.test_reg008_rules tests.test_ts7_001_classification_catalog tests.test_ts3_input_variants tests.test_ts3_case_variant_api -v
+python -m unittest tests.test_reg001_rules tests.test_reg001_runtime tests.test_reg002_rules tests.test_reg002_runtime tests.test_reg003_rules tests.test_reg003_runtime tests.test_reg003_classification tests.test_reg004_rules tests.test_reg004_runtime tests.test_reg005_rules tests.test_reg005_runtime tests.test_reg006_rules tests.test_reg006_runtime tests.test_reg007_rules tests.test_reg008_rules tests.test_reg009_rules tests.test_ts7_001_classification_catalog tests.test_ts3_input_variants tests.test_ts3_case_variant_api -v
 julia --project=. test/component_rules.jl
 cd frontend
 npm ci
 npm run api:generate
 npm run api:check
-npm test -- --run src/ComponentRules.test.tsx src/HourlyRules.test.tsx src/RelatedRules.test.tsx src/TemporalRules.test.tsx src/BudgetRules.test.tsx src/CalculatedSeries.test.tsx src/ReusableRules.test.tsx src/App.test.tsx src/RunExperience.test.tsx src/ProtectedMutationJourney.test.tsx
+npm test -- --run src/ComponentRules.test.tsx src/HourlyRules.test.tsx src/RelatedRules.test.tsx src/TemporalRules.test.tsx src/BudgetRules.test.tsx src/CalculatedSeries.test.tsx src/ReusableRules.test.tsx src/RuleRecovery.test.tsx src/App.test.tsx src/RunExperience.test.tsx src/ProtectedMutationJourney.test.tsx
 npm run build
 npx playwright test e2e/component-rules.spec.ts
 # Requiere Julia disponible (PATH o variable JULIA) y la imagen OCI configurada.
@@ -510,6 +544,7 @@ RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-temporal.spec.t
 RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-budgets.spec.ts
 RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-series.spec.ts
 RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-reuse.spec.ts
+RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-recovery.spec.ts
 ```
 
 El smoke de navegador usa el servidor aislado existente, comprueba la entrada

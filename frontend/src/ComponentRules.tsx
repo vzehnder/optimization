@@ -21,6 +21,7 @@ import { RuleObjects, type RuleAlias, type RuleObject } from "./RuleObjects";
 import { RuleTemporal, type TemporalPolicy } from "./RuleTemporal";
 import { RuleWindows, type WindowPolicy } from "./RuleWindows";
 import { RuleLibrary } from "./RuleLibrary";
+import { definitionLabel, validationLabel } from "./ruleStatus";
 
 export interface RuleParameter {
   name: string;
@@ -44,11 +45,24 @@ export interface RuleDraft {
   windows?: WindowPolicy | null;
   template?: { rule_id: string; publication_id: string };
   variant_id?: number;
+  status?: string;
 }
 interface RuleList {
   enabled?: boolean;
   object: { display_name: string };
-  items: { id: string; name: string; revision: number }[];
+  items: {
+    id: string;
+    name: string;
+    revision: number;
+    status?: string;
+    applications?: {
+      id: string;
+      status: string;
+      variant_id: number;
+      validation_status: string;
+      validation_causes?: { message: string }[];
+    }[];
+  }[];
   runtime: { image: string; sdk: string } | null;
 }
 const DEFAULT_CODE =
@@ -269,17 +283,31 @@ function RulesContent() {
       {list.data && (
         <nav aria-label="Reglas del objeto">
           {list.data.items.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => {
-                const next = new URLSearchParams(search);
-                next.set("rule", item.id);
-                setSearch(next);
-              }}
-            >
-              {item.name}
-            </button>
+            <div key={item.id}>
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  const next = new URLSearchParams(search);
+                  next.set("rule", item.id);
+                  setSearch(next);
+                }}
+              >
+                {item.name}
+              </button>
+              {item.status && <span> · {definitionLabel(item.status)}</span>}
+              {item.applications
+                ?.filter((a) => a.status === "active")
+                .map((a) => (
+                  <p key={a.id}>
+                    Variante {a.variant_id} ·{" "}
+                    {validationLabel(a.validation_status)}
+                    {a.validation_causes
+                      ?.map((c) => ` · ${c.message}`)
+                      .join("")}
+                  </p>
+                ))}
+            </div>
           ))}
         </nav>
       )}
@@ -656,6 +684,18 @@ function RuleForm({
           available={available}
           template={saved.template}
           instanceVariant={saved.variant_id}
+          onRecovered={async () => {
+            const fresh = await requestJson<RuleDraft>(`${root}/${saved.id}`);
+            setSaved(fresh);
+            setName(fresh.name);
+            setCode(fresh.code);
+            setParameters(fresh.parameters);
+            setAliases(fresh.aliases ?? []);
+            setInputs(fresh.inputs ?? []);
+            setTemporal(fresh.temporal ?? null);
+            setWindows(fresh.windows ?? null);
+            onSaved(fresh);
+          }}
         />
       )}
       {error && <p role="alert">{error}</p>}

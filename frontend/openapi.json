@@ -2944,6 +2944,107 @@
         "title": "PublicationDraftWriteRequest",
         "type": "object"
       },
+      "RecoveryMappings": {
+        "additionalProperties": false,
+        "properties": {
+          "aliases": {
+            "items": {
+              "$ref": "#/components/schemas/RuleObjectAlias"
+            },
+            "maxItems": 50,
+            "title": "Aliases",
+            "type": "array"
+          },
+          "inputs": {
+            "items": {
+              "$ref": "#/components/schemas/RuleInput"
+            },
+            "maxItems": 20,
+            "title": "Inputs",
+            "type": "array"
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/RuleParameter"
+            },
+            "maxItems": 50,
+            "title": "Parameters",
+            "type": "array"
+          },
+          "temporal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuleTemporalPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "windows": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuleWindowPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "parameters",
+          "aliases",
+          "inputs"
+        ],
+        "title": "RecoveryMappings",
+        "type": "object"
+      },
+      "RecoveryPreviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_application_revision": {
+            "minimum": 1.0,
+            "title": "Expected Application Revision",
+            "type": "integer"
+          },
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "mappings": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecoveryMappings"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "publication_id": {
+            "title": "Publication Id",
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/RuleScope"
+          },
+          "source_application_id": {
+            "title": "Source Application Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "source_application_id",
+          "expected_application_revision",
+          "publication_id",
+          "scope"
+        ],
+        "title": "RecoveryPreviewRequest",
+        "type": "object"
+      },
       "ResultCleanupRequest": {
         "properties": {
           "targets": {
@@ -3387,6 +3488,40 @@
           "value"
         ],
         "title": "RuleParameter",
+        "type": "object"
+      },
+      "RuleResolutionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "accept_empty": {
+            "default": false,
+            "title": "Accept Empty",
+            "type": "boolean"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Reason",
+            "type": "string"
+          },
+          "request_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "reason",
+          "request_id"
+        ],
+        "title": "RuleResolutionRequest",
         "type": "object"
       },
       "RuleScope": {
@@ -8924,6 +9059,200 @@
         ]
       }
     },
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/archive": {
+      "post": {
+        "operationId": "archive_api_projects__project_id__linkable_objects__object_id__rules__rule_id__archive_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleDeactivateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Archive",
+        "tags": [
+          "component-rules"
+        ]
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/comparisons": {
+      "post": {
+        "operationId": "compare_api_projects__project_id__linkable_objects__object_id__rules__rule_id__comparisons_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoveryPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compare",
+        "tags": [
+          "component-rules"
+        ]
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/history": {
+      "get": {
+        "operationId": "history_api_projects__project_id__linkable_objects__object_id__rules__rule_id__history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "History",
+        "tags": [
+          "component-rules"
+        ]
+      }
+    },
     "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/library": {
       "post": {
         "operationId": "publish_template_api_projects__project_id__linkable_objects__object_id__rules__rule_id__library_post",
@@ -9122,6 +9451,142 @@
           }
         },
         "summary": "Get Publication",
+        "tags": [
+          "component-rules"
+        ]
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/recovery-previews": {
+      "post": {
+        "operationId": "preview_api_projects__project_id__linkable_objects__object_id__rules__rule_id__recovery_previews_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoveryPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview",
+        "tags": [
+          "component-rules"
+        ]
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/resolutions": {
+      "post": {
+        "operationId": "resolve_api_projects__project_id__linkable_objects__object_id__rules__rule_id__resolutions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleResolutionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve",
         "tags": [
           "component-rules"
         ]

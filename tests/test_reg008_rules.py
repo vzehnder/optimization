@@ -328,7 +328,7 @@ class ReusableRuleApiTests(unittest.TestCase):
             job = self.compile_instance(path, scope, instance)
         with ThreadPoolExecutor(max_workers=2) as pool:
             applications = list(pool.map(lambda _: self.client.post(path + "/applications", json={"job_id": job["id"], "reason": "Aplicación concurrente"}, headers=headers), range(2)))
-        self.assertEqual(sorted(r.status_code for r in applications), [201, 409])
+        self.assertEqual(sorted(r.status_code for r in applications), [201, 409], [(r.status_code, r.text) for r in applications])
         self.assertEqual(len(self.client.get(path + "/applications").json()["items"]), 1)
 
 

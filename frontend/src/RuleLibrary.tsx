@@ -9,7 +9,7 @@ import { ruleUnit } from "./ruleUnits";
 import type { WindowPolicy } from "./RuleWindows";
 import { ruleExamples } from "./ruleExamples";
 
-interface Template {
+export interface Template {
   rule_id: string;
   publication_id: string;
   revision: number;

@@ -1186,6 +1186,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Archive */
+        post: operations["archive_api_projects__project_id__linkable_objects__object_id__rules__rule_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/comparisons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Compare */
+        post: operations["compare_api_projects__project_id__linkable_objects__object_id__rules__rule_id__comparisons_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** History */
+        get: operations["history_api_projects__project_id__linkable_objects__object_id__rules__rule_id__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/library": {
         parameters: {
             query?: never;
@@ -1231,6 +1282,40 @@ export interface paths {
         get: operations["get_publication_api_projects__project_id__linkable_objects__object_id__rules__rule_id__publications__publication_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/recovery-previews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview */
+        post: operations["preview_api_projects__project_id__linkable_objects__object_id__rules__rule_id__recovery_previews_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/resolutions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve */
+        post: operations["resolve_api_projects__project_id__linkable_objects__object_id__rules__rule_id__resolutions_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3948,6 +4033,30 @@ export interface components {
             /** Public Title */
             public_title: string;
         };
+        /** RecoveryMappings */
+        RecoveryMappings: {
+            /** Aliases */
+            aliases: components["schemas"]["RuleObjectAlias"][];
+            /** Inputs */
+            inputs: components["schemas"]["RuleInput"][];
+            /** Parameters */
+            parameters: components["schemas"]["RuleParameter"][];
+            temporal?: components["schemas"]["RuleTemporalPolicy"] | null;
+            windows?: components["schemas"]["RuleWindowPolicy"] | null;
+        };
+        /** RecoveryPreviewRequest */
+        RecoveryPreviewRequest: {
+            /** Expected Application Revision */
+            expected_application_revision: number;
+            /** Expected Revision */
+            expected_revision: number;
+            mappings?: components["schemas"]["RecoveryMappings"] | null;
+            /** Publication Id */
+            publication_id: string;
+            scope: components["schemas"]["RuleScope"];
+            /** Source Application Id */
+            source_application_id: string;
+        };
         /** ResultCleanupRequest */
         ResultCleanupRequest: {
             /** Targets */
@@ -4078,6 +4187,20 @@ export interface components {
             unit: string;
             /** Value */
             value: number | boolean;
+        };
+        /** RuleResolutionRequest */
+        RuleResolutionRequest: {
+            /**
+             * Accept Empty
+             * @default false
+             */
+            accept_empty: boolean;
+            /** Job Id */
+            job_id: string;
+            /** Reason */
+            reason: string;
+            /** Request Id */
+            request_id: string;
         };
         /** RuleScope */
         RuleScope: {
@@ -7274,6 +7397,113 @@ export interface operations {
             };
         };
     };
+    archive_api_projects__project_id__linkable_objects__object_id__rules__rule_id__archive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                object_id: number;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuleDeactivateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compare_api_projects__project_id__linkable_objects__object_id__rules__rule_id__comparisons_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                object_id: number;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecoveryPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    history_api_projects__project_id__linkable_objects__object_id__rules__rule_id__history_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                object_id: number;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     publish_template_api_projects__project_id__linkable_objects__object_id__rules__rule_id__library_post: {
         parameters: {
             query?: never;
@@ -7364,6 +7594,80 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_api_projects__project_id__linkable_objects__object_id__rules__rule_id__recovery_previews_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                object_id: number;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecoveryPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_api_projects__project_id__linkable_objects__object_id__rules__rule_id__resolutions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                object_id: number;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuleResolutionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };

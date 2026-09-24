@@ -113,7 +113,8 @@ class RuleApiTests(unittest.TestCase):
         saved = post_json_with_csrf(self.client, self.root, PAYLOAD).json()
         response = self.client.get(self.root)
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["items"], [{"id": saved["id"], "name": PAYLOAD["name"], "revision": 1}])
+        self.assertEqual(response.json()["items"], [{"id": saved["id"], "name": PAYLOAD["name"], "revision": 1,
+                                                  "status": "draft", "applications": []}])
         self.assertEqual(response.json()["object"]["id"], self.obj["id"])
         self.assertIsNone(response.json()["runtime"])
 
