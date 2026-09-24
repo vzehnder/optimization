@@ -49,7 +49,7 @@ export interface RuleDraft {
 }
 interface RuleList {
   enabled?: boolean;
-  object: { display_name: string };
+  object: { display_name: string; kind?: string };
   items: {
     id: string;
     name: string;
@@ -196,15 +196,17 @@ export function ComponentRulesView() {
 }
 
 export function HydraulicRulesEntryView() {
-  const { scenarioId, plantKey, unitKey } = useParams();
-  const endpoint = `/api/scenarios/${scenarioId}/hydraulic-plants/${encodeURIComponent(plantKey ?? "")}/units/${encodeURIComponent(unitKey ?? "")}/rule-context`;
+  const { scenarioId, plantKey, unitKey, componentKey } = useParams();
+  const endpoint = componentKey
+    ? `/api/scenarios/${scenarioId}/components/${encodeURIComponent(componentKey)}/rule-context`
+    : `/api/scenarios/${scenarioId}/hydraulic-plants/${encodeURIComponent(plantKey ?? "")}/units/${encodeURIComponent(unitKey ?? "")}/rule-context`;
   const context = useQuery({
     queryKey: [endpoint],
     queryFn: () =>
       requestJson<{ project_id: number; object_id: number }>(endpoint),
     retry: false,
   });
-  const returnTo = `/scenarios/${scenarioId}/hydraulic-diagram`;
+  const returnTo = `/scenarios/${scenarioId}/${componentKey ? "draft" : "hydraulic-diagram"}`;
   if (context.data)
     return (
       <Navigate
@@ -248,10 +250,17 @@ function RulesContent() {
         Las pruebas no modifican corridas ni series. Para incorporar
         restricciones, publica, prueba y aplica una revisión a la variante.
       </p>
-      {returnTo && <Link to={returnTo}>Volver a la unidad</Link>}
+      {returnTo && (
+        <Link to={returnTo}>
+          {list.data?.object.kind === "hydro"
+            ? "Volver al componente"
+            : "Volver a la unidad"}
+        </Link>
+      )}
       {list.data && (
         <p>
-          Unidad: {list.data.object.display_name} · Proyecto {projectId}
+          {list.data.object.kind === "hydro" ? "Hidro" : "Unidad"}:{" "}
+          {list.data.object.display_name} · Proyecto {projectId}
         </p>
       )}
       {list.isError || draft.isError ? (
@@ -269,6 +278,7 @@ function RulesContent() {
         <RuleLibrary
           root={root}
           scenarioId={Number(search.get("scenario_id")) || null}
+          objectKind={list.data.object.kind}
           onOpenChange={setLibraryOpen}
           onCreated={(saved) => {
             const next = new URLSearchParams(search);

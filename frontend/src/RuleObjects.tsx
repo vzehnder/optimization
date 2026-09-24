@@ -35,8 +35,9 @@ export function RuleObjects({
     <fieldset>
       <legend>Objetos y variables del modelo</legend>
       <p>
-        Los alias conservan la identidad del objeto. La potencia de una planta
-        suma las unidades activas de este caso.
+        Los alias conservan la identidad del objeto.
+        {objects.some((o) => o.kind === "hydraulic_plant") &&
+          " La potencia de una planta suma las unidades activas de este caso."}
       </p>
       <label>
         Objeto a relacionar

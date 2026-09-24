@@ -1,7 +1,7 @@
 # Cálculos y restricciones por componente con Python
 
 Fecha: 2026-09-24.
-Estado: REG-001 a REG-010 implementados y verificados; REG-011 es la siguiente entrega.
+Estado: REG-001 a REG-011 implementados y verificados; REG-012 es la siguiente entrega.
 
 El usuario eligió Python con una API de modelado propia y delegó las respuestas
 restantes en las recomendaciones del asistente: «vamos con tu recomendación en
@@ -19,7 +19,7 @@ autorizó implementar la siguiente issue mediante TDD.
 
 Se aplicaron `grill-me`/`grilling` para identificar las decisiones y `to-issues`
 para dividirlas en entregas verticales. El destino solicitado es este directorio,
-no un tracker remoto. REG-001 a REG-010 están en `Done` y los restantes en `Todo`; `AFK` indica que el plan
+no un tracker remoto. REG-001 a REG-011 están en `Done` y los restantes en `Todo`; `AFK` indica que el plan
 resuelve sus decisiones de producto y permite implementarlos sin otra entrevista,
 siempre que sus bloqueadores estén completados.
 
@@ -39,6 +39,6 @@ especifica las dependencias reales. Cada issue incluye su UI, API, persistencia,
 ejecución aplicable y pruebas de comportamiento. Permisos, aislamiento y snapshots
 son parte de las primeras entregas, no tareas pospuestas al cierre.
 
-Para continuar, leer el plan y REG-011, que tiene sus dependencias
+Para continuar, leer el plan y REG-012, que tiene sus dependencias
 completadas. No es necesario implementar todos los
 issues para obtener un primer resultado útil.

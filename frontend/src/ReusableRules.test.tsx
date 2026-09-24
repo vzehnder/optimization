@@ -12,6 +12,61 @@ const json = (data: unknown, status = 200) =>
     headers: { "Content-Type": "application/json" },
   });
 
+it("offers hydro templates only when the contextual object supports their variables", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      json({
+        items: [
+          {
+            rule_id: "h",
+            publication_id: "h1",
+            revision: 1,
+            name: "Volumen hidro",
+            compatible_types: ["hydro"],
+            required_capabilities: ["affine_hydraulic.v1"],
+            parameters: [],
+            aliases: [],
+            inputs: [],
+          },
+          {
+            rule_id: "u",
+            publication_id: "u1",
+            revision: 1,
+            name: "Otra capacidad",
+            compatible_types: ["battery"],
+            required_capabilities: [],
+            parameters: [],
+            aliases: [],
+            inputs: [],
+          },
+        ],
+      }),
+    ),
+  );
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <RuleLibrary
+        root="/api/projects/1/linkable-objects/7/rules"
+        scenarioId={4}
+        objectKind="hydro"
+        onCreated={vi.fn()}
+      />
+    </QueryClientProvider>,
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "Biblioteca del proyecto" }),
+  );
+  expect(
+    await screen.findByRole("button", {
+      name: "Usar Volumen hidro · revisión 1",
+    }),
+  ).toBeEnabled();
+  expect(
+    screen.getByRole("button", { name: "Usar Otra capacidad · revisión 1" }),
+  ).toBeDisabled();
+});
+
 it("filters series candidates by the required template port and uses its alias", async () => {
   vi.stubGlobal(
     "fetch",

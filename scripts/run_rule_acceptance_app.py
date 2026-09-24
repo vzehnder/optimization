@@ -1,6 +1,7 @@
 """Isolated browser acceptance server: real OCI compiler and real Julia solve."""
 import os
 import copy
+import json
 import sys
 import tempfile
 from contextlib import asynccontextmanager
@@ -58,6 +59,13 @@ def main():
             reaches=[{"technical_key": "temporal_reach", "display_name": "Tramo", "from_node_key": "reservoir_alpha", "to_node_key": "junction_in", "reach_type": "river"}])
         budget_base = store.create_scenario_version(scenario_id=temporal["id"], system_case_json=store.generate_hydraulic_v3_preview(temporal["id"]), validation_payload={"status": "ok"})
         calculated_consumer = renewable_consumer(store, project["id"], "reg007-browser")
+        from app.draft_editor import structured_draft_document_from_system_case
+        simple_document = json.loads((REPO_ROOT / "data/cases/linear_hydro_system/system_case.json").read_text())
+        simple_draft = structured_draft_document_from_system_case(simple_document)
+        simple_draft["time_series"] = {"periods": simple_document["time_series"]}
+        simple_hydro = store.create_scenario(project_id=project["id"], name="REG-011 · Hidro simple")
+        store.create_or_replace_scenario_draft(scenario_id=simple_hydro["id"], document=simple_draft)
+        simple_source = source("REG-011 · Caudal horario", "hydro_inflow", "m3_per_s", [4, 6])
         app = create_app(store=store, auth_enabled=True, artifact_root=Path(temporary) / "artifacts", input_source_root=Path(temporary) / "sources")
         original_lifespan = app.router.lifespan_context
 
@@ -72,6 +80,10 @@ def main():
         @app.get("/api/auth/smoke-token", include_in_schema=False)
         def token():
             return {"token": os.environ.get("REACT_SMOKE_TOKEN", "")}
+
+        @app.get("/api/auth/reg011-fixture", include_in_schema=False)
+        def simple_fixture():
+            return {"scenario_id": simple_hydro["id"], "source": simple_source}
 
         @app.get("/api/auth/reg002-fixture", include_in_schema=False)
         def fixture():

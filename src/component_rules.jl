@@ -2,6 +2,7 @@ const COMPONENT_RULE_VERSION = "affine_flow.v1"
 const HYDRAULIC_RULE_VERSION = "affine_hydraulic.v1"
 const TEMPORAL_RULE_VERSION = "affine_temporal.v1"
 const BUDGET_RULE_VERSION = "affine_budget.v1"
+const SIMPLE_HYDRO_RULE_ADAPTER = "hydro_v2.v1"
 
 function validate_budget_window(row, policy, grid)
     policy isa AbstractDict || throw(ArgumentError("budget window requires an explicit policy"))
@@ -36,8 +37,21 @@ end
 function validate_component_rules(document)
     haskey(document, "component_rules") || return
     rules = required_dict(document, "component_rules")
-    required_string(document, "schema_version") == SYSTEM_SCHEMA_VERSION_V3 ||
-        throw(ArgumentError("component rules require hydraulic v3"))
+    schema = required_string(document, "schema_version")
+    simple_hydro = schema == SYSTEM_SCHEMA_VERSION_V2
+    schema in (SYSTEM_SCHEMA_VERSION_V2, SYSTEM_SCHEMA_VERSION_V3) ||
+        throw(ArgumentError("component rules require v2 or hydraulic v3"))
+    if simple_hydro
+        get(rules, "adapter", nothing) == SIMPLE_HYDRO_RULE_ADAPTER || throw(ArgumentError("unsupported v2 component rule adapter"))
+        for application in required_vector(rules, "applications")
+            get(application, "adapter", nothing) == SIMPLE_HYDRO_RULE_ADAPTER || throw(ArgumentError("application adapter differs from snapshot"))
+            capabilities = required_vector(application, "required_capabilities")
+            !isempty(capabilities) && all(v -> v in (COMPONENT_RULE_VERSION, HYDRAULIC_RULE_VERSION, TEMPORAL_RULE_VERSION, BUDGET_RULE_VERSION), capabilities) ||
+                throw(ArgumentError("unsupported application capabilities"))
+        end
+    elseif haskey(rules, "adapter") && rules["adapter"] != "hydraulic_v3.v1"
+        throw(ArgumentError("component rule adapter does not match v3"))
+    end
     get(rules, "version", nothing) in (COMPONENT_RULE_VERSION, HYDRAULIC_RULE_VERSION, TEMPORAL_RULE_VERSION, BUDGET_RULE_VERSION) ||
         throw(ArgumentError("unsupported component rules version"))
     budget = rules["version"] == BUDGET_RULE_VERSION
@@ -47,7 +61,10 @@ function validate_component_rules(document)
     1 <= length(periods) <= 8784 || throw(ArgumentError("component rules period quota exceeded"))
     grid = required_vector(rules, "grid")
     expected_grid = [Dict("timestamp" => p["timestamp"], "duration_hours" => p["duration_hours"]) for p in periods]
-    grid == expected_grid || throw(ArgumentError("component rules grid differs from snapshot"))
+    length(grid) == length(expected_grid) && all(
+        parse_required_datetime(a["timestamp"], "rules.timestamp") == parse_required_datetime(b["timestamp"], "period.timestamp") &&
+        a["duration_hours"] == b["duration_hours"] for (a, b) in zip(grid, expected_grid)) ||
+        throw(ArgumentError("component rules grid differs from snapshot"))
     temporal_policies = Dict{String,Any}()
     if temporal
         for application in required_vector(rules, "applications")
@@ -61,8 +78,10 @@ function validate_component_rules(document)
         !budget && isempty(temporal_policies) && throw(ArgumentError("temporal rules require an explicit initial period policy"))
     end
     window_policies = budget ? Dict(a["id"] => get(a, "windows", nothing) for a in rules["applications"]) : Dict()
-    units = Set(u["id"] for u in document["hydraulic_network"]["units"])
-    network = document["hydraulic_network"]
+    network = simple_hydro ? Dict("units" => [], "nodes" => [], "plants" => []) : document["hydraulic_network"]
+    units = Set(u["id"] for u in network["units"])
+    hydros = simple_hydro ? Dict(n["id"] => parse_system_hydro_asset(SystemNode(n["id"], "hydro", Dict{String,Any}(n)))
+                               for n in document["nodes"] if n["type"] == "hydro") : Dict()
     reservoirs = Set(n["id"] for n in network["nodes"] if n["type"] == "reservoir")
     plants = Set(p["id"] for p in network["plants"])
     objects = required_vector(rules, "objects")
@@ -71,10 +90,14 @@ function validate_component_rules(document)
         id = get(object, "id", nothing)
         id isa Integer && !(id isa Bool) && id > 0 && !(id in object_ids) ||
             throw(ArgumentError("invalid component rules object identity"))
-        keys_present = [key for key in ("unit_key", "node_key", "plant_key") if haskey(object, key)]
+        keys_present = [key for key in ("unit_key", "node_key", "plant_key", "component_key") if haskey(object, key)]
         length(keys_present) == 1 || throw(ArgumentError("ambiguous component rules object"))
         key = only(keys_present)
-        valid = key == "unit_key" ? object[key] in units : extended && (key == "node_key" ? object[key] in reservoirs : object[key] in plants)
+        valid = if simple_hydro
+            key == "component_key" && haskey(hydros, object[key]) && get(object, "kind", nothing) == "hydro" && get(object, "schema_version", nothing) == schema
+        else
+            key == "unit_key" ? object[key] in units : extended && (key == "node_key" ? object[key] in reservoirs : key == "plant_key" && object[key] in plants)
+        end
         valid || throw(ArgumentError("component rules object outside snapshot"))
         push!(object_ids, id)
     end
@@ -125,7 +148,10 @@ function validate_component_rules(document)
             push!(row_objects, id)
             variable = get(term, "variable", nothing)
             object = by_id[id]
-            expected_unit = if haskey(object, "unit_key")
+            expected_unit = if haskey(object, "component_key")
+                variable == "caudal" ? "m3_per_s" : !extended ? nothing :
+                    get(Dict("potencia" => "mw", "almacenamiento" => "hm3", "vertimiento" => "m3_per_s"), variable, nothing)
+            elseif haskey(object, "unit_key")
                 variable == "caudal" ? "m3_per_s" : extended && variable == "potencia" ? "mw" : nothing
             elseif extended && haskey(object, "node_key")
                 variable == "almacenamiento" ? "hm3" : variable == "vertimiento" ? "m3_per_s" : nothing
@@ -163,7 +189,12 @@ function validate_component_rules(document)
             valid || throw(ArgumentError("contradictory constant component rule $(row["name"])"))
         else
             (id, variable, term_period) = only(keys(coefficients))
-            physical = if variable in ("caudal", "potencia")
+            physical = if haskey(by_id[id], "component_key")
+                hydro = hydros[by_id[id]["component_key"]]
+                variable == "caudal" ? (hydro_turbine_flow_lower_bound(hydro), hydro_turbine_flow_upper_bound(hydro)) :
+                    variable == "potencia" ? (0.0, hydro_power_upper_bound(hydro)) :
+                    variable == "almacenamiento" ? (hydro.storage_min_hm3, hydro.storage_max_hm3) : (0.0, Inf)
+            elseif variable in ("caudal", "potencia")
                 unit = object_units[id]
                 curve = unit["curves"]["flow_power"]
                 if variable == "caudal"

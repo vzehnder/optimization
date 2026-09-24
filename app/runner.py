@@ -102,6 +102,17 @@ class JuliaRunExecutor:
         )
 
         validation_result = self.validation_service.validate_file(input_snapshot_path)
+        rules = scenario_version["system_case_json"].get("component_rules")
+        if validation_result.ok and rules is not None:
+            supported = rules.get("version") in validation_result.payload.get("component_rule_versions", [])
+            if rules.get("adapter"):
+                supported = supported and rules["adapter"] in validation_result.payload.get("component_rule_adapters", [])
+            if not supported:
+                validation_result = ValidationResult(
+                    ok=False, phase="julia", message="El worker no declara las capacidades o el adaptador de las reglas fijadas.",
+                    payload={"status": "error", "code": "RULE_CAPABILITY_UNSUPPORTED"},
+                    raw_stdout=validation_result.raw_stdout, raw_stderr=validation_result.raw_stderr,
+                )
         if not validation_result.ok:
             stdout_log_path, stderr_log_path = self._write_log_files(
                 workspace_path,

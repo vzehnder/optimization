@@ -3,10 +3,23 @@ import ast
 from fastapi import HTTPException
 
 VARIABLES = {
+    "hydro": {"caudal": "m3_per_s", "vertimiento": "m3_per_s", "potencia": "mw", "almacenamiento": "hm3"},
     "hydraulic_unit": {"caudal": "m3_per_s", "potencia": "mw"},
     "hydraulic_plant": {"potencia": "mw"},
     "hydraulic_node": {"almacenamiento": "hm3", "vertimiento": "m3_per_s"},
 }
+
+
+def model_document(store, scenario_id, object_id=None):
+    """Use the current editor model, or the hydraulic diagram when there is no draft."""
+    from app.draft_editor import generate_system_case_from_draft
+    if object_id is not None and store.get_linkable_object(object_id)["object_kind"] != "component":
+        return store.generate_hydraulic_v3_preview(scenario_id)
+    try:
+        draft = store.get_scenario_draft(scenario_id)
+    except KeyError:
+        return store.generate_hydraulic_v3_preview(scenario_id)
+    return generate_system_case_from_draft(draft["document"])
 
 
 def object_error(alias, object_id, code=None):
@@ -21,7 +34,7 @@ def object_error(alias, object_id, code=None):
                               "alias": alias, "object_id": object_id, "line": line})
 
 
-def model_objects(store, project_id, scenario_id, document=None):
+def model_objects(store, project_id, scenario_id, document=None, *, object_id=None):
     try:
         scenario = store.get_scenario(scenario_id)
     except KeyError:
@@ -30,9 +43,18 @@ def model_objects(store, project_id, scenario_id, document=None):
         raise HTTPException(404, "Escenario fuera del proyecto")
     if document is None:
         try:
-            document = store.generate_hydraulic_v3_preview(scenario_id)
+            document = model_document(store, scenario_id, object_id)
         except (KeyError, ValueError) as error:
             raise HTTPException(422, "El modelo hidráulico no está disponible para relacionar objetos") from error
+    if document["schema_version"] == "bess_system_dispatch.v2":
+        keys = {n["id"] for n in document["nodes"] if n["type"] == "hydro"}
+        return [{"id": o["id"], "key": o["object_key"], "component_key": o["object_key"],
+                 "display_name": o["display_name"], "kind": "hydro", "variables": VARIABLES["hydro"],
+                 "schema_version": document["schema_version"]}
+                for o in store.list_linkable_objects(project_id=project_id)
+                if o["object_type_key"] == "component:hydro" and o["status"] == "active" and o["object_key"] in keys]
+    if document["schema_version"] != "bess_system_dispatch.v3":
+        raise HTTPException(422, "Este modelo no admite reglas por componente")
     network = document["hydraulic_network"]
     table = store.linkable_object_table_names()["linkable_objects"]
     result = []
@@ -62,7 +84,7 @@ def resolve_aliases(store, project_id, object_id, scenario_id, aliases, document
         if aliases:
             object_error(aliases[0]["alias"], aliases[0]["object_id"], code)
         return []
-    candidates = model_objects(store, project_id, scenario_id, document)
+    candidates = model_objects(store, project_id, scenario_id, document, object_id=object_id)
     by_id = {item["id"]: item for item in candidates}
     if object_id not in by_id:
         object_error("objeto", object_id)

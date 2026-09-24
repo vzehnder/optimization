@@ -114,7 +114,8 @@ def term_value(term, objects, grid, values):
     columns = {"caudal": "hydro_turbine_flow_m3s", "potencia": "hydro_power_mw",
                "almacenamiento": "hydro_storage_hm3", "vertimiento": "hydro_spill_flow_m3s"}
     obj = objects[term["object_id"]]
-    kind, key = ("hydraulic_unit", "unit_key") if "unit_key" in obj else ("hydraulic_reservoir", "node_key")
+    kind, key = (("hydro", "component_key") if "component_key" in obj else
+                 ("hydraulic_unit", "unit_key") if "unit_key" in obj else ("hydraulic_reservoir", "node_key"))
     row = values[(kind, obj[key], instant(grid[term["period"]]["timestamp"]))]
     return float(row[columns[term["variable"]]]) * term["coefficient"]
 

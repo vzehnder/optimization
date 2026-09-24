@@ -19,12 +19,13 @@ class EngineBoundary:
     def __init__(self):
         self.after_validation = None
         self.capabilities = ["affine_flow.v1"]
+        self.adapters = []
 
     def validate_text(self, text):
         from app.validation import ValidationResult
         if self.after_validation:
             self.after_validation()
-        return ValidationResult(ok=True, phase="julia", message="Validated", payload={"status": "ok", "component_rule_versions": self.capabilities})
+        return ValidationResult(ok=True, phase="julia", message="Validated", payload={"status": "ok", "component_rule_versions": self.capabilities, "component_rule_adapters": self.adapters})
 
 
 class RuleApplicationApiTests(unittest.TestCase):

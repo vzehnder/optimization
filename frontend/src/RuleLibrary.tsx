@@ -19,7 +19,7 @@ export interface Template {
   parameters: (Omit<RuleParameter, "value" | "object_id"> & {
     owner: string | null;
   })[];
-  aliases: { alias: string; kind: string }[];
+  aliases: { alias: string; kind: string; compatible_types?: string[] }[];
   inputs: (Pick<
     RuleInput,
     "alias" | "dimension_key" | "semantic_type_key" | "binding_role_key"
@@ -41,11 +41,13 @@ const capabilityNames: Record<string, string> = {
 export function RuleLibrary({
   root,
   scenarioId,
+  objectKind = "hydraulic_unit",
   onCreated,
   onOpenChange,
 }: {
   root: string;
   scenarioId: number | null;
+  objectKind?: string;
   onCreated: (rule: RuleDraft) => void;
   onOpenChange?: (open: boolean) => void;
 }) {
@@ -85,8 +87,7 @@ export function RuleLibrary({
           </p>
           {!scenarioId && (
             <p>
-              Abre la biblioteca desde una unidad del diagrama para elegir su
-              contexto.
+              Abre la biblioteca desde un componente para elegir su contexto.
             </p>
           )}
           <label>
@@ -116,7 +117,11 @@ export function RuleLibrary({
                   Tipos:{" "}
                   {t.compatible_types
                     .map((kind) =>
-                      kind === "hydraulic_unit" ? "Unidad hidráulica" : kind,
+                      kind === "hydraulic_unit"
+                        ? "Unidad hidráulica"
+                        : kind === "hydro"
+                          ? "Hidro simple"
+                          : kind,
                     )
                     .join(", ")}{" "}
                   · Capacidades:{" "}
@@ -127,8 +132,7 @@ export function RuleLibrary({
                 <button
                   type="button"
                   disabled={
-                    !scenarioId ||
-                    !t.compatible_types.includes("hydraulic_unit")
+                    !scenarioId || !t.compatible_types.includes(objectKind)
                   }
                   onClick={() => setSelection(t)}
                 >
@@ -454,7 +458,7 @@ function InstanceForm({
           >
             <option value="">Selecciona un objeto compatible</option>
             {objects.data?.items
-              .filter((o) => o.kind === a.kind)
+              .filter((o) => (a.compatible_types ?? [a.kind]).includes(o.kind))
               .map((o) => (
                 <option key={o.id} value={o.id}>
                   {o.display_name} · {o.key}

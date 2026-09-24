@@ -112,7 +112,7 @@ class PersistentClassificationCatalogTests(unittest.TestCase):
                     "hydraulic_system",
                     "hydraulic_unit",
                 ],
-                "compatibility_rules": 12,
+                "compatibility_rules": 15,
                 "role_columns": [
                     "association_allowed",
                     "canonical_unit_id",

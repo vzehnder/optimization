@@ -71,7 +71,7 @@ def snapshot_transaction(store):
         raise
 
 
-def freeze_scope(store, project_id, scope, expected_bindings_revision=None):
+def freeze_scope(store, project_id, scope, expected_bindings_revision=None, *, object_id=None):
     scenario_id, variant_id = scope["scenario_id"], scope["variant_id"]
     scenario = store.get_scenario(scenario_id)
     variant = store.get_case_input_variant(variant_id)
@@ -90,8 +90,9 @@ def freeze_scope(store, project_id, scope, expected_bindings_revision=None):
                                                           range_start=scope["range_start"], range_end=scope["range_end"], record_validation=False)
         document, lineage = resolved["system_case"], {"series_bindings": resolved["series_bindings"]}
     else:
-        document = store.generate_hydraulic_v3_preview(scenario_id)
-        diagram = store.get_hydraulic_diagram(scenario_id)
+        from app.rule_objects import model_document
+        document = model_document(store, scenario_id, object_id)
+        diagram = store.get_hydraulic_diagram(scenario_id) if document["schema_version"] == "bess_system_dispatch.v3" else {"nodes": [], "reaches": []}
         sources = []
         for collection, field, signal in (("nodes", "natural_inflow_series", "natural_inflow_m3s"),
                                            ("reaches", "minimum_flow_series", "minimum_flow_m3s")):
@@ -105,8 +106,8 @@ def freeze_scope(store, project_id, scope, expected_bindings_revision=None):
         lineage = {"series_bindings": sources}
         start, end = instant(scope["range_start"]), instant(scope["range_end"])
         document["time_series"] = [p for p in document["time_series"] if start <= instant(p["timestamp"]) < end]
-    if document["schema_version"] != "bess_system_dispatch.v3" or "component_rules" in document:
-        raise HTTPException(422, "Esta capacidad requiere un modelo hidráulico v3 sin reglas incrustadas")
+    if document["schema_version"] not in {"bess_system_dispatch.v2", "bess_system_dispatch.v3"} or "component_rules" in document:
+        raise HTTPException(422, "Esta capacidad requiere un modelo v2 o hidráulico v3 sin reglas incrustadas")
     grid = [{"timestamp": p["timestamp"], "duration_hours": p["duration_hours"]} for p in document["time_series"]]
     if not 1 <= len(grid) <= 8784:
         raise HTTPException(422, "El horizonte debe tener entre 1 y 8784 períodos")
@@ -123,7 +124,10 @@ def freeze_scope(store, project_id, scope, expected_bindings_revision=None):
 
 
 def compile_context(store, project_id, object_id, scope):
-    frozen = freeze_scope(store, project_id, scope)
+    frozen = freeze_scope(store, project_id, scope, object_id=object_id)
+    if frozen["system_case"]["schema_version"] == "bess_system_dispatch.v2":
+        obj = resolve_aliases(store, project_id, object_id, scope["scenario_id"], [], frozen["system_case"])[0]
+        return {**frozen, "component_key": obj["component_key"], "adapter": "hydro_v2.v1"}
     objects = store.linkable_object_table_names()["linkable_objects"]
     row = store.connection.execute(f"""
         SELECT u.unit_key, p.plant_key FROM {objects} o
@@ -290,6 +294,9 @@ def _apply_locked(repository, rule_id, project_id, object_id, body, actor, *, re
                     "observed_publication": payload["publication_head"], "accept_empty": body.accept_empty,
                     "observed_lifecycle": lifecycle(store, rule_id),
                     "events": [event or {"action": "apply", "actor": actor, "reason": body.reason.strip(), "at": timestamp()}]}
+        if frozen.get("adapter"):
+            document.update(adapter=frozen["adapter"], schema_version=frozen["system_case"]["schema_version"],
+                            required_capabilities=[ir["version"]])
         store.connection.execute("INSERT INTO component_rule_applications VALUES (?, ?, ?, ?, ?, 1, 'active', ?)",
                                  (identity, rule_id, publication["id"], body.job_id, frozen["scope"]["variant_id"], encode(document)))
         response = next(item for item in list_applications(repository, rule_id) if item["id"] == identity)
@@ -392,7 +399,7 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
         applications = active_applications(store, variant_id=scope["variant_id"])
         if not applications or len(applications) > 50:
             raise HTTPException(409, "Se requieren entre 1 y 50 aplicaciones activas")
-        frozen = freeze_scope(store, project_id, scope, expected_bindings_revision)
+        frozen = freeze_scope(store, project_id, scope, expected_bindings_revision, object_id=applications[0]["object_id"])
         rows, objects, snapshots = [], {}, []
         runtime = repository.runtime()
         for application in applications:
@@ -411,7 +418,7 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
             if digest(ir) != application["ir_hash"] or digest(application["code"]) != application["code_hash"]:
                 raise HTTPException(409, "La integridad de la regla no coincide")
             rows.extend({**row, "application_id": application["id"], "revision_id": application["publication_id"]} for row in ir["rows"])
-            for obj in application.get("objects", [{"id": application["object_id"], "unit_key": application["compilation"]["unit_key"]}]):
+            for obj in application.get("objects") or [{"id": application["object_id"], "unit_key": application["compilation"]["unit_key"]}]:
                 objects[obj["id"]] = obj
             snapshots.append({key: application[key] for key in (
                 "id", "rule_id", "publication_id", "revision", "object_id", "name", "code", "parameters", "code_hash",
@@ -421,11 +428,15 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
                                 "windows": application.get("windows"),
                                 "template": application.get("template"), "origin": application.get("origin"),
                                 "aliases": application.get("aliases", []), "objects": application.get("objects", [])})
+            if application.get("adapter"):
+                snapshots[-1].update({key: application[key] for key in ("adapter", "schema_version", "required_capabilities")})
         if len(rows) > 100000 or sum(len(row["terms"]) for row in rows) > 500000:
             raise HTTPException(422, "Cuota de restricciones excedida")
         block_version = next((v for v in (BUDGET_IR_VERSION, TEMPORAL_IR_VERSION, HYDRAULIC_IR_VERSION) if any(a["ir"]["version"] == v for a in applications)), IR_VERSION)
         block = {"version": block_version, "objects": list(objects.values()), "grid": frozen["grid"], "timezone": "UTC",
                  "rows": rows, "applications": snapshots, "context_hash": frozen["fingerprint"], "ir_hash": digest(rows)}
+        if frozen["system_case"]["schema_version"] == "bess_system_dispatch.v2":
+            block["adapter"] = "hydro_v2.v1"
         document = {**frozen["system_case"], "component_rules": block}
         from app.rule_ir import RuleBoundsError, validate_model_bounds
         from app.rule_compliance import rule_url
@@ -448,6 +459,8 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
         raise HTTPException(422, validation.message)
     if block_version not in validation.payload.get("component_rule_versions", []):
         raise HTTPException(409, "El motor no declara soporte para estas reglas")
+    if block.get("adapter") and block["adapter"] not in validation.payload.get("component_rule_adapters", []):
+        raise HTTPException(409, "El motor no declara soporte para el adaptador de estas reglas")
 
     with store._lock, snapshot_transaction(store):
         store.connection.execute("UPDATE case_input_variants SET updated_at = updated_at WHERE id = ?", (scope["variant_id"],))
@@ -456,7 +469,7 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
             return existing, False
         if not project_enabled(project_id):
             raise HTTPException(409, "Las reglas se deshabilitaron durante la materialización")
-        current = freeze_scope(store, project_id, scope, expected_bindings_revision)
+        current = freeze_scope(store, project_id, scope, expected_bindings_revision, object_id=applications[0]["object_id"])
         if current["fingerprint"] != frozen["fingerprint"] or digest(active_applications(store, variant_id=scope["variant_id"])) != application_hash:
             raise HTTPException(409, "El contexto cambió al materializar; vuelve a compilar")
         if any(latest_publication(store, item["rule_id"]) != item["observed_publication"] for item in applications):

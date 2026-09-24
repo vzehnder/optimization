@@ -1,4 +1,4 @@
-# Operación y verificación de REG-001 a REG-010
+# Operación y verificación de REG-001 a REG-011
 
 REG-001 guarda borradores y calcula un máximo escalar de caudal. REG-002 incorpora
 publicación, aplicaciones a variantes y restricciones afines en el optimizador
@@ -15,6 +15,8 @@ REG-009 compara revisiones y recupera aplicaciones de forma atómica, con motivo
 archivo, historial y comprobación de cambios entre prueba y confirmación.
 REG-010 reconstruye el cumplimiento de cada restricción desde el snapshot y los
 artefactos del solver, con paginación, muestras, tolerancias y diagnósticos internos.
+REG-011 incorpora el hidro simple v2 al mismo recorrido, con caudal, vertimiento,
+potencia y almacenamiento, remapeo explícito de plantillas y cumplimiento histórico.
 Las revisiones `sealed_preview` son copias inmutables
 de pruebas; no cambian por sí solas el estado de la definición editable.
 
@@ -548,6 +550,46 @@ julia --project=. test/rule_compliance.jl
 # Desde frontend, con RULE_ACCEPTANCE_SERVER=1 y el runtime ya configurado:
 npx playwright test e2e/component-rules-compliance.spec.ts
 ```
+
+### Hidro simple v2 (REG-011)
+
+Desde el editor del escenario, selecciona el hidro, guarda sus cambios y abre
+«Cálculos y restricciones». La ruta contextual es
+`/api/scenarios/{scenario_id}/components/{component_key}/rule-context`; resuelve
+el componente guardado a su identidad canónica. El catálogo de objetos y el
+autocompletado ofrecen solo las cuatro variables soportadas, sin cota/altura.
+
+El bloque `component_rules` conserva los contratos afines existentes y añade
+`adapter: hydro_v2.v1`. Cada objeto v2 incluye `kind: hydro`, `component_key` y
+`schema_version: bess_system_dispatch.v2`; cada aplicación fija adaptador,
+esquema y capacidades requeridas. La validación Julia anuncia
+`component_rule_adapters`, además de `component_rule_versions`. Tanto la
+materialización como el worker verifican estas capacidades. Un ejecutor antiguo
+falla explícitamente antes del solve, incluso al reintentar un snapshot existente.
+
+Julia conserva el bloque en `SystemGraphData`, normalización y
+`system_case_resolved.json`. `summary.json` identifica
+`component_rule_adapter` y `component_rule_contract`. Caudal, vertimiento,
+potencia y almacenamiento se agregan sobre las variables ya existentes, con los
+balances y las curvas originales. El cumplimiento se reconstruye desde las
+filas `asset_type=hydro` de `asset_dispatch.csv` y el snapshot congelado.
+
+Los objetos de otro modelo no se heredan al reutilizar una plantilla: deben
+seleccionarse destinos compatibles. Las revisiones v3 existentes admiten el
+nuevo adaptador sin reescribir sus pins. Si coexisten editor simple y diagrama,
+el objeto seleccionado determina cuál snapshot se usa; no se mezclan ambos.
+Clonar una variante conserva las revisiones y exige revalidar sus aplicaciones.
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_reg011_rules -v
+julia --project=. test/simple_hydro_rules.jl
+# Desde frontend, con RULE_ACCEPTANCE_SERVER=1 y el runtime ya configurado:
+npx playwright test e2e/component-rules-simple-hydro.spec.ts
+```
+
+No cambia el SDK `reg-006.1` ni se requiere reconstruir la imagen OCI. La
+extensión de compatibilidad de afluente/disponibilidad es aditiva y se verifica
+sobre SQLite y PostgreSQL. Consolas y programaciones siguen pendientes de REG-014.
 
 ### Regresión del subsistema
 

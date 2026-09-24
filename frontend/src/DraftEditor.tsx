@@ -2252,6 +2252,7 @@ function HydroFields({
   setJsonTexts,
   removalProps,
   onOpenHydraulicDiagram,
+  rulesPath,
 }: AssetFieldProps) {
   const patch = (field: string, value: unknown) =>
     setDocument((current) =>
@@ -2276,6 +2277,16 @@ function HydroFields({
         Edita aquí el modelo hidro simple. Para redes con nodos, tramos,
         centrales y unidades, abre el diagrama hidráulico.
       </p>
+      {rulesPath ? (
+        <Link to={rulesPath}>
+          Cálculos y restricciones · {String(asset.id)}
+        </Link>
+      ) : (
+        <p>
+          Guarda los cambios del componente para abrir sus cálculos y
+          restricciones.
+        </p>
+      )}
       {onOpenHydraulicDiagram ? (
         <button
           type="button"
@@ -2455,6 +2466,7 @@ type AssetFieldProps = {
     onConfirmRemove: (assetId: string) => void;
   };
   onOpenHydraulicDiagram?: () => void;
+  rulesPath?: string;
 };
 
 function LoadingView({ label }: { label: string }) {
@@ -3047,6 +3059,10 @@ function DraftEditor({
                   setJsonTexts: updateJsonTexts,
                   removalProps,
                   onOpenHydraulicDiagram: openHydraulicDiagram,
+                  rulesPath:
+                    !dirty && !saveMutation.isPending
+                      ? `/scenarios/${scenario.id}/components/${encodeURIComponent(String(asset.id))}/rules`
+                      : undefined,
                 };
                 if (asset.type === "battery")
                   return <BatteryFields key={assetIndex} {...props} />;

@@ -39,7 +39,7 @@ class ReusableRuleApiTests(unittest.TestCase):
         item = response.json()["items"][0]
         self.assertEqual((item["name"], item["publication_id"], item["revision"]),
                          (PAYLOAD["name"], publication["id"], 1))
-        self.assertEqual(item["compatible_types"], ["hydraulic_unit"])
+        self.assertEqual(item["compatible_types"], ["hydraulic_unit", "hydro"])
         self.assertEqual(item["required_capabilities"], ["affine_flow.v1"])
         self.assertEqual(item["parameters"][0]["name"], "limite")
         self.assertNotIn("object_id", item["parameters"][0])

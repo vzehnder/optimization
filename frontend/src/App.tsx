@@ -538,6 +538,14 @@ function AuthenticatedRoutes({
         />
         <Route path="system" element={<SystemStatus />} />
         <Route
+          path="scenarios/:scenarioId/components/:componentKey/rules"
+          element={
+            <Suspense fallback={<p role="status">Cargando editor…</p>}>
+              <HydraulicRulesEntryView />
+            </Suspense>
+          }
+        />
+        <Route
           path="admin/users"
           element={
             user.role === "admin" ? <AdminUsersView /> : <ForbiddenView />

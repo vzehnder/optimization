@@ -48,7 +48,11 @@ struct SystemGraphData
     constraints::Dict{String,Any}
     solver::SolverConfig
     source_path::Union{String,Nothing}
+    component_rules::Union{Dict{String,Any},Nothing}
 end
+
+SystemGraphData(schema, name, nodes, edges, periods, constraints, solver, path) =
+    SystemGraphData(schema, name, nodes, edges, periods, constraints, solver, path, nothing)
 
 struct BatteryAssetParameters
     id::String
@@ -203,12 +207,14 @@ function load_system_case(path::AbstractString)::SystemGraphData
         optional_dict(document, "constraints"),
         load_solver_config(required_value(document, "solver")),
         abspath(resolved_path),
+        get(document, "component_rules", nothing),
     )
 
     return validate_system_case(system_case)
 end
 
 function validate_system_case(system_case::SystemGraphData)::SystemGraphData
+    validate_component_rules(system_case_dict(system_case))
     if !(system_case.schema_version in SYSTEM_SUPPORTED_SCHEMA_VERSIONS)
         throw(ArgumentError(
             "schema_version must be one of $(join(sort(collect(SYSTEM_SUPPORTED_SCHEMA_VERSIONS)), ", ")); got $(system_case.schema_version)",
@@ -1288,6 +1294,27 @@ function build_system_dispatch_model(data::SystemOptimizationData)::SystemDispat
         hydro_spill_penalty_objective +
         hydro_terminal_water_value_objective
     )
+
+    if data.graph.component_rules !== nothing
+        rules = data.graph.component_rules
+        validate_component_rules(system_case_dict(data.graph))
+        indices = Dict(o["id"] => findfirst(h -> h.id == o["component_key"], data.hydros) for o in rules["objects"])
+        variables = Dict("caudal" => hydro_turbine_flow_m3s, "potencia" => hydro_power_mw,
+                         "almacenamiento" => hydro_storage_hm3, "vertimiento" => hydro_spill_flow_m3s)
+        for row in rules["rows"]
+            expression = AffExpr(Float64(row["constant"]))
+            for term in row["terms"]
+                add_to_expression!(expression, Float64(term["coefficient"]), variables[term["variable"]][indices[term["object_id"]], term["period"] + 1])
+            end
+            if row["relation"] == "<="
+                @constraint(model, expression <= 0)
+            elseif row["relation"] == ">="
+                @constraint(model, expression >= 0)
+            else
+                @constraint(model, expression == 0)
+            end
+        end
+    end
 
     return SystemDispatchModel(
         model,
@@ -2921,6 +2948,10 @@ function system_summary_dict(
         "model_version" => package_version_string(),
     )
 
+    if data.graph.component_rules !== nothing
+        summary["component_rule_adapter"] = data.graph.component_rules["adapter"]
+        summary["component_rule_contract"] = data.graph.component_rules["version"]
+    end
     if !isempty(data.hydros)
         hydro_kpis_by_asset = Dict{String,Any}()
         for (hydro_index, hydro) in enumerate(data.hydros)
@@ -3019,7 +3050,7 @@ function system_model_metadata_dict(data::SystemOptimizationData)::Dict{String,A
 end
 
 function system_case_dict(system_case::SystemGraphData)::Dict{String,Any}
-    return Dict{String,Any}(
+    document = Dict{String,Any}(
         "schema_version" => system_case.schema_version,
         "case_name" => system_case.case_name,
         "nodes" => [
@@ -3037,6 +3068,10 @@ function system_case_dict(system_case::SystemGraphData)::Dict{String,Any}
             "options" => Dict{String,Any}(string(key) => value for (key, value) in pairs(system_case.solver.options)),
         ),
     )
+    if system_case.component_rules !== nothing
+        document["component_rules"] = deepcopy(system_case.component_rules)
+    end
+    return document
 end
 
 function system_period_dict(period::SystemPeriodData)::Dict{String,Any}

@@ -337,38 +337,40 @@ it("starts an asynchronous preview and lets the analyst cancel it", async () => 
   expect(await screen.findByText("Cancelada")).toBeVisible();
 });
 
-it("opens rules from the saved hydraulic unit and retains its diagram as return destination", async () => {
-  window.history.replaceState(
-    {},
-    "",
-    "/react/scenarios/4/hydraulic-plants/plant/units/unit/rules",
-  );
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (input: RequestInfo | URL) => {
-      const path = new URL(String(input), "http://localhost").pathname;
-      if (path.endsWith("/object-candidates")) return json({ items: [] });
-      if (path === "/api/auth/me")
-        return json({
-          user: { id: 3, role: "analyst", is_active: true },
-          bootstrap_required: false,
-        });
-      if (path.endsWith("/rule-context"))
-        return json({ project_id: 1, object_id: 7 });
-      if (path.endsWith("/rules"))
-        return json({
-          object: { display_name: "Unidad Norte" },
-          items: [],
-          runtime: null,
-        });
-      return json({ detail: path }, 404);
-    }),
-  );
-  render(<App />);
-  expect(
-    await screen.findByText("Unidad: Unidad Norte · Proyecto 1"),
-  ).toBeVisible();
-  expect(
-    screen.getByRole("link", { name: "Volver a la unidad" }),
-  ).toHaveAttribute("href", "/react/scenarios/4/hydraulic-diagram");
-});
+it.each([
+  ["hydraulic-plants/plant/units/unit", "hydraulic-diagram"],
+  ["components/hydro_1", "draft"],
+])(
+  "opens rules from %s and retains its contextual return destination",
+  async (entry, destination) => {
+    window.history.replaceState({}, "", `/react/scenarios/4/${entry}/rules`);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = new URL(String(input), "http://localhost").pathname;
+        if (path.endsWith("/object-candidates")) return json({ items: [] });
+        if (path === "/api/auth/me")
+          return json({
+            user: { id: 3, role: "analyst", is_active: true },
+            bootstrap_required: false,
+          });
+        if (path.endsWith("/rule-context"))
+          return json({ project_id: 1, object_id: 7 });
+        if (path.endsWith("/rules"))
+          return json({
+            object: { display_name: "Unidad Norte" },
+            items: [],
+            runtime: null,
+          });
+        return json({ detail: path }, 404);
+      }),
+    );
+    render(<App />);
+    expect(
+      await screen.findByText("Unidad: Unidad Norte · Proyecto 1"),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "Volver a la unidad" }),
+    ).toHaveAttribute("href", `/react/scenarios/4/${destination}`);
+  },
+);

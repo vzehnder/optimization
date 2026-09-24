@@ -7,6 +7,19 @@ TEMPORAL_IR_VERSION = "affine_temporal.v1"
 BUDGET_IR_VERSION = "affine_budget.v1"
 
 
+def hydro_bounds(hydro):
+    curve = hydro.get("generation_curve", [])
+    piecewise = hydro["generation_mode"] == "piecewise_linear"
+    lower = hydro.get("turbine_flow_min_m3s")
+    upper = hydro.get("turbine_flow_max_m3s")
+    lower = lower if lower is not None else curve[0]["flow_m3s"] if piecewise else 0
+    upper = upper if upper is not None else curve[-1]["flow_m3s"]
+    power = hydro.get("power_max_mw")
+    power = power if power is not None else max(p["power_mw"] for p in curve) if piecewise else hydro["power_per_flow_mw_per_m3s"] * upper
+    return {"caudal": (lower, upper), "potencia": (0, power), "vertimiento": (0, float("inf")),
+            "almacenamiento": (hydro["storage_min_hm3"], hydro["storage_max_hm3"])}
+
+
 class RuleBoundsError(ValueError):
     def __init__(self, row, conflicting_rows=None):
         super().__init__(f"Mínimo mayor que máximo conocido en {row['name']}, período {row['period'] + 1}")
@@ -21,10 +34,13 @@ class RuleBoundsError(ValueError):
 
 def validate_model_bounds(rows, objects, document):
     """Intersect scalar affine bounds; multi-variable feasibility remains the solver's job."""
-    network = document["hydraulic_network"]
+    network = document.get("hydraulic_network")
     physical = {}
     for obj in objects:
-        if obj["kind"] == "hydraulic_unit":
+        if obj["kind"] == "hydro":
+            hydro = next(n for n in document["nodes"] if n["id"] == obj["component_key"] and n["type"] == "hydro")
+            physical.update({(obj["id"], variable): bounds for variable, bounds in hydro_bounds(hydro).items()})
+        elif obj["kind"] == "hydraulic_unit":
             unit = next(u for u in network["units"] if u["id"] == obj["unit_key"])
             curve = unit["curves"]["flow_power"]
             flow_min = max(curve[0]["flow_m3s"], unit.get("min_flow_m3s") or 0)
@@ -70,10 +86,13 @@ def validate_model_bounds(rows, objects, document):
 
 
 def validate_bounds(rows, unit, period_count):
-    curve = unit["curves"]["flow_power"]
-    lower, upper = curve[0]["flow_m3s"], curve[-1]["flow_m3s"]
-    lower = max(lower, unit.get("min_flow_m3s") if unit.get("min_flow_m3s") is not None else lower)
-    upper = min(upper, unit.get("max_flow_m3s") if unit.get("max_flow_m3s") is not None else upper)
+    if unit.get("type") == "hydro":
+        lower, upper = hydro_bounds(unit)["caudal"]
+    else:
+        curve = unit["curves"]["flow_power"]
+        lower, upper = curve[0]["flow_m3s"], curve[-1]["flow_m3s"]
+        lower = max(lower, unit.get("min_flow_m3s") if unit.get("min_flow_m3s") is not None else lower)
+        upper = min(upper, unit.get("max_flow_m3s") if unit.get("max_flow_m3s") is not None else upper)
     bounds = [[lower, upper] for _ in range(period_count)]
     for row in rows:
         lo, hi = bounds[row["period"]]

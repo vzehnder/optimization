@@ -136,7 +136,9 @@ class OCIExecutor:
                             value["windows"] = payload["windows"]
                         if "compilation" in payload:
                             compilation = payload["compilation"]
-                            unit = next(u for u in compilation["system_case"]["hydraulic_network"]["units"] if u["id"] == compilation["unit_key"])
+                            unit = (next(n for n in compilation["system_case"]["nodes"] if n["id"] == compilation["component_key"])
+                                    if compilation.get("adapter") == "hydro_v2.v1" else
+                                    next(u for u in compilation["system_case"]["hydraulic_network"]["units"] if u["id"] == compilation["unit_key"]))
                             try:
                                 if payload.get("objects"):
                                     validate_model_bounds(value["ir"]["rows"], payload["objects"], compilation["system_case"])

@@ -238,8 +238,13 @@ class ComplianceApiTests(unittest.TestCase):
         self.frozen_run(failure={"message": "pending retry"})
         def timeout(*args, **kwargs):
             raise subprocess.TimeoutExpired("julia", 1)
+        class CapableRuleEngine(AcceptingRunValidationService):
+            def validate_file(self, path):
+                result = super().validate_file(path)
+                result.payload["component_rule_versions"] = ["affine_hydraulic.v1"]
+                return result
         JuliaRunExecutor(store=self.store, artifact_root=self.temporary.name, runner=timeout,
-                         validation_service=AcceptingRunValidationService(), timeout_seconds=1).execute(self.run["id"])
+                         validation_service=CapableRuleEngine(), timeout_seconds=1).execute(self.run["id"])
         diagnostic = self.report()["diagnostics"][0]
         self.assertEqual(diagnostic["category"], "timeout")
         self.assertEqual(diagnostic["code"], "RUN_SOLVER_TIMEOUT")

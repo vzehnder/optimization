@@ -13262,6 +13262,55 @@
         "summary": "Validate Case Input Variant"
       }
     },
+    "/api/scenarios/{scenario_id}/components/{component_key}/rule-context": {
+      "get": {
+        "operationId": "component_context_api_scenarios__scenario_id__components__component_key__rule_context_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "component_key",
+            "required": true,
+            "schema": {
+              "title": "Component Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Component Context",
+        "tags": [
+          "component-rules"
+        ]
+      }
+    },
     "/api/scenarios/{scenario_id}/consoles": {
       "get": {
         "operationId": "list_operator_consoles_api_scenarios__scenario_id__consoles_get",

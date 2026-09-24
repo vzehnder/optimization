@@ -494,8 +494,8 @@ def rule_router(store):
             raise HTTPException(404, "Objeto no encontrado") from None
         if obj["project_id"] != project_id:
             raise HTTPException(404, "Objeto no encontrado")
-        if obj["object_kind"] != "hydraulic_unit" or obj["status"] != "active":
-            raise HTTPException(422, "Esta capacidad requiere una unidad hidráulica activa")
+        if (obj["object_kind"] != "hydraulic_unit" and obj["object_type_key"] != "component:hydro") or obj["status"] != "active":
+            raise HTTPException(422, "Esta capacidad requiere una unidad hidráulica o hidro simple activo")
         return user, obj
 
     @router.post("", status_code=201)
@@ -517,7 +517,8 @@ def rule_router(store):
                       "status": definition_status(repository, row["id"], row["revision"]),
                       "applications": [{k: a[k] for k in ("id", "revision", "status", "variant_id", "publication_id", "validation_status", "validation_causes")}
                                        for a in list_applications(repository, row["id"])]} for row in rows]
-        return {"object": {"id": obj["id"], "display_name": obj["display_name"]},
+        return {"object": {"id": obj["id"], "display_name": obj["display_name"],
+                           "kind": "hydro" if obj["object_type_key"] == "component:hydro" else obj["object_kind"]},
                 "items": items,
                 "runtime": repository.runtime() if project_enabled(project_id) else None,
                 "enabled": project_enabled(project_id)}
@@ -536,7 +537,10 @@ def rule_router(store):
                 store.get_or_create_default_input_variant(case["id"])
                 variants = store.list_case_input_variants(case["id"])
                 result = {"variants": variants, "range_start": "", "range_end": ""}
-                periods = store.generate_hydraulic_v3_preview(scenario_id)["time_series"]
+                from app.rule_objects import model_document, resolve_aliases
+                document = model_document(store, scenario_id, object_id)
+                resolve_aliases(store, project_id, object_id, scenario_id, [], document)
+                periods = document["time_series"]
                 if periods:
                     result["range_start"] = periods[0]["timestamp"]
                     result["range_end"] = (instant(periods[-1]["timestamp"]) + timedelta(hours=periods[-1]["duration_hours"])).replace(tzinfo=None).isoformat()
@@ -551,7 +555,7 @@ def rule_router(store):
         from app.rule_objects import model_objects, object_error
         context(request, project_id, object_id)
         with store._lock:
-            items = model_objects(store, project_id, scenario_id)
+            items = model_objects(store, project_id, scenario_id, object_id=object_id)
             if object_id not in {item["id"] for item in items}:
                 object_error("objeto", object_id)
             return {"items": items}
@@ -732,5 +736,33 @@ def rule_router(store):
         if row is None:
             raise HTTPException(404, "Guarda primero la unidad activa en el diagrama")
         return dict(row)
+
+    @routes.get("/api/scenarios/{scenario_id}/components/{component_key}/rule-context", tags=["component-rules"])
+    def component_context(scenario_id: int, component_key: str, request: Request):
+        user = getattr(request.state, "current_user", None)
+        if not user or user["role"] not in {"analyst", "admin"}:
+            raise HTTPException(403 if user else 401, "Acceso denegado")
+        from app.rule_objects import model_document, model_objects
+        with store._lock:
+            try:
+                project_id = store.get_scenario(scenario_id)["project_id"]
+            except KeyError:
+                raise HTTPException(404, "Escenario no encontrado") from None
+            try:
+                document = model_document(store, scenario_id)
+                if document["schema_version"] != "bess_system_dispatch.v2" or not any(
+                        n["id"] == component_key and n["type"] == "hydro" for n in document["nodes"]):
+                    raise HTTPException(404, "Hidro simple no encontrado en este modelo")
+                for node in document["nodes"]:
+                    if node["type"] == "hydro":
+                        store.ensure_project_component(project_id=project_id, component_key=node["id"],
+                            component_type="hydro", display_name=node.get("name", node["id"]), actor=user["email"])
+            except (ValueError, LinkableObjectError) as error:
+                raise HTTPException(422, str(error)) from error
+            candidate = next((o for o in model_objects(store, project_id, scenario_id, document)
+                              if o.get("component_key") == component_key), None)
+        if candidate is None:
+            raise HTTPException(404, "Guarda primero el hidro simple activo en el modelo")
+        return {"project_id": project_id, "object_id": candidate["id"]}
 
     return routes

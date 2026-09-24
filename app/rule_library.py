@@ -77,10 +77,14 @@ def validate_instance(repository, project_id, object_id, body, pin):
     if body.code != shared["code"]:
         raise HTTPException(422, "El código compartido solo se modifica en la definición de la plantilla")
     actual = contract_for(repository.store, body.model_dump(), object_id, project_id)
-    for key in ("parameters", "inputs", "aliases"):
+    for key in ("parameters", "inputs"):
         identity = "name" if key == "parameters" else "alias"
         if sorted(actual[key], key=lambda x: x[identity]) != sorted(expected[key], key=lambda x: x[identity]):
             raise HTTPException(422, f"Completa {key} sin modificar el contrato de la revisión compartida")
+    actual_aliases = {a["alias"]: a["kind"] for a in actual["aliases"]}
+    if set(actual_aliases) != {a["alias"] for a in expected["aliases"]} or any(
+            actual_aliases[a["alias"]] not in alias_types(a["kind"]) for a in expected["aliases"]):
+        raise HTTPException(422, "Completa aliases con objetos que ofrezcan las variables requeridas por la plantilla")
     if actual["temporal"] != expected.get("temporal") or actual["windows"] != expected.get("windows"):
         raise HTTPException(422, "Conserva las políticas temporales y declara las condiciones iniciales de la plantilla")
 
@@ -107,9 +111,10 @@ def create_instance(repository, project_id, object_id, body, actor):
         from app.rule_recovery import require_available
         require_available(store, template["rule_id"])
         from app.rule_objects import model_objects
-        candidates = model_objects(store, project_id, body.scenario_id)
-        if not any(o["id"] == object_id and o["kind"] == "hydraulic_unit" for o in candidates):
-            raise HTTPException(422, "El destino requiere una unidad hidráulica de este modelo")
+        candidates = model_objects(store, project_id, body.scenario_id, object_id=object_id)
+        target = next((o for o in candidates if o["id"] == object_id), None)
+        if target is None or target["kind"] not in supported_contract(json.loads(template["contract"]))["compatible_types"]:
+            raise HTTPException(422, {"code": "RULE_CAPABILITY_UNSUPPORTED", "message": "El objeto de destino no ofrece las variables requeridas por esta plantilla"})
         try:
             variant = store.get_case_input_variant(body.variant_id)
         except KeyError:
@@ -136,16 +141,17 @@ def create_instance(repository, project_id, object_id, body, actor):
 
 def require_clone_destinations(store, project_id, object_id, document, object_map):
     from app.rule_objects import model_objects
-    candidates = model_objects(store, project_id, document["scenario_id"])
+    candidates = model_objects(store, project_id, document["scenario_id"], object_id=object_map.get(object_id, object_id))
     available = {o["id"]: o for o in candidates}
     missing = []
     for identity in sorted({object_id, *(a["object_id"] for a in document.get("aliases", []))}):
         source = store.get_linkable_object(identity)
+        source_kind = "hydro" if source["object_type_key"] == "component:hydro" else source["object_kind"]
         target = available.get(object_map.get(identity, identity))
-        if target is None or target["kind"] != source["object_kind"]:
+        if target is None or target["kind"] != source_kind:
             missing.append({"object_id": identity, "display_name": source["display_name"],
                             "candidates": [{k: o[k] for k in ("id", "display_name")} for o in candidates
-                                           if o["kind"] == source["object_kind"]]})
+                                           if o["kind"] == source_kind]})
     if missing:
         raise HTTPException(422, {"code": "RULE_REMAP_REQUIRED", "message": "Elige los destinos de las reglas antes de clonar la variante.",
                                   "objects": missing})
@@ -227,8 +233,23 @@ def clone_rules(repository, source_variant_id, target_variant_id, actor, object_
             (uuid.uuid4().hex, row["project_id"], target_object, encode(instance), timestamp(), timestamp(), row["updated_by"]))
 
 
+def alias_types(kind):
+    from app.rule_objects import VARIABLES
+    return [target for target, variables in VARIABLES.items() if set(VARIABLES[kind]) <= set(variables)]
+
+
+def supported_contract(contract):
+    # Existing sealed unit templates gain the new adapter without moving their pins.
+    result = copy.deepcopy(contract)
+    if "hydraulic_unit" in result["compatible_types"] and "hydro" not in result["compatible_types"]:
+        result["compatible_types"].append("hydro")
+    for alias in result["aliases"]:
+        alias["compatible_types"] = alias_types(alias["kind"])
+    return result
+
+
 def contract_for(store, publication, object_id, project_id):
-    from app.rule_objects import resolve_aliases
+    from app.rule_objects import resolve_aliases, VARIABLES
     objects = resolve_aliases(store, project_id, object_id, publication.get("scenario_id"),
                               publication.get("aliases", []), code=publication["code"])
     by_id = {o["id"]: o for o in objects}
@@ -246,8 +267,11 @@ def contract_for(store, publication, object_id, project_id):
                   "affine_temporal.v1" if publication.get("temporal") else
                   "affine_hydraulic.v1" if publication.get("aliases") or attrs & {"potencia", "almacenamiento", "vertimiento"} else
                   "affine_flow.v1")
+    kind = by_id.get(object_id, {}).get("kind", "hydraulic_unit")
+    required = attrs & set(VARIABLES[kind])
+    compatible = [target for target in ("hydraulic_unit", "hydro") if required <= set(VARIABLES[target])]
     return {
-        "compatible_types": ["hydraulic_unit"], "required_capabilities": [capability],
+        "compatible_types": compatible, "required_capabilities": [capability],
         "parameters": [{k: v for k, v in p.items() if k not in {"value", "object_id"}} | {"owner": owner(p.get("object_id"))}
                        for p in publication["parameters"]],
         "aliases": [{"alias": a["alias"], "kind": by_id[a["object_id"]]["kind"]} for a in publication.get("aliases", [])],
@@ -350,6 +374,6 @@ def library_router(repository, context):
             from app.rule_recovery import lifecycle
             return {"items": [{"rule_id": r["rule_id"], "publication_id": r["publication_id"],
                                "revision": r["draft_revision"], "name": json.loads(r["document"])["name"],
-                               **json.loads(r["contract"])} for r in rows if not any(lifecycle(store, r["rule_id"]).values())]}
+                               **supported_contract(json.loads(r["contract"]))} for r in rows if not any(lifecycle(store, r["rule_id"]).values())]}
 
     return router
