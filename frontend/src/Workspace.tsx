@@ -9146,6 +9146,15 @@ function CaseInputVariantPanel({
     number | null
   >(() => readStoredInputVariantId(scenarioId));
   const [cloneName, setCloneName] = useState("");
+  const [ruleRemap, setRuleRemap] = useState<{
+    variantId: number;
+    objects: {
+      object_id: number;
+      display_name: string;
+      candidates: { id: number; display_name: string }[];
+    }[];
+    selection: Record<string, number>;
+  }>();
 
   const variantQuery = useQuery({
     queryKey: caseInputVariantsQueryKey(scenarioId),
@@ -9163,6 +9172,8 @@ function CaseInputVariantPanel({
       (entry: CaseInputVariantDetail) => entry.variant.id === selectedVariantId,
     ) ?? variantQuery.data?.variants[0];
   const activeVariant = activeVariantDetail?.variant;
+  const currentRemap =
+    ruleRemap?.variantId === activeVariant?.id ? ruleRemap : undefined;
   const needsLegacyCatalog =
     activeVariantDetail?.preparation?.binding_mode !== "protected";
   const timeSeriesSetsQuery = useQuery({
@@ -9177,11 +9188,13 @@ function CaseInputVariantPanel({
       if (!activeVariant) throw new Error("No hay una variante activa.");
       return cloneCaseInputVariant(scenarioId, activeVariant.id, {
         display_name: cloneName.trim(),
+        ...(currentRemap ? { rule_object_map: currentRemap.selection } : {}),
       });
     },
     onSuccess: (variant) => {
       setCloneName("");
       setCloneError("");
+      setRuleRemap(undefined);
       setSelectedVariantPreference(variant.id);
       persistInputVariantId(scenarioId, variant.id);
       const nextParams = new URLSearchParams(variantParams);
@@ -9191,7 +9204,38 @@ function CaseInputVariantPanel({
         queryKey: caseInputVariantsQueryKey(scenarioId),
       });
     },
-    onError: (mutationError) => setCloneError(errorMessage(mutationError)),
+    onError: (mutationError) => {
+      const detail =
+        mutationError instanceof ApiError
+          ? (mutationError.details as {
+              code?: string;
+              message?: string;
+              objects?: NonNullable<typeof ruleRemap>["objects"];
+            })
+          : undefined;
+      if (
+        activeVariant &&
+        detail?.code === "RULE_REMAP_REQUIRED" &&
+        detail.objects
+      ) {
+        setCloneError(detail.message ?? "Elige los destinos de las reglas.");
+        const missing = detail.objects;
+        setRuleRemap({
+          variantId: activeVariant.id,
+          objects: [
+            ...(currentRemap?.objects ?? []).filter(
+              (o) => !missing.some((m) => m.object_id === o.object_id),
+            ),
+            ...missing,
+          ],
+          selection: Object.fromEntries(
+            Object.entries(currentRemap?.selection ?? {}).filter(
+              ([key]) => !missing.some((m) => m.object_id === Number(key)),
+            ),
+          ),
+        });
+      } else setCloneError(errorMessage(mutationError));
+    },
   });
 
   if (
@@ -9237,6 +9281,8 @@ function CaseInputVariantPanel({
   const canClone =
     cloneName.trim() !== "" &&
     activeVariant !== undefined &&
+    (!currentRemap ||
+      currentRemap.objects.every((o) => currentRemap.selection[o.object_id])) &&
     !cloneMutation.isPending;
 
   return (
@@ -9265,6 +9311,8 @@ function CaseInputVariantPanel({
           value={selectedVariantId ?? ""}
           onChange={(event) => {
             const nextVariantId = Number(event.target.value);
+            setRuleRemap(undefined);
+            setCloneError("");
             setSelectedVariantPreference(nextVariantId);
             persistInputVariantId(scenarioId, nextVariantId);
             const nextParams = new URLSearchParams(variantParams);
@@ -9284,6 +9332,45 @@ function CaseInputVariantPanel({
       </div>
       <details>
         <summary>Gestionar variantes</summary>
+        {currentRemap && (
+          <fieldset>
+            <legend>Destinos de las reglas</legend>
+            <p>
+              Los objetos originales ya no están disponibles. La copia conserva
+              la revisión de cada regla y requiere volver a probarla.
+            </p>
+            {currentRemap.objects.map((object) => (
+              <label key={object.object_id}>
+                Destino para {object.display_name}
+                <select
+                  value={currentRemap.selection[object.object_id] ?? ""}
+                  onChange={(event) =>
+                    setRuleRemap({
+                      ...currentRemap,
+                      selection: {
+                        ...currentRemap.selection,
+                        [object.object_id]: Number(event.target.value),
+                      },
+                    })
+                  }
+                >
+                  <option value="">Elige un objeto compatible</option>
+                  {object.candidates.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.display_name}
+                    </option>
+                  ))}
+                </select>
+                {object.candidates.length === 0 && (
+                  <span>
+                    No hay destinos compatibles en este modelo. Actualiza el
+                    modelo antes de clonar.
+                  </span>
+                )}
+              </label>
+            ))}
+          </fieldset>
+        )}
         <div className="field-row">
           <label htmlFor="input_variant_clone_name">
             Nombre nueva variante

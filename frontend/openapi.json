@@ -547,6 +547,27 @@
         "title": "CaseBindingRevisionRequest",
         "type": "object"
       },
+      "CaseInputVariantCloneRequest": {
+        "properties": {
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "rule_object_map": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Rule Object Map",
+            "type": "object"
+          }
+        },
+        "required": [
+          "display_name"
+        ],
+        "title": "CaseInputVariantCloneRequest",
+        "type": "object"
+      },
       "CaseInputVariantRunRequest": {
         "properties": {
           "expected_bindings_revision": {
@@ -2110,6 +2131,20 @@
         "title": "HydraulicUnitRequest",
         "type": "object"
       },
+      "LibraryPublicationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "publication_id": {
+            "title": "Publication Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "publication_id"
+        ],
+        "title": "LibraryPublicationRequest",
+        "type": "object"
+      },
       "LoginRequest": {
         "properties": {
           "email": {
@@ -3159,6 +3194,101 @@
           "content_hash"
         ],
         "title": "RuleInput",
+        "type": "object"
+      },
+      "RuleInstanceRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "aliases": {
+            "items": {
+              "$ref": "#/components/schemas/RuleObjectAlias"
+            },
+            "maxItems": 50,
+            "title": "Aliases",
+            "type": "array"
+          },
+          "inputs": {
+            "items": {
+              "$ref": "#/components/schemas/RuleInput"
+            },
+            "maxItems": 20,
+            "title": "Inputs",
+            "type": "array"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/RuleParameter"
+            },
+            "maxItems": 50,
+            "title": "Parameters",
+            "type": "array"
+          },
+          "publication_id": {
+            "title": "Publication Id",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Reason",
+            "type": "string"
+          },
+          "request_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Request Id",
+            "type": "string"
+          },
+          "scenario_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Scenario Id",
+            "type": "integer"
+          },
+          "temporal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuleTemporalPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "variant_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Variant Id",
+            "type": "integer"
+          },
+          "windows": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuleWindowPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "publication_id",
+          "scenario_id",
+          "variant_id",
+          "name",
+          "parameters",
+          "aliases",
+          "inputs",
+          "request_id",
+          "reason"
+        ],
+        "title": "RuleInstanceRequest",
         "type": "object"
       },
       "RuleObjectAlias": {
@@ -8294,6 +8424,65 @@
         ]
       }
     },
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/instances": {
+      "post": {
+        "operationId": "instantiate_api_projects__project_id__linkable_objects__object_id__rules_instances_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleInstanceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Instantiate",
+        "tags": [
+          "component-rules"
+        ]
+      }
+    },
     "/api/projects/{project_id}/linkable-objects/{object_id}/rules/object-candidates": {
       "get": {
         "operationId": "get_object_candidates_api_projects__project_id__linkable_objects__object_id__rules_object_candidates_get",
@@ -8730,6 +8919,74 @@
           }
         },
         "summary": "Deactivate Rule",
+        "tags": [
+          "component-rules"
+        ]
+      }
+    },
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/library": {
+      "post": {
+        "operationId": "publish_template_api_projects__project_id__linkable_objects__object_id__rules__rule_id__library_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibraryPublicationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Publish Template",
         "tags": [
           "component-rules"
         ]
@@ -9681,6 +9938,95 @@
           }
         },
         "summary": "Upload Portal Logo"
+      }
+    },
+    "/api/projects/{project_id}/rule-library": {
+      "get": {
+        "operationId": "list_templates_api_projects__project_id__rule_library_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Templates",
+        "tags": [
+          "component-rules"
+        ]
+      }
+    },
+    "/api/projects/{project_id}/rule-library/{publication_id}/instances": {
+      "get": {
+        "operationId": "instances_api_projects__project_id__rule_library__publication_id__instances_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "publication_id",
+            "required": true,
+            "schema": {
+              "title": "Publication Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Instances",
+        "tags": [
+          "component-rules"
+        ]
       }
     },
     "/api/projects/{project_id}/scenarios": {
@@ -11699,7 +12045,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CaseInputVariantWriteRequest"
+                "$ref": "#/components/schemas/CaseInputVariantCloneRequest"
               }
             }
           },

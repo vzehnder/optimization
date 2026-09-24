@@ -1,4 +1,4 @@
-# Operación y verificación de REG-001 a REG-007
+# Operación y verificación de REG-001 a REG-008
 
 REG-001 guarda borradores y calcula un máximo escalar de caudal. REG-002 incorpora
 publicación, aplicaciones a variantes y restricciones afines en el optimizador
@@ -9,6 +9,8 @@ REG-006 integra potencia y caudal por horizonte o día civil, con zona IANA y
 aceptación explícita de días parciales.
 REG-007 publica salidas numéricas completas como series derivadas y permite
 regenerarlas explícitamente conservando revisiones, propietarios y consumidores.
+REG-008 ofrece una biblioteca del proyecto con revisiones compartidas e instancias
+independientes por unidad y variante, comparación y clonación con remapeo explícito.
 Las revisiones `sealed_preview` son copias inmutables
 de pruebas; el estado de la definición editable sigue siendo `draft`.
 
@@ -425,6 +427,59 @@ seguir cambios posteriores del borrador. No existe una ruta de edición de esas
 revisiones. Las tablas nuevas son aditivas y no se borran al deshabilitar la
 función. Los datos históricos referenciados impiden su eliminación accidental.
 
+## Biblioteca e instancias reutilizables (REG-008)
+
+Desde una unidad del diagrama, guardar y publicar una definición y seleccionar
+**Ofrecer en biblioteca**. **Biblioteca del proyecto** muestra nombre, revisión,
+tipos compatibles y capacidades. También contiene ejemplos editables de máximo
+de caudal, salida horaria, suma de unidades, rampa y presupuestos de agua/energía;
+sus alias y entradas deben completarse en el contexto del modelo.
+
+En otra unidad, elegir la revisión y declarar nombre, variante, motivo, valores
+tipados, alias y entradas requeridos. El formulario no hereda valores ni IDs del
+objeto original. Los candidatos de entradas se filtran por propietario, dimensión,
+semántica y rol del puerto. Código, tipos y unidades pertenecen a la revisión
+compartida; los valores, referencias y activación pertenecen a la instancia.
+**Preparar revisión fijada**, probar y aplicar usan el recorrido de ejecución
+existente. El listado de comparación muestra parámetros y hasta 100 filas de la
+última preview vigente, junto al total de filas; una edición local invalida esa
+preview sin modificar otras instancias.
+
+La aplicación conserva publicación compartida, revisión local, parámetros,
+contexto y origen. Publicar otra revisión de la definición no mueve los pins:
+las aplicaciones quedan obsoletas hasta su resolución explícita. Editar valores
+locales exige desactivar, probar y aplicar de nuevo antes de ejecutar. Las
+corridas históricas conservan sus snapshots y sus identificadores de aplicación.
+
+**Datos → Gestionar variantes → Clonar variante activa** copia también instancias
+pendientes y aplicaciones activas. Conserva sus pins y registra variante, regla y
+aplicación de origen, actor y remapeo. Las aplicaciones copiadas requieren nueva
+prueba y aplicación. Si falta un objeto, el formulario solicita un destino del
+mismo tipo dentro del modelo; la transacción rechazada no deja una variante
+parcial. Las entradas siguen verificando sus propios pins y propietarios: cuando
+también cambian sus fuentes deben configurarse explícitamente en la instancia.
+
+Rutas nuevas (analista/admin, CSRF en escrituras):
+
+- `POST /api/projects/{project}/linkable-objects/{object}/rules/{rule}/library`
+  con `publication_id` ofrece una revisión inmutable.
+- `GET /api/projects/{project}/rule-library` descubre sus contratos sin valores
+  ni referencias de la instancia de origen.
+- `POST /api/projects/{project}/linkable-objects/{object}/rules/instances` recibe
+  `publication_id`, `scenario_id`, `variant_id`, `name`, listas explícitas de
+  `parameters`, `aliases`, `inputs`, políticas `temporal`/`windows` cuando proceda,
+  `request_id` idempotente y `reason`.
+- `GET /api/projects/{project}/rule-library/{publication}/instances` compara
+  configuración, activación, obsolescencia y filas vigentes.
+- El endpoint existente `POST /api/scenarios/{scenario}/case/variants/{variant}/clone`
+  admite `rule_object_map`, mapa de ID original a destino. `RULE_REMAP_REQUIRED`
+  identifica objetos pendientes y candidatos compatibles.
+
+La biblioteca es local al proyecto y permanece inaccesible para usuarios externos.
+Las tablas aditivas `component_rule_templates` y `component_rule_instance_requests`
+referencian publicaciones y borradores existentes; no duplican el código ejecutable.
+Esta entrega reutiliza el SDK `reg-006.1` y no modifica la matemática del solver.
+
 ## Comprobaciones reproducibles
 
 Usar una base PostgreSQL **exclusiva de pruebas**, nunca una base de proyectos.
@@ -438,13 +493,13 @@ export DATABASE_URL=sqlite:///:memory:
 export POSTGRES_TEST_DATABASE_URL=postgresql://test:test@127.0.0.1:5432/rules_test
 # Configurar RULE_RUNTIME_COMMAND / RULE_RUNTIME_IMAGE como arriba; no levantar
 # un worker adicional: las pruebas administran sus propios workers.
-python -m unittest tests.test_reg001_rules tests.test_reg001_runtime tests.test_reg002_rules tests.test_reg002_runtime tests.test_reg003_rules tests.test_reg003_runtime tests.test_reg003_classification tests.test_reg004_rules tests.test_reg004_runtime tests.test_reg005_rules tests.test_reg005_runtime tests.test_reg006_rules tests.test_reg006_runtime tests.test_reg007_rules tests.test_ts7_001_classification_catalog -v
+python -m unittest tests.test_reg001_rules tests.test_reg001_runtime tests.test_reg002_rules tests.test_reg002_runtime tests.test_reg003_rules tests.test_reg003_runtime tests.test_reg003_classification tests.test_reg004_rules tests.test_reg004_runtime tests.test_reg005_rules tests.test_reg005_runtime tests.test_reg006_rules tests.test_reg006_runtime tests.test_reg007_rules tests.test_reg008_rules tests.test_ts7_001_classification_catalog tests.test_ts3_input_variants tests.test_ts3_case_variant_api -v
 julia --project=. test/component_rules.jl
 cd frontend
 npm ci
 npm run api:generate
 npm run api:check
-npm test -- --run src/ComponentRules.test.tsx src/HourlyRules.test.tsx src/RelatedRules.test.tsx src/TemporalRules.test.tsx src/BudgetRules.test.tsx src/CalculatedSeries.test.tsx src/RunExperience.test.tsx src/ProtectedMutationJourney.test.tsx
+npm test -- --run src/ComponentRules.test.tsx src/HourlyRules.test.tsx src/RelatedRules.test.tsx src/TemporalRules.test.tsx src/BudgetRules.test.tsx src/CalculatedSeries.test.tsx src/ReusableRules.test.tsx src/App.test.tsx src/RunExperience.test.tsx src/ProtectedMutationJourney.test.tsx
 npm run build
 npx playwright test e2e/component-rules.spec.ts
 # Requiere Julia disponible (PATH o variable JULIA) y la imagen OCI configurada.
@@ -454,6 +509,7 @@ RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-related.spec.ts
 RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-temporal.spec.ts
 RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-budgets.spec.ts
 RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-series.spec.ts
+RULE_ACCEPTANCE_SERVER=1 npx playwright test e2e/component-rules-reuse.spec.ts
 ```
 
 El smoke de navegador usa el servidor aislado existente, comprueba la entrada
@@ -473,12 +529,18 @@ la equivalencia del alias de planta y el bloqueo tras cambiar sus miembros,
 conservando el mapa de alias y el resultado histórico. REG-005 compara ambas políticas
 iniciales con tres intervalos de 0,5, 2 y 1 horas, comprueba las rampas de caudal
 y conserva el resultado histórico al cambiar la política y el rango. CI incluye
-los siete recorridos y la prueba Julia. REG-006 compara un presupuesto de 12 MWh,
+los ocho recorridos y la prueba Julia. Cada comando inicia su servidor y base
+temporal; ejecutar los recorridos por separado. REG-006 compara un presupuesto de 12 MWh,
 uno diario de 36.000 m³ aceptando la ventana parcial y el caso libre de 105 MWh
 y 504.000 m³, con duraciones de 0,5, 2 y 1 horas e historial intacto.
 REG-007 publica `[20, 10, 15, 20]` MW, abre su inspector en el catálogo y resuelve
 un caso con esa entrada. Tras cambiar la disponibilidad, regenera `[10, 10, 10, 10]`
 MW, comprueba el pin anterior obsoleto y conserva la corrida y su snapshot.
+REG-008 crea una definición desde un ejemplo, reutiliza su segunda revisión en
+dos unidades de distinta capacidad y resuelve 17 m³/s (5 + 12). Tras editar solo
+la segunda instancia resuelve 13 m³/s (5 + 8), compara filas y conserva el snapshot
+inicial al publicar otra revisión. La API verifica también idempotencia y aplicación
+concurrentes, clonación sin resultados parciales y rechazos de contratos incompatibles.
 
 Regresión adicional del escritor canónico:
 

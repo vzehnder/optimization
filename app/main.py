@@ -694,6 +694,10 @@ class CaseInputVariantWriteRequest(BaseModel):
     display_name: str = Field(min_length=1)
 
 
+class CaseInputVariantCloneRequest(CaseInputVariantWriteRequest):
+    rule_object_map: dict[int, int] = Field(default_factory=dict)
+
+
 class HydraulicDiagramViewportRequest(BaseModel):
     x: float = 0.0
     y: float = 0.0
@@ -5021,7 +5025,7 @@ def create_app(
     async def clone_case_input_variant(
         scenario_id: int,
         variant_id: int,
-        payload: CaseInputVariantWriteRequest,
+        payload: CaseInputVariantCloneRequest,
         request: Request,
     ):
         try:
@@ -5031,6 +5035,7 @@ def create_app(
                 source_variant_id=variant_id,
                 display_name=payload.display_name,
                 created_by=current_user_email(request),
+                rule_object_map=payload.rule_object_map,
             )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error

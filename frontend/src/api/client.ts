@@ -2121,7 +2121,9 @@ export async function createCaseInputVariant(
 export async function cloneCaseInputVariant(
   scenarioId: number,
   variantId: number,
-  payload: CaseInputVariantWritePayload,
+  payload: CaseInputVariantWritePayload & {
+    rule_object_map?: Record<string, number>;
+  },
 ): Promise<CaseInputVariant> {
   return postJsonWithCsrf<CaseInputVariant>(
     `/api/scenarios/${scenarioId}/case/variants/${variantId}/clone`,

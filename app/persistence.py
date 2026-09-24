@@ -28518,6 +28518,7 @@ class AnalystStore:
         case_id: int,
         display_name: str,
         created_by: str = "internal_analyst",
+        commit: bool = True,
     ) -> dict[str, Any]:
         clean_name = display_name.strip()
         if clean_name == "":
@@ -28547,7 +28548,8 @@ class AnalystStore:
                 created_by,
             ),
         )
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
         return self.get_case_input_variant(int(cursor.lastrowid))
 
     def update_case_input_variant(
@@ -28581,23 +28583,23 @@ class AnalystStore:
         source_variant_id: int,
         display_name: str,
         created_by: str = "internal_analyst",
+        rule_object_map: dict[int, int] | None = None,
     ) -> dict[str, Any]:
-        source_variant = self.get_case_input_variant_for_case(case_id, source_variant_id)
-        clone = self.create_case_input_variant(
-            case_id=case_id,
-            display_name=display_name,
-            created_by=created_by,
-        )
-        for binding in self.list_case_time_series_bindings(source_variant["id"]):
-            self.upsert_case_time_series_binding(
-                case_input_variant_id=clone["id"],
-                signal_key=str(binding["signal_key"]),
-                entity_type=binding.get("entity_type"),
-                entity_id=binding.get("entity_id"),
-                time_series_set_id=int(binding["time_series_set_id"]),
-                created_by=created_by,
+        with self._lock, self._run_materialization_transaction():
+            source_variant = self.get_case_input_variant_for_case(case_id, source_variant_id)
+            clone = self.create_case_input_variant(
+                case_id=case_id, display_name=display_name, created_by=created_by, commit=False,
             )
-        return clone
+            for binding in self.list_case_time_series_bindings(source_variant["id"]):
+                self.upsert_case_time_series_binding(
+                    case_input_variant_id=clone["id"], signal_key=str(binding["signal_key"]),
+                    entity_type=binding.get("entity_type"), entity_id=binding.get("entity_id"),
+                    time_series_set_id=int(binding["time_series_set_id"]), created_by=created_by, commit=False,
+                )
+            if getattr(self, "component_rule_repository", None):
+                from app.rule_library import clone_rules
+                clone_rules(self.component_rule_repository, source_variant_id, clone["id"], created_by, rule_object_map)
+            return clone
 
     def create_operator_console(
         self,
@@ -31331,6 +31333,7 @@ class AnalystStore:
         entity_id: str | None = None,
         time_series_set_id: int,
         created_by: str = "internal_analyst",
+        commit: bool = True,
     ) -> dict[str, Any]:
         self._require_no_legacy_mutation_pause("upsert_case_time_series_binding")
         now = utc_now_iso()
@@ -31362,7 +31365,8 @@ class AnalystStore:
                 """,
                 (time_series_set_id, now, created_by, int(existing["id"])),
             )
-            self.connection.commit()
+            if commit:
+                self.connection.commit()
             return self._get_case_time_series_binding(int(existing["id"]))
 
         cursor = self.connection.execute(
@@ -31393,7 +31397,8 @@ class AnalystStore:
                 created_by,
             ),
         )
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
         return self._get_case_time_series_binding(int(cursor.lastrowid))
 
     def bind_case_time_series_from_legacy_alias(

@@ -1713,7 +1713,7 @@ describe("application shell", () => {
     ).toBeVisible();
   });
 
-  it("clones variants, switches them from dropdown, and persists active selection", async () => {
+  async function cloneVariantJourney(remapRequired: boolean) {
     window.localStorage.clear();
     window.history.replaceState(
       {},
@@ -1943,7 +1943,31 @@ describe("application shell", () => {
           method === "POST"
         ) {
           const body = JSON.parse(String(init?.body));
-          expect(body).toEqual({ display_name: "Stress prices" });
+          if (remapRequired && !body.rule_object_map) {
+            return Response.json(
+              {
+                detail: {
+                  code: "RULE_REMAP_REQUIRED",
+                  message:
+                    "Elige los destinos de las reglas antes de clonar la variante.",
+                  objects: [
+                    {
+                      object_id: 7,
+                      display_name: "Unidad retirada",
+                      candidates: [
+                        { id: 8, display_name: "Unidad disponible" },
+                      ],
+                    },
+                  ],
+                },
+              },
+              { status: 422 },
+            );
+          }
+          expect(body).toEqual({
+            display_name: "Stress prices",
+            ...(remapRequired ? { rule_object_map: { "7": 8 } } : {}),
+          });
           const source = variantEntries[0];
           const clonedVariant = {
             variant: {
@@ -1961,7 +1985,10 @@ describe("application shell", () => {
             required_signals: source.required_signals.map((signal) => ({
               ...signal,
             })),
-            preparation: { binding_mode: "legacy", model_status: "available" },
+            preparation: {
+              binding_mode: "legacy",
+              model_status: "available",
+            },
             staleness: { validated: false, stale: false, reasons: [] },
           };
           variantEntries.push(clonedVariant);
@@ -2065,6 +2092,23 @@ describe("application shell", () => {
     await user.click(
       screen.getByRole("button", { name: "Clonar variante activa" }),
     );
+    if (remapRequired) {
+      expect(
+        await screen.findByText(
+          "Elige los destinos de las reglas antes de clonar la variante.",
+        ),
+      ).toBeVisible();
+      expect(
+        screen.getByRole("button", { name: "Clonar variante activa" }),
+      ).toBeDisabled();
+      await user.selectOptions(
+        screen.getByLabelText("Destino para Unidad retirada"),
+        "8",
+      );
+      await user.click(
+        screen.getByRole("button", { name: "Clonar variante activa" }),
+      );
+    }
 
     await waitFor(() =>
       expect(
@@ -2113,7 +2157,12 @@ describe("application shell", () => {
       }),
     ).toBeVisible();
     expect(screen.getByText("Precio vinculado: set #6.")).toBeVisible();
-  });
+  }
+
+  it("clones variants, switches them and persists selection", () =>
+    cloneVariantJourney(false));
+  it("remaps missing rule objects before cloning a variant", () =>
+    cloneVariantJourney(true));
 
   it("surfaces input variant coverage errors before launching", async () => {
     window.history.replaceState({}, "", "/react/scenarios/10?section=data");
@@ -4151,14 +4200,14 @@ describe("application shell", () => {
     expect(
       await screen.findByRole("heading", { name: "Diagrama hidraulico" }),
     ).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Agregar union" }));
-
     // Nothing is selected yet: the panel prompts for a selection.
     expect(
       screen.getByText(
         "Selecciona un objeto del diagrama para editar sus propiedades.",
       ),
     ).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Agregar union" }));
 
     // Select the node on the canvas.
     const canvasNode = screen.getByTestId("hydraulic-canvas-node-junction_1");

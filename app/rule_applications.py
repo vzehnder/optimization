@@ -142,6 +142,9 @@ def list_applications(repository, rule_id):
         for application in applications:
             application["validation_status"] = "valid"
             try:
+                assert_instance_current(repository, application)
+                if latest_publication(repository.store, rule_id) != application["observed_publication"]:
+                    raise HTTPException(409, "Hay una nueva revisión publicada; revalida la aplicación con motivo")
                 assert_inputs_current(repository.store, application["project_id"], application["object_id"], application.get("inputs", []), application.get("aliases", []))
                 current = compile_context(repository.store, application["project_id"], application["object_id"], application["compilation"]["scope"])
                 assert_objects_current(repository.store, application["project_id"], application["object_id"], application["compilation"], current, application["code"])
@@ -157,8 +160,21 @@ def list_applications(repository, rule_id):
 
 
 def latest_publication(store, rule_id):
+    from app.rule_library import raw_instance
+    instance = raw_instance(store, rule_id)
+    if instance:
+        rule_id = instance["template"]["rule_id"]
     row = store.connection.execute("SELECT id FROM component_rule_publications WHERE rule_id = ? ORDER BY draft_revision DESC LIMIT 1", (rule_id,)).fetchone()
     return row["id"] if row else None
+
+
+def assert_instance_current(repository, application):
+    if application.get("requires_revalidation"):
+        raise HTTPException(409, "Variante copiada: vuelve a probar y aplicar las reglas con motivo")
+    if application.get("template"):
+        current = repository.get(application["rule_id"], application["project_id"], application["object_id"])
+        if current["revision"] != application.get("instance_revision"):
+            raise HTTPException(409, "Cambió la configuración local; vuelve a probar y aplicar con motivo")
 
 
 def apply(repository, rule_id, project_id, object_id, body, actor):
@@ -180,6 +196,10 @@ def apply(repository, rule_id, project_id, object_id, body, actor):
         raise HTTPException(409, "El SDK cambió; vuelve a publicar y probar")
     with store._lock, snapshot_transaction(store):
         store.connection.execute("UPDATE case_input_variants SET updated_at = updated_at WHERE id = ?", (frozen["scope"]["variant_id"],))
+        store.connection.execute("UPDATE component_rule_drafts SET revision = revision WHERE id = ?", (rule_id,))
+        draft = repository.get(rule_id, project_id, object_id)
+        if draft.get("template") and draft["revision"] != job["draft_revision"]:
+            raise HTTPException(409, "Cambió la configuración local durante la prueba; vuelve a compilar")
         if latest_publication(store, rule_id) != payload["publication_head"]:
             raise HTTPException(409, "Cambió la revisión publicada durante la prueba; vuelve a probar")
         assert_inputs_current(store, project_id, object_id, payload.get("inputs", []), payload.get("aliases", []))
@@ -193,12 +213,14 @@ def apply(repository, rule_id, project_id, object_id, body, actor):
             raise HTTPException(409, "Desactiva la aplicación vigente antes de reemplazarla")
         identity = uuid.uuid4().hex
         document = {"project_id": project_id, "object_id": object_id, "compilation": frozen, "code": publication["code"],
-                    "name": publication["name"], "parameters": publication["parameters"], "code_hash": publication["code_hash"],
+                    "name": publication["name"], "parameters": payload["parameters"], "code_hash": publication["code_hash"],
+                    "instance_revision": job["draft_revision"] if draft.get("template") else None,
                     "context_hash": job["context_hash"], "runtime": job["runtime"], "ir": ir, "ir_hash": digest(ir),
                     "inputs": payload.get("inputs", []),
                     "aliases": payload.get("aliases", []), "objects": payload.get("objects", []),
                     "temporal": payload.get("temporal"),
                     "windows": payload.get("windows"),
+                    "template": publication.get("template"), "origin": publication.get("origin"),
                     "outputs": validate_outputs(job["result"].get("outputs", []), len(frozen["grid"])),
                     "observed_publication": payload["publication_head"], "accept_empty": body.accept_empty,
                     "events": [{"action": "apply", "actor": actor, "reason": body.reason.strip(), "at": timestamp()}]}
@@ -304,6 +326,7 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
         rows, objects, snapshots = [], {}, []
         runtime = repository.runtime()
         for application in applications:
+            assert_instance_current(repository, application)
             assert_inputs_current(store, project_id, application["object_id"], application.get("inputs", []), application.get("aliases", []))
             if application["compilation"]["fingerprint"] != frozen["fingerprint"] or application["compilation"]["scope"] != scope:
                 raise HTTPException(409, "Regla obsoleta: cambió el modelo, las entradas o el rango; vuelve a probar y aplicar con motivo")
@@ -326,6 +349,7 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
                              | {"inputs": application.get("inputs", []), "outputs": application.get("outputs", []),
                                 "temporal": application.get("temporal"),
                                 "windows": application.get("windows"),
+                                "template": application.get("template"), "origin": application.get("origin"),
                                 "aliases": application.get("aliases", []), "objects": application.get("objects", [])})
         if len(rows) > 100000 or sum(len(row["terms"]) for row in rows) > 500000:
             raise HTTPException(422, "Cuota de restricciones excedida")
@@ -360,6 +384,7 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
         for set_id in sorted({source["set_id"] for item in applications for source in item.get("inputs", [])}):
             store._lock_canonical_set(set_id)
         for item in applications:
+            assert_instance_current(repository, item)
             assert_objects_current(store, project_id, item["object_id"], item["compilation"], current, item["code"])
             assert_inputs_current(store, project_id, item["object_id"], item.get("inputs", []), item.get("aliases", []))
         metadata = extract_system_case_metadata(document)

@@ -2535,20 +2535,49 @@ button:focus-visible {
   border-bottom: 1px solid #dbe2ea;
 }
 
-.rule-form label {
+.rule-form label,
+.rule-library label {
   display: grid;
   gap: 0.35rem;
   min-width: 0;
 }
 
 .rule-form input,
-.rule-form select {
+.rule-form select,
+.rule-library input,
+.rule-library select {
   min-width: 0;
   width: 100%;
   padding: 0.5rem;
   border: 1px solid #b8c4d2;
   border-radius: 0.35rem;
   font: inherit;
+}
+
+.rule-library article,
+.rule-library fieldset {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid #dbe2ea;
+  border-radius: 0.5rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.rule-library fieldset {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.rule-library button {
+  margin: 0.25rem 0.5rem 0.25rem 0;
+  max-width: 100%;
+  white-space: normal;
+}
+
+.rule-library input[type="radio"],
+.rule-library input[type="checkbox"] {
+  width: auto;
 }
 
 .rule-form code,

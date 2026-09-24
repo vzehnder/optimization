@@ -1082,6 +1082,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/instances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Instantiate */
+        post: operations["instantiate_api_projects__project_id__linkable_objects__object_id__rules_instances_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/linkable-objects/{object_id}/rules/object-candidates": {
         parameters: {
             query?: never;
@@ -1163,6 +1180,23 @@ export interface paths {
         put?: never;
         /** Deactivate Rule */
         post: operations["deactivate_rule_api_projects__project_id__linkable_objects__object_id__rules__rule_id__applications__application_id__deactivate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/linkable-objects/{object_id}/rules/{rule_id}/library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish Template */
+        post: operations["publish_template_api_projects__project_id__linkable_objects__object_id__rules__rule_id__library_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1372,6 +1406,40 @@ export interface paths {
         post?: never;
         /** Remove Portal Logo */
         delete: operations["remove_portal_logo_api_projects__project_id__portal_configuration_logo_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/rule-library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Templates */
+        get: operations["list_templates_api_projects__project_id__rule_library_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/rule-library/{publication_id}/instances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Instances */
+        get: operations["instances_api_projects__project_id__rule_library__publication_id__instances_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3036,6 +3104,15 @@ export interface components {
             /** Revision Id */
             revision_id: number;
         };
+        /** CaseInputVariantCloneRequest */
+        CaseInputVariantCloneRequest: {
+            /** Display Name */
+            display_name: string;
+            /** Rule Object Map */
+            rule_object_map?: {
+                [key: string]: number;
+            };
+        };
         /** CaseInputVariantRunRequest */
         CaseInputVariantRunRequest: {
             /** Expected Bindings Revision */
@@ -3586,6 +3663,11 @@ export interface components {
             /** Technical Key */
             technical_key: string;
         };
+        /** LibraryPublicationRequest */
+        LibraryPublicationRequest: {
+            /** Publication Id */
+            publication_id: string;
+        };
         /** LoginRequest */
         LoginRequest: {
             /** Email */
@@ -3946,6 +4028,29 @@ export interface components {
             semantic_type_key: string;
             /** Signal Id */
             signal_id: number;
+        };
+        /** RuleInstanceRequest */
+        RuleInstanceRequest: {
+            /** Aliases */
+            aliases: components["schemas"]["RuleObjectAlias"][];
+            /** Inputs */
+            inputs: components["schemas"]["RuleInput"][];
+            /** Name */
+            name: string;
+            /** Parameters */
+            parameters: components["schemas"]["RuleParameter"][];
+            /** Publication Id */
+            publication_id: string;
+            /** Reason */
+            reason: string;
+            /** Request Id */
+            request_id: string;
+            /** Scenario Id */
+            scenario_id: number;
+            temporal?: components["schemas"]["RuleTemporalPolicy"] | null;
+            /** Variant Id */
+            variant_id: number;
+            windows?: components["schemas"]["RuleWindowPolicy"] | null;
         };
         /** RuleObjectAlias */
         RuleObjectAlias: {
@@ -6887,6 +6992,42 @@ export interface operations {
             };
         };
     };
+    instantiate_api_projects__project_id__linkable_objects__object_id__rules_instances_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                object_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuleInstanceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_object_candidates_api_projects__project_id__linkable_objects__object_id__rules_object_candidates_get: {
         parameters: {
             query: {
@@ -7115,6 +7256,43 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_template_api_projects__project_id__linkable_objects__object_id__rules__rule_id__library_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                object_id: number;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LibraryPublicationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7665,6 +7843,69 @@ export interface operations {
                 "application/json": components["schemas"]["PortalLogoDeleteRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_templates_api_projects__project_id__rule_library_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    instances_api_projects__project_id__rule_library__publication_id__instances_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                publication_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -9121,7 +9362,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CaseInputVariantWriteRequest"];
+                "application/json": components["schemas"]["CaseInputVariantCloneRequest"];
             };
         };
         responses: {

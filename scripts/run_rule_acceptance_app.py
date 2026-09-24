@@ -46,7 +46,7 @@ def main():
         related_diagram = store.get_or_create_hydraulic_diagram(related["id"])
         related_nodes = copy.deepcopy(nodes)
         second = copy.deepcopy(related_nodes[-1]["units"][0])
-        second.update(technical_key="unit_2", display_name="Unit 2")
+        second.update(technical_key="unit_2", display_name="Unit 2", max_flow_m3s=20.0, max_power_mw=15.0)
         related_nodes[-1]["units"].append(second)
         store.save_hydraulic_diagram(scenario_id=related["id"], revision=related_diagram["revision"], nodes=related_nodes,
             reaches=[{"technical_key": "related_reach", "display_name": "Tramo", "from_node_key": "reservoir_alpha", "to_node_key": "junction_in", "reach_type": "river"}])

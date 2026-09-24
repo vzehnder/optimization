@@ -20,6 +20,7 @@ import { ruleErrorMessage } from "./ruleErrors";
 import { RuleObjects, type RuleAlias, type RuleObject } from "./RuleObjects";
 import { RuleTemporal, type TemporalPolicy } from "./RuleTemporal";
 import { RuleWindows, type WindowPolicy } from "./RuleWindows";
+import { RuleLibrary } from "./RuleLibrary";
 
 export interface RuleParameter {
   name: string;
@@ -30,7 +31,7 @@ export interface RuleParameter {
   max: number | null;
   object_id?: number | null;
 }
-interface RuleDraft {
+export interface RuleDraft {
   id: string;
   name: string;
   code: string;
@@ -41,6 +42,8 @@ interface RuleDraft {
   scenario_id?: number | null;
   temporal?: TemporalPolicy | null;
   windows?: WindowPolicy | null;
+  template?: { rule_id: string; publication_id: string };
+  variant_id?: number;
 }
 interface RuleList {
   enabled?: boolean;
@@ -209,6 +212,7 @@ export function HydraulicRulesEntryView() {
 function RulesContent() {
   const { projectId, linkableObjectId } = useParams();
   const [search, setSearch] = useSearchParams();
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const root = `/api/projects/${projectId}/linkable-objects/${linkableObjectId}/rules`;
   const list = useQuery({
     queryKey: [root],
@@ -248,6 +252,21 @@ function RulesContent() {
         </p>
       )}
       {list.data && (
+        <RuleLibrary
+          root={root}
+          scenarioId={Number(search.get("scenario_id")) || null}
+          onOpenChange={setLibraryOpen}
+          onCreated={(saved) => {
+            const next = new URLSearchParams(search);
+            next.set("rule", saved.id);
+            next.delete("constraint_test");
+            next.delete("test");
+            setSearch(next);
+            void list.refetch();
+          }}
+        />
+      )}
+      {list.data && (
         <nav aria-label="Reglas del objeto">
           {list.data.items.map((item) => (
             <button
@@ -264,7 +283,7 @@ function RulesContent() {
           ))}
         </nav>
       )}
-      {list.data && (!selected || draft.data) && (
+      {list.data && !libraryOpen && (!selected || draft.data) && (
         <RuleForm
           key={selected ?? "new"}
           root={root}
@@ -419,11 +438,18 @@ function RuleForm({
           }
         </pre>
       </details>
-      <PythonEditor
-        initialCode={initial?.code ?? DEFAULT_CODE}
-        onChange={setCode}
-        completions={completions}
-      />
+      {saved?.template ? (
+        <>
+          <p>Revisión compartida fijada: {saved.template.publication_id}</p>
+          <pre>{code}</pre>
+        </>
+      ) : (
+        <PythonEditor
+          initialCode={initial?.code ?? DEFAULT_CODE}
+          onChange={setCode}
+          completions={completions}
+        />
+      )}
       {scenarioId && (
         <RuleObjects
           objects={objects}
@@ -463,6 +489,7 @@ function RuleForm({
               Parámetro {index + 1}
               <input
                 value={p.name}
+                disabled={!!saved?.template}
                 onChange={(e) =>
                   parameterChange(index, { name: e.target.value })
                 }
@@ -472,6 +499,7 @@ function RuleForm({
               Tipo {p.name}
               <select
                 value={p.type}
+                disabled={!!saved?.template}
                 onChange={(e) =>
                   parameterChange(index, {
                     type: e.target.value as RuleParameter["type"],
@@ -490,6 +518,7 @@ function RuleForm({
               Unidad {p.name}
               <input
                 value={p.unit}
+                disabled={!!saved?.template}
                 onChange={(e) =>
                   parameterChange(index, { unit: e.target.value })
                 }
@@ -542,6 +571,7 @@ function RuleForm({
               <input
                 type="number"
                 value={p.min ?? ""}
+                disabled={!!saved?.template}
                 onChange={(e) =>
                   parameterChange(index, {
                     min: e.target.value === "" ? null : Number(e.target.value),
@@ -554,6 +584,7 @@ function RuleForm({
               <input
                 type="number"
                 value={p.max ?? ""}
+                disabled={!!saved?.template}
                 onChange={(e) =>
                   parameterChange(index, {
                     max: e.target.value === "" ? null : Number(e.target.value),
@@ -563,6 +594,7 @@ function RuleForm({
             </label>
             <button
               type="button"
+              disabled={!!saved?.template}
               onClick={() =>
                 setParameters(parameters.filter((_, i) => i !== index))
               }
@@ -573,7 +605,7 @@ function RuleForm({
         ))}
         <button
           type="button"
-          disabled={parameters.length >= 50}
+          disabled={!!saved?.template || parameters.length >= 50}
           onClick={() =>
             setParameters([
               ...parameters,
@@ -622,6 +654,8 @@ function RuleForm({
           revision={saved.revision}
           disabled={dirty || busy}
           available={available}
+          template={saved.template}
+          instanceVariant={saved.variant_id}
         />
       )}
       {error && <p role="alert">{error}</p>}

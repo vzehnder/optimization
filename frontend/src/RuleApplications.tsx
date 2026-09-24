@@ -93,12 +93,16 @@ export function RuleApplications({
   revision,
   disabled,
   available,
+  template,
+  instanceVariant,
 }: {
   root: string;
   ruleId: string;
   revision: number;
   disabled: boolean;
   available: boolean;
+  template?: { rule_id: string; publication_id: string };
+  instanceVariant?: number;
 }) {
   const [search, setSearch] = useSearchParams();
   const navigate = useNavigate();
@@ -116,7 +120,7 @@ export function RuleApplications({
     retry: false,
   });
   const apps = useQuery({
-    queryKey: [path, "applications"],
+    queryKey: [path, "applications", revision],
     queryFn: () =>
       requestJson<{ items: Application[] }>(`${path}/applications`),
     retry: false,
@@ -124,6 +128,7 @@ export function RuleApplications({
   const [published, setPublished] = useState<{
     id: string;
     draft_revision: number;
+    instance_revision?: number;
   }>();
   const [variant, setVariant] = useState<number>();
   const [start, setStart] = useState<string>();
@@ -131,6 +136,7 @@ export function RuleApplications({
   const [reason, setReason] = useState("");
   const [acceptEmpty, setAcceptEmpty] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [libraryPublished, setLibraryPublished] = useState<string>();
   const [error, setError] = useState("");
   const [page, setPage] = useState(0);
   const [termPages, setTermPages] = useState<Record<string, number>>({});
@@ -146,7 +152,7 @@ export function RuleApplications({
         ? 350
         : false,
   });
-  const selected = variant ?? scope.data?.variants[0]?.id;
+  const selected = instanceVariant ?? variant ?? scope.data?.variants[0]?.id;
   const selectedScope: Scope = {
     scenario_id: Number(scenario),
     variant_id: selected ?? 0,
@@ -199,12 +205,30 @@ export function RuleApplications({
           })
         }
       >
-        Publicar revisión
+        {template ? "Preparar revisión fijada" : "Publicar revisión"}
       </button>
+      {published && !template && (
+        <button
+          type="button"
+          disabled={disabled || busy}
+          onClick={() =>
+            void act(async () => {
+              await post(`${path}/library`, { publication_id: published.id });
+              setError("");
+              setLibraryPublished(published.id);
+            })
+          }
+        >
+          Ofrecer en biblioteca
+        </button>
+      )}
+      {libraryPublished && (
+        <p role="status">Revisión disponible en la biblioteca del proyecto.</p>
+      )}
       {published && (
         <p role="status">
           Revisión publicada {published.id} · borrador{" "}
-          {published.draft_revision}
+          {published.instance_revision ?? published.draft_revision}
         </p>
       )}
       {!scenario && (
@@ -219,6 +243,7 @@ export function RuleApplications({
           <label>
             Variante de aplicación
             <select
+              disabled={!!instanceVariant}
               value={selected}
               onChange={(event) => setVariant(Number(event.target.value))}
             >
@@ -254,7 +279,7 @@ export function RuleApplications({
           !available ||
           !selected ||
           !published ||
-          published.draft_revision !== revision
+          (published.instance_revision ?? published.draft_revision) !== revision
         }
         onClick={() =>
           void act(async () => {

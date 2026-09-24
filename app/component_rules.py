@@ -240,8 +240,15 @@ class RuleRepository:
         initialize(store)
         from app.rule_series import initialize as initialize_series
         initialize_series(store)
+        from app.rule_library import initialize as initialize_library
+        initialize_library(store)
+        store.component_rule_repository = self
 
     def publication(self, rule_id, publication_id):
+        from app.rule_library import raw_instance, effective_publication
+        instance = raw_instance(self.store, rule_id)
+        if instance:
+            return effective_publication(self, rule_id, publication_id, instance)
         row = self.store.connection.execute(
             "SELECT * FROM component_rule_publications WHERE id = ? AND rule_id = ?", (publication_id, rule_id),
         ).fetchone()
@@ -258,6 +265,8 @@ class RuleRepository:
             draft = self.get(rule_id, project_id, object_id)
             if draft["revision"] != expected_revision:
                 raise HTTPException(409, "El borrador cambió. Recarga antes de publicar.")
+            if draft.get("template"):
+                return self.publication(rule_id, draft["template"]["publication_id"])
             previous = self.store.connection.execute(
                 "SELECT id FROM component_rule_publications WHERE rule_id = ? AND draft_revision = ?", (rule_id, expected_revision),
             ).fetchone()
@@ -273,6 +282,10 @@ class RuleRepository:
             document["sdk"] = SDK_VERSION
             self.store.connection.execute("INSERT INTO component_rule_publications VALUES (?, ?, ?, ?, ?, ?)",
                                           (identity, rule_id, expected_revision, encode(document), actor, timestamp()))
+            if self.store.connection.execute("SELECT 1 FROM component_rule_templates WHERE rule_id = ?", (rule_id,)).fetchone():
+                from app.rule_library import contract_for
+                contract = contract_for(self.store, document, object_id, project_id)
+                self.store.connection.execute("INSERT INTO component_rule_templates VALUES (?, ?, ?)", (identity, rule_id, encode(contract)))
             return self.publication(rule_id, identity)
 
     def runtime(self):
@@ -305,6 +318,8 @@ class RuleRepository:
             draft = self.get(rule_id, project_id, object_id)
             if draft["revision"] != expected_revision:
                 raise HTTPException(409, "El borrador cambió. Guarda o recarga antes de probar.")
+            if draft.get("template") and (not scope or scope["variant_id"] != draft["variant_id"]):
+                raise HTTPException(422, "Selecciona la variante propia de esta instancia")
             if publication_id:
                 draft = self.publication(rule_id, publication_id)
                 if draft["sdk"] != runtime["sdk"]:
@@ -379,6 +394,9 @@ class RuleRepository:
             raise HTTPException(404, "Regla no encontrada")
         data = dict(row)
         data.update(json.loads(data.pop("document")))
+        if data.get("template"):
+            shared = self.publication(data["template"]["rule_id"], data["template"]["publication_id"])
+            data["code"] = shared["code"]
         return {**data, "status": "draft", "code_hash": digest(data["code"])}
 
     def create(self, project_id, object_id, body, actor):
@@ -398,7 +416,14 @@ class RuleRepository:
         document = body.model_dump(exclude={"expected_revision"})
         with self.store._lock, self.store._database_transaction():
             self.validate(body, project_id, object_id)
-            self.get(rule_id, project_id, object_id)
+            previous = self.get(rule_id, project_id, object_id)
+            if previous.get("template"):
+                from app.rule_library import validate_instance
+                if body.scenario_id != previous["scenario_id"]:
+                    raise HTTPException(422, "La instancia conserva su modelo de destino")
+                validate_instance(self, project_id, object_id, body, previous["template"])
+                document.pop("code")
+                document.update({key: previous[key] for key in ("template", "variant_id", "origin")})
             changed = self.store.connection.execute(
                 "UPDATE component_rule_drafts SET document = ?, revision = revision + 1, "
                 "updated_at = ?, updated_by = ? WHERE id = ? AND revision = ?",
@@ -666,6 +691,8 @@ def rule_router(store):
 
     routes = APIRouter()
     routes.include_router(router)
+    from app.rule_library import library_router
+    routes.include_router(library_router(repository, context))
 
     @routes.get("/api/scenarios/{scenario_id}/hydraulic-plants/{plant_key}/units/{unit_key}/rule-context", tags=["component-rules"])
     def hydraulic_context(scenario_id: int, plant_key: str, unit_key: str, request: Request):

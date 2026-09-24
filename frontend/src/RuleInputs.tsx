@@ -26,12 +26,21 @@ export function RuleInputs({
   onChange,
   scenarioId,
   objects = [],
+  requiredPorts,
 }: {
   root: string;
   inputs: RuleInput[];
   onChange: (inputs: RuleInput[]) => void;
   scenarioId?: number | null;
   objects?: { id: number; label: string }[];
+  requiredPorts?: Pick<
+    RuleInput,
+    | "alias"
+    | "object_id"
+    | "dimension_key"
+    | "semantic_type_key"
+    | "binding_role_key"
+  >[];
 }) {
   const [step, setStep] = useState<number | null>(null);
   const [kind, setKind] = useState("catalog");
@@ -50,7 +59,30 @@ export function RuleInputs({
   });
   const validAlias =
     /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(alias) &&
-    !inputs.some((p) => p.alias === alias);
+    !inputs.some((p) => p.alias === alias) &&
+    (!requiredPorts ||
+      requiredPorts.some(
+        (p) => p.alias === alias && selection && matchesPort(p, selection),
+      ));
+  function matchesPort(
+    port: NonNullable<typeof requiredPorts>[number],
+    candidate: Candidate,
+  ) {
+    return (
+      port.object_id === candidate.object_id &&
+      port.semantic_type_key === candidate.semantic_type_key &&
+      port.binding_role_key === candidate.binding_role_key &&
+      port.dimension_key === candidate.dimension_key
+    );
+  }
+  const availablePorts = requiredPorts?.filter(
+    (p) => !inputs.some((i) => i.alias === p.alias),
+  );
+  const choices = (candidates.data?.items ?? []).filter(
+    (p) =>
+      p.series_kind === kind &&
+      (!availablePorts || availablePorts.some((port) => matchesPort(port, p))),
+  );
   return (
     <fieldset className="rule-inputs">
       <legend>Entradas horarias</legend>
@@ -76,7 +108,7 @@ export function RuleInputs({
       {step === null ? (
         <button
           type="button"
-          disabled={inputs.length >= 20}
+          disabled={inputs.length >= 20 || availablePorts?.length === 0}
           onClick={() => {
             setStep(0);
             setSelection(undefined);
@@ -145,34 +177,33 @@ export function RuleInputs({
                   onChange={(event) => setAlias(event.target.value)}
                 />
               </label>
-              {candidates.data?.items
-                .filter((p) => p.series_kind === kind)
-                .map((item) => (
-                  <label key={item.signal_id}>
-                    <input
-                      type="radio"
-                      name="rule-input-signal"
-                      checked={selection?.signal_id === item.signal_id}
-                      onChange={() => {
-                        setSelection(item);
-                        setAlias(
-                          item.binding_role_key === "rule_availability"
+              {choices.map((item) => (
+                <label key={item.signal_id}>
+                  <input
+                    type="radio"
+                    name="rule-input-signal"
+                    checked={selection?.signal_id === item.signal_id}
+                    onChange={() => {
+                      setSelection(item);
+                      setAlias(
+                        availablePorts?.find((p) => matchesPort(p, item))
+                          ?.alias ??
+                          (item.binding_role_key === "rule_availability"
                             ? "disponibilidad"
-                            : "afluente",
-                        );
-                      }}
-                    />
-                    {item.display_name} · {item.set_name} ·{" "}
-                    {item.unit_key === "m3_per_s" ? "m³/s" : "adimensional"}
-                  </label>
-                ))}
+                            : "afluente"),
+                      );
+                    }}
+                  />
+                  {item.display_name} · {item.set_name} ·{" "}
+                  {item.unit_key === "m3_per_s" ? "m³/s" : "adimensional"}
+                </label>
+              ))}
               {candidates.isPending && (
                 <p role="status">Buscando entradas compatibles…</p>
               )}
-              {candidates.data &&
-                !candidates.data.items.some((p) => p.series_kind === kind) && (
-                  <p>No hay entradas compatibles en esta página.</p>
-                )}
+              {candidates.data && choices.length === 0 && (
+                <p>No hay entradas compatibles en esta página.</p>
+              )}
               {candidates.data?.next_cursor && (
                 <button
                   type="button"
