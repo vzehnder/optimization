@@ -1,4 +1,4 @@
-# Operación y verificación de REG-001 a REG-013
+# Operación y verificación de REG-001 a REG-014
 
 El runtime actual usa **SDK `reg-013.1`**. Reconstruir la imagen OCI y reiniciar
 el worker con su nuevo digest; las aplicaciones anteriores requieren publicar,
@@ -86,10 +86,10 @@ clave `X-Request-Id` se confirman juntas. Repetir la clave devuelve la misma cor
 incluso tras desactivar la aplicación, sin volver a ejecutar Python. La revisión y
 los parámetros aparecen en la pantalla de corrida.
 
-Los productores que aún no soportan reglas bloquean con motivo: consolas y
-programaciones requieren REG-014. La ejecución directa de una versión sin reglas
-también bloquea si el caso tiene aplicaciones activas. Deshabilitar la función
-no permite ejecutar ignorando sus restricciones.
+Consolas y programaciones usan el materializador común desde REG-014, con las
+revisiones preparadas por el analista. Una versión sin reglas bloquea si su variante
+tiene aplicaciones activas; cuando no identifica variante, se comprueba todo el
+escenario. Deshabilitar la función no permite ejecutar ignorando restricciones.
 
 Esta capacidad inicial no admite importaciones, atributos privados ni clases
 del usuario. Incluye utilidades deterministas de Python (`range`, `len`, `sum`,
@@ -598,7 +598,7 @@ npx playwright test e2e/component-rules-simple-hydro.spec.ts
 
 No cambia el SDK `reg-006.1` ni se requiere reconstruir la imagen OCI. La
 extensión de compatibilidad de afluente/disponibilidad es aditiva y se verifica
-sobre SQLite y PostgreSQL. Consolas y programaciones siguen pendientes de REG-014.
+sobre SQLite y PostgreSQL. REG-014 extiende el materializador a consolas y programaciones.
 
 ### Regresión del subsistema
 
@@ -809,3 +809,65 @@ MW y demanda `[2, 2, 2, 2]` MW. La fracción de 0,5 produce exportación
 `[6, 4, 0, 0]` MW. Sin reglas, la exportación es `[6, 6, 0, 0]` MW y el recorte
 `[2, 0, 0, 0]` MW. El recorrido web también comprueba las igualdades de balance
 y disponibilidad: doce filas satisfechas.
+
+## Consolas y programaciones (REG-014)
+
+La configuración interna de una consola y la lista de programaciones muestran
+las publicaciones fijadas, su estado y enlaces de revisión a la variante correcta.
+Antes de activar una consola o crear una programación con reglas, la preparación
+recompila sus pins y negocia las capacidades del motor, sin guardar una corrida.
+Las reglas de una variante clonada requieren la revalidación explícita de REG-009.
+
+Cada ejecución operativa congela el rango solicitado, las fuentes exactas y los
+parámetros físicos efectivos antes de enviar las reglas al mismo worker OCI.
+Conserva el SDK `reg-013.1` y la imagen ya instalada; no agrega un adaptador ni
+ejecuta Python en el proceso web. Comparte cuotas, aislamiento y validación de
+IR, cotas y capacidades con el recorrido del analista. La espera del trabajo
+operativo está acotada a 65 segundos por regla, incluida la cola; al agotarse
+solicita cancelación. Siguen vigentes los límites del worker y del contenedor.
+
+El operador solo puede editar los escalares y columnas expuestos en la consola.
+Una copia de serie autorizada puede cambiar los datos conocidos de esas columnas;
+se comprueban origen permitido, propiedad de la copia y ausencia de cambios en
+el resto del modelo. Los puertos canónicos de las reglas mantienen sus pins.
+Código, alias, publicaciones y parámetros internos de reglas no son editables
+desde el contrato externo. Las ventanas y referencias se reconstruyen para el
+rango efectivo; no se recorta ni reutiliza la IR de otro horizonte.
+
+El snapshot conserva publicaciones, código, entradas, objetos, IR y hashes,
+además del trabajo OCI, overrides y copias operativas. La corrida de consola
+registra el operador y la revisión de configuración. La programada registra al
+creador autorizado de la programación y el iniciador del tick en `automation`.
+Al confirmar se vuelven a comprobar permisos, configuración, modelo, reglas,
+fuentes y runtime; un cambio concurrente bloquea antes de guardar versión/corrida.
+
+Una entrega repetida del mismo `(schedule_id, due_at)` devuelve el tick existente,
+incluido su fallo, sin duplicar corrida ni encolado. Cambiar la fecha mientras se
+materializa bloquea la confirmación y conserva la nueva fecha. El reintento desde
+`POST /api/scenario-versions/{id}/runs` usa el snapshot congelado, sin recompilar
+Python ni necesitar un worker disponible. Deshabilitar la función sigue bloqueando
+nuevas corridas con reglas; los resultados históricos permanecen consultables.
+
+La consola pública utiliza el bloqueo seguro `dependencia_movida` y el recorrido
+existente para solicitar revisión; el detalle de reglas queda en vistas internas.
+Las variantes sin reglas conservan el flujo anterior, incluso si otra variante
+del mismo escenario tiene reglas o el worker está detenido.
+
+Con la imagen OCI fijada y una base PostgreSQL aislada configuradas según este
+documento:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_reg014_rules -v
+```
+
+Desde `frontend`, con el bundle compilado:
+
+```powershell
+$env:RULE_ACCEPTANCE_SERVER = '1'
+npx playwright test e2e/component-rules-operations.spec.ts
+```
+
+El recorrido real comparte una publicación hidro v2 entre analista, consola y
+programación. Julia resuelve `[5, 5]`, `[4, 4]` y `[5, 5]` m³/s respectivamente:
+la consola expone un máximo físico de 4 m³/s. Las seis restricciones evaluadas
+se cumplen y cada snapshot conserva el mismo pin de publicación.

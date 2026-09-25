@@ -54,6 +54,7 @@ import {
 import { loadPlotly, type PlotlyTrace } from "./plotly";
 import { PortalResultsBlock } from "./PortalResults";
 import { ConsoleResultsConfiguration } from "./ConsoleResultsConfiguration";
+import { PreparedRules } from "./PreparedRules";
 import {
   signalCatalogEntry,
   signalCatalogOptions,
@@ -545,6 +546,7 @@ export function OperatorConsoleEditorView() {
         <dt>Bloqueo</dt>
         <dd>{blockingLabel(console.blocking.reason)}</dd>
       </dl>
+      <PreparedRules rules={console.rules} />
       {repairTarget?.section === "parameters" ? (
         <p
           id={configurationTargetId(repairTarget)}

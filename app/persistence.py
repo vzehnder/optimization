@@ -27477,6 +27477,7 @@ class AnalystStore:
         next_run_at: str,
         last_fired_at: str,
         updated_by: str = "internal_analyst",
+        expected_next_run_at: str | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             self.get_run_schedule(schedule_id)
@@ -27490,8 +27491,9 @@ class AnalystStore:
                     updated_at = ?,
                     updated_by = ?
                 WHERE id = ?
-                """,
-                (next_run_at, last_fired_at, updated_at, updated_by, schedule_id),
+                """ + (" AND next_run_at = ?" if expected_next_run_at is not None else ""),
+                (next_run_at, last_fired_at, updated_at, updated_by, schedule_id,
+                 *((expected_next_run_at,) if expected_next_run_at is not None else ())),
             )
             self.connection.commit()
             return self.get_run_schedule(schedule_id)
@@ -27504,9 +27506,18 @@ class AnalystStore:
         fired_at: str,
         range_start: str,
         range_end: str,
+        unique_due: bool = False,
     ) -> dict[str, Any]:
-        with self._lock:
+        with self._lock, self._run_materialization_transaction():
             self.get_run_schedule(schedule_id)
+            self.connection.execute("UPDATE run_schedules SET id = id WHERE id = ?", (schedule_id,))
+            if unique_due:
+                previous = self.connection.execute(
+                    "SELECT id FROM run_schedule_ticks WHERE schedule_id = ? AND due_at = ? ORDER BY id LIMIT 1",
+                    (schedule_id, due_at),
+                ).fetchone()
+                if previous:
+                    return {**self.get_run_schedule_tick(previous["id"]), "_claimed": False}
             now = utc_now_iso()
             cursor = self.connection.execute(
                 """
@@ -27524,8 +27535,8 @@ class AnalystStore:
                 """,
                 (schedule_id, due_at, fired_at, range_start, range_end, now, now),
             )
-            self.connection.commit()
-            return self.get_run_schedule_tick(cursor.lastrowid)
+            tick = self.get_run_schedule_tick(cursor.lastrowid)
+            return {**tick, "_claimed": True} if unique_due else tick
 
     def get_run_schedule_tick(self, tick_id: int) -> dict[str, Any]:
         row = self.connection.execute(
@@ -29071,6 +29082,9 @@ class AnalystStore:
             staleness = {"stale": False, "reasons": []}
         if staleness["stale"]:
             reasons = list(staleness["reasons"])
+        from app.rule_operations import prepared_summary
+        if not prepared_summary(self.component_rule_repository, int(console["owned_variant_id"]))["ready"]:
+            reasons.append({"reason": "component_rules", "message": "Revisar las reglas preparadas y su runtime"})
         return {
             "editing_locked_by": self._operator_console_editing_holder(
                 console, viewer_user_id
@@ -31168,15 +31182,16 @@ class AnalystStore:
         *,
         range_start: str,
         range_end: str,
+        rule_materialized: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Materialize the console variant, then apply its scalar overlay."""
 
         console = self.get_operator_console(console_id)
         location = self.get_operator_console_location(console_id)
         from app.rule_applications import active_applications
-        if active_applications(self, scenario_id=int(location["scenario_id"])):
+        if rule_materialized is None and active_applications(self, variant_id=int(console["owned_variant_id"])):
             raise ValueError("El caso tiene reglas activas y requiere revisión del analista antes de ejecutar desde una consola.")
-        materialized = self.materialize_system_case_for_variant(
+        materialized = rule_materialized if rule_materialized is not None else self.materialize_system_case_for_variant(
             scenario_id=int(location["scenario_id"]),
             case_input_variant_id=int(console["owned_variant_id"]),
             range_start=range_start,

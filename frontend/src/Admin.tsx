@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { PreparedRules } from "./PreparedRules";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
@@ -119,6 +120,7 @@ function RunScheduleList({
             <div className="admin-resource-row">
               <div>
                 <strong>{schedule.display_name}</strong>
+                <PreparedRules rules={schedule.rules} />
                 <p>
                   Escenario {schedule.scenario_id} | Variante{" "}
                   {schedule.case_input_variant_id} |{" "}

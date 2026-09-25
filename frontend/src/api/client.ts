@@ -50,7 +50,21 @@ export interface ExternalProjectCapabilities {
   operate: boolean;
 }
 
+export interface PreparedRuleSummary {
+  ready: boolean;
+  runtime_available: boolean;
+  items: Array<{
+    application_id: string;
+    publication_id: string;
+    name: string;
+    rule_url: string;
+    validation_status: string;
+    validation_causes: Array<{ message: string }>;
+  }>;
+}
+
 export interface RunSchedule {
+  rules?: PreparedRuleSummary;
   id: number;
   scenario_id: number;
   case_id: number;
@@ -471,6 +485,7 @@ export interface OperatorConsoleBlocking {
 }
 
 export interface OperatorConsole {
+  rules?: PreparedRuleSummary;
   id: number;
   scenario_id: number;
   case_id: number;

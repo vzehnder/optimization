@@ -242,7 +242,7 @@ class RuleApplicationApiTests(unittest.TestCase):
         self.assertEqual(self.client.get(f"/api/scenarios/{scope['scenario_id']}/runs").json()["runs"], [])
 
     @unittest.skipUnless(os.environ.get("RULE_RUNTIME_IMAGE"), "pinned OCI image required")
-    def test_scheduled_execution_reports_that_active_rules_are_not_supported(self):
+    def test_schedule_activation_requires_the_rule_runtime(self):
         from app.rule_worker import RuleWorker
         from app.rule_runtime import OCIExecutor
         from app.auth import hash_password
@@ -254,12 +254,9 @@ class RuleApplicationApiTests(unittest.TestCase):
         admin = self.store.create_user(email=f"admin-{self.token}@rules.test", display_name="Admin", role="admin", password_hash=hash_password("test password"))
         login_json_with_csrf(self.client, admin["email"], "test password")
         schedule = post_json_with_csrf(self.client, "/api/admin/schedules", {"scenario_id": scope["scenario_id"], "case_input_variant_id": scope["variant_id"], "display_name": "Con reglas", "range_start": scope["range_start"] + "+00:00", "range_end": scope["range_end"] + "+00:00", "cadence": "daily", "next_run_at": "2026-09-21T00:00:00+00:00"})
-        self.assertEqual(schedule.status_code, 201, schedule.text)
-        response = post_json_with_csrf(self.client, "/api/admin/schedules/run-due", {"now": "2026-09-21T01:00:00+00:00"})
-        self.assertEqual(response.status_code, 200, response.text)
-        tick = next(t for t in response.json()["ticks"] if t["schedule_id"] == schedule.json()["schedule"]["id"])
-        self.assertEqual(tick["status"], "failed")
-        self.assertIn("reglas", tick["error_message"].lower())
+        self.assertEqual(schedule.status_code, 409, schedule.text)
+        self.assertIn("runtime", schedule.text)
+        self.assertEqual(self.client.get(f"/api/scenarios/{scope['scenario_id']}/runs").json()["runs"], [])
 
     def test_publishing_pins_immutable_code_without_following_draft_edits(self):
         rule = post_json_with_csrf(self.client, self.root, {**PAYLOAD, "code": CODE, "parameters": PARAMETERS}).json()

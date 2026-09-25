@@ -1,7 +1,7 @@
 # Plan: motor de cálculos y restricciones por componente
 
 Fecha: 2026-09-21.
-Estado: decisiones adoptadas por delegación del usuario; REG-001 a REG-013 implementados y verificados, REG-014 pendiente.
+Estado: decisiones adoptadas por delegación del usuario; REG-001 a REG-014 implementados y verificados.
 Tracker: [issues](issues/tracker.md).
 
 ## 1. Objetivo y decisiones de la entrevista
@@ -306,8 +306,8 @@ Las contradicciones simples se detectan antes del solve; una infactibilidad gene
 se presenta con el conjunto de reglas y estado del solver, sin afirmar que se
 identificó una causa única ni prometer un IIS o un diagnóstico mínimo.
 
-Hasta REG-014, las rutas de consola y programación con reglas activas bloquean
-explícitamente. Al habilitarlas, usarán revisiones preparadas por el analista y
+Desde REG-014, las rutas de consola y programación usan el materializador común
+con revisiones preparadas por el analista y
 parámetros operativos efectivos antes de compilar. Los externos solo ven mensajes
 operativos seguros; no reciben código, IR, trazas ni referencias internas. Los
 modelos sin reglas siguen funcionando en todas las etapas.

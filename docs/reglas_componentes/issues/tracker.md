@@ -2,7 +2,7 @@
 
 Fecha de creación: 2026-09-21.
 Fuente normativa de este paquete: [plan](../plan.md).
-Estado: REG-001 a REG-013 implementados y verificados; siguiente issue por orden: REG-014.
+Estado: REG-001 a REG-014 implementados y verificados; secuencia completada.
 
 ## Vocabulario y reglas de trabajo
 
@@ -40,7 +40,7 @@ de aislamiento, permisos, snapshots y capacidades se exigen desde su primer uso.
 | 11 | [REG-011: Hidro simple v2](REG-011-hidro-simple.md) | AFK | Done | REG-004 | HU-11 |
 | 12 | [REG-012: Baterías](REG-012-baterias.md) | AFK | Done | REG-011 | HU-03, HU-11 |
 | 13 | [REG-013: Red y renovables](REG-013-red-y-renovables.md) | AFK | Done | REG-011 | HU-04, HU-11 |
-| 14 | [REG-014: Consolas y programaciones](REG-014-consolas-y-programaciones.md) | AFK | Todo | REG-009, REG-010, REG-011 | HU-09, HU-12 |
+| 14 | [REG-014: Consolas y programaciones](REG-014-consolas-y-programaciones.md) | AFK | Done | REG-009, REG-010, REG-011 | HU-09, HU-12 |
 
 El orden numérico es una lectura y una secuencia válida, no una obligación de
 serializar ramas sin dependencias. Tras REG-003 puede avanzar REG-007; tras
@@ -96,3 +96,4 @@ proyectos reales. No alterar ni cerrar issues previos de TS-6/TS-7 por completar
 | 2026-09-24 | REG-011 implementado con TDD; REG-012 es el siguiente por orden | 26 pruebas nuevas SQLite/PostgreSQL/OCI, 95 de regresión de reglas, 71 de corridas/resultados/catálogo, 130 React y 610 comprobaciones Julia aprobadas. Chromium real aplica límites de 4 y 6 m³/s, conserva balances y evalúa ocho restricciones. Remapeo explícito, coexistencia de editores y bloqueo de motores antiguos; detalles y limitación de formato en REG-011. |
 | 2026-09-24 | REG-012 implementado con TDD; REG-013 es el siguiente por orden | 26 pruebas nuevas SQLite/PostgreSQL/OCI, 26 de regresión REG-011, 38 React y 635 comprobaciones Julia aprobadas. Chromium real aplica una reserva horaria en MWh y límites de carga/descarga, conserva eficiencias y energía terminal, y evalúa ocho restricciones cumplidas. SDK reg-012.1 y adaptador battery_system.v1; evidencia, operación y limitación de formato en REG-012. |
 | 2026-09-25 | REG-013 implementado con TDD; REG-014 es el siguiente por orden | 16 pruebas nuevas SQLite/PostgreSQL/OCI, 46 de regresión Python, 89 React y 663 comprobaciones Julia aprobadas. Chromium real relaciona exportación y generación con una fracción 0,5, conserva balance/disponibilidad y evalúa doce restricciones cumplidas. SDK reg-013.1 y adaptador electric_system.v1; evidencia y repetición del test CLI en [REG-013](REG-013-red-y-renovables.md). |
+| 2026-09-25 | REG-014 implementado con TDD; secuencia completada | 22 pruebas nuevas HTTP SQLite/PostgreSQL/OCI, 95 de regresi?n operativa, 13 de hidro simple, 34 de REG-002/corridas y 64 React aprobadas. Chromium con Julia conserva una publicaci?n y resuelve 5 ? 4 ? 5 m?/s entre analista, consola y programaci?n. Pins, datos efectivos, snapshots, idempotencia, reintentos, permisos y concurrencia; detalles en [REG-014](REG-014-consolas-y-programaciones.md). |

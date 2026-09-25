@@ -221,6 +221,48 @@ function stubScenarioWorkspace(
 }
 
 describe("operator consoles in the scenario workspace", () => {
+  it("shows pinned operational rules with their review link", async () => {
+    window.history.replaceState({}, "", "/react/scenarios/10/consoles/4");
+    stubScenarioWorkspace((path) => {
+      if (path === "/api/scenarios/10/consoles/4") {
+        return Response.json({
+          operator_console: {
+            ...draftConsole,
+            rules: {
+              ready: false,
+              runtime_available: true,
+              items: [
+                {
+                  application_id: "app-1",
+                  publication_id: "revision-fijada-2",
+                  name: "Caudal operativo",
+                  validation_status: "stale",
+                  validation_causes: [
+                    { message: "Hay una nueva revisión publicada" },
+                  ],
+                  rule_url:
+                    "/react/scenarios/10/rules/31?rule=hydro&variant_id=9",
+                },
+              ],
+            },
+          },
+        });
+      }
+    });
+    render(<App />);
+    expect(
+      await screen.findByRole("heading", { name: "Reglas preparadas" }),
+    ).toBeVisible();
+    expect(screen.getByText("revision-fijada-2")).toBeVisible();
+    expect(screen.getByText("Hay una nueva revisión publicada")).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "Revisar Caudal operativo" }),
+    ).toHaveAttribute(
+      "href",
+      "/react/scenarios/10/rules/31?rule=hydro&variant_id=9",
+    );
+  });
+
   it("creates a draft console from a chosen source variant", async () => {
     window.history.replaceState({}, "", "/react/scenarios/10?section=advanced");
     const created: unknown[] = [];

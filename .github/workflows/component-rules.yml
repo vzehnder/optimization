@@ -94,6 +94,13 @@ jobs:
       - run: python -m unittest tests.test_reg011_rules -v
       - run: python -m unittest tests.test_reg012_rules -v
       - run: python -m unittest tests.test_reg013_rules -v
+      - run: python -m unittest tests.test_reg014_rules tests.test_configuration_layer_operator_console tests.test_configuration_layer_console_fail_closed tests.test_ts6_008_schedules -v
+      - run: npm test -- --run src/OperatorConsole.test.tsx src/ConsoleExperience.test.tsx src/Admin.test.tsx src/AdminExperience.test.tsx
+        working-directory: frontend
+      - run: npx playwright test e2e/component-rules-operations.spec.ts
+        working-directory: frontend
+        env:
+          RULE_ACCEPTANCE_SERVER: '1'
       - run: npx playwright test e2e/component-rules-electric.spec.ts
         working-directory: frontend
         env:

@@ -11,6 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import quote
+from uuid import uuid4
 
 from fastapi import (
     FastAPI,
@@ -5311,6 +5312,7 @@ def create_app(
         console: dict[str, Any],
         request: Request | None = None,
     ) -> dict[str, Any]:
+        from app.rule_operations import prepared_summary
         owned_variant = analyst_store.get_case_input_variant(int(console["owned_variant_id"]))
         latest_failed_run = next(
             (
@@ -5349,6 +5351,7 @@ def create_app(
                 "id": owned_variant["id"],
                 "display_name": owned_variant["display_name"],
             },
+            "rules": prepared_summary(analyst_store.component_rule_repository, owned_variant["id"]),
             "prepared_by": portal_configuration_editor_email(console["prepared_by_user_id"]),
             "created_at": console["created_at"],
             "created_by": portal_configuration_editor_email(console["created_by_user_id"]),
@@ -5445,6 +5448,11 @@ def create_app(
             get_console_for_scenario(scenario_id, console_id)
             document = validate_operator_console_config_document(payload.document)
             status = validate_operator_console_status(payload.status)
+            if status == "active":
+                from app.rule_operations import validate_activation
+                validate_activation(analyst_store.component_rule_repository,
+                    analyst_store.get_operator_console(console_id)["owned_variant_id"],
+                    request.state.current_user, service.validate_text)
             console = analyst_store.save_operator_console(
                 console_id,
                 document=document,
@@ -5933,11 +5941,26 @@ def create_app(
         if not gate["can_run"]:
             return JSONResponse({"run_gate": gate}, status_code=409)
         try:
+            from app.rule_applications import active_applications, materialize_run
+            variant_id = int(resolved["console"]["owned_variant_id"])
+            if active_applications(analyst_store, variant_id=variant_id):
+                scope = {"scenario_id": int(resolved["location"]["scenario_id"]), "variant_id": variant_id,
+                         "range_start": payload.range_start, "range_end": payload.range_end}
+                run, created = materialize_run(analyst_store.component_rule_repository, scope,
+                    request.state.current_user, request.headers.get("Idempotency-Key") or uuid4().hex,
+                    service.validate_text, operation={"trigger_type": "operator_console", "console_id": console_id,
+                        "console_revision": int(resolved["console"]["revision"]), "lineage": {}})
+                if created:
+                    local_run_queue.enqueue(run["id"])
+                return {"run": build_console_run_entry(run)}
             materialized = analyst_store.materialize_operator_console_run(
                 console_id,
                 range_start=payload.range_start,
                 range_end=payload.range_end,
             )
+        except HTTPException:
+            return JSONResponse({"run_gate": build_console_run_gate(moved_dependency=True, contact=contact,
+                review_requested_at=resolved["console"]["waiting_since"])}, status_code=409)
         except InputVariantRangeError:
             return JSONResponse(
                 {
@@ -6225,8 +6248,10 @@ def create_app(
     @app.get("/api/admin/schedules")
     async def admin_list_run_schedules(request: Request):
         require_admin_user(request)
+        from app.rule_operations import prepared_summary
         return {
-            "schedules": analyst_store.list_run_schedules(),
+            "schedules": [{**s, "rules": prepared_summary(analyst_store.component_rule_repository, s["case_input_variant_id"])}
+                          for s in analyst_store.list_run_schedules()],
             "ticks": analyst_store.list_run_schedule_ticks(),
         }
 
@@ -6234,6 +6259,9 @@ def create_app(
     async def admin_create_run_schedule(payload: RunScheduleCreateRequest, request: Request):
         require_admin_user(request)
         try:
+            from app.rule_operations import validate_activation, prepared_summary
+            validate_activation(analyst_store.component_rule_repository, payload.case_input_variant_id,
+                                request.state.current_user, service.validate_text)
             schedule = analyst_store.create_run_schedule(
                 scenario_id=payload.scenario_id,
                 case_input_variant_id=payload.case_input_variant_id,
@@ -6251,7 +6279,7 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         except (DraftGenerationError, ScheduleError, ValueError) as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
-        return {"schedule": schedule}
+        return {"schedule": {**schedule, "rules": prepared_summary(analyst_store.component_rule_repository, schedule["case_input_variant_id"])}}
 
     @app.post("/api/admin/schedules/run-due")
     async def admin_run_due_schedules(payload: RunDueSchedulesRequest, request: Request):

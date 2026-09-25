@@ -359,7 +359,13 @@ def has_run_request(store, variant_id, actor_id, request_id):
 def guard_version_run(store, version, trigger_type):
     block = version["system_case_json"].get("component_rules")
     if block is None:
-        guard_uncompiled_run(store, scenario_id=version["scenario_id"])
+        variant_id = version["generation_metadata"].get("input_variant", {}).get("id")
+        if variant_id is not None:
+            variant = store.get_case_input_variant(variant_id)
+            case = store.connection.execute("SELECT scenario_id FROM optimization_cases WHERE id = ?", (variant["case_id"],)).fetchone()
+            if case["scenario_id"] != version["scenario_id"]:
+                raise HTTPException(409, "La variante del snapshot no pertenece al caso")
+        guard_uncompiled_run(store, scenario_id=version["scenario_id"], variant_id=variant_id)
         return
     from app.rule_ir import IR_VERSION, HYDRAULIC_IR_VERSION, TEMPORAL_IR_VERSION, BUDGET_IR_VERSION
     project = store.get_scenario(version["scenario_id"])["project_id"]
@@ -371,15 +377,17 @@ def guard_version_run(store, version, trigger_type):
         raise HTTPException(409, "El SDK del snapshot no está soportado")
 
 
-def materialize_run(repository, scope, actor, request_id, validate_text, expected_bindings_revision=None):
+def materialize_run(repository, scope, actor, request_id, validate_text, expected_bindings_revision=None, *, operation=None, prepare_only=False):
     from app.persistence import extract_system_case_metadata
     from app.rule_ir import IR_VERSION, HYDRAULIC_IR_VERSION, TEMPORAL_IR_VERSION, BUDGET_IR_VERSION
     store = repository.store
     scenario = store.get_scenario(scope["scenario_id"])
     project_id = scenario["project_id"]
-    request_hash = digest({"scope": scope, "bindings_revision": expected_bindings_revision})
-    if not actor.get("id") or actor.get("role") not in {"analyst", "admin"}:
+    request_hash = digest({"scope": scope, "bindings_revision": expected_bindings_revision, **({"operation": operation} if operation else {})})
+    if not actor.get("id"):
         raise HTTPException(403, "Las corridas con reglas requieren un analista autenticado")
+    from app.rule_operations import authorize_operation, effective_scope
+    authorize_operation(store, scope, actor, operation)
 
     def replay():
         row = store.connection.execute("SELECT * FROM component_rule_run_requests WHERE variant_id = ? AND actor = ? AND request_id = ?",
@@ -390,6 +398,7 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
             raise HTTPException(409, "La clave idempotente ya se usó con otro rango")
         return store.get_run(row["run_id"])
 
+    compiled = None
     with store._lock:
         existing = replay()
         if existing:
@@ -399,7 +408,17 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
         applications = active_applications(store, variant_id=scope["variant_id"])
         if not applications or len(applications) > 50:
             raise HTTPException(409, "Se requieren entre 1 y 50 aplicaciones activas")
-        frozen = freeze_scope(store, project_id, scope, expected_bindings_revision, object_id=applications[0]["object_id"])
+        frozen = effective_scope(repository, scope, applications, operation, expected_bindings_revision)
+        application_hash = digest(applications)
+        if operation:
+            from app.rule_operations import assert_prepared
+            assert_prepared(repository, applications)
+    if operation:
+        from app.rule_operations import compile_operation
+        compiled = compile_operation(repository, applications, frozen, actor)
+    with store._lock:
+        if compiled is not None:
+            applications = compiled
         rows, objects, snapshots = [], {}, []
         runtime = repository.runtime()
         for application in applications:
@@ -411,7 +430,7 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
                 raise HTTPException(409, "Hay una nueva revisión publicada; revalida la aplicación con motivo")
             if application["runtime"]["sdk"] != SDK_VERSION or (runtime and runtime != application["runtime"]):
                 raise HTTPException(409, "El runtime cambió; vuelve a probar la regla")
-            current = compile_context(store, project_id, application["object_id"], scope)
+            current = frozen if operation else compile_context(store, project_id, application["object_id"], scope)
             assert_objects_current(store, project_id, application["object_id"], application["compilation"], current, application["code"])
             ir = validate_ir(application["ir"], application["object_id"], len(frozen["grid"]), application.get("objects"),
                              grid=frozen["grid"], windows=application.get("windows"), temporal=application.get("temporal"))
@@ -428,6 +447,8 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
                                 "windows": application.get("windows"),
                                 "template": application.get("template"), "origin": application.get("origin"),
                                 "aliases": application.get("aliases", []), "objects": application.get("objects", [])})
+            if operation:
+                snapshots[-1]["compilation_job_id"] = application["compilation_job_id"]
             if application.get("adapter"):
                 snapshots[-1].update({key: application[key] for key in ("adapter", "schema_version", "required_capabilities")})
         if len(rows) > 100000 or sum(len(row["terms"]) for row in rows) > 500000:
@@ -452,7 +473,6 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
         text = encode(document)
         if len(text.encode()) > 64 * 1024 * 1024:
             raise HTTPException(422, "Snapshot de reglas excede 64 MiB")
-        application_hash = digest(applications)
 
     # Neither the sandbox nor Julia runs while holding a database transaction.
     validation = validate_text(text)
@@ -465,12 +485,13 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
 
     with store._lock, snapshot_transaction(store):
         store.connection.execute("UPDATE case_input_variants SET updated_at = updated_at WHERE id = ?", (scope["variant_id"],))
+        authorize_operation(store, scope, actor, operation)
         existing = replay()
         if existing:
             return existing, False
         if not project_enabled(project_id):
             raise HTTPException(409, "Las reglas se deshabilitaron durante la materialización")
-        current = freeze_scope(store, project_id, scope, expected_bindings_revision, object_id=applications[0]["object_id"])
+        current = effective_scope(repository, scope, applications, operation, expected_bindings_revision)
         if current["fingerprint"] != frozen["fingerprint"] or digest(active_applications(store, variant_id=scope["variant_id"])) != application_hash:
             raise HTTPException(409, "El contexto cambió al materializar; vuelve a compilar")
         if any(latest_publication(store, item["rule_id"]) != item["observed_publication"] for item in applications):
@@ -481,11 +502,19 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
             assert_instance_current(repository, item)
             assert_objects_current(store, project_id, item["object_id"], item["compilation"], current, item["code"])
             assert_inputs_current(store, project_id, item["object_id"], item.get("inputs", []), item.get("aliases", []))
+        if operation:
+            if any(repository.runtime() != item["runtime"] for item in applications):
+                raise HTTPException(409, "El runtime dejó de estar disponible o cambió durante la materialización")
+            assert_prepared(repository, active_applications(store, variant_id=scope["variant_id"]))
         metadata = extract_system_case_metadata(document)
-        generation = {**frozen["lineage"], "kind": "case_input_variant", "input_variant": {
+        if prepare_only:
+            return document
+        generation = {**frozen["lineage"], "kind": frozen["lineage"].get("kind", "case_input_variant"), "input_variant": {
                           "id": scope["variant_id"], "display_name": store.get_case_input_variant(scope["variant_id"])["display_name"]},
                       "date_range": {"start": scope["range_start"], "end": scope["range_end"]},
                       "component_rules_hash": digest(block), "request_id": request_id}
+        if operation:
+            generation.update(operation["lineage"])
         version = store.connection.execute("""
             INSERT INTO scenario_versions (scenario_id, version_number, system_case_json, case_name, schema_version,
                 period_count, asset_counts_json, validation_payload_json, generation_metadata_json, created_at, created_by)
@@ -495,9 +524,17 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
         lineage = {"component_rules": [{key: item[key] for key in ("id", "name", "publication_id", "parameters", "ir_hash")}
                                        | {"windows": item.get("windows")} for item in applications],
                    "component_rules_hash": digest(block)}
+        if operation:
+            lineage.update(operation["lineage"])
         run = store.connection.execute("""INSERT INTO runs (scenario_version_id, status, created_at, triggered_by, trigger_type,
-            triggered_by_user_id, triggered_by_display_name, materialized_lineage_json) VALUES (?, 'queued', ?, ?, 'manual', ?, ?, ?)""",
-            (version.lastrowid, timestamp(), actor["email"], actor["id"], actor["display_name"], encode(lineage)))
+            triggered_by_user_id, triggered_by_display_name, materialized_lineage_json, operator_console_id, operator_console_revision)
+            VALUES (?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (version.lastrowid, timestamp(), actor["email"], operation["trigger_type"] if operation else "manual",
+             actor["id"], actor["display_name"], encode({**frozen["lineage"], **lineage}),
+             operation.get("console_id") if operation else None, operation.get("console_revision") if operation else None))
         store.connection.execute("INSERT INTO component_rule_run_requests VALUES (?, ?, ?, ?, ?)",
                                  (scope["variant_id"], actor["id"], request_id, request_hash, run.lastrowid))
+        if operation and operation["trigger_type"] == "scheduled":
+            store.connection.execute("UPDATE run_schedule_ticks SET scenario_version_id = ?, run_id = ?, updated_at = ? WHERE id = ?",
+                (version.lastrowid, run.lastrowid, timestamp(), operation["lineage"]["automation"]["schedule_tick_id"]))
         return store.get_run(run.lastrowid), True

@@ -161,7 +161,10 @@ def execute_fixed_range_schedule(
         fired_at=fired_at,
         range_start=resolved_range["start"],
         range_end=resolved_range["end"],
+        unique_due=True,
     )
+    if not tick.pop("_claimed"):
+        return tick
     next_run_at = next_fixed_range_fire_time(
         cadence=schedule["cadence"], due_at=due_at, now=fired_at
     )
@@ -169,7 +172,23 @@ def execute_fixed_range_schedule(
     try:
         from app.rule_applications import active_applications
         if active_applications(store, variant_id=int(schedule["case_input_variant_id"])):
-            raise ValueError("Las programaciones con reglas activas requieren soporte de REG-014")
+            from app.rule_applications import materialize_run
+            actor = store.get_user_by_email(schedule["created_by"])
+            scope = {"scenario_id": int(schedule["scenario_id"]), "variant_id": int(schedule["case_input_variant_id"]),
+                     "range_start": resolved_range["start"], "range_end": resolved_range["end"]}
+            run, created = materialize_run(store.component_rule_repository, scope, actor,
+                f"schedule:{schedule['id']}:{due_at}", validation_service.validate_text,
+                operation={"trigger_type": "scheduled", "schedule_state": {key: schedule[key] for key in (
+                    "id", "scenario_id", "case_input_variant_id", "is_active", "range_start", "range_end", "range_mode",
+                    "rolling_start_offset_hours", "rolling_duration_hours", "cadence", "next_run_at", "created_by")},
+                    "lineage": {"automation": {
+                    "schedule_id": int(schedule["id"]), "schedule_tick_id": tick["id"],
+                    "schedule_name": schedule["display_name"], "due_at": due_at,
+                    "fired_at": fired_at, "initiated_by": triggered_by}}})
+            tick = store.mark_run_schedule_tick_queued(tick["id"], scenario_version_id=run["scenario_version_id"], run_id=run["id"])
+            if created:
+                run_queue.enqueue(run["id"])
+            return tick
         variant = store.get_case_input_variant_for_case(
             int(schedule["case_id"]), int(schedule["case_input_variant_id"])
         )
@@ -220,6 +239,7 @@ def execute_fixed_range_schedule(
         VariantStaleError,
         ValueError,
         HTTPException,
+        KeyError,
     ) as error:
         tick = store.mark_run_schedule_tick_failed(
             tick["id"],
@@ -233,4 +253,5 @@ def execute_fixed_range_schedule(
             next_run_at=next_run_at,
             last_fired_at=fired_at,
             updated_by=triggered_by,
+            expected_next_run_at=str(schedule["next_run_at"]),
         )

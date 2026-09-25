@@ -7,6 +7,67 @@ import { describe, expect, it, vi } from "vitest";
 import { AdminUsersView, ProjectExternalAccessSection } from "./Admin";
 
 describe("external project capabilities", () => {
+  it("shows the pinned rules for a scheduled execution", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path === "/api/admin/users") return Response.json({ users: [] });
+        if (path === "/api/admin/schedules")
+          return Response.json({
+            ticks: [],
+            schedules: [
+              {
+                id: 1,
+                display_name: "Hidro diario",
+                scenario_id: 10,
+                case_input_variant_id: 9,
+                range_mode: "fixed",
+                range_start: "2026-01-01T00:00:00Z",
+                range_end: "2026-01-01T02:00:00Z",
+                cadence: "daily",
+                next_run_at: "2026-01-02T00:00:00Z",
+                is_active: true,
+                rules: {
+                  ready: true,
+                  runtime_available: true,
+                  items: [
+                    {
+                      application_id: "a1",
+                      publication_id: "pin-hidro-1",
+                      name: "Límite hidro",
+                      validation_status: "valid",
+                      validation_causes: [],
+                      rule_url: "/react/scenarios/10/rules/1",
+                    },
+                  ],
+                },
+              },
+            ],
+          });
+        return Response.json({ detail: "unhandled" }, { status: 500 });
+      }),
+    );
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <MemoryRouter>
+          <AdminUsersView />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("link", { name: "Programación" }));
+    expect(await screen.findByText("pin-hidro-1")).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "Revisar Límite hidro" }),
+    ).toBeVisible();
+  });
+
   it("offers external as an identity role in administration", async () => {
     vi.stubGlobal(
       "fetch",
