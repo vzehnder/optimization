@@ -3737,7 +3737,11 @@
               "vertimiento",
               "carga",
               "descarga",
-              "energia"
+              "energia",
+              "importacion",
+              "exportacion",
+              "generacion",
+              "recorte"
             ],
             "title": "Variable",
             "type": "string"

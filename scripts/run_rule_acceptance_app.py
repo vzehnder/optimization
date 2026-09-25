@@ -72,6 +72,11 @@ def main():
         battery_scenario = store.create_scenario(project_id=project["id"], name="REG-012 · Reserva batería")
         store.create_or_replace_scenario_draft(scenario_id=battery_scenario["id"], document=battery_draft)
         battery_source = source("REG-012 · Reserva horaria", "battery_energy_reserve", "mwh", [0, 4, 1, 2])
+        electric_document = json.loads((REPO_ROOT / "tests/fixtures/reg013_electric.json").read_text())
+        electric_draft = structured_draft_document_from_system_case(electric_document)
+        electric_draft["time_series"] = {"periods": electric_document["time_series"]}
+        electric_scenario = store.create_scenario(project_id=project["id"], name="REG-013 · Red y renovables")
+        store.create_or_replace_scenario_draft(scenario_id=electric_scenario["id"], document=electric_draft)
         app = create_app(store=store, auth_enabled=True, artifact_root=Path(temporary) / "artifacts", input_source_root=Path(temporary) / "sources")
         original_lifespan = app.router.lifespan_context
 
@@ -94,6 +99,10 @@ def main():
         @app.get("/api/auth/reg012-fixture", include_in_schema=False)
         def battery_fixture():
             return {"scenario_id": battery_scenario["id"], "source": battery_source}
+
+        @app.get("/api/auth/reg013-fixture", include_in_schema=False)
+        def electric_fixture():
+            return {"scenario_id": electric_scenario["id"]}
 
         @app.get("/api/auth/reg002-fixture", include_in_schema=False)
         def fixture():

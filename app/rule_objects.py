@@ -1,14 +1,33 @@
 """Resolve rule references by stable identity and active case membership."""
 import ast
+import math
 from fastapi import HTTPException
 
 VARIABLES = {
+    "grid": {"importacion": "mw", "exportacion": "mw"},
+    "renewable": {"generacion": "mw", "recorte": "mw"},
+    "load": {},
     "battery": {"carga": "mw", "descarga": "mw", "energia": "mwh"},
     "hydro": {"caudal": "m3_per_s", "vertimiento": "m3_per_s", "potencia": "mw", "almacenamiento": "hm3"},
     "hydraulic_unit": {"caudal": "m3_per_s", "potencia": "mw"},
     "hydraulic_plant": {"potencia": "mw"},
     "hydraulic_node": {"almacenamiento": "hm3", "vertimiento": "m3_per_s"},
 }
+
+
+def electric_data(node, document):
+    kind = node["type"]
+    if kind not in {"grid", "renewable", "load"}:
+        return {}
+    result = {"conventions": {name: "nonnegative_interval_mean" for name in VARIABLES[kind]}}
+    if kind != "grid":
+        field, name = (("renewable_available_power_mw", "disponibilidad") if kind == "renewable"
+                       else ("load_demand_mw", "demanda"))
+        values = [p.get(field, {}).get(node["id"]) for p in document["time_series"]]
+        if any(type(v) not in (int, float) or not math.isfinite(v) or v < 0 for v in values):
+            raise HTTPException(422, f"{name}: se requieren datos finitos no negativos para toda la grilla")
+        result["known_series"] = {name: {"values": values, "unit": "mw"}}
+    return result
 
 
 def model_document(store, scenario_id, object_id=None):
@@ -48,10 +67,11 @@ def model_objects(store, project_id, scenario_id, document=None, *, object_id=No
         except (KeyError, ValueError) as error:
             raise HTTPException(422, "El modelo no está disponible para relacionar objetos") from error
     if document["schema_version"] in {"bess_system_dispatch.v1", "bess_system_dispatch.v2"}:
-        nodes = {n["id"]: n for n in document["nodes"] if n["type"] in {"hydro", "battery"}}
+        nodes = {n["id"]: n for n in document["nodes"] if n["type"] in {"hydro", "battery", "grid", "renewable", "load"}}
         return [{"id": o["id"], "key": o["object_key"], "component_key": o["object_key"],
                  "display_name": o["display_name"], "kind": nodes[o["object_key"]]["type"],
                  "variables": VARIABLES[nodes[o["object_key"]]["type"]],
+                 **electric_data(nodes[o["object_key"]], document),
                  **({"conventions": {"carga": "nonnegative_interval_mean", "descarga": "nonnegative_interval_mean", "energia": "end_of_period"},
                      "known_values": {"energia_inicial": {"value": nodes[o["object_key"]]["initial_energy_mwh"], "unit": "mwh"}}}
                     if nodes[o["object_key"]]["type"] == "battery" else {}),

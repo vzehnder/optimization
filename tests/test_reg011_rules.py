@@ -68,7 +68,8 @@ class SimpleHydroRuleTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertNotEqual(response.json()["object_id"], self.obj["id"])
         self.assertEqual(self.client.get(path + "/hydro_1/rule-context").status_code, 404)
-        self.assertEqual(self.client.get(path + "/solar_1/rule-context").status_code, 404)
+        self.assertEqual(self.client.get(path + "/solar_1/rule-context").status_code, 200)
+        self.assertEqual(self.client.get(path + "/bus_1/rule-context").status_code, 404)
 
     def test_v2_code_and_context_keep_project_and_internal_role_boundaries(self):
         scope = self.hydro_scope()

@@ -64,7 +64,8 @@ class RuleObjectAlias(BaseModel):
 class RuleInitialValue(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     object_id: int = Field(gt=0)
-    variable: Literal["caudal", "potencia", "almacenamiento", "vertimiento", "carga", "descarga", "energia"]
+    variable: Literal["caudal", "potencia", "almacenamiento", "vertimiento", "carga", "descarga", "energia",
+                      "importacion", "exportacion", "generacion", "recorte"]
     value: float
     unit: str = Field(max_length=64)
     timestamp: str = Field(max_length=64)
@@ -494,8 +495,8 @@ def rule_router(store):
             raise HTTPException(404, "Objeto no encontrado") from None
         if obj["project_id"] != project_id:
             raise HTTPException(404, "Objeto no encontrado")
-        if (obj["object_kind"] != "hydraulic_unit" and obj["object_type_key"] not in {"component:hydro", "component:battery"}) or obj["status"] != "active":
-            raise HTTPException(422, "Esta capacidad requiere una unidad hidráulica, hidro simple o batería activa")
+        if (obj["object_kind"] != "hydraulic_unit" and obj["object_type_key"] not in {"component:hydro", "component:battery", "component:grid", "component:renewable"}) or obj["status"] != "active":
+            raise HTTPException(422, "Esta capacidad requiere una unidad hidráulica, hidro simple, batería, red o renovable activa")
         return user, obj
 
     @router.post("", status_code=201)
@@ -751,10 +752,10 @@ def rule_router(store):
             try:
                 document = model_document(store, scenario_id)
                 if document["schema_version"] not in {"bess_system_dispatch.v1", "bess_system_dispatch.v2"} or not any(
-                        n["id"] == component_key and n["type"] in {"hydro", "battery"} for n in document["nodes"]):
+                        n["id"] == component_key and n["type"] in {"hydro", "battery", "grid", "renewable"} for n in document["nodes"]):
                     raise HTTPException(404, "Componente compatible no encontrado en este modelo")
                 for node in document["nodes"]:
-                    if node["type"] in {"hydro", "battery"}:
+                    if node["type"] in {"hydro", "battery", "grid", "renewable", "load"}:
                         store.ensure_project_component(project_id=project_id, component_key=node["id"],
                             component_type=node["type"], display_name=node.get("name", node["id"]), actor=user["email"])
             except (ValueError, LinkableObjectError) as error:

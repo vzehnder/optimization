@@ -72,6 +72,20 @@ const BATTERY_CODE =
 const BATTERY_PARAMETERS: RuleParameter[] = [
   { name: "reserva", type: "number", unit: "mwh", value: 0, min: 0, max: null },
 ];
+const electricCode = (kind: string) =>
+  kind === "grid"
+    ? 'def construir(ctx):\n    # Selecciona la renovable con alias solar.\n    for t in ctx.periodos:\n        ctx.restriccion("fraccion", t, ctx.objeto.exportacion[t] <= ctx.parametros.fraccion * ctx.objetos.solar.generacion[t])\n'
+    : 'def construir(ctx):\n    # Selecciona la red con alias red.\n    for t in ctx.periodos:\n        ctx.restriccion("fraccion", t, ctx.objetos.red.exportacion[t] <= ctx.parametros.fraccion * ctx.objeto.generacion[t])\n';
+const ELECTRIC_PARAMETERS: RuleParameter[] = [
+  {
+    name: "fraccion",
+    type: "number",
+    unit: "dimensionless",
+    value: 0.5,
+    min: 0,
+    max: 1,
+  },
+];
 const DEFAULT_PARAMETERS: RuleParameter[] = [
   {
     name: "capacidad",
@@ -257,7 +271,9 @@ function RulesContent() {
       </p>
       {returnTo && (
         <Link to={returnTo}>
-          {["hydro", "battery"].includes(list.data?.object.kind ?? "")
+          {["hydro", "battery", "grid", "renewable"].includes(
+            list.data?.object.kind ?? "",
+          )
             ? "Volver al componente"
             : "Volver a la unidad"}
         </Link>
@@ -268,7 +284,11 @@ function RulesContent() {
             ? "Batería"
             : list.data.object.kind === "hydro"
               ? "Hidro"
-              : "Unidad"}
+              : list.data.object.kind === "grid"
+                ? "Red"
+                : list.data.object.kind === "renewable"
+                  ? "Renovable"
+                  : "Unidad"}
           : {list.data.object.display_name} · Proyecto {projectId}
         </p>
       )}
@@ -336,6 +356,12 @@ function RulesContent() {
           root={root}
           initial={draft.data}
           battery={list.data.object.kind === "battery"}
+          electricKind={
+            list.data.object.kind === "grid" ||
+            list.data.object.kind === "renewable"
+              ? list.data.object.kind
+              : undefined
+          }
           available={!!list.data.runtime}
           onSaved={(saved) => {
             const next = new URLSearchParams(search);
@@ -353,23 +379,38 @@ function RuleForm({
   root,
   initial,
   battery,
+  electricKind,
   available,
   onSaved,
 }: {
   root: string;
   initial?: RuleDraft;
   battery: boolean;
+  electricKind?: string;
   available: boolean;
   onSaved: (rule: RuleDraft) => void;
 }) {
   const [name, setName] = useState(
     initial?.name ??
-      (battery ? "Reserva de energía" : "Capacidad por disponibilidad"),
+      (electricKind
+        ? "Fracción de exportación renovable"
+        : battery
+          ? "Reserva de energía"
+          : "Capacidad por disponibilidad"),
   );
-  const defaultCode = battery ? BATTERY_CODE : DEFAULT_CODE;
+  const defaultCode = electricKind
+    ? electricCode(electricKind)
+    : battery
+      ? BATTERY_CODE
+      : DEFAULT_CODE;
   const [code, setCode] = useState(initial?.code ?? defaultCode);
   const [parameters, setParameters] = useState(
-    initial?.parameters ?? (battery ? BATTERY_PARAMETERS : DEFAULT_PARAMETERS),
+    initial?.parameters ??
+      (electricKind
+        ? ELECTRIC_PARAMETERS
+        : battery
+          ? BATTERY_PARAMETERS
+          : DEFAULT_PARAMETERS),
   );
   const [saved, setSaved] = useState(initial);
   const [inputs, setInputs] = useState(initial?.inputs ?? []);
@@ -395,6 +436,7 @@ function RuleForm({
     Object.keys({
       ...objects.find((o) => o.id === ref.object_id)?.variables,
       ...objects.find((o) => o.id === ref.object_id)?.known_values,
+      ...objects.find((o) => o.id === ref.object_id)?.known_series,
     }).map(
       (variable) =>
         `ctx.${ref.alias ? `objetos.${ref.alias}` : "objeto"}.${variable}`,
@@ -466,7 +508,15 @@ function RuleForm({
           onChange={(event) => setName(event.target.value)}
         />
       </label>
-      {battery ? (
+      {electricKind ? (
+        <p>
+          Selecciona los alias de red y renovable del caso. La fracción es
+          adimensional; también puedes seleccionar una serie de fracciones y
+          usar <code>ctx.entradas.fraccion[t]</code>. Emite límites con{" "}
+          <code>ctx.restriccion</code> y cálculos conocidos con{" "}
+          <code>ctx.salida</code>.
+        </p>
+      ) : battery ? (
         <>
           <p>
             Recorre <code>ctx.periodos</code> y emite límites con{" "}
@@ -542,14 +592,32 @@ function RuleForm({
       )}
       <RuleTemporal
         battery={battery}
+        powerVariable={
+          electricKind === "grid"
+            ? "exportacion"
+            : electricKind === "renewable"
+              ? "generacion"
+              : undefined
+        }
         policy={temporal}
         onChange={setTemporal}
         objects={objects.filter((o) =>
           references.some((ref) => ref.object_id === o.id),
         )}
       />
-      <RuleWindows policy={windows} onChange={setWindows} battery={battery} />
-      {!battery && (
+      <RuleWindows
+        policy={windows}
+        onChange={setWindows}
+        battery={battery}
+        powerVariable={
+          electricKind === "grid"
+            ? "exportacion"
+            : electricKind === "renewable"
+              ? "generacion"
+              : undefined
+        }
+      />
+      {!battery && !electricKind && (
         <details>
           <summary>Ejemplo de potencia conjunta</summary>
           <p>
@@ -724,7 +792,7 @@ function RuleForm({
           {dirty ? " · cambios sin guardar" : ""}
         </p>
       )}
-      {!battery && (
+      {!battery && !electricKind && (
         <RulePreview
           root={root}
           saved={saved}

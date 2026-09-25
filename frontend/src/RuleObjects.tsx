@@ -9,6 +9,7 @@ export interface RuleObject {
   variables: Record<string, string>;
   member_ids?: number[];
   known_values?: Record<string, { value: number; unit: string }>;
+  known_series?: Record<string, { values: number[]; unit: string }>;
 }
 export interface RuleAlias {
   alias: string;
@@ -89,6 +90,23 @@ export function RuleObjects({
                 intervalo. La energía al final del período se expresa en MWh.
               </p>
             )}
+            {object?.kind === "grid" && (
+              <p>
+                Importación y exportación son magnitudes no negativas en MW,
+                medias del intervalo. En exportación − importación, positivo
+                significa exportación neta; negativo, importación neta.
+              </p>
+            )}
+            {object?.kind === "renewable" && (
+              <p>
+                Generación y recorte son magnitudes no negativas en MW, medias
+                del intervalo. Su suma es la disponibilidad conocida; el solver
+                decide cuánto utilizar y recortar.
+              </p>
+            )}
+            {object?.kind === "load" && (
+              <p>La demanda fija es un dato conocido en MW.</p>
+            )}
             <ul>
               {Object.entries(object?.variables ?? {}).map(([name, unit]) => (
                 <li key={name}>
@@ -102,6 +120,14 @@ export function RuleObjects({
                 : {value.value} {ruleUnit(value.unit)} · dato conocido
               </p>
             ))}
+            {Object.entries(object?.known_series ?? {}).map(
+              ([name, series]) => (
+                <p key={name}>
+                  <code>{`ctx.${ref.alias ? `objetos.${ref.alias}` : "objeto"}.${name}[t] · ${ruleUnit(series.unit)}`}</code>
+                  {" · dato conocido del caso por período"}
+                </p>
+              ),
+            )}
             {ref.alias && (
               <button
                 type="button"

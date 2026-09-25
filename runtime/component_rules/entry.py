@@ -11,7 +11,7 @@ from types import MappingProxyType
 sys.path.insert(0, "/runtime")
 from symbolic import Flow, Periods, collector, temporal_error
 
-SDK = "reg-012.1"
+SDK = "reg-013.1"
 
 
 class LogLimit(ValueError):
@@ -172,7 +172,9 @@ def main(payload):
             objects[item["id"]] = {"id": item["id"], **{
                 name: Flow(item["id"], count, name, unit, tuple(item.get("member_ids", [])))
                 for name, unit in item["variables"].items()},
-                **{name: Quantity(value["value"], value["unit"]) for name, value in item.get("known_values", {}).items()}}
+                **{name: Quantity(value["value"], value["unit"]) for name, value in item.get("known_values", {}).items()},
+                **{name: NumericSeries(name, tuple(Quantity(v, series["unit"]) for v in series["values"]))
+                   for name, series in item.get("known_series", {}).items()}}
         if objects:
             obj = objects[obj["id"]]
         values["objetos"] = FrozenContext({ref["alias"]: FrozenContext(objects[ref["object_id"]]) for ref in payload.get("aliases", [])})

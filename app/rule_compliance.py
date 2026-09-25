@@ -113,7 +113,9 @@ def rule_url(project_id, scenario_id, application):
 def term_value(term, objects, grid, values):
     columns = {"caudal": "hydro_turbine_flow_m3s", "potencia": "hydro_power_mw",
                "almacenamiento": "hydro_storage_hm3", "vertimiento": "hydro_spill_flow_m3s",
-               "carga": "battery_charge_mw", "descarga": "battery_discharge_mw", "energia": "battery_energy_mwh"}
+               "carga": "battery_charge_mw", "descarga": "battery_discharge_mw", "energia": "battery_energy_mwh",
+               "importacion": "grid_import_mw", "exportacion": "grid_export_mw",
+               "generacion": "renewable_used_mw", "recorte": "renewable_curtailed_mw"}
     obj = objects[term["object_id"]]
     kind, key = ((obj["kind"], "component_key") if "component_key" in obj else
                  ("hydraulic_unit", "unit_key") if "unit_key" in obj else ("hydraulic_reservoir", "node_key"))

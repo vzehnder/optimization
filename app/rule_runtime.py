@@ -9,7 +9,7 @@ import subprocess
 import threading
 import time
 
-SDK_VERSION = "reg-012.1"
+SDK_VERSION = "reg-013.1"
 POLICY_VERSION = "reg-001.1"
 
 

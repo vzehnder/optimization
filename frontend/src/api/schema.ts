@@ -4316,7 +4316,7 @@ export interface components {
              * Variable
              * @enum {string}
              */
-            variable: "caudal" | "potencia" | "almacenamiento" | "vertimiento" | "carga" | "descarga" | "energia";
+            variable: "caudal" | "potencia" | "almacenamiento" | "vertimiento" | "carga" | "descarga" | "energia" | "importacion" | "exportacion" | "generacion" | "recorte";
         };
         /** RuleInput */
         RuleInput: {

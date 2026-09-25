@@ -75,3 +75,10 @@ def seed_rule_classification(store):
         ensure(tables[2], {"semantic_type_id": semantic, "binding_role_id": role, "object_type_id": battery_type, "rule_version": 1},
             {"association_allowed": 1, "execution_allowed": 1},
             {"supersedes_rule_id": None, **audit, "archived_at": None, "archived_by": None})
+    for kind in ("grid", "renewable"):
+        ensure(tables[2], {"semantic_type_id": availability,
+               "binding_role_id": identity(tables[1], "role_key", "rule_availability"),
+               "object_type_id": identity("linkable_object_types", "object_type_key", "component:" + kind), "rule_version": 1},
+            {"association_allowed": 1, "execution_allowed": 1},
+            {"supersedes_rule_id": None, "created_at": "2026-09-25T00:00:00+00:00", "created_by": "reg-013",
+             "archived_at": None, "archived_by": None})

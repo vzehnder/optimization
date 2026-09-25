@@ -2185,6 +2185,7 @@ function RenewableFields({
   setDocument,
   errors,
   removalProps,
+  rulesPath,
 }: AssetFieldProps) {
   const patch = (field: string, value: unknown) =>
     setDocument((current) =>
@@ -2192,6 +2193,16 @@ function RenewableFields({
     );
   return (
     <AssetShell asset={asset} {...removalProps}>
+      {rulesPath ? (
+        <Link to={rulesPath}>
+          Cálculos y restricciones · {String(asset.id)}
+        </Link>
+      ) : (
+        <p>
+          Guarda los cambios del componente para abrir sus cálculos y
+          restricciones.
+        </p>
+      )}
       <div className="draft-field-grid">
         <details className="model-details">
           <summary>Identificación técnica de renovable</summary>
@@ -3090,6 +3101,18 @@ function DraftEditor({
         </section>
         <section className="workspace-section" aria-labelledby="graph-settings">
           <h2 id="graph-settings">Red y punto de conexión</h2>
+          {!dirty && !saveMutation.isPending ? (
+            <Link
+              to={`/scenarios/${scenario.id}/components/${encodeURIComponent(String(document.grid?.id))}/rules`}
+            >
+              Cálculos y restricciones · {String(document.grid?.id)}
+            </Link>
+          ) : (
+            <p>
+              Guarda los cambios de la red para abrir sus cálculos y
+              restricciones.
+            </p>
+          )}
           <div className="draft-field-grid">
             <NumberInput
               id="grid_import_power_max_mw"

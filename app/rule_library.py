@@ -235,6 +235,8 @@ def clone_rules(repository, source_variant_id, target_variant_id, actor, object_
 
 def alias_types(kind):
     from app.rule_objects import VARIABLES
+    if kind == "load":
+        return ["load"]
     return [target for target, variables in VARIABLES.items() if set(VARIABLES[kind]) <= set(variables)]
 
 
@@ -260,17 +262,21 @@ def contract_for(store, publication, object_id, project_id):
         return references.get(identity) if identity is not None else None
 
     try:
-        attrs = {n.attr for n in ast.walk(ast.parse(publication["code"])) if isinstance(n, ast.Attribute)}
+        tree = ast.parse(publication["code"])
+        attrs = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+        self_attrs = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)
+                      and isinstance(n.value, ast.Attribute) and n.value.attr == "objeto"}
     except SyntaxError:
         raise HTTPException(422, "Corrige el código antes de ofrecerlo en la biblioteca") from None
     capability = ("affine_budget.v1" if publication.get("windows") else
                   "affine_temporal.v1" if publication.get("temporal") else
-                  "affine_hydraulic.v1" if publication.get("aliases") or attrs & {"potencia", "almacenamiento", "vertimiento", "carga", "descarga", "energia", "energia_inicial"} else
+                  "affine_hydraulic.v1" if publication.get("aliases") or attrs & {"potencia", "almacenamiento", "vertimiento", "carga", "descarga", "energia", "energia_inicial", "importacion", "exportacion", "generacion", "recorte"} or "disponibilidad" in self_attrs else
                   "affine_flow.v1")
     kind = by_id.get(object_id, {}).get("kind", "hydraulic_unit")
     required = attrs & set(VARIABLES[kind])
-    compatible = [target for target in ("hydraulic_unit", "hydro", "battery") if required <= set(VARIABLES[target])
-                  and ("energia_inicial" not in attrs or target == "battery")]
+    compatible = [target for target in ("hydraulic_unit", "hydro", "battery", "grid", "renewable") if required <= set(VARIABLES[target])
+                  and ("energia_inicial" not in self_attrs or target == "battery")
+                  and ("disponibilidad" not in self_attrs or target == "renewable")]
     return {
         "compatible_types": compatible, "required_capabilities": [capability],
         "parameters": [{k: v for k, v in p.items() if k not in {"value", "object_id"}} | {"owner": owner(p.get("object_id"))}

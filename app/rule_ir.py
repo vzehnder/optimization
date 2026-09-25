@@ -45,6 +45,16 @@ def validate_model_bounds(rows, objects, document):
             physical[obj["id"], "carga"] = (0, battery["charge_power_max_mw"])
             physical[obj["id"], "descarga"] = (0, battery["discharge_power_max_mw"])
             physical[obj["id"], "energia"] = (battery["energy_min_mwh"], battery["energy_max_mwh"])
+        elif obj["kind"] == "grid":
+            node = next(n for n in document["nodes"] if n["id"] == obj["component_key"] and n["type"] == "grid")
+            for variable, field in (("importacion", "import_power_max_mw"), ("exportacion", "export_power_max_mw")):
+                upper = node.get(field)
+                physical[obj["id"], variable] = (0, float("inf") if upper is None else upper)
+        elif obj["kind"] == "renewable":
+            for variable in ("generacion", "recorte"):
+                physical[obj["id"], variable] = (0, float("inf"))
+                for t, period in enumerate(document["time_series"]):
+                    physical[obj["id"], variable, t] = (0, period["renewable_available_power_mw"][obj["component_key"]])
         elif obj["kind"] == "hydraulic_unit":
             unit = next(u for u in network["units"] if u["id"] == obj["unit_key"])
             curve = unit["curves"]["flow_power"]
@@ -66,7 +76,7 @@ def validate_model_bounds(rows, objects, document):
             term = terms[0]
             identity = (term["object_id"], term["variable"])
             key = (*identity, term["period"])
-            lo, hi = bounds.get(key, physical[identity])
+            lo, hi = bounds.get(key, physical.get(key, physical[identity]))
             lo_row, hi_row = origins.get(key, (None, None))
             coefficient = term["coefficient"]
             bound = finite(-constant / coefficient)

@@ -4,6 +4,7 @@ const TEMPORAL_RULE_VERSION = "affine_temporal.v1"
 const BUDGET_RULE_VERSION = "affine_budget.v1"
 const SIMPLE_HYDRO_RULE_ADAPTER = "hydro_v2.v1"
 const BATTERY_RULE_ADAPTER = "battery_system.v1"
+const ELECTRIC_RULE_ADAPTER = "electric_system.v1"
 
 function validate_budget_window(row, policy, grid)
     policy isa AbstractDict || throw(ArgumentError("budget window requires an explicit policy"))
@@ -44,10 +45,12 @@ function validate_component_rules(document)
         throw(ArgumentError("component rules require v1/v2 or hydraulic v3"))
     if simple_hydro
         adapter = get(rules, "adapter", nothing)
-        adapter in (SIMPLE_HYDRO_RULE_ADAPTER, BATTERY_RULE_ADAPTER) || throw(ArgumentError("unsupported system component rule adapter"))
-        schema == SYSTEM_SCHEMA_VERSION && adapter != BATTERY_RULE_ADAPTER && throw(ArgumentError("v1 requires battery adapter"))
+        adapter in (SIMPLE_HYDRO_RULE_ADAPTER, BATTERY_RULE_ADAPTER, ELECTRIC_RULE_ADAPTER) || throw(ArgumentError("unsupported system component rule adapter"))
+        schema == SYSTEM_SCHEMA_VERSION && adapter == SIMPLE_HYDRO_RULE_ADAPTER && throw(ArgumentError("v1 requires battery or electric adapter"))
         for application in required_vector(rules, "applications")
-            get(application, "adapter", nothing) in (adapter == BATTERY_RULE_ADAPTER ? (BATTERY_RULE_ADAPTER, SIMPLE_HYDRO_RULE_ADAPTER) : (SIMPLE_HYDRO_RULE_ADAPTER,)) || throw(ArgumentError("application adapter differs from snapshot"))
+            allowed_adapters = adapter == ELECTRIC_RULE_ADAPTER ? (ELECTRIC_RULE_ADAPTER, BATTERY_RULE_ADAPTER, SIMPLE_HYDRO_RULE_ADAPTER) :
+                               adapter == BATTERY_RULE_ADAPTER ? (BATTERY_RULE_ADAPTER, SIMPLE_HYDRO_RULE_ADAPTER) : (SIMPLE_HYDRO_RULE_ADAPTER,)
+            get(application, "adapter", nothing) in allowed_adapters || throw(ArgumentError("application adapter differs from snapshot"))
             capabilities = required_vector(application, "required_capabilities")
             !isempty(capabilities) && all(v -> v in (COMPONENT_RULE_VERSION, HYDRAULIC_RULE_VERSION, TEMPORAL_RULE_VERSION, BUDGET_RULE_VERSION), capabilities) ||
                 throw(ArgumentError("unsupported application capabilities"))
@@ -86,6 +89,7 @@ function validate_component_rules(document)
     hydros = simple_hydro ? Dict(n["id"] => parse_system_hydro_asset(SystemNode(n["id"], "hydro", Dict{String,Any}(n)))
                                for n in document["nodes"] if n["type"] == "hydro") : Dict()
     batteries = simple_hydro ? Dict(n["id"] => n for n in document["nodes"] if n["type"] == "battery") : Dict()
+    electric = simple_hydro ? Dict(n["id"] => n for n in document["nodes"] if n["type"] in ("grid", "renewable", "load")) : Dict()
     reservoirs = Set(n["id"] for n in network["nodes"] if n["type"] == "reservoir")
     plants = Set(p["id"] for p in network["plants"])
     objects = required_vector(rules, "objects")
@@ -100,9 +104,12 @@ function validate_component_rules(document)
         valid = if simple_hydro
             key == "component_key" && get(object, "schema_version", nothing) == schema &&
                 ((get(object, "kind", nothing) == "hydro" && schema == SYSTEM_SCHEMA_VERSION_V2 && haskey(hydros, object[key])) ||
-                 (get(object, "kind", nothing) == "battery" && rules["adapter"] == BATTERY_RULE_ADAPTER && haskey(batteries, object[key])))
+                 (get(object, "kind", nothing) == "battery" && rules["adapter"] in (BATTERY_RULE_ADAPTER, ELECTRIC_RULE_ADAPTER) && haskey(batteries, object[key])) ||
+                 (rules["adapter"] == ELECTRIC_RULE_ADAPTER && haskey(electric, object[key]) && get(object, "kind", nothing) == electric[object[key]]["type"]))
         else
-            key == "unit_key" ? object[key] in units : extended && (key == "node_key" ? object[key] in reservoirs : key == "plant_key" && object[key] in plants)
+            expected_kind = get(Dict("unit_key" => "hydraulic_unit", "node_key" => "hydraulic_node", "plant_key" => "hydraulic_plant"), key, nothing)
+            expected_kind !== nothing && get(object, "kind", expected_kind) == expected_kind &&
+                (key == "unit_key" ? object[key] in units : extended && (key == "node_key" ? object[key] in reservoirs : key == "plant_key" && object[key] in plants))
         end
         valid || throw(ArgumentError("component rules object outside snapshot"))
         push!(object_ids, id)
@@ -156,6 +163,9 @@ function validate_component_rules(document)
             object = by_id[id]
             expected_unit = if get(object, "kind", nothing) == "battery"
                 extended ? get(Dict("carga" => "mw", "descarga" => "mw", "energia" => "mwh"), variable, nothing) : nothing
+            elseif get(object, "kind", nothing) in ("grid", "renewable", "load")
+                supported = object["kind"] == "grid" ? ("importacion", "exportacion") : object["kind"] == "renewable" ? ("generacion", "recorte") : ()
+                extended && variable in supported ? "mw" : nothing
             elseif haskey(object, "component_key")
                 variable == "caudal" ? "m3_per_s" : !extended ? nothing :
                     get(Dict("potencia" => "mw", "almacenamiento" => "hm3", "vertimiento" => "m3_per_s"), variable, nothing)
@@ -202,6 +212,12 @@ function validate_component_rules(document)
                 variable == "carga" ? (0.0, Float64(battery["charge_power_max_mw"])) :
                     variable == "descarga" ? (0.0, Float64(battery["discharge_power_max_mw"])) :
                     (Float64(battery["energy_min_mwh"]), Float64(battery["energy_max_mwh"]))
+            elseif get(by_id[id], "kind", nothing) == "grid"
+                node = electric[by_id[id]["component_key"]]
+                limit = get(node, variable == "importacion" ? "import_power_max_mw" : "export_power_max_mw", nothing)
+                (0.0, limit === nothing ? Inf : Float64(limit))
+            elseif get(by_id[id], "kind", nothing) == "renewable"
+                (0.0, Float64(periods[term_period + 1]["renewable_available_power_mw"][by_id[id]["component_key"]]))
             elseif haskey(by_id[id], "component_key")
                 hydro = hydros[by_id[id]["component_key"]]
                 variable == "caudal" ? (hydro_turbine_flow_lower_bound(hydro), hydro_turbine_flow_upper_bound(hydro)) :

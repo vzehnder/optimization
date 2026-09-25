@@ -8,10 +8,12 @@ export function RuleWindows({
   policy,
   onChange,
   battery = false,
+  powerVariable,
 }: {
   policy: WindowPolicy | null;
   onChange: (policy: WindowPolicy | null) => void;
   battery?: boolean;
+  powerVariable?: string;
 }) {
   return (
     <fieldset>
@@ -69,17 +71,15 @@ export function RuleWindows({
             → MWh; m³/s por segundos → m³. Los intervalos no pueden cruzar
             bordes de día. No se prorratea el presupuesto.
           </p>
-          {battery ? (
+          {battery || powerVariable ? (
             <details>
               <summary>Ejemplo de presupuesto de energía</summary>
               <p>
-                Define presupuesto en mwh. Integra la carga o descarga en MW por
-                su duración en horas.
+                Define presupuesto en mwh. Integra la potencia en MW por su
+                duración en horas.
               </p>
               <pre>
-                {
-                  'def construir(ctx):\n    for ventana in ctx.ventanas():\n        ctx.restriccion("energia", ventana, ventana.integral(ctx.objeto.descarga) <= ctx.parametros.presupuesto)'
-                }
+                {`def construir(ctx):\n    for ventana in ctx.ventanas():\n        ctx.restriccion("energia", ventana, ventana.integral(ctx.objeto.${powerVariable ?? "descarga"}) <= ctx.parametros.presupuesto)`}
               </pre>
             </details>
           ) : (

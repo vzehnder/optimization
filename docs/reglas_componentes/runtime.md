@@ -1,6 +1,6 @@
-# Operación y verificación de REG-001 a REG-012
+# Operación y verificación de REG-001 a REG-013
 
-El runtime actual usa **SDK `reg-012.1`**. Reconstruir la imagen OCI y reiniciar
+El runtime actual usa **SDK `reg-013.1`**. Reconstruir la imagen OCI y reiniciar
 el worker con su nuevo digest; las aplicaciones anteriores requieren publicar,
 probar y aplicar de nuevo. Sus snapshots y resultados históricos siguen legibles.
 Los ejemplos de versiones anteriores de este documento describen su entrega original.
@@ -24,6 +24,8 @@ REG-011 incorpora el hidro simple v2 al mismo recorrido, con caudal, vertimiento
 potencia y almacenamiento, remapeo explícito de plantillas y cumplimiento histórico.
 REG-012 incorpora baterías de sistemas v1/v2, reservas horarias en MWh, límites
 de carga/descarga, relaciones con hidro simple y cumplimiento de las variables reales.
+REG-013 incorpora generación renovable utilizada/recortada e importación/exportación
+de red. Disponibilidad y demanda fija son datos conocidos del mismo snapshot.
 Las revisiones `sealed_preview` son copias inmutables
 de pruebas; no cambian por sí solas el estado de la definición editable.
 
@@ -746,3 +748,64 @@ La fixture `tests/fixtures/reg012_battery.json` demuestra una reserva `[0, 4, 1,
 MWh y un límite conjunto de 3 MW: descarga `[0, 0.36, 2.7, 0]` MW, energía
 `[4.4, 4, 1, 2]` MWh y objetivo 208.95 USD, incluida la degradación. Sin reglas,
 la descarga es `[0, 4, 0.68, 0]` MW. La condición terminal conserva 2 MWh en ambos casos.
+
+## Red y renovables (REG-013)
+
+El editor guardado de un sistema v1/v2 ofrece acceso desde renovables y red.
+Las cuatro decisiones son `generacion` y `recorte` de renovables e `importacion`
+y `exportacion` de red, todas magnitudes no negativas en MW, medias del intervalo.
+Una expresión `exportacion - importacion` es positiva al exportar y negativa al
+importar. No se agrega una variable neta independiente.
+
+`renovable.disponibilidad[t]` contiene la potencia disponible conocida en MW;
+`demanda.demanda[t]` es la demanda fija conocida. Ambas se congelan desde los
+datos del caso y se pueden usar en cálculos y condiciones numéricas. Los objetos
+de demanda solo se ofrecen como alias de lectura. Los alias nunca cruzan hacia
+otro snapshot ni conectan el sistema hidráulico v3 separado.
+
+Desde una red, seleccionar la renovable con alias `solar` y declarar `fraccion`
+adimensional con valor 0,5:
+
+```python
+def construir(ctx):
+    for t in ctx.periodos:
+        ctx.restriccion("fraccion", t,
+            ctx.objeto.exportacion[t] <= ctx.parametros.fraccion * ctx.objetos.solar.generacion[t])
+        ctx.salida("disponible", t, ctx.objetos.solar.disponibilidad[t])
+```
+
+El rol canónico `rule_availability` permite seleccionar series de fracciones
+para red y renovables, con valores entre 0 y 1 y revisión/hash exactos. Para una
+fracción horaria, sustituir el parámetro por `ctx.entradas.fraccion[t]`.
+Los cambios de fuentes, disponibilidades, demanda o configuración física
+invalidan la aplicación según el flujo común; los resultados históricos
+conservan código, entradas, objetos, IR y hashes.
+
+El adaptador `electric_system.v1` negocia soporte antes de encolar y mapea las
+filas a las variables reales de Julia, junto con las reglas de baterías/hidro
+del mismo sistema. Conserva disponibilidad, balances, límites de red y exclusión
+de simultaneidad. La validación de cotas revisa la disponibilidad de cada período;
+la factibilidad de relaciones con varias variables sigue correspondiendo al solver.
+El cumplimiento utiliza `grid_import_mw`, `grid_export_mw`, `renewable_used_mw`
+y `renewable_curtailed_mw` de los artefactos de esa corrida.
+
+```powershell
+docker build -t component-rules:reg-013 runtime/component_rules
+$env:RULE_RUNTIME_IMAGE = (docker image inspect component-rules:reg-013 --format '{{.Id}}').Trim()
+.\.venv\Scripts\python.exe -m unittest tests.test_reg013_rules -v
+julia --project=. test/electric_rules.jl
+```
+
+Reiniciar el worker con el nuevo digest. Desde `frontend`, con el bundle compilado:
+
+```powershell
+$env:RULE_ACCEPTANCE_SERVER = '1'
+npx playwright test e2e/component-rules-electric.spec.ts
+```
+
+La fixture `tests/fixtures/reg013_electric.json` tiene disponibilidad `[10, 8, 1, 0]`
+MW y demanda `[2, 2, 2, 2]` MW. La fracción de 0,5 produce exportación
+`[2, 2, 0, 0]`, importación `[0, 0, 1, 2]`, generación `[4, 4, 1, 0]` y recorte
+`[6, 4, 0, 0]` MW. Sin reglas, la exportación es `[6, 6, 0, 0]` MW y el recorte
+`[2, 0, 0, 0]` MW. El recorrido web también comprueba las igualdades de balance
+y disponibilidad: doce filas satisfechas.

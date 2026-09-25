@@ -37,16 +37,17 @@ jobs:
       - run: julia --project=. test/rule_compliance.jl
       - run: julia --project=. test/simple_hydro_rules.jl
       - run: julia --project=. test/battery_rules.jl
+      - run: julia --project=. test/electric_rules.jl
       - run: pip install -r requirements.txt
       - name: Build the same Linux sandbox used in development
         run: |
-          docker build -t component-rules:reg-012 runtime/component_rules
-          echo "RULE_RUNTIME_IMAGE=$(docker image inspect component-rules:reg-012 --format '{{.Id}}')" >> "$GITHUB_ENV"
+          docker build -t component-rules:reg-013 runtime/component_rules
+          echo "RULE_RUNTIME_IMAGE=$(docker image inspect component-rules:reg-013 --format '{{.Id}}')" >> "$GITHUB_ENV"
       - run: python -m unittest tests.test_reg001_rules tests.test_reg001_runtime tests.test_reg002_rules tests.test_reg002_runtime tests.test_reg003_rules tests.test_reg003_runtime tests.test_reg003_classification tests.test_reg004_rules tests.test_reg004_runtime tests.test_reg005_rules tests.test_reg005_runtime tests.test_reg006_rules tests.test_reg006_runtime tests.test_reg007_rules tests.test_reg008_rules tests.test_reg009_rules tests.test_reg010_compliance tests.test_ts7_001_classification_catalog tests.test_ts3_input_variants tests.test_ts3_case_variant_api -v
       - run: python -m unittest tests.test_manual_runs tests.test_results_review tests.test_ts4_result_indexing -v
       - run: npm ci
         working-directory: frontend
-      - run: npm run api:check && npm test -- --run src/ComponentRules.test.tsx src/HourlyRules.test.tsx src/RelatedRules.test.tsx src/TemporalRules.test.tsx src/BudgetRules.test.tsx src/CalculatedSeries.test.tsx src/ReusableRules.test.tsx src/RuleRecovery.test.tsx src/BatteryRules.test.tsx src/App.test.tsx src/RunExperience.test.tsx src/ProtectedMutationJourney.test.tsx && npm run build
+      - run: npm run api:check && npm test -- --run src/ComponentRules.test.tsx src/HourlyRules.test.tsx src/RelatedRules.test.tsx src/TemporalRules.test.tsx src/BudgetRules.test.tsx src/CalculatedSeries.test.tsx src/ReusableRules.test.tsx src/RuleRecovery.test.tsx src/BatteryRules.test.tsx src/ElectricRules.test.tsx src/App.test.tsx src/RunExperience.test.tsx src/ProtectedMutationJourney.test.tsx && npm run build
         working-directory: frontend
       - run: npx playwright install --with-deps chromium && npx playwright test e2e/component-rules.spec.ts
         working-directory: frontend
@@ -92,6 +93,11 @@ jobs:
           RULE_ACCEPTANCE_SERVER: '1'
       - run: python -m unittest tests.test_reg011_rules -v
       - run: python -m unittest tests.test_reg012_rules -v
+      - run: python -m unittest tests.test_reg013_rules -v
+      - run: npx playwright test e2e/component-rules-electric.spec.ts
+        working-directory: frontend
+        env:
+          RULE_ACCEPTANCE_SERVER: '1'
       - run: npx playwright test e2e/component-rules-battery.spec.ts
         working-directory: frontend
         env:
