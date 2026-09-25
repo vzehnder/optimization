@@ -9,7 +9,7 @@ import subprocess
 import threading
 import time
 
-SDK_VERSION = "reg-006.1"
+SDK_VERSION = "reg-012.1"
 POLICY_VERSION = "reg-001.1"
 
 
@@ -137,7 +137,7 @@ class OCIExecutor:
                         if "compilation" in payload:
                             compilation = payload["compilation"]
                             unit = (next(n for n in compilation["system_case"]["nodes"] if n["id"] == compilation["component_key"])
-                                    if compilation.get("adapter") == "hydro_v2.v1" else
+                                    if "component_key" in compilation else
                                     next(u for u in compilation["system_case"]["hydraulic_network"]["units"] if u["id"] == compilation["unit_key"]))
                             try:
                                 if payload.get("objects"):

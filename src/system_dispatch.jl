@@ -1298,9 +1298,10 @@ function build_system_dispatch_model(data::SystemOptimizationData)::SystemDispat
     if data.graph.component_rules !== nothing
         rules = data.graph.component_rules
         validate_component_rules(system_case_dict(data.graph))
-        indices = Dict(o["id"] => findfirst(h -> h.id == o["component_key"], data.hydros) for o in rules["objects"])
+        indices = Dict(o["id"] => findfirst(h -> h.id == o["component_key"], o["kind"] == "battery" ? data.batteries : data.hydros) for o in rules["objects"])
         variables = Dict("caudal" => hydro_turbine_flow_m3s, "potencia" => hydro_power_mw,
-                         "almacenamiento" => hydro_storage_hm3, "vertimiento" => hydro_spill_flow_m3s)
+                         "almacenamiento" => hydro_storage_hm3, "vertimiento" => hydro_spill_flow_m3s,
+                         "carga" => p_battery_charge_mw, "descarga" => p_battery_discharge_mw, "energia" => battery_energy_mwh)
         for row in rules["rows"]
             expression = AffExpr(Float64(row["constant"]))
             for term in row["terms"]

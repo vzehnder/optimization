@@ -112,9 +112,10 @@ def rule_url(project_id, scenario_id, application):
 
 def term_value(term, objects, grid, values):
     columns = {"caudal": "hydro_turbine_flow_m3s", "potencia": "hydro_power_mw",
-               "almacenamiento": "hydro_storage_hm3", "vertimiento": "hydro_spill_flow_m3s"}
+               "almacenamiento": "hydro_storage_hm3", "vertimiento": "hydro_spill_flow_m3s",
+               "carga": "battery_charge_mw", "descarga": "battery_discharge_mw", "energia": "battery_energy_mwh"}
     obj = objects[term["object_id"]]
-    kind, key = (("hydro", "component_key") if "component_key" in obj else
+    kind, key = ((obj["kind"], "component_key") if "component_key" in obj else
                  ("hydraulic_unit", "unit_key") if "unit_key" in obj else ("hydraulic_reservoir", "node_key"))
     row = values[(kind, obj[key], instant(grid[term["period"]]["timestamp"]))]
     return float(row[columns[term["variable"]]]) * term["coefficient"]

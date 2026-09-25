@@ -151,7 +151,7 @@ def input_candidates(store, project_id, object_id, after=0, limit=50):
         WHERE sig.id > ? AND s.status = 'validated' AND sig.status = 'active' AND rev.state = 'sealed'
           AND (s.visibility_scope = 'global' OR s.owner_project_id = ?)
           AND (s.series_kind = 'catalog' OR s.owner_linkable_object_id = ?)
-          AND roles.role_key IN ('rule_inflow', 'rule_availability') AND ot.object_type_key = ?
+          AND roles.role_key IN ('rule_inflow', 'rule_availability', 'rule_energy_reserve') AND ot.object_type_key = ?
           AND compat.status = 'active' AND compat.execution_allowed = 1
         ORDER BY sig.id LIMIT ?
     """, (after, project_id, object_id, object_type, limit + 1)).fetchall()

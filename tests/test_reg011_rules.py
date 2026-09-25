@@ -45,7 +45,7 @@ class SimpleHydroRuleTests(unittest.TestCase):
         self.assertEqual(context.json()["object_id"], self.obj["id"])
         response = self.client.get(self.root + "/object-candidates", params={"scenario_id": scope["scenario_id"]})
         self.assertEqual(response.status_code, 200, response.text)
-        objects = response.json()["items"]
+        objects = [o for o in response.json()["items"] if o["kind"] == "hydro"]
         self.assertEqual(len(objects), 1)
         self.assertEqual(objects[0]["kind"], "hydro")
         self.assertEqual(objects[0]["schema_version"], "bess_system_dispatch.v2")
@@ -55,7 +55,7 @@ class SimpleHydroRuleTests(unittest.TestCase):
         self.assertEqual(selected.status_code, 200, selected.text)
         self.assertEqual(selected.json()["range_end"], scope["range_end"])
 
-    def test_context_registers_a_new_saved_hydro_but_rejects_other_component_types(self):
+    def test_context_registers_a_new_saved_hydro_but_rejects_unsupported_component_types(self):
         scope = self.hydro_scope()
         draft = self.store.get_scenario_draft(scope["scenario_id"])["document"]
         hydro = next(a for a in draft["assets"] if a["type"] == "hydro")
@@ -68,7 +68,7 @@ class SimpleHydroRuleTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertNotEqual(response.json()["object_id"], self.obj["id"])
         self.assertEqual(self.client.get(path + "/hydro_1/rule-context").status_code, 404)
-        self.assertEqual(self.client.get(path + "/battery_1/rule-context").status_code, 404)
+        self.assertEqual(self.client.get(path + "/solar_1/rule-context").status_code, 404)
 
     def test_v2_code_and_context_keep_project_and_internal_role_boundaries(self):
         scope = self.hydro_scope()

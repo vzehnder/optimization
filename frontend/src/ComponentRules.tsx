@@ -67,6 +67,11 @@ interface RuleList {
 }
 const DEFAULT_CODE =
   "def construir(ctx):\n    return ctx.parametros.capacidad * ctx.parametros.disponibilidad\n";
+const BATTERY_CODE =
+  'def construir(ctx):\n    for t in ctx.periodos:\n        ctx.restriccion("reserva", t, ctx.objeto.energia[t] >= ctx.parametros.reserva)\n';
+const BATTERY_PARAMETERS: RuleParameter[] = [
+  { name: "reserva", type: "number", unit: "mwh", value: 0, min: 0, max: null },
+];
 const DEFAULT_PARAMETERS: RuleParameter[] = [
   {
     name: "capacidad",
@@ -252,15 +257,19 @@ function RulesContent() {
       </p>
       {returnTo && (
         <Link to={returnTo}>
-          {list.data?.object.kind === "hydro"
+          {["hydro", "battery"].includes(list.data?.object.kind ?? "")
             ? "Volver al componente"
             : "Volver a la unidad"}
         </Link>
       )}
       {list.data && (
         <p>
-          {list.data.object.kind === "hydro" ? "Hidro" : "Unidad"}:{" "}
-          {list.data.object.display_name} · Proyecto {projectId}
+          {list.data.object.kind === "battery"
+            ? "Batería"
+            : list.data.object.kind === "hydro"
+              ? "Hidro"
+              : "Unidad"}
+          : {list.data.object.display_name} · Proyecto {projectId}
         </p>
       )}
       {list.isError || draft.isError ? (
@@ -326,6 +335,7 @@ function RulesContent() {
           key={selected ?? "new"}
           root={root}
           initial={draft.data}
+          battery={list.data.object.kind === "battery"}
           available={!!list.data.runtime}
           onSaved={(saved) => {
             const next = new URLSearchParams(search);
@@ -342,20 +352,24 @@ function RulesContent() {
 function RuleForm({
   root,
   initial,
+  battery,
   available,
   onSaved,
 }: {
   root: string;
   initial?: RuleDraft;
+  battery: boolean;
   available: boolean;
   onSaved: (rule: RuleDraft) => void;
 }) {
   const [name, setName] = useState(
-    initial?.name ?? "Capacidad por disponibilidad",
+    initial?.name ??
+      (battery ? "Reserva de energía" : "Capacidad por disponibilidad"),
   );
-  const [code, setCode] = useState(initial?.code ?? DEFAULT_CODE);
+  const defaultCode = battery ? BATTERY_CODE : DEFAULT_CODE;
+  const [code, setCode] = useState(initial?.code ?? defaultCode);
   const [parameters, setParameters] = useState(
-    initial?.parameters ?? DEFAULT_PARAMETERS,
+    initial?.parameters ?? (battery ? BATTERY_PARAMETERS : DEFAULT_PARAMETERS),
   );
   const [saved, setSaved] = useState(initial);
   const [inputs, setInputs] = useState(initial?.inputs ?? []);
@@ -378,9 +392,10 @@ function RuleForm({
   const objects = candidates.data?.items ?? [];
   const references = [{ alias: "", object_id: objectId }, ...aliases];
   const completions = references.flatMap((ref) =>
-    Object.keys(
-      objects.find((o) => o.id === ref.object_id)?.variables ?? {},
-    ).map(
+    Object.keys({
+      ...objects.find((o) => o.id === ref.object_id)?.variables,
+      ...objects.find((o) => o.id === ref.object_id)?.known_values,
+    }).map(
       (variable) =>
         `ctx.${ref.alias ? `objetos.${ref.alias}` : "objeto"}.${variable}`,
     ),
@@ -451,31 +466,57 @@ function RuleForm({
           onChange={(event) => setName(event.target.value)}
         />
       </label>
-      <p>
-        Define <code>construir(ctx)</code>. Para un cálculo numérico, devuelve
-        una cantidad en m³/s. Para relacionar variables, recorre{" "}
-        <code>ctx.periodos</code>y emite filas con <code>ctx.restriccion</code>.
-      </p>
-      <details>
-        <summary>Ejemplo de máximo de caudal</summary>
-        <pre>
-          {
-            'def construir(ctx):\n    for t in ctx.periodos:\n        ctx.restriccion("maximo", t, ctx.objeto.caudal[t] <= ctx.parametros.capacidad * ctx.parametros.disponibilidad)'
-          }
-        </pre>
-      </details>
-      <details>
-        <summary>Ejemplo de límites horarios con series</summary>
-        <p>
-          Selecciona entradas con alias afluente y disponibilidad; agrega un
-          parámetro adimensional fraccion.
-        </p>
-        <pre>
-          {
-            'def construir(ctx):\n    for t in ctx.periodos:\n        minimo = ctx.entradas.afluente[t] * ctx.parametros.fraccion\n        maximo = ctx.parametros.capacidad * ctx.entradas.disponibilidad[t]\n        ctx.restriccion("minimo", t, ctx.objeto.caudal[t] >= minimo)\n        ctx.restriccion("maximo", t, ctx.objeto.caudal[t] <= maximo)\n        ctx.salida("limite_calculado", t, maximo)'
-          }
-        </pre>
-      </details>
+      {battery ? (
+        <>
+          <p>
+            Recorre <code>ctx.periodos</code> y emite límites con{" "}
+            <code>ctx.restriccion</code>. Los cálculos numéricos se muestran con{" "}
+            <code>ctx.salida</code>.
+          </p>
+          <details>
+            <summary>Ejemplo de reserva horaria</summary>
+            <p>
+              Selecciona una entrada de reserva de energía en MWh con alias
+              reserva. Cada valor limita la energía al final de su intervalo,
+              identificado por el inicio UTC.
+            </p>
+            <pre>
+              {
+                'def construir(ctx):\n    for t in ctx.periodos:\n        ctx.restriccion("reserva", t, ctx.objeto.energia[t] >= ctx.entradas.reserva[t])'
+              }
+            </pre>
+          </details>
+        </>
+      ) : (
+        <>
+          <p>
+            Define <code>construir(ctx)</code>. Para un cálculo numérico,
+            devuelve una cantidad en m³/s. Para relacionar variables, recorre{" "}
+            <code>ctx.periodos</code>y emite filas con{" "}
+            <code>ctx.restriccion</code>.
+          </p>
+          <details>
+            <summary>Ejemplo de máximo de caudal</summary>
+            <pre>
+              {
+                'def construir(ctx):\n    for t in ctx.periodos:\n        ctx.restriccion("maximo", t, ctx.objeto.caudal[t] <= ctx.parametros.capacidad * ctx.parametros.disponibilidad)'
+              }
+            </pre>
+          </details>
+          <details>
+            <summary>Ejemplo de límites horarios con series</summary>
+            <p>
+              Selecciona entradas con alias afluente y disponibilidad; agrega un
+              parámetro adimensional fraccion.
+            </p>
+            <pre>
+              {
+                'def construir(ctx):\n    for t in ctx.periodos:\n        minimo = ctx.entradas.afluente[t] * ctx.parametros.fraccion\n        maximo = ctx.parametros.capacidad * ctx.entradas.disponibilidad[t]\n        ctx.restriccion("minimo", t, ctx.objeto.caudal[t] >= minimo)\n        ctx.restriccion("maximo", t, ctx.objeto.caudal[t] <= maximo)\n        ctx.salida("limite_calculado", t, maximo)'
+              }
+            </pre>
+          </details>
+        </>
+      )}
       {saved?.template ? (
         <>
           <p>Revisión compartida fijada: {saved.template.publication_id}</p>
@@ -483,7 +524,7 @@ function RuleForm({
         </>
       ) : (
         <PythonEditor
-          initialCode={initial?.code ?? DEFAULT_CODE}
+          initialCode={initial?.code ?? defaultCode}
           onChange={setCode}
           completions={completions}
         />
@@ -500,25 +541,28 @@ function RuleForm({
         <p role="alert">{ruleErrorMessage(candidates.error)}</p>
       )}
       <RuleTemporal
+        battery={battery}
         policy={temporal}
         onChange={setTemporal}
         objects={objects.filter((o) =>
           references.some((ref) => ref.object_id === o.id),
         )}
       />
-      <RuleWindows policy={windows} onChange={setWindows} />
-      <details>
-        <summary>Ejemplo de potencia conjunta</summary>
-        <p>
-          Selecciona la planta con alias central y define un parámetro limite de
-          10 MW.
-        </p>
-        <pre>
-          {
-            'def construir(ctx):\n    for t in ctx.periodos:\n        ctx.restriccion("conjunto", t, ctx.objetos.central.potencia[t] <= ctx.parametros.limite)'
-          }
-        </pre>
-      </details>
+      <RuleWindows policy={windows} onChange={setWindows} battery={battery} />
+      {!battery && (
+        <details>
+          <summary>Ejemplo de potencia conjunta</summary>
+          <p>
+            Selecciona la planta con alias central y define un parámetro limite
+            de 10 MW.
+          </p>
+          <pre>
+            {
+              'def construir(ctx):\n    for t in ctx.periodos:\n        ctx.restriccion("conjunto", t, ctx.objetos.central.potencia[t] <= ctx.parametros.limite)'
+            }
+          </pre>
+        </details>
+      )}
       <fieldset>
         <legend>Parámetros tipados</legend>
         {parameters.map((p, index) => (
@@ -680,11 +724,13 @@ function RuleForm({
           {dirty ? " · cambios sin guardar" : ""}
         </p>
       )}
-      <RulePreview
-        root={root}
-        saved={saved}
-        disabled={dirty || busy || !available || inputs.length > 0}
-      />
+      {!battery && (
+        <RulePreview
+          root={root}
+          saved={saved}
+          disabled={dirty || busy || !available || inputs.length > 0}
+        />
+      )}
       {saved && (
         <RuleApplications
           root={root}

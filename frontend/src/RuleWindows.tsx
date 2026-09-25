@@ -7,9 +7,11 @@ export interface WindowPolicy {
 export function RuleWindows({
   policy,
   onChange,
+  battery = false,
 }: {
   policy: WindowPolicy | null;
   onChange: (policy: WindowPolicy | null) => void;
+  battery?: boolean;
 }) {
   return (
     <fieldset>
@@ -67,18 +69,33 @@ export function RuleWindows({
             → MWh; m³/s por segundos → m³. Los intervalos no pueden cruzar
             bordes de día. No se prorratea el presupuesto.
           </p>
-          <details>
-            <summary>Ejemplo de presupuesto de agua</summary>
-            <p>
-              Define el parámetro agua en hm3. Para energía, usa potencia y un
-              parámetro en mwh, sin convertir a hm3.
-            </p>
-            <pre>
-              {
-                'def construir(ctx):\n    for ventana in ctx.ventanas():\n        agua = ventana.integral(ctx.objeto.caudal).a("hm3")\n        ctx.restriccion("agua", ventana, agua <= ctx.parametros.agua)'
-              }
-            </pre>
-          </details>
+          {battery ? (
+            <details>
+              <summary>Ejemplo de presupuesto de energía</summary>
+              <p>
+                Define presupuesto en mwh. Integra la carga o descarga en MW por
+                su duración en horas.
+              </p>
+              <pre>
+                {
+                  'def construir(ctx):\n    for ventana in ctx.ventanas():\n        ctx.restriccion("energia", ventana, ventana.integral(ctx.objeto.descarga) <= ctx.parametros.presupuesto)'
+                }
+              </pre>
+            </details>
+          ) : (
+            <details>
+              <summary>Ejemplo de presupuesto de agua</summary>
+              <p>
+                Define el parámetro agua en hm3. Para energía, usa potencia y un
+                parámetro en mwh, sin convertir a hm3.
+              </p>
+              <pre>
+                {
+                  'def construir(ctx):\n    for ventana in ctx.ventanas():\n        agua = ventana.integral(ctx.objeto.caudal).a("hm3")\n        ctx.restriccion("agua", ventana, agua <= ctx.parametros.agua)'
+                }
+              </pre>
+            </details>
+          )}
         </>
       )}
     </fieldset>

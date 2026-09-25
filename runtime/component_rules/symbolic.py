@@ -140,7 +140,7 @@ def collector(rows, count, temporal=False):
         rows.append({"name": name, "period": period, "line": inspect.currentframe().f_back.f_lineno,
                      "relation": relation.relation, "unit": relation.unit, "constant": relation.constant,
                      "terms": [{"object_id": oid, "period": t, "variable": variable, "coefficient": c,
-                                "unit": "h" if relation.unit == "mwh" and variable == "potencia" else
+                                "unit": "h" if relation.unit == "mwh" and variable in {"potencia", "carga", "descarga"} else
                                         "s" if relation.unit == "m3" and variable in {"caudal", "vertimiento"} else
                                         "hm3_per_m3_per_s" if relation.unit == "hm3" and variable in {"caudal", "vertimiento"} else "dimensionless"}
                                for oid, variable, t, c in relation.terms],

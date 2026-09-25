@@ -4316,7 +4316,7 @@ export interface components {
              * Variable
              * @enum {string}
              */
-            variable: "caudal" | "potencia" | "almacenamiento" | "vertimiento";
+            variable: "caudal" | "potencia" | "almacenamiento" | "vertimiento" | "carga" | "descarga" | "energia";
         };
         /** RuleInput */
         RuleInput: {
@@ -4326,7 +4326,7 @@ export interface components {
              * Binding Role Key
              * @enum {string}
              */
-            binding_role_key: "rule_inflow" | "rule_availability";
+            binding_role_key: "rule_inflow" | "rule_availability" | "rule_energy_reserve";
             /** Content Hash */
             content_hash: string;
             /** Dimension Key */

@@ -3,6 +3,7 @@ import ast
 from fastapi import HTTPException
 
 VARIABLES = {
+    "battery": {"carga": "mw", "descarga": "mw", "energia": "mwh"},
     "hydro": {"caudal": "m3_per_s", "vertimiento": "m3_per_s", "potencia": "mw", "almacenamiento": "hm3"},
     "hydraulic_unit": {"caudal": "m3_per_s", "potencia": "mw"},
     "hydraulic_plant": {"potencia": "mw"},
@@ -30,7 +31,7 @@ def object_error(alias, object_id, code=None):
                          and node.attr == alias and isinstance(node.value, ast.Attribute) and node.value.attr == "objetos"), None)
         except SyntaxError:
             pass
-    raise HTTPException(422, {"code": "RULE_OBJECT_INVALID", "message": "El objeto no pertenece al mismo snapshot hidráulico activo",
+    raise HTTPException(422, {"code": "RULE_OBJECT_INVALID", "message": "El objeto no pertenece al mismo snapshot activo del modelo",
                               "alias": alias, "object_id": object_id, "line": line})
 
 
@@ -45,14 +46,19 @@ def model_objects(store, project_id, scenario_id, document=None, *, object_id=No
         try:
             document = model_document(store, scenario_id, object_id)
         except (KeyError, ValueError) as error:
-            raise HTTPException(422, "El modelo hidráulico no está disponible para relacionar objetos") from error
-    if document["schema_version"] == "bess_system_dispatch.v2":
-        keys = {n["id"] for n in document["nodes"] if n["type"] == "hydro"}
+            raise HTTPException(422, "El modelo no está disponible para relacionar objetos") from error
+    if document["schema_version"] in {"bess_system_dispatch.v1", "bess_system_dispatch.v2"}:
+        nodes = {n["id"]: n for n in document["nodes"] if n["type"] in {"hydro", "battery"}}
         return [{"id": o["id"], "key": o["object_key"], "component_key": o["object_key"],
-                 "display_name": o["display_name"], "kind": "hydro", "variables": VARIABLES["hydro"],
+                 "display_name": o["display_name"], "kind": nodes[o["object_key"]]["type"],
+                 "variables": VARIABLES[nodes[o["object_key"]]["type"]],
+                 **({"conventions": {"carga": "nonnegative_interval_mean", "descarga": "nonnegative_interval_mean", "energia": "end_of_period"},
+                     "known_values": {"energia_inicial": {"value": nodes[o["object_key"]]["initial_energy_mwh"], "unit": "mwh"}}}
+                    if nodes[o["object_key"]]["type"] == "battery" else {}),
                  "schema_version": document["schema_version"]}
                 for o in store.list_linkable_objects(project_id=project_id)
-                if o["object_type_key"] == "component:hydro" and o["status"] == "active" and o["object_key"] in keys]
+                if o["status"] == "active" and o["object_key"] in nodes
+                and o["object_type_key"] == "component:" + nodes[o["object_key"]]["type"]]
     if document["schema_version"] != "bess_system_dispatch.v3":
         raise HTTPException(422, "Este modelo no admite reglas por componente")
     network = document["hydraulic_network"]

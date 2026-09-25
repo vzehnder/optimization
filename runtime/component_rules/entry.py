@@ -6,12 +6,12 @@ import platform
 import sys
 import traceback
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import MappingProxyType
 sys.path.insert(0, "/runtime")
 from symbolic import Flow, Periods, collector, temporal_error
 
-SDK = "reg-006.1"
+SDK = "reg-012.1"
 
 
 class LogLimit(ValueError):
@@ -171,7 +171,8 @@ def main(payload):
         for item in payload.get("objects", []):
             objects[item["id"]] = {"id": item["id"], **{
                 name: Flow(item["id"], count, name, unit, tuple(item.get("member_ids", [])))
-                for name, unit in item["variables"].items()}}
+                for name, unit in item["variables"].items()},
+                **{name: Quantity(value["value"], value["unit"]) for name, value in item.get("known_values", {}).items()}}
         if objects:
             obj = objects[obj["id"]]
         values["objetos"] = FrozenContext({ref["alias"]: FrozenContext(objects[ref["object_id"]]) for ref in payload.get("aliases", [])})
@@ -193,9 +194,14 @@ def main(payload):
                 def instant(value):
                     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
                     return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
-                hours = (instant(current) - instant(previous)).total_seconds() / 3600
+                current_instant, previous_instant = instant(current), instant(previous)
+                if series.variable == "energia":
+                    current_instant += timedelta(hours=payload["grid"][t]["duration_hours"])
+                    if t > 0:
+                        previous_instant += timedelta(hours=payload["grid"][t - 1]["duration_hours"])
+                hours = (current_instant - previous_instant).total_seconds() / 3600
                 if hours <= 0:
-                    temporal_error("El instante anterior debe preceder al inicio del período", t)
+                    temporal_error("El instante anterior debe preceder al instante actual", t)
                 previous_value = Quantity(initial["value"], initial["unit"]) if t == 0 else series[t - 1]
                 yield FrozenContext({"periodo": t, "actual": series[t], "anterior": previous_value,
                                      "inicio": current, "inicio_anterior": previous, "horas": Quantity(hours, "h")})

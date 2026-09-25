@@ -16,10 +16,12 @@ export function RuleTemporal({
   policy,
   onChange,
   objects,
+  battery = false,
 }: {
   policy: TemporalPolicy | null;
   onChange: (policy: TemporalPolicy | null) => void;
   objects: RuleObject[];
+  battery?: boolean;
 }) {
   const variables = objects.flatMap((object) =>
     Object.entries(object.variables).map(([variable, unit]) => ({
@@ -57,6 +59,11 @@ export function RuleTemporal({
         Las rampas entre medias usan la distancia entre inicios, en horas. Cada
         subida y bajada se declara por separado.
       </p>
+      {battery && (
+        <p>
+          Para energía, las transiciones usan los cierres de los intervalos.
+        </p>
+      )}
       {policy?.first_period === "omit" && (
         <p>
           Se omite la comparación del primer período con el exterior del
@@ -176,13 +183,11 @@ export function RuleTemporal({
       <details>
         <summary>Ejemplo de rampas de potencia</summary>
         <p>
-          Define subida y bajada en mw_per_h (MW/h). Para caudal, usa
-          m3_per_s_per_h.
+          Define subida y bajada en mw_per_h (MW/h).
+          {!battery && " Para caudal, usa m3_per_s_per_h."}
         </p>
         <pre>
-          {
-            'def construir(ctx):\n    for paso in ctx.transiciones(ctx.objeto.potencia):\n        diferencia = paso.actual - paso.anterior\n        ctx.restriccion("subida", paso.periodo, diferencia <= ctx.parametros.subida * paso.horas)\n        ctx.restriccion("bajada", paso.periodo, -diferencia <= ctx.parametros.bajada * paso.horas)'
-          }
+          {`def construir(ctx):\n    for paso in ctx.transiciones(ctx.objeto.${battery ? "descarga" : "potencia"}):\n        diferencia = paso.actual - paso.anterior\n        ctx.restriccion("subida", paso.periodo, diferencia <= ctx.parametros.subida * paso.horas)\n        ctx.restriccion("bajada", paso.periodo, -diferencia <= ctx.parametros.bajada * paso.horas)`}
         </pre>
       </details>
     </fieldset>

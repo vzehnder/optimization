@@ -106,8 +106,8 @@ def freeze_scope(store, project_id, scope, expected_bindings_revision=None, *, o
         lineage = {"series_bindings": sources}
         start, end = instant(scope["range_start"]), instant(scope["range_end"])
         document["time_series"] = [p for p in document["time_series"] if start <= instant(p["timestamp"]) < end]
-    if document["schema_version"] not in {"bess_system_dispatch.v2", "bess_system_dispatch.v3"} or "component_rules" in document:
-        raise HTTPException(422, "Esta capacidad requiere un modelo v2 o hidráulico v3 sin reglas incrustadas")
+    if document["schema_version"] not in {"bess_system_dispatch.v1", "bess_system_dispatch.v2", "bess_system_dispatch.v3"} or "component_rules" in document:
+        raise HTTPException(422, "Esta capacidad requiere un modelo v1/v2 o hidráulico v3 sin reglas incrustadas")
     grid = [{"timestamp": p["timestamp"], "duration_hours": p["duration_hours"]} for p in document["time_series"]]
     if not 1 <= len(grid) <= 8784:
         raise HTTPException(422, "El horizonte debe tener entre 1 y 8784 períodos")
@@ -125,9 +125,9 @@ def freeze_scope(store, project_id, scope, expected_bindings_revision=None, *, o
 
 def compile_context(store, project_id, object_id, scope):
     frozen = freeze_scope(store, project_id, scope, object_id=object_id)
-    if frozen["system_case"]["schema_version"] == "bess_system_dispatch.v2":
+    if frozen["system_case"]["schema_version"] in {"bess_system_dispatch.v1", "bess_system_dispatch.v2"}:
         obj = resolve_aliases(store, project_id, object_id, scope["scenario_id"], [], frozen["system_case"])[0]
-        return {**frozen, "component_key": obj["component_key"], "adapter": "hydro_v2.v1"}
+        return {**frozen, "component_key": obj["component_key"], "adapter": "battery_system.v1" if obj["kind"] == "battery" else "hydro_v2.v1"}
     objects = store.linkable_object_table_names()["linkable_objects"]
     row = store.connection.execute(f"""
         SELECT u.unit_key, p.plant_key FROM {objects} o
@@ -435,8 +435,8 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
         block_version = next((v for v in (BUDGET_IR_VERSION, TEMPORAL_IR_VERSION, HYDRAULIC_IR_VERSION) if any(a["ir"]["version"] == v for a in applications)), IR_VERSION)
         block = {"version": block_version, "objects": list(objects.values()), "grid": frozen["grid"], "timezone": "UTC",
                  "rows": rows, "applications": snapshots, "context_hash": frozen["fingerprint"], "ir_hash": digest(rows)}
-        if frozen["system_case"]["schema_version"] == "bess_system_dispatch.v2":
-            block["adapter"] = "hydro_v2.v1"
+        if frozen["system_case"]["schema_version"] in {"bess_system_dispatch.v1", "bess_system_dispatch.v2"}:
+            block["adapter"] = "battery_system.v1" if any(o["kind"] == "battery" for o in objects.values()) else "hydro_v2.v1"
         document = {**frozen["system_case"], "component_rules": block}
         from app.rule_ir import RuleBoundsError, validate_model_bounds
         from app.rule_compliance import rule_url

@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { requestJson } from "./api/client";
 import { ProtectedJourneyProgress } from "./ProtectedMutationJourney";
+import { ruleUnit } from "./ruleUnits";
 
 export interface RuleInput {
   alias: string;
@@ -11,7 +12,7 @@ export interface RuleInput {
   content_hash: string;
   dimension_key: string;
   semantic_type_key: string;
-  binding_role_key: "rule_inflow" | "rule_availability";
+  binding_role_key: "rule_inflow" | "rule_availability" | "rule_energy_reserve";
 }
 interface Candidate extends RuleInput {
   display_name: string;
@@ -87,15 +88,19 @@ export function RuleInputs({
     <fieldset className="rule-inputs">
       <legend>Entradas horarias</legend>
       <p>
-        Selecciona series de afluente o disponibilidad para el objeto. Cada
-        entrada conserva su revisión.
+        Selecciona entradas compatibles con el objeto. Cada entrada conserva su
+        unidad y revisión.
       </p>
       {inputs.map((port, index) => (
         <div className="rule-input-pin" key={port.alias}>
           <strong>{port.alias}</strong>
           <span>
             Señal {port.signal_id} · revisión {port.revision_id} ·{" "}
-            {port.dimension_key === "flow" ? "m³/s" : "adimensional"}
+            {ruleUnit(
+              { flow: "m3_per_s", energy: "mwh", power: "mw" }[
+                port.dimension_key
+              ] ?? port.dimension_key,
+            )}
           </span>
           <button
             type="button"
@@ -190,12 +195,14 @@ export function RuleInputs({
                           ?.alias ??
                           (item.binding_role_key === "rule_availability"
                             ? "disponibilidad"
-                            : "afluente"),
+                            : item.binding_role_key === "rule_energy_reserve"
+                              ? "reserva"
+                              : "afluente"),
                       );
                     }}
                   />
                   {item.display_name} · {item.set_name} ·{" "}
-                  {item.unit_key === "m3_per_s" ? "m³/s" : "adimensional"}
+                  {ruleUnit(item.unit_key)}
                 </label>
               ))}
               {candidates.isPending && (
@@ -244,7 +251,7 @@ export function RuleInputs({
           )}
           {step === 3 && selection && (
             <p>
-              Guardarás <strong>{alias}</strong> en el borrador de esta unidad
+              Guardarás <strong>{alias}</strong> en el borrador de este objeto
               con la revisión {selection.revision_id}. Publica y prueba el
               horizonte completo antes de aplicar sus límites.
             </p>

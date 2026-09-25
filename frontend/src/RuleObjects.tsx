@@ -8,6 +8,7 @@ export interface RuleObject {
   kind: string;
   variables: Record<string, string>;
   member_ids?: number[];
+  known_values?: Record<string, { value: number; unit: string }>;
 }
 export interface RuleAlias {
   alias: string;
@@ -82,6 +83,12 @@ export function RuleObjects({
             {object?.member_ids && (
               <p>{object.member_ids.length} unidades en esta planta.</p>
             )}
+            {object?.kind === "battery" && (
+              <p>
+                Carga y descarga son potencias positivas en MW, medias del
+                intervalo. La energía al final del período se expresa en MWh.
+              </p>
+            )}
             <ul>
               {Object.entries(object?.variables ?? {}).map(([name, unit]) => (
                 <li key={name}>
@@ -89,6 +96,12 @@ export function RuleObjects({
                 </li>
               ))}
             </ul>
+            {Object.entries(object?.known_values ?? {}).map(([name, value]) => (
+              <p key={name}>
+                <code>{`ctx.${ref.alias ? `objetos.${ref.alias}` : "objeto"}.${name}`}</code>
+                : {value.value} {ruleUnit(value.unit)} · dato conocido
+              </p>
+            ))}
             {ref.alias && (
               <button
                 type="button"

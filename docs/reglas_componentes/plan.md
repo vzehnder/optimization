@@ -1,7 +1,7 @@
 # Plan: motor de cálculos y restricciones por componente
 
 Fecha: 2026-09-21.
-Estado: decisiones adoptadas por delegación del usuario; REG-001 a REG-011 implementados y verificados, REG-012 a REG-014 pendientes.
+Estado: decisiones adoptadas por delegación del usuario; REG-001 a REG-012 implementados y verificados, REG-013 a REG-014 pendientes.
 Tracker: [issues](issues/tracker.md).
 
 ## 1. Objetivo y decisiones de la entrevista
@@ -226,6 +226,8 @@ No descargar datos externos durante el cálculo ni rellenar valores automáticam
 Los valores de potencia y caudal representan medias por intervalo; almacenamiento
 representa estado al final del intervalo. Una rampa entre medias usa la distancia
 entre inicios de intervalos, expresada en horas, incluso con duraciones variables.
+Para la energía almacenada de baterías, las transiciones usan la distancia entre
+cierres; el primer cierre se compara con el instante inicial declarado.
 Al usar referencias anteriores, declarar política de borde: omitir el primer
 período de forma visible o proporcionar valor inicial tipado y su instante. No hay
 wraparound por índices negativos. El almacenamiento inicial del modelo se expone

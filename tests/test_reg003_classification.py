@@ -37,4 +37,5 @@ class AdditiveRuleClassificationTests(unittest.TestCase):
                     self.assertEqual(response.status_code, 200, response.text)
                     self.assertIn("custom_fraction", response.text)
                     self.assertIn("availability_factor", response.text)
+                    self.assertIn("battery_energy_reserve", response.text)
                 store.close()

@@ -2033,6 +2033,7 @@ function BatteryFields({
   setDocument,
   errors,
   removalProps,
+  rulesPath,
 }: AssetFieldProps) {
   const patch = (field: string, value: unknown) =>
     setDocument((current) =>
@@ -2040,6 +2041,16 @@ function BatteryFields({
     );
   return (
     <AssetShell asset={asset} {...removalProps}>
+      {rulesPath ? (
+        <Link to={rulesPath}>
+          Cálculos y restricciones · {String(asset.id)}
+        </Link>
+      ) : (
+        <p>
+          Guarda los cambios del componente para abrir sus cálculos y
+          restricciones.
+        </p>
+      )}
       <h3>Capacidad y límites</h3>
       <div className="draft-field-grid">
         <NumberInput

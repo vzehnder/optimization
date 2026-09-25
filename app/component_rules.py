@@ -48,7 +48,7 @@ class RuleInput(BaseModel):
     alias: str = Field(pattern=r"^[a-zA-Z][a-zA-Z0-9_]{0,63}$")
     dimension_key: str = Field(max_length=64)
     semantic_type_key: str = Field(max_length=64)
-    binding_role_key: Literal["rule_inflow", "rule_availability"]
+    binding_role_key: Literal["rule_inflow", "rule_availability", "rule_energy_reserve"]
     object_id: int = Field(gt=0)
     signal_id: int = Field(gt=0)
     revision_id: int = Field(gt=0)
@@ -64,7 +64,7 @@ class RuleObjectAlias(BaseModel):
 class RuleInitialValue(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     object_id: int = Field(gt=0)
-    variable: Literal["caudal", "potencia", "almacenamiento", "vertimiento"]
+    variable: Literal["caudal", "potencia", "almacenamiento", "vertimiento", "carga", "descarga", "energia"]
     value: float
     unit: str = Field(max_length=64)
     timestamp: str = Field(max_length=64)
@@ -494,8 +494,8 @@ def rule_router(store):
             raise HTTPException(404, "Objeto no encontrado") from None
         if obj["project_id"] != project_id:
             raise HTTPException(404, "Objeto no encontrado")
-        if (obj["object_kind"] != "hydraulic_unit" and obj["object_type_key"] != "component:hydro") or obj["status"] != "active":
-            raise HTTPException(422, "Esta capacidad requiere una unidad hidráulica o hidro simple activo")
+        if (obj["object_kind"] != "hydraulic_unit" and obj["object_type_key"] not in {"component:hydro", "component:battery"}) or obj["status"] != "active":
+            raise HTTPException(422, "Esta capacidad requiere una unidad hidráulica, hidro simple o batería activa")
         return user, obj
 
     @router.post("", status_code=201)
@@ -518,7 +518,7 @@ def rule_router(store):
                       "applications": [{k: a[k] for k in ("id", "revision", "status", "variant_id", "publication_id", "validation_status", "validation_causes")}
                                        for a in list_applications(repository, row["id"])]} for row in rows]
         return {"object": {"id": obj["id"], "display_name": obj["display_name"],
-                           "kind": "hydro" if obj["object_type_key"] == "component:hydro" else obj["object_kind"]},
+                           "kind": obj["object_type_key"].removeprefix("component:") if obj["object_kind"] == "component" else obj["object_kind"]},
                 "items": items,
                 "runtime": repository.runtime() if project_enabled(project_id) else None,
                 "enabled": project_enabled(project_id)}
@@ -750,19 +750,19 @@ def rule_router(store):
                 raise HTTPException(404, "Escenario no encontrado") from None
             try:
                 document = model_document(store, scenario_id)
-                if document["schema_version"] != "bess_system_dispatch.v2" or not any(
-                        n["id"] == component_key and n["type"] == "hydro" for n in document["nodes"]):
-                    raise HTTPException(404, "Hidro simple no encontrado en este modelo")
+                if document["schema_version"] not in {"bess_system_dispatch.v1", "bess_system_dispatch.v2"} or not any(
+                        n["id"] == component_key and n["type"] in {"hydro", "battery"} for n in document["nodes"]):
+                    raise HTTPException(404, "Componente compatible no encontrado en este modelo")
                 for node in document["nodes"]:
-                    if node["type"] == "hydro":
+                    if node["type"] in {"hydro", "battery"}:
                         store.ensure_project_component(project_id=project_id, component_key=node["id"],
-                            component_type="hydro", display_name=node.get("name", node["id"]), actor=user["email"])
+                            component_type=node["type"], display_name=node.get("name", node["id"]), actor=user["email"])
             except (ValueError, LinkableObjectError) as error:
                 raise HTTPException(422, str(error)) from error
             candidate = next((o for o in model_objects(store, project_id, scenario_id, document)
                               if o.get("component_key") == component_key), None)
         if candidate is None:
-            raise HTTPException(404, "Guarda primero el hidro simple activo en el modelo")
+            raise HTTPException(404, "Guarda primero el componente activo en el modelo")
         return {"project_id": project_id, "object_id": candidate["id"]}
 
     return routes

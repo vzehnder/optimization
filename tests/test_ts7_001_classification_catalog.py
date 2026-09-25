@@ -79,6 +79,7 @@ class PersistentClassificationCatalogTests(unittest.TestCase):
                 ],
                 "semantic_types": [
                     "availability_factor",
+                    "battery_energy_reserve",
                     "energy_price",
                     "grid_export_price",
                     "grid_import_price",
@@ -97,6 +98,7 @@ class PersistentClassificationCatalogTests(unittest.TestCase):
                     "natural_inflow",
                     "renewable_available_power",
                     "rule_availability",
+                    "rule_energy_reserve",
                     "rule_inflow",
                 ],
                 "object_types": [
@@ -112,7 +114,7 @@ class PersistentClassificationCatalogTests(unittest.TestCase):
                     "hydraulic_system",
                     "hydraulic_unit",
                 ],
-                "compatibility_rules": 15,
+                "compatibility_rules": 17,
                 "role_columns": [
                     "association_allowed",
                     "canonical_unit_id",

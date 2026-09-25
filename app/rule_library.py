@@ -146,7 +146,7 @@ def require_clone_destinations(store, project_id, object_id, document, object_ma
     missing = []
     for identity in sorted({object_id, *(a["object_id"] for a in document.get("aliases", []))}):
         source = store.get_linkable_object(identity)
-        source_kind = "hydro" if source["object_type_key"] == "component:hydro" else source["object_kind"]
+        source_kind = source["object_type_key"].removeprefix("component:") if source["object_kind"] == "component" else source["object_kind"]
         target = available.get(object_map.get(identity, identity))
         if target is None or target["kind"] != source_kind:
             missing.append({"object_id": identity, "display_name": source["display_name"],
@@ -265,11 +265,12 @@ def contract_for(store, publication, object_id, project_id):
         raise HTTPException(422, "Corrige el código antes de ofrecerlo en la biblioteca") from None
     capability = ("affine_budget.v1" if publication.get("windows") else
                   "affine_temporal.v1" if publication.get("temporal") else
-                  "affine_hydraulic.v1" if publication.get("aliases") or attrs & {"potencia", "almacenamiento", "vertimiento"} else
+                  "affine_hydraulic.v1" if publication.get("aliases") or attrs & {"potencia", "almacenamiento", "vertimiento", "carga", "descarga", "energia", "energia_inicial"} else
                   "affine_flow.v1")
     kind = by_id.get(object_id, {}).get("kind", "hydraulic_unit")
     required = attrs & set(VARIABLES[kind])
-    compatible = [target for target in ("hydraulic_unit", "hydro") if required <= set(VARIABLES[target])]
+    compatible = [target for target in ("hydraulic_unit", "hydro", "battery") if required <= set(VARIABLES[target])
+                  and ("energia_inicial" not in attrs or target == "battery")]
     return {
         "compatible_types": compatible, "required_capabilities": [capability],
         "parameters": [{k: v for k, v in p.items() if k not in {"value", "object_id"}} | {"owner": owner(p.get("object_id"))}

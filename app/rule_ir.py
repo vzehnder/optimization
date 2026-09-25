@@ -40,6 +40,11 @@ def validate_model_bounds(rows, objects, document):
         if obj["kind"] == "hydro":
             hydro = next(n for n in document["nodes"] if n["id"] == obj["component_key"] and n["type"] == "hydro")
             physical.update({(obj["id"], variable): bounds for variable, bounds in hydro_bounds(hydro).items()})
+        elif obj["kind"] == "battery":
+            battery = next(n for n in document["nodes"] if n["id"] == obj["component_key"] and n["type"] == "battery")
+            physical[obj["id"], "carga"] = (0, battery["charge_power_max_mw"])
+            physical[obj["id"], "descarga"] = (0, battery["discharge_power_max_mw"])
+            physical[obj["id"], "energia"] = (battery["energy_min_mwh"], battery["energy_max_mwh"])
         elif obj["kind"] == "hydraulic_unit":
             unit = next(u for u in network["units"] if u["id"] == obj["unit_key"])
             curve = unit["curves"]["flow_power"]
@@ -146,7 +151,7 @@ def validate_ir(ir, object_id, period_count, objects=None, *, grid=None, windows
         if not isinstance(row["name"], str) or not 1 <= len(row["name"]) <= 200 or (row["name"], period) in names:
             raise ValueError("Nombre de restricción vacío o duplicado")
         names.add((row["name"], period))
-        if type(row["line"]) is not int or row["line"] < 1 or row["relation"] not in {"<=", ">=", "=="} or row["unit"] not in ({"mwh", "m3", "hm3"} if window else {"m3_per_s"} if ir["version"] == IR_VERSION else {"m3_per_s", "mw", "hm3"}):
+        if type(row["line"]) is not int or row["line"] < 1 or row["relation"] not in {"<=", ">=", "=="} or row["unit"] not in ({"mwh", "m3", "hm3"} if window else {"m3_per_s"} if ir["version"] == IR_VERSION else {"m3_per_s", "mw", "hm3", "mwh"}):
             raise ValueError("Origen, relación o unidad inválidos")
         finite(row["constant"])
         terms = row["terms"]
@@ -196,7 +201,7 @@ def validate_outputs(outputs, period_count):
         name, period = row["name"], row["period"]
         if not isinstance(name, str) or not 1 <= len(name) <= 200 or type(period) is not int or not 0 <= period < period_count:
             raise ValueError("Nombre o período de salida inválido")
-        if (name, period) in names or row["unit"] not in {"m3_per_s", "dimensionless", "mw", "usd_per_mwh", "hm3"}:
+        if (name, period) in names or row["unit"] not in {"m3_per_s", "dimensionless", "mw", "usd_per_mwh", "hm3", "mwh"}:
             raise ValueError("Salida duplicada o unidad desconocida")
         if units.setdefault(name, row["unit"]) != row["unit"]:
             raise ValueError("La unidad de una salida no puede cambiar entre períodos")

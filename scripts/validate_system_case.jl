@@ -22,7 +22,7 @@ function system_validation_success_payload(data::BESSDispatch.SystemOptimization
         "period_count" => length(data.timestamp),
         "component_rule_versions" => [BESSDispatch.COMPONENT_RULE_VERSION, BESSDispatch.HYDRAULIC_RULE_VERSION,
                                       BESSDispatch.TEMPORAL_RULE_VERSION, BESSDispatch.BUDGET_RULE_VERSION],
-        "component_rule_adapters" => [BESSDispatch.SIMPLE_HYDRO_RULE_ADAPTER],
+        "component_rule_adapters" => [BESSDispatch.SIMPLE_HYDRO_RULE_ADAPTER, BESSDispatch.BATTERY_RULE_ADAPTER],
         "asset_counts" => Dict{String,Any}(
             "battery" => length(data.batteries),
             "renewable" => length(data.renewables),

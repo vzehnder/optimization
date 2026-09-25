@@ -59,3 +59,19 @@ def seed_rule_classification(store):
                 ensure(tables[2], {"semantic_type_id": semantic, "binding_role_id": role, "object_type_id": target_type, "rule_version": 1},
                     {"association_allowed": 1, "execution_allowed": 1},
                     {"supersedes_rule_id": None, **audit, "archived_at": None, "archived_by": None})
+    at = "2026-09-24T00:00:00+00:00"
+    audit = {"created_at": at, "created_by": "reg-012"}
+    battery_type = identity("linkable_object_types", "object_type_key", "component:battery")
+    reserve = ensure(tables[0], {"semantic_key": "battery_energy_reserve"},
+        {"dimension_id": energy, "canonical_unit_id": identity("measurement_units", "unit_key", "mwh"),
+         "value_kind": "numeric", "default_aggregation": "mean", "validation_rules_json": '{"minimum":0}', "is_system": 1},
+        {"display_name": "Reserva de energía de batería", "description": "Minimum end-of-period energy target for each interval.",
+         **audit, "updated_at": at, "updated_by": "reg-012"})
+    reserve_role = ensure(tables[1], {"role_key": "rule_energy_reserve"},
+        {"dimension_id": energy, "canonical_unit_id": identity("measurement_units", "unit_key", "mwh"),
+         "association_allowed": 1, "execution_allowed": 1, "execution_contract_key": "component_rule_input", "is_system": 1},
+        {"display_name": "Reserva de energía al final del período"})
+    for semantic, role in ((reserve, reserve_role), (availability, identity(tables[1], "role_key", "rule_availability"))):
+        ensure(tables[2], {"semantic_type_id": semantic, "binding_role_id": role, "object_type_id": battery_type, "rule_version": 1},
+            {"association_allowed": 1, "execution_allowed": 1},
+            {"supersedes_rule_id": None, **audit, "archived_at": None, "archived_by": None})

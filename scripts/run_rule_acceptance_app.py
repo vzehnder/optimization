@@ -66,6 +66,12 @@ def main():
         simple_hydro = store.create_scenario(project_id=project["id"], name="REG-011 · Hidro simple")
         store.create_or_replace_scenario_draft(scenario_id=simple_hydro["id"], document=simple_draft)
         simple_source = source("REG-011 · Caudal horario", "hydro_inflow", "m3_per_s", [4, 6])
+        battery_document = json.loads((REPO_ROOT / "tests/fixtures/reg012_battery.json").read_text())
+        battery_draft = structured_draft_document_from_system_case(battery_document)
+        battery_draft["time_series"] = {"periods": battery_document["time_series"]}
+        battery_scenario = store.create_scenario(project_id=project["id"], name="REG-012 · Reserva batería")
+        store.create_or_replace_scenario_draft(scenario_id=battery_scenario["id"], document=battery_draft)
+        battery_source = source("REG-012 · Reserva horaria", "battery_energy_reserve", "mwh", [0, 4, 1, 2])
         app = create_app(store=store, auth_enabled=True, artifact_root=Path(temporary) / "artifacts", input_source_root=Path(temporary) / "sources")
         original_lifespan = app.router.lifespan_context
 
@@ -84,6 +90,10 @@ def main():
         @app.get("/api/auth/reg011-fixture", include_in_schema=False)
         def simple_fixture():
             return {"scenario_id": simple_hydro["id"], "source": simple_source}
+
+        @app.get("/api/auth/reg012-fixture", include_in_schema=False)
+        def battery_fixture():
+            return {"scenario_id": battery_scenario["id"], "source": battery_source}
 
         @app.get("/api/auth/reg002-fixture", include_in_schema=False)
         def fixture():

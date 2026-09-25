@@ -1,4 +1,9 @@
-# Operación y verificación de REG-001 a REG-011
+# Operación y verificación de REG-001 a REG-012
+
+El runtime actual usa **SDK `reg-012.1`**. Reconstruir la imagen OCI y reiniciar
+el worker con su nuevo digest; las aplicaciones anteriores requieren publicar,
+probar y aplicar de nuevo. Sus snapshots y resultados históricos siguen legibles.
+Los ejemplos de versiones anteriores de este documento describen su entrega original.
 
 REG-001 guarda borradores y calcula un máximo escalar de caudal. REG-002 incorpora
 publicación, aplicaciones a variantes y restricciones afines en el optimizador
@@ -17,6 +22,8 @@ REG-010 reconstruye el cumplimiento de cada restricción desde el snapshot y los
 artefactos del solver, con paginación, muestras, tolerancias y diagnósticos internos.
 REG-011 incorpora el hidro simple v2 al mismo recorrido, con caudal, vertimiento,
 potencia y almacenamiento, remapeo explícito de plantillas y cumplimiento histórico.
+REG-012 incorpora baterías de sistemas v1/v2, reservas horarias en MWh, límites
+de carga/descarga, relaciones con hidro simple y cumplimiento de las variables reales.
 Las revisiones `sealed_preview` son copias inmutables
 de pruebas; no cambian por sí solas el estado de la definición editable.
 
@@ -664,3 +671,78 @@ POSTGRES_TEST_DATABASE_URL=postgresql://test:test@127.0.0.1:5432/object_series_t
 
 Referencia del mecanismo OCI: [Docker, ejecución de contenedores](https://docs.docker.com/engine/containers/run/).
 Los tests de esta entrega no constituyen una auditoría de escapes del kernel.
+
+## Baterías (REG-012)
+
+El editor de batería guardado abre «Cálculos y restricciones». El mismo SDK expone:
+
+| Expresión | Unidad | Convención |
+| --- | --- | --- |
+| `ctx.objeto.carga[t]` | `mw` | Potencia media absorbida durante el intervalo, no negativa. |
+| `ctx.objeto.descarga[t]` | `mw` | Potencia media entregada durante el intervalo, no negativa. |
+| `ctx.objeto.energia[t]` | `mwh` | Energía almacenada al final del intervalo. |
+| `ctx.objeto.energia_inicial` | `mwh` | Dato conocido del modelo al inicio del horizonte. |
+
+Una reserva usa la semántica canónica `battery_energy_reserve`, dimensión
+`energy`, unidad `mwh` y rol `rule_energy_reserve`. La clasificación se instala
+aditivamente por clave. Cada valor es la consigna mínima para el final de su
+intervalo, identificado por el inicio UTC; se conserva la grilla exacta y la
+agregación canónica `mean` del programa por intervalo. No se interpreta como
+una medición del estado inicial ni se convierte en una señal de disponibilidad.
+Las baterías también admiten `rule_availability`; un afluente sigue siendo incompatible.
+
+```python
+def construir(ctx):
+    for t in ctx.periodos:
+        ctx.restriccion("reserva", t,
+            ctx.objeto.energia[t] >= ctx.entradas.reserva[t])
+        ctx.restriccion("potencia", t,
+            ctx.objeto.carga[t] + ctx.objeto.descarga[t] <= ctx.parametros.limite)
+```
+
+`limite` declara `mw`. Las rampas de potencia conservan la política inicial
+explícita y los presupuestos usan `ventana.integral(ctx.objeto.descarga)` o
+`carga`, con horas como coeficientes para producir MWh. Una reserva superior a
+la capacidad se diagnostica como `RULE_BOUNDS_CONFLICT` con objeto, período y línea.
+Los productos/divisiones entre decisiones y las variables de usuario siguen rechazados.
+
+En `ctx.transiciones(ctx.objeto.energia)`, `horas` mide la distancia entre los
+cierres de los intervalos. Con condición inicial declarada, la primera transición
+parte de ese instante; puede ser el inicio del horizonte. Para intervalos de
+0,5 y 1,5 horas, las transiciones desde ese estado inicial duran 0,5 y 1,5 horas.
+Los campos `inicio` e `inicio_anterior` siguen identificando los inicios de los
+intervalos (o el instante inicial declarado).
+
+Las aplicaciones y el bloque Julia fijan `battery_system.v1` con su esquema de
+sistema, identidades y capacidades afines. En v2 se pueden relacionar baterías e
+hidros del mismo snapshot. Los términos se conectan a carga, descarga y energía
+existentes: se conservan eficiencias, balance eléctrico, degradación, condición
+terminal y las binarias internas del modelo. Un motor sin ese adaptador bloquea
+la corrida. Cambios de capacidad o entradas dejan las aplicaciones obsoletas.
+Clonar una variante conserva sus pins y exige revalidación; la biblioteca puede
+reutilizar revisiones compatibles entre baterías.
+
+El informe de cumplimiento lee `battery_charge_mw`, `battery_discharge_mw` y
+`battery_energy_mwh` de los artefactos congelados. Las publicaciones posteriores
+no reinterpretan las corridas históricas.
+
+Verificación desde el repositorio, con runtime OCI y PostgreSQL de pruebas configurados:
+
+```powershell
+docker build -t component-rules:reg-012 runtime/component_rules
+$env:RULE_RUNTIME_IMAGE = (docker image inspect component-rules:reg-012 --format '{{.Id}}').Trim()
+.\.venv\Scripts\python.exe -m unittest tests.test_reg012_rules tests.test_reg011_rules -v
+julia --project=. test/battery_rules.jl
+```
+
+Desde `frontend`, después de compilar el bundle:
+
+```powershell
+$env:RULE_ACCEPTANCE_SERVER = '1'
+npx playwright test e2e/component-rules-battery.spec.ts
+```
+
+La fixture `tests/fixtures/reg012_battery.json` demuestra una reserva `[0, 4, 1, 2]`
+MWh y un límite conjunto de 3 MW: descarga `[0, 0.36, 2.7, 0]` MW, energía
+`[4.4, 4, 1, 2]` MWh y objetivo 208.95 USD, incluida la degradación. Sin reglas,
+la descarga es `[0, 4, 0.68, 0]` MW. La condición terminal conserva 2 MWh en ambos casos.
