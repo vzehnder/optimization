@@ -1326,6 +1326,15 @@ export interface HydraulicPlantLinkAnchor {
   to?: number | null;
 }
 
+export interface HydraulicTravelTimeParameters {
+  travel_time_hours?: number;
+  travel_time_unit?: "seconds" | "minutes" | "hours" | "days";
+  initial_flow_m3s?: number;
+  initial_arrivals?:
+    | { timestamp: string; duration_hours: number; value_m3s: number }[]
+    | null;
+}
+
 export interface HydraulicDiagramNodeWrite {
   component_type: HydraulicComponentType;
   technical_key: string;
@@ -1340,6 +1349,7 @@ export interface HydraulicDiagramNodeWrite {
   // Plant only: border anchors for derived plant links, keyed by
   // "in:<nodeKey>" (intake) / "out:<nodeKey>" (discharge).
   link_anchors?: Record<string, HydraulicPlantLinkAnchor> | null;
+  link_transit?: Record<string, HydraulicTravelTimeParameters> | null;
 }
 
 export interface HydraulicDiagramNode extends HydraulicDiagramNodeWrite {
@@ -1362,12 +1372,13 @@ export interface HydraulicFlowBehavior {
   curve: HydraulicCurveWrite;
 }
 
-export interface HydraulicDiagramReachWrite {
+export interface HydraulicDiagramReachWrite extends HydraulicTravelTimeParameters {
   technical_key: string;
   display_name: string;
   from_node_key: string;
   to_node_key: string;
   reach_type: HydraulicReachType;
+  routing_method?: string;
   // Fraction (0..1) along the source bottom / target top border where the
   // edge attaches; null/absent means center (0.5).
   from_anchor?: number | null;

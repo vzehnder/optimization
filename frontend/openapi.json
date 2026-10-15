@@ -2060,6 +2060,20 @@
             ],
             "title": "Link Anchors"
           },
+          "link_transit": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/HydraulicTravelTimeRequest"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Transit"
+          },
           "natural_inflow_series": {
             "anyOf": [
               {
@@ -2187,6 +2201,26 @@
             "title": "From Node Key",
             "type": "string"
           },
+          "initial_arrivals": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/HydraulicNaturalInflowSeriesPointRequest"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Arrivals"
+          },
+          "initial_flow_m3s": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Initial Flow M3S",
+            "type": "number"
+          },
           "minimum_flow_series": {
             "anyOf": [
               {
@@ -2243,6 +2277,17 @@
             "default": 0.0,
             "title": "Travel Time Hours",
             "type": "number"
+          },
+          "travel_time_unit": {
+            "default": "hours",
+            "enum": [
+              "seconds",
+              "minutes",
+              "hours",
+              "days"
+            ],
+            "title": "Travel Time Unit",
+            "type": "string"
           }
         },
         "required": [
@@ -2567,6 +2612,49 @@
           }
         },
         "title": "HydraulicStorageElevationCurveRequest",
+        "type": "object"
+      },
+      "HydraulicTravelTimeRequest": {
+        "properties": {
+          "initial_arrivals": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/HydraulicNaturalInflowSeriesPointRequest"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Arrivals"
+          },
+          "initial_flow_m3s": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Initial Flow M3S",
+            "type": "number"
+          },
+          "travel_time_hours": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Travel Time Hours",
+            "type": "number"
+          },
+          "travel_time_unit": {
+            "default": "hours",
+            "enum": [
+              "seconds",
+              "minutes",
+              "hours",
+              "days"
+            ],
+            "title": "Travel Time Unit",
+            "type": "string"
+          }
+        },
+        "title": "HydraulicTravelTimeRequest",
         "type": "object"
       },
       "HydraulicUnitRequest": {

@@ -7,6 +7,7 @@ using Test
 using YAML
 
 include("hydraulic_seepage.jl")
+include("hydraulic_transit.jl")
 
 const POWER_TOLERANCE_MW = 1e-6
 const ENERGY_TOLERANCE_MWH = 1e-6

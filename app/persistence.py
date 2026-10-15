@@ -25,6 +25,11 @@ from app.hydraulic_behaviors import (
     normalize_flow_behavior,
     validate_flow_behaviors,
 )
+from app.hydraulic_transit import (
+    compile_plant_transit,
+    normalize_initial_transit,
+    normalize_link_transit,
+)
 from app.database import connect_database, database_url_from_env, postgres_schema_from_sqlite
 from app.draft_editor import DraftGenerationError, generate_system_case_from_draft
 from app.input_variants import (
@@ -324,11 +329,10 @@ HYDRAULIC_REACH_TYPES = {
     "other",
 }
 HYDRAULIC_TERMINAL_CONDITIONS = {"none", "equal_initial", "min_terminal"}
-# Routing methods the schema can store; the MVP v3 solver only runs `none`
-# (no travel-time delay). Other values are persisted but rejected before
+# Routing methods the schema can store. Unsupported methods are rejected before
 # promotion by topology validation.
 HYDRAULIC_ROUTING_METHODS = {"none", "fixed_delay", "linear_reservoir", "custom_curve"}
-HYDRAULIC_SUPPORTED_ROUTING_METHODS = {"none"}
+HYDRAULIC_SUPPORTED_ROUTING_METHODS = {"none", "fixed_delay"}
 # Unit capability/generation modes the schema can store. The MVP v3 solver only
 # runs generation-only units with a flow-power curve; pumping, reversibility and
 # head-dependent generation are rejected before promotion.
@@ -26489,6 +26493,8 @@ class AnalystStore:
                 item_metadata: dict[str, Any] = {}
                 if node["component_type"] == "plant" and node.get("link_anchors"):
                     item_metadata["link_anchors"] = node["link_anchors"]
+                if node["component_type"] == "plant" and node.get("link_transit"):
+                    item_metadata["link_transit"] = node["link_transit"]
                 self.connection.execute(
                     """
                     INSERT INTO case_hydraulic_diagram_items (
@@ -26601,7 +26607,8 @@ class AnalystStore:
                 else:
                     x = 0.0
                     y = 0.0
-                reach_metadata: dict[str, Any] = {}
+                reach_metadata: dict[str, Any] = {"travel_time_unit": reach["travel_time_unit"]}
+                reach_metadata.update(normalize_initial_transit(reach))
                 if reach.get("from_anchor") is not None:
                     reach_metadata["from_anchor"] = reach["from_anchor"]
                 if reach.get("to_anchor") is not None:
@@ -26805,8 +26812,9 @@ class AnalystStore:
                     "from_node": reach["from_node_key"],
                     "to_node": reach["to_node_key"],
                     "type": reach["reach_type"],
-                    "routing_method": "none",
-                    "travel_time_hours": 0.0,
+                    "routing_method": reach["routing_method"],
+                    "travel_time_hours": reach["travel_time_hours"],
+                    **normalize_initial_transit(reach),
                     "flow_min_m3s": None if has_series else reach.get("flow_min_m3s"),
                     "flow_min_source": "series" if has_series else "scalar",
                     "spill_penalty_usd_per_hm3": reach.get("spill_penalty_usd_per_hm3"),
@@ -26815,6 +26823,7 @@ class AnalystStore:
                 }
             )
 
+        compile_plant_transit(network_nodes, reaches, units, diagram["nodes"])
         time_series = hydraulic_v3_time_series_from_inflows(
             required_time_series, inflow_series_by_key
         )
@@ -32942,20 +32951,20 @@ class AnalystStore:
                         "code": "unsupported_reach_routing",
                         "message": (
                             f"Reach {reach_key} uses unsupported routing method "
-                            f"{routing_method}; only 'none' runs in the MVP solver."
+                            f"{routing_method}; supported methods are none and fixed_delay."
                         ),
                         **entity,
                     }
                 )
             travel_time = float(row["travel_time_hours"] or 0.0)
-            if travel_time != 0.0:
+            if not math.isfinite(travel_time) or travel_time < 0:
                 errors.append(
                     {
                         "severity": "error",
                         "code": "unsupported_reach_travel_time",
                         "message": (
                             f"Reach {reach_key} has travel_time_hours {travel_time}; "
-                            "the MVP solver only supports non-delayed reaches."
+                            "travel time must be finite and nonnegative."
                         ),
                         **entity,
                     }
@@ -34840,6 +34849,9 @@ def normalize_hydraulic_diagram_nodes(nodes: list[dict[str, Any]]) -> list[dict[
             normalized_node["link_anchors"] = normalize_hydraulic_link_anchors(
                 node.get("link_anchors")
             )
+            normalized_node["link_transit"] = normalize_link_transit(
+                node.get("link_transit"), normalized_node["units"]
+            )
         normalized.append(normalized_node)
     return normalized
 
@@ -35129,8 +35141,13 @@ def normalize_hydraulic_diagram_reaches(reaches: list[dict[str, Any]]) -> list[d
         if routing_method not in HYDRAULIC_ROUTING_METHODS:
             raise ValueError(f"unsupported hydraulic routing method: {routing_method}")
         travel_time_hours = float(reach.get("travel_time_hours") or 0.0)
-        if travel_time_hours < 0:
-            raise ValueError("hydraulic reach travel_time_hours must be nonnegative")
+        if not math.isfinite(travel_time_hours) or travel_time_hours < 0:
+            raise ValueError("hydraulic reach travel_time_hours must be finite and nonnegative")
+        travel_time_unit = str(reach.get("travel_time_unit") or "hours")
+        if travel_time_unit not in {"seconds", "minutes", "hours", "days"}:
+            raise ValueError("unsupported hydraulic travel time unit")
+        if travel_time_hours > 0 and routing_method == "none":
+            routing_method = "fixed_delay"
         minimum_flow_series = None
         if reach.get("minimum_flow_series") is not None:
             minimum_flow_series = normalize_hydraulic_natural_inflow_series(
@@ -35145,6 +35162,8 @@ def normalize_hydraulic_diagram_reaches(reaches: list[dict[str, Any]]) -> list[d
                 "reach_type": reach_type,
                 "routing_method": routing_method,
                 "travel_time_hours": travel_time_hours,
+                "travel_time_unit": travel_time_unit,
+                **normalize_initial_transit(reach),
                 "flow_min_m3s": _optional_float(reach.get("flow_min_m3s")),
                 "spill_penalty_usd_per_hm3": _optional_float(
                     reach.get("spill_penalty_usd_per_hm3")
@@ -35276,6 +35295,7 @@ def hydraulic_diagram_node_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) -> 
         metadata = _hydraulic_item_metadata(value)
         anchors = metadata.get("link_anchors")
         node["link_anchors"] = anchors if isinstance(anchors, dict) else {}
+        node["link_transit"] = metadata.get("link_transit", {})
     return node
 
 
@@ -35293,6 +35313,9 @@ def hydraulic_diagram_reach_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) ->
         "reach_type": value["reach_type"],
         "routing_method": str(value.get("routing_method") or "none"),
         "travel_time_hours": float(value.get("travel_time_hours") or 0.0),
+        "travel_time_unit": metadata.get("travel_time_unit", "hours"),
+        "initial_flow_m3s": float(metadata.get("initial_flow_m3s", 0)),
+        "initial_arrivals": metadata.get("initial_arrivals"),
         "flow_min_m3s": _optional_float(value.get("flow_min_m3s")),
         "spill_penalty_usd_per_hm3": _optional_float(
             value.get("spill_penalty_usd_per_hm3")

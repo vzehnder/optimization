@@ -769,6 +769,13 @@ class HydraulicUnitRequest(BaseModel):
     flow_power_curve: HydraulicFlowPowerCurveRequest | None = None
 
 
+class HydraulicTravelTimeRequest(BaseModel):
+    travel_time_hours: float = Field(default=0.0, ge=0, allow_inf_nan=False)
+    travel_time_unit: Literal["seconds", "minutes", "hours", "days"] = "hours"
+    initial_flow_m3s: float = Field(default=0.0, ge=0, allow_inf_nan=False)
+    initial_arrivals: list[HydraulicNaturalInflowSeriesPointRequest] | None = None
+
+
 class HydraulicDiagramNodeRequest(BaseModel):
     component_type: Literal["reservoir", "junction", "plant"]
     technical_key: str = Field(min_length=1)
@@ -781,6 +788,7 @@ class HydraulicDiagramNodeRequest(BaseModel):
     plant: HydraulicPlantParametersRequest | None = None
     units: list[HydraulicUnitRequest] = Field(default_factory=list)
     link_anchors: dict[str, Any] | None = None
+    link_transit: dict[str, HydraulicTravelTimeRequest] | None = None
 
 
 class HydraulicFlowBehaviorRequest(BaseModel):
@@ -799,6 +807,9 @@ class HydraulicDiagramReachRequest(BaseModel):
     reach_type: str = Field(min_length=1)
     routing_method: str = "none"
     travel_time_hours: float = 0.0
+    travel_time_unit: Literal["seconds", "minutes", "hours", "days"] = "hours"
+    initial_flow_m3s: float = Field(default=0.0, ge=0, allow_inf_nan=False)
+    initial_arrivals: list[HydraulicNaturalInflowSeriesPointRequest] | None = None
     flow_min_m3s: float | None = None
     spill_penalty_usd_per_hm3: float | None = None
     minimum_flow_series: HydraulicNaturalInflowSeriesRequest | None = None

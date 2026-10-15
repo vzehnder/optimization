@@ -27,7 +27,15 @@ Para una filtración, selecciona el tramo y usa **Agregar comportamiento → Fil
 
 El comportamiento impone **Q = interpolación(cota)** durante la optimización y transfiere esa misma agua al nodo de destino usando los balances existentes. No agregues otro descuento por filtración. Cambiar la selección del dibujo solo oculta el formulario; **Quitar filtración** y guardar elimina la relación. Las reglas personalizadas siguen añadiéndose a esta ley física, por lo que un mínimo incompatible puede volver el caso infactible. La cota continúa sin estar expuesta en el editor Python.
 
-El modelo actual usa transporte instantáneo: `routing_method = none` y tiempo de viaje cero. No hay pérdidas ni almacenamiento dentro de un tramo. No supongas que una referencia a otro período reproduce un tiempo de viaje físico: el transporte con retardo requiere soporte específico del modelo.
+Cada unión permite configurar **Tiempo de viaje** en segundos, minutos, horas o días, incluidos decimales. El software conserva internamente `travel_time_hours`; cambiar la unidad de visualización no cambia el tiempo físico. Cero mantiene el transporte instantáneo y un valor positivo usa `fixed_delay`.
+
+El caudal de una regla sobre un tramo (`caudal[t]`) y su mínimo operativo se aplican a la **salida del origen**. La llegada al destino se calcula desplazando cada intervalo por el tiempo de viaje y repartiendo su volumen por el solapamiento con los intervalos de destino. Las duraciones pueden variar dentro del horizonte; no se redondea el retardo a un número de períodos. El calendario debe ser consecutivo, sin huecos ni solapamientos. Se trabaja con caudales medios por intervalo: para resolver la operación dentro de un intervalo se necesita una malla más fina.
+
+Las conexiones de entrada y salida de una central tienen retardos independientes. Al generar el caso se convierten en tramos internos compartidos por las unidades conectadas a la misma toma o descarga. La potencia se calcula con el caudal que atraviesa las turbinas en ese período; el retardo de descarga afecta a la disponibilidad del agua aguas abajo.
+
+En **Condición inicial**, el caudal previo constante define el agua que ya viaja al comenzar: volumen inicial = caudal previo × tiempo de viaje en horas × 0.0036 hm³. Por defecto es cero. El caso también admite `initial_arrivals`, un calendario de llegadas procedentes de una corrida anterior, en lugar del caudal previo constante. Los resultados por tramo incluyen caudal de salida (`hydraulic_flow_m3s`), caudal y volumen de llegada (`hydraulic_arrival_flow_m3s`, `hydraulic_arrival_volume_hm3`) y volumen en tránsito al cierre (`hydraulic_in_transit_hm3`).
+
+El agua que sigue viajando al finalizar se conserva en `summary.json → hydraulic_transport`: `final_volume_hm3` y `terminal_arrivals`. Para continuar un horizonte, este último calendario puede usarse como `initial_arrivals` aunque cambien los tamaños de intervalo. No se conecta automáticamente a otra corrida. La política terminal actual registra ese volumen sin valor económico terminal adicional (`carry_forward_unvalued`); no se acredita como agua disponible en el destino. Las reglas temporales personalizadas no sustituyen estas ecuaciones de transporte.
 
 ### Unidades, embalses y centrales
 
@@ -285,7 +293,7 @@ Después de resolver, compara los caudales con la regla. Los resultados por acti
 
 Si el solver informa infactibilidad, revisa conjuntamente disponibilidad de agua, volúmenes iniciales y terminales, mínimos físicos, capacidades y todas las reglas activas. Un error de factibilidad no identifica por sí solo cuál condición es incorrecta. Cambiar una restricción requiere un nuevo borrador/revisión y una nueva prueba; conserva un motivo de aplicación comprensible.
 
-Este archivo incluye parámetros de entrada que podrían no tener soporte completo en el motor. El motor hidráulico actual exige curvas caudal-potencia de dos puntos y transporte sin retardo. La presencia de un campo en el anexo no garantiza que sea una variable accesible ni una restricción implementada. Para un límite operativo adicional, utiliza una variable de la tabla del apartado 4 y verifica su efecto en una corrida.
+Este archivo incluye parámetros de entrada que podrían no tener soporte completo en el motor. El transporte admite tiempo de viaje fijo; otros métodos de routing siguen sin soporte. La presencia de un campo en el anexo no garantiza que sea una variable accesible ni una restricción implementada. Para un límite operativo adicional, utiliza una variable de la tabla del apartado 4 y verifica su efecto en una corrida.
 
 ## 11. Diagnóstico rápido
 

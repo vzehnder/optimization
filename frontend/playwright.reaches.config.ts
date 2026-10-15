@@ -14,6 +14,7 @@ export default defineConfig({
   testMatch: [
     "hydraulic-reach-rules.spec.ts",
     "hydraulic-connection-handles.spec.ts",
+    "hydraulic-transit.spec.ts",
   ],
   workers: 1,
   reporter: "line",

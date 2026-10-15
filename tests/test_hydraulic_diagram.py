@@ -1,3 +1,4 @@
+import copy
 import json
 import subprocess
 import tempfile
@@ -1669,9 +1670,87 @@ class HydraulicDiagramApiTests(unittest.TestCase):
             f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/validate"
         ).json()["validation"]
 
+    def test_fixed_delay_survives_editor_save_and_preview(self):
+        diagram = self._save_complete_v3_diagram(reach_overrides={
+            "routing_method": "fixed_delay", "travel_time_hours": 0.75,
+            "travel_time_unit": "minutes",
+        })
+        self.assertEqual(diagram["reaches"][0]["travel_time_unit"], "minutes")
+        preview = self.client.post(
+            f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram/v3-preview"
+        ).json()["validation"]
+        self.assertTrue(preview["ok"], preview)
+        reach = preview["system_case"]["hydraulic_network"]["reaches"][0]
+        self.assertEqual((reach["routing_method"], reach["travel_time_hours"]), ("fixed_delay", 0.75))
+
+    def test_plant_links_keep_independent_delays_and_share_transport_between_units(self):
+        diagram = self._save_complete_v3_diagram()
+        plant = next(n for n in diagram["nodes"] if n["component_type"] == "plant")
+        second = copy.deepcopy(plant["units"][0])
+        second["technical_key"] = "unit_2"
+        second["flow_power_curve"]["curve_set_id"] = None
+        plant["units"].append(second)
+        plant["link_transit"] = {
+            "in:junction_in": {"travel_time_hours": 0.5, "travel_time_unit": "minutes"},
+            "out:junction_out": {"travel_time_hours": 0.25, "travel_time_unit": "seconds"},
+        }
+        root = f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram"
+        response = self.client.put(root, json={
+            "revision": diagram["revision"], "nodes": diagram["nodes"], "reaches": diagram["reaches"],
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        reloaded = self.client.get(root).json()["diagram"]
+        saved_plant = next(n for n in reloaded["nodes"] if n["component_type"] == "plant")
+        self.assertEqual(saved_plant["link_transit"], plant["link_transit"])
+        preview = self.client.post(root + "/v3-preview").json()["validation"]
+        self.assertTrue(preview["ok"], preview)
+        network = preview["system_case"]["hydraulic_network"]
+        links = {r["diagram_link"]["side"]: r for r in network["reaches"] if "diagram_link" in r}
+        self.assertEqual(len(links), 2)
+        self.assertEqual((links["intake"]["from_node"], links["intake"]["travel_time_hours"]), ("junction_in", 0.5))
+        self.assertEqual((links["discharge"]["to_node"], links["discharge"]["travel_time_hours"]), ("junction_out", 0.25))
+        for unit in network["units"]:
+            self.assertEqual(unit["intake_node"], links["intake"]["to_node"])
+            self.assertEqual(unit["discharge_node"], links["discharge"]["from_node"])
+
+    def test_initial_transit_conditions_are_preserved_for_reaches_and_plant_links(self):
+        diagram = self._save_complete_v3_diagram(reach_overrides={
+            "travel_time_hours": 0.75, "initial_flow_m3s": 4,
+        })
+        self.assertEqual(diagram["reaches"][0]["initial_flow_m3s"], 4)
+        arrivals = [{"timestamp": "2026-01-01T00:00:00", "duration_hours": 0.25, "value_m3s": 2}]
+        plant = next(n for n in diagram["nodes"] if n["component_type"] == "plant")
+        plant["link_transit"] = {"in:junction_in": {"travel_time_hours": 0.5, "initial_arrivals": arrivals}}
+        root = f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram"
+        response = self.client.put(root, json={"revision": diagram["revision"], "nodes": diagram["nodes"], "reaches": diagram["reaches"]})
+        self.assertEqual(response.status_code, 200, response.text)
+        validation = self.client.post(root + "/v3-preview").json()["validation"]
+        self.assertTrue(validation["ok"], validation)
+        reaches = validation["system_case"]["hydraulic_network"]["reaches"]
+        self.assertEqual(reaches[0]["initial_flow_m3s"], 4)
+        link = next(r for r in reaches if "diagram_link" in r)
+        self.assertEqual(link["initial_arrivals"], arrivals)
+
+    def test_zero_delay_cannot_silently_discard_imported_water(self):
+        diagram = self._save_complete_v3_diagram()
+        arrivals = [{"timestamp": "2026-01-01T00:00:00", "duration_hours": 0.25, "value_m3s": 2}]
+        for kind in ("reach", "plant_link"):
+            with self.subTest(kind=kind):
+                payload = copy.deepcopy(diagram)
+                if kind == "reach":
+                    payload["reaches"][0]["initial_arrivals"] = arrivals
+                else:
+                    plant = next(n for n in payload["nodes"] if n["component_type"] == "plant")
+                    plant["link_transit"] = {"in:junction_in": {"travel_time_hours": 0, "initial_arrivals": arrivals}}
+                response = self.client.put(
+                    f"/api/scenarios/{self.scenario['id']}/hydraulic-diagram",
+                    json={"revision": diagram["revision"], "nodes": payload["nodes"], "reaches": payload["reaches"]},
+                )
+                self.assertEqual(response.status_code, 400, response.text)
+
     def test_validation_rejects_unsupported_reach_routing_method(self):
         self._save_complete_v3_diagram(
-            reach_overrides={"routing_method": "fixed_delay"}
+            reach_overrides={"routing_method": "linear_reservoir"}
         )
         validation = self._validation_for()
         self.assertFalse(validation["ok"])
@@ -1684,19 +1763,18 @@ class HydraulicDiagramApiTests(unittest.TestCase):
         self.assertEqual(routing[0]["entity_type"], "case_hydraulic_reach")
         self.assertEqual(routing[0]["technical_key"], "reach_reservoir_intake")
 
-    def test_validation_rejects_reach_travel_time_delay(self):
+    def test_validation_accepts_reach_travel_time_delay(self):
         self._save_complete_v3_diagram(
             reach_overrides={"travel_time_hours": 2.0}
         )
         validation = self._validation_for()
-        self.assertFalse(validation["ok"])
+        self.assertTrue(validation["ok"])
         delays = [
             error
             for error in validation["errors"]
             if error["code"] == "unsupported_reach_travel_time"
         ]
-        self.assertEqual(len(delays), 1)
-        self.assertEqual(delays[0]["technical_key"], "reach_reservoir_intake")
+        self.assertEqual(delays, [])
 
     def test_routing_and_travel_time_round_trip_on_reach(self):
         diagram = self._save_complete_v3_diagram(

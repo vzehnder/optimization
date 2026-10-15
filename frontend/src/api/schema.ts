@@ -3780,6 +3780,10 @@ export interface components {
             link_anchors?: {
                 [key: string]: unknown;
             } | null;
+            /** Link Transit */
+            link_transit?: {
+                [key: string]: components["schemas"]["HydraulicTravelTimeRequest"];
+            } | null;
             natural_inflow_series?: components["schemas"]["HydraulicNaturalInflowSeriesRequest"] | null;
             plant?: components["schemas"]["HydraulicPlantParametersRequest"] | null;
             reservoir?: components["schemas"]["HydraulicReservoirParametersRequest"] | null;
@@ -3804,6 +3808,13 @@ export interface components {
             from_anchor?: number | null;
             /** From Node Key */
             from_node_key: string;
+            /** Initial Arrivals */
+            initial_arrivals?: components["schemas"]["HydraulicNaturalInflowSeriesPointRequest"][] | null;
+            /**
+             * Initial Flow M3S
+             * @default 0
+             */
+            initial_flow_m3s: number;
             minimum_flow_series?: components["schemas"]["HydraulicNaturalInflowSeriesRequest"] | null;
             /** Reach Type */
             reach_type: string;
@@ -3825,6 +3836,12 @@ export interface components {
              * @default 0
              */
             travel_time_hours: number;
+            /**
+             * Travel Time Unit
+             * @default hours
+             * @enum {string}
+             */
+            travel_time_unit: "seconds" | "minutes" | "hours" | "days";
         };
         /** HydraulicDiagramSaveRequest */
         HydraulicDiagramSaveRequest: {
@@ -3947,6 +3964,27 @@ export interface components {
             points?: components["schemas"]["HydraulicCurvePointRequest"][];
             /** Version Label */
             version_label?: string | null;
+        };
+        /** HydraulicTravelTimeRequest */
+        HydraulicTravelTimeRequest: {
+            /** Initial Arrivals */
+            initial_arrivals?: components["schemas"]["HydraulicNaturalInflowSeriesPointRequest"][] | null;
+            /**
+             * Initial Flow M3S
+             * @default 0
+             */
+            initial_flow_m3s: number;
+            /**
+             * Travel Time Hours
+             * @default 0
+             */
+            travel_time_hours: number;
+            /**
+             * Travel Time Unit
+             * @default hours
+             * @enum {string}
+             */
+            travel_time_unit: "seconds" | "minutes" | "hours" | "days";
         };
         /** HydraulicUnitRequest */
         HydraulicUnitRequest: {

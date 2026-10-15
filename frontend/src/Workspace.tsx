@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { downloadDiagramConstraintInfo } from "./hydraulicConstraintExport";
 import { HydraulicReachBehavior } from "./HydraulicReachBehavior";
+import { HydraulicTravelTime } from "./HydraulicTravelTime";
 import { HydraulicConnectionHandle } from "./HydraulicConnectionHandle";
 import {
   DragEvent,
@@ -5243,6 +5244,7 @@ function editableHydraulicNodes(
         ...base,
         plant: node.plant ?? defaultPlantParameters(),
         link_anchors: node.link_anchors ?? null,
+        link_transit: node.link_transit ?? null,
         units: (node.units ?? []).map((unit) => ({
           technical_key: unit.technical_key,
           display_name: unit.display_name,
@@ -5330,6 +5332,11 @@ function editableHydraulicReaches(
     from_node_key: reach.from_node_key,
     to_node_key: reach.to_node_key,
     reach_type: reach.reach_type,
+    routing_method: reach.routing_method ?? "none",
+    travel_time_hours: reach.travel_time_hours ?? 0,
+    travel_time_unit: reach.travel_time_unit ?? "hours",
+    initial_flow_m3s: reach.initial_flow_m3s ?? 0,
+    initial_arrivals: reach.initial_arrivals ?? null,
     from_anchor: reach.from_anchor ?? null,
     to_anchor: reach.to_anchor ?? null,
     flow_min_m3s: reach.flow_min_m3s ?? null,
@@ -6134,6 +6141,18 @@ function HydraulicReachList({
               </label>
             ) : null}
           </div>
+          <HydraulicTravelTime
+            value={reach}
+            onChange={(patch) =>
+              updateReach(reach.technical_key, {
+                ...patch,
+                routing_method:
+                  (patch.travel_time_hours ?? reach.travel_time_hours ?? 0) > 0
+                    ? "fixed_delay"
+                    : "none",
+              })
+            }
+          />
           <HydraulicReachBehavior
             reach={reach}
             source={nodes.find(
@@ -7202,6 +7221,16 @@ function HydraulicPropertiesPanel({
   const { scenarioId } = useParams();
   const plantLink = parseHydraulicPlantLinkKey(focusedEntityKey);
   if (plantLink && focusedEntityKey) {
+    const plant = nodes.find(
+      (candidate) =>
+        candidate.component_type === "plant" &&
+        (candidate.technical_key === plantLink.fromKey ||
+          candidate.technical_key === plantLink.toKey),
+    );
+    const transitKey =
+      plant?.technical_key === plantLink.toKey
+        ? `in:${plantLink.fromKey}`
+        : `out:${plantLink.toKey}`;
     return (
       <div
         className="hydraulic-properties-panel"
@@ -7219,6 +7248,22 @@ function HydraulicPropertiesPanel({
             Eliminar conexion
           </button>
         </div>
+        {plant ? (
+          <HydraulicTravelTime
+            value={plant.link_transit?.[transitKey] ?? {}}
+            onChange={(patch) =>
+              updateNode(plant.technical_key, {
+                link_transit: {
+                  ...plant.link_transit,
+                  [transitKey]: {
+                    ...plant.link_transit?.[transitKey],
+                    ...patch,
+                  },
+                },
+              })
+            }
+          />
+        ) : null}
         <p className="hydraulic-properties-hint">
           Eliminar la conexion desvincula la toma o descarga de todas las
           unidades de la central; los componentes se conservan.

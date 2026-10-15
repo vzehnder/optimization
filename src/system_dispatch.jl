@@ -336,9 +336,10 @@ function validate_hydraulic_v3_system_case_document(document)::Dict{String,Any}
         end
         routing_method = optional_string(reach, "routing_method", "none")
         travel_time_hours = optional_float(get(reach, "travel_time_hours", 0.0), "reach $(reach_id) travel_time_hours")
-        if routing_method != "none" || travel_time_hours === nothing || travel_time_hours != 0.0
-            throw(ArgumentError("reach $(reach_id) uses unsupported routing; only routing_method none with zero travel_time_hours is supported"))
+        if !(routing_method in ("none", "fixed_delay")) || travel_time_hours === nothing || !isfinite(travel_time_hours) || travel_time_hours < 0
+            throw(ArgumentError("reach $(reach_id) requires none/fixed_delay routing and a finite nonnegative travel_time_hours"))
         end
+        hydraulic_initial_arrivals(reach, parse_required_datetime(required_value(first(periods), "timestamp"), "time_series[1].timestamp"))
         flow_min = optional_float(get(reach, "flow_min_m3s", nothing), "reach $(reach_id) flow_min_m3s")
         if flow_min !== nothing && (!isfinite(flow_min) || flow_min < 0)
             throw(ArgumentError("reach $(reach_id) flow_min_m3s must be nonnegative"))
@@ -448,13 +449,23 @@ function validate_hydraulic_v3_system_case_document(document)::Dict{String,Any}
         end
     end
 
+    has_delayed_transport = any(Float64(get(reach, "travel_time_hours", 0.0)) > 0 for reach in reaches)
+    previous_start = nothing
+    previous_duration = 0.0
     for (index, raw_period) in enumerate(periods)
         period = to_string_key_dict(raw_period)
-        parse_required_datetime(required_value(period, "timestamp"), "time_series[$index].timestamp")
+        start = parse_required_datetime(required_value(period, "timestamp"), "time_series[$index].timestamp")
         duration_hours = parse_required_float(required_value(period, "duration_hours"), "time_series[$index].duration_hours")
         if !isfinite(duration_hours) || duration_hours <= 0
             throw(ArgumentError("time_series[$index].duration_hours must be positive"))
         end
+        if has_delayed_transport && previous_start !== nothing
+            elapsed_hours = Dates.value(start - previous_start) / 3_600_000
+            if !isapprox(elapsed_hours, previous_duration; atol=1 / 3_600_000, rtol=0)
+                throw(ArgumentError("delayed hydraulic transport requires consecutive intervals without gaps or overlaps (time_series[$index])"))
+            end
+        end
+        previous_start, previous_duration = start, duration_hours
         inflows = to_string_key_dict(required_dict(period, "natural_inflow_m3s"))
         for raw_requirement in required_time_series
             requirement = to_string_key_dict(raw_requirement)
@@ -1658,6 +1669,41 @@ function run_hydraulic_v3_system_case(
     # Each directed reach transports its own nonnegative flow. Units transport
     # water from their intake to their discharge; both participate in balances.
     @variable(model, reach_flow[1:n_reaches, 1:n_periods] >= 0)
+    # Flows are period averages. Shift each departure interval in clock time,
+    # then integrate its overlap with each receiving interval (hours * m3/s).
+    starts = [Dates.value(timestamp - first(timestamps)) / 3_600_000 for timestamp in timestamps]
+    reach_arrival = [AffExpr(0.0) for _ in 1:n_reaches, _ in 1:n_periods]
+    for (r, reach) in enumerate(reaches)
+        delay = Float64(get(reach, "travel_time_hours", 0.0))
+        for (left, right, flow) in hydraulic_initial_arrivals(reach, first(timestamps))
+            t = max(1, searchsortedlast(starts, left))
+            while t <= n_periods && starts[t] < right
+                overlap = max(0.0, min(right, starts[t] + durations[t]) - max(left, starts[t]))
+                add_to_expression!(reach_arrival[r, t], flow * overlap / durations[t])
+                t += 1
+            end
+        end
+        if delay == 0
+            for period in 1:n_periods
+                add_to_expression!(reach_arrival[r, period], 1.0, reach_flow[r, period])
+            end
+            continue
+        end
+        first_destination = 1
+        for source in 1:n_periods
+            left = starts[source] + delay
+            right = left + durations[source]
+            while first_destination <= n_periods && starts[first_destination] + durations[first_destination] <= left
+                first_destination += 1
+            end
+            destination = first_destination
+            while destination <= n_periods && starts[destination] < right
+                overlap = max(0.0, min(right, starts[destination] + durations[destination]) - max(left, starts[destination]))
+                add_to_expression!(reach_arrival[r, destination], overlap / durations[destination], reach_flow[r, source])
+                destination += 1
+            end
+        end
+    end
 
     # Evaluate each source level once per boundary, sharing it across seepage reaches.
     source_levels = Dict{Tuple{Int,Int},Any}()
@@ -1730,7 +1776,7 @@ function run_hydraulic_v3_system_case(
         discharges = findall(u -> u["discharge_node"] == node_id, units)
         spillways = filter(r -> reach_is_spillway[r], outgoing)
         for period_index in 1:n_periods
-            received = sum(reach_flow[r, period_index] for r in incoming; init=AffExpr(0.0)) +
+            received = sum(reach_arrival[r, period_index] for r in incoming; init=AffExpr(0.0)) +
                        sum(turbine_flow[u, period_index] for u in discharges; init=AffExpr(0.0))
             sent = sum(reach_flow[r, period_index] for r in outgoing; init=AffExpr(0.0)) +
                    sum(turbine_flow[u, period_index] for u in intakes; init=AffExpr(0.0))
@@ -1861,6 +1907,7 @@ function run_hydraulic_v3_system_case(
         source_identifiers = system_case_source_identifiers(source_path),
         reach_ids = reach_ids,
         reach_values = value.(reach_flow),
+        reach_arrivals = value.(reach_arrival),
     )
 end
 
@@ -1877,6 +1924,7 @@ function write_hydraulic_v3_run_outputs(
     source_identifiers = Dict{String,Any}(),
     reach_ids::Vector{String} = String[],
     reach_values::Matrix{Float64} = zeros(0, length(timestamps)),
+    reach_arrivals::Matrix{Float64} = reach_values,
 )::SystemRunOutput
     run_timestamp_id = format_run_timestamp(run_timestamp)
     case_output_root = joinpath(output_root, result.case_name)
@@ -1892,20 +1940,34 @@ function write_hydraulic_v3_run_outputs(
     CSV.write(dispatch_path, hydraulic_v3_dispatch_dataframe(timestamps, durations, natural_inflow, result))
     assets = hydraulic_v3_asset_dispatch_dataframe(timestamps, durations, reservoir_ids, unit_ids, natural_inflow, result)
     assets.hydraulic_flow_m3s = zeros(nrow(assets))
+    assets.hydraulic_arrival_flow_m3s = zeros(nrow(assets))
+    assets.hydraulic_arrival_volume_hm3 = zeros(nrow(assets))
+    assets.hydraulic_in_transit_hm3 = zeros(nrow(assets))
+    transport = hydraulic_transit_summary(document["hydraulic_network"]["reaches"], timestamps, durations, reach_values)
+    in_transit = [transport[id]["initial_volume_hm3"] for id in reach_ids]
     for period in eachindex(timestamps), (reach_index, reach_id) in enumerate(reach_ids)
+        arrival_volume = reach_arrivals[reach_index, period] * durations[period] * HM3_PER_M3S_HOUR
+        in_transit[reach_index] += reach_values[reach_index, period] * durations[period] * HM3_PER_M3S_HOUR - arrival_volume
         row = Dict{Symbol,Any}(name => 0.0 for name in propertynames(assets))
         merge!(row, Dict(:timestamp => string(timestamps[period]), :duration_hours => durations[period],
                         :asset_id => reach_id, :asset_type => "hydraulic_reach",
-                        :hydraulic_flow_m3s => reach_values[reach_index, period]))
+                        :hydraulic_flow_m3s => reach_values[reach_index, period],
+                        :hydraulic_arrival_flow_m3s => reach_arrivals[reach_index, period],
+                        :hydraulic_arrival_volume_hm3 => arrival_volume,
+                        :hydraulic_in_transit_hm3 => max(0.0, in_transit[reach_index])))
         push!(assets, row)
     end
     CSV.write(asset_dispatch_path, assets)
-    write_json_file(summary_path, hydraulic_v3_summary_dict(result, durations, reservoir_ids, unit_ids, resolved_run_timestamp, source_identifiers))
+    summary = hydraulic_v3_summary_dict(result, durations, reservoir_ids, unit_ids, resolved_run_timestamp, source_identifiers)
+    summary["hydraulic_transport"] = transport
+    write_json_file(summary_path, summary)
     write_json_file(system_case_resolved_path, document)
     metadata = hydraulic_v3_metadata_dict(reservoir_ids, unit_ids, length(timestamps))
     metadata["hydraulic_reach_ids"] = reach_ids
     metadata["active_constraint_flags"]["hydraulic_junction_balance"] = true
     metadata["active_constraint_flags"]["hydraulic_reach_flow"] = true
+    metadata["active_constraint_flags"]["hydraulic_travel_time"] = any(item["travel_time_hours"] > 0 for item in values(transport))
+    metadata["hydraulic_transport"] = Dict("method" => "interval_overlap", "flow_semantics" => "piecewise_constant_period_average", "terminal_state" => "summary.hydraulic_transport")
     metadata["hydraulic_reach_behaviors"] = Dict(
         reach["id"] => Dict("kind" => reach["flow_behavior"]["kind"],
                             "level_timing" => reach["flow_behavior"]["level_timing"],
