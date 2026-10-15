@@ -3797,6 +3797,7 @@ export interface components {
         HydraulicDiagramReachRequest: {
             /** Display Name */
             display_name: string;
+            flow_behavior?: components["schemas"]["HydraulicFlowBehaviorRequest"] | null;
             /** Flow Min M3S */
             flow_min_m3s?: number | null;
             /** From Anchor */
@@ -3852,6 +3853,21 @@ export interface components {
              * @default 1
              */
             zoom: number;
+        };
+        /** HydraulicFlowBehaviorRequest */
+        HydraulicFlowBehaviorRequest: {
+            curve?: components["schemas"]["HydraulicStorageElevationCurveRequest"];
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "seepage";
+            /**
+             * Level Timing
+             * @default start
+             * @enum {string}
+             */
+            level_timing: "start" | "end";
         };
         /** HydraulicFlowPowerCurveRequest */
         HydraulicFlowPowerCurveRequest: {

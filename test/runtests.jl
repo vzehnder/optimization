@@ -6,6 +6,8 @@ using JuMP
 using Test
 using YAML
 
+include("hydraulic_seepage.jl")
+
 const POWER_TOLERANCE_MW = 1e-6
 const ENERGY_TOLERANCE_MWH = 1e-6
 const OBJECTIVE_TOLERANCE_USD = 1e-5

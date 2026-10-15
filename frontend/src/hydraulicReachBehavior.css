@@ -1,0 +1,100 @@
+.seepage-add-behavior {
+  margin: 1rem 0;
+}
+.seepage-behavior-options {
+  margin-top: 0.75rem;
+}
+.seepage-behavior-card {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid #bcd6da;
+  border-radius: 8px;
+  background: #f3fafb;
+}
+.seepage-behavior-card h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.seepage-behavior-card p {
+  margin: 0.65rem 0;
+}
+.seepage-card-actions,
+.seepage-dialog-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.seepage-curve-dialog {
+  width: min(760px, calc(100vw - 2rem));
+  max-height: calc(100vh - 3rem);
+  box-sizing: border-box;
+  overflow-y: auto;
+  padding: 1.5rem;
+  border: 1px solid #ccd9df;
+  border-radius: 12px;
+  color: #102a43;
+  background: white;
+  box-shadow: 0 24px 64px #102a4340;
+}
+.seepage-curve-dialog::backdrop {
+  background: #102a4370;
+}
+.seepage-curve-dialog h2 {
+  margin-top: 0;
+  font-size: 1.3rem;
+}
+.seepage-curve-dialog input,
+.seepage-curve-dialog select {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0.6rem;
+  border: 1px solid #aabcc9;
+  border-radius: 4px;
+  font: inherit;
+}
+.seepage-curve-plot {
+  display: block;
+  width: 100%;
+  max-height: 270px;
+  font-size: 13px;
+}
+.seepage-table-scroll {
+  overflow-x: auto;
+  margin-bottom: 0.75rem;
+}
+.seepage-curve-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.seepage-curve-table th,
+.seepage-curve-table td {
+  padding: 0.5rem;
+  text-align: left;
+  border-bottom: 1px solid #e0e8ed;
+}
+.seepage-curve-table input {
+  min-width: 105px;
+}
+.seepage-curve-error {
+  color: #9b3915;
+}
+.seepage-advanced {
+  margin: 1.25rem 0;
+  padding: 0.8rem 0;
+  border-top: 1px solid #e0e8ed;
+  border-bottom: 1px solid #e0e8ed;
+}
+.seepage-advanced summary {
+  cursor: pointer;
+}
+.seepage-advanced label {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.seepage-dialog-actions span {
+  flex: 1 1 200px;
+  font-size: 0.85rem;
+  color: #526878;
+}

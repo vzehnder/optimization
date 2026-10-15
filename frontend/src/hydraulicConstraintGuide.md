@@ -23,6 +23,10 @@ Si aparece «Ejecutor aislado no disponible» o «Pruebas deshabilitadas en este
 
 Cada tramo posee su propio caudal. Esto incluye río, canal, túnel, compuerta, vertedero, bypass, descarga y otros tipos de tramo. El nombre del tipo por sí solo no introduce ecuaciones de pérdidas de carga, apertura de compuertas ni una relación entre nivel y caudal.
 
+Para una filtración, selecciona el tramo y usa **Agregar comportamiento → Filtración según cota → Editar tabla y gráfico**. La tabla relaciona la cota del embalse de origen (m s. n. m.) con el caudal de filtración (m³/s). Requiere al menos dos puntos, cotas estrictamente crecientes, caudales no negativos y cobertura de todo el rango operativo. No se extrapola. En **Configuración avanzada** puedes elegir cota al inicio (por defecto; usa el volumen inicial en el primer intervalo) o al cierre. Pulsa **Listo**, guarda el diagrama y valida antes de promoverlo.
+
+El comportamiento impone **Q = interpolación(cota)** durante la optimización y transfiere esa misma agua al nodo de destino usando los balances existentes. No agregues otro descuento por filtración. Cambiar la selección del dibujo solo oculta el formulario; **Quitar filtración** y guardar elimina la relación. Las reglas personalizadas siguen añadiéndose a esta ley física, por lo que un mínimo incompatible puede volver el caso infactible. La cota continúa sin estar expuesta en el editor Python.
+
 El modelo actual usa transporte instantáneo: `routing_method = none` y tiempo de viaje cero. No hay pérdidas ni almacenamiento dentro de un tramo. No supongas que una referencia a otro período reproduce un tiempo de viaje físico: el transporte con retardo requiere soporte específico del modelo.
 
 ### Unidades, embalses y centrales

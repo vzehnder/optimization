@@ -2150,6 +2150,16 @@
             "title": "Display Name",
             "type": "string"
           },
+          "flow_behavior": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HydraulicFlowBehaviorRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "flow_min_m3s": {
             "anyOf": [
               {
@@ -2297,6 +2307,32 @@
           }
         },
         "title": "HydraulicDiagramViewportRequest",
+        "type": "object"
+      },
+      "HydraulicFlowBehaviorRequest": {
+        "properties": {
+          "curve": {
+            "$ref": "#/components/schemas/HydraulicStorageElevationCurveRequest"
+          },
+          "kind": {
+            "const": "seepage",
+            "title": "Kind",
+            "type": "string"
+          },
+          "level_timing": {
+            "default": "start",
+            "enum": [
+              "start",
+              "end"
+            ],
+            "title": "Level Timing",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "HydraulicFlowBehaviorRequest",
         "type": "object"
       },
       "HydraulicFlowPowerCurveRequest": {

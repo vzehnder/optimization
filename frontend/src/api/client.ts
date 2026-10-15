@@ -1356,6 +1356,12 @@ export interface HydraulicDiagramNode extends HydraulicDiagramNodeWrite {
   units: HydraulicUnit[];
 }
 
+export interface HydraulicFlowBehavior {
+  kind: "seepage";
+  level_timing: "start" | "end";
+  curve: HydraulicCurveWrite;
+}
+
 export interface HydraulicDiagramReachWrite {
   technical_key: string;
   display_name: string;
@@ -1369,6 +1375,7 @@ export interface HydraulicDiagramReachWrite {
   flow_min_m3s?: number | null;
   spill_penalty_usd_per_hm3?: number | null;
   minimum_flow_series?: HydraulicNaturalInflowSeriesWrite | null;
+  flow_behavior?: HydraulicFlowBehavior | null;
 }
 
 export interface HydraulicDiagramReach extends HydraulicDiagramReachWrite {
@@ -1380,6 +1387,7 @@ export interface HydraulicDiagramReach extends HydraulicDiagramReachWrite {
   spill_penalty_usd_per_hm3: number | null;
   minimum_flow_series: HydraulicNaturalInflowSeriesSummary | null;
   available_minimum_flow_series: HydraulicNaturalInflowSeriesSummary[];
+  available_elevation_flow_curves?: HydraulicCurveSummary[];
 }
 
 export interface HydraulicDiagramViewport {

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { downloadDiagramConstraintInfo } from "./hydraulicConstraintExport";
+import { HydraulicReachBehavior } from "./HydraulicReachBehavior";
 import {
   DragEvent,
   FormEvent,
@@ -5332,6 +5333,17 @@ function editableHydraulicReaches(
     to_anchor: reach.to_anchor ?? null,
     flow_min_m3s: reach.flow_min_m3s ?? null,
     spill_penalty_usd_per_hm3: reach.spill_penalty_usd_per_hm3 ?? null,
+    flow_behavior: reach.flow_behavior
+      ? {
+          ...reach.flow_behavior,
+          curve: {
+            ...reach.flow_behavior.curve,
+            points: reach.flow_behavior.curve.points.map((point) => ({
+              ...point,
+            })),
+          },
+        }
+      : null,
     minimum_flow_series: reach.minimum_flow_series
       ? {
           time_series_set_id: reach.minimum_flow_series.time_series_set_id,
@@ -6035,6 +6047,15 @@ function HydraulicReachList({
               </label>
             ) : null}
           </div>
+          <HydraulicReachBehavior
+            reach={reach}
+            source={nodes.find(
+              (node) => node.technical_key === reach.from_node_key,
+            )}
+            onChange={(flow_behavior) =>
+              updateReach(reach.technical_key, { flow_behavior })
+            }
+          />
           <HydraulicReachMinimumFlowSeries
             reach={reach}
             availableSeries={

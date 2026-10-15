@@ -783,6 +783,14 @@ class HydraulicDiagramNodeRequest(BaseModel):
     link_anchors: dict[str, Any] | None = None
 
 
+class HydraulicFlowBehaviorRequest(BaseModel):
+    kind: Literal["seepage"]
+    level_timing: Literal["start", "end"] = "start"
+    curve: HydraulicStorageElevationCurveRequest = Field(
+        default_factory=HydraulicStorageElevationCurveRequest
+    )
+
+
 class HydraulicDiagramReachRequest(BaseModel):
     technical_key: str = Field(min_length=1)
     display_name: str = Field(min_length=1)
@@ -794,6 +802,7 @@ class HydraulicDiagramReachRequest(BaseModel):
     flow_min_m3s: float | None = None
     spill_penalty_usd_per_hm3: float | None = None
     minimum_flow_series: HydraulicNaturalInflowSeriesRequest | None = None
+    flow_behavior: HydraulicFlowBehaviorRequest | None = None
     from_anchor: float | None = None
     to_anchor: float | None = None
 

@@ -331,6 +331,9 @@ function validate_hydraulic_v3_system_case_document(document)::Dict{String,Any}
         if from_node == to_node
             throw(ArgumentError("reach $(reach_id) must connect distinct nodes"))
         end
+        if get(reach, "flow_behavior", nothing) !== nothing
+            validate_hydraulic_v3_flow_behavior(reach, nodes)
+        end
         routing_method = optional_string(reach, "routing_method", "none")
         travel_time_hours = optional_float(get(reach, "travel_time_hours", 0.0), "reach $(reach_id) travel_time_hours")
         if routing_method != "none" || travel_time_hours === nothing || travel_time_hours != 0.0
@@ -570,6 +573,43 @@ function validate_hydraulic_v3_reservoir_node(node_id::String, node::Dict{String
     if storage_min < minimum(storages) || storage_max > maximum(storages)
         throw(ArgumentError("reservoir $(node_id) storage bounds must lie within storage_elevation domain"))
     end
+end
+
+function validate_hydraulic_v3_flow_behavior(reach, nodes)
+    label = "reach $(reach["id"]) seepage"
+    behavior = required_dict(reach, "flow_behavior")
+    required_string(behavior, "kind") == "seepage" || throw(ArgumentError("$(label) unsupported behavior"))
+    required_string(behavior, "level_timing") in ("start", "end") ||
+        throw(ArgumentError("$(label) level_timing must be start or end"))
+    source = only(filter(n -> n["id"] == reach["from_node"], nodes))
+    source["type"] == "reservoir" || throw(ArgumentError("$(label) requires a reservoir source"))
+    points = required_vector(behavior, "curve")
+    validate_hydraulic_v3_curve(points, label, "elevation_masl", "flow_m3s"; nondecreasing_y=false)
+    any(p -> p["flow_m3s"] < 0, points) && throw(ArgumentError("$(label) flows must be nonnegative"))
+    levels = hydraulic_v3_curve_tuples(source["curves"]["storage_elevation"], "storage_hm3", "elevation_masl")
+    lower = hydraulic_v3_interpolate(levels, Float64(source["reservoir"]["storage_min_hm3"]))
+    upper = hydraulic_v3_interpolate(levels, Float64(source["reservoir"]["storage_max_hm3"]))
+    points[1]["elevation_masl"] <= lower && points[end]["elevation_masl"] >= upper ||
+        throw(ArgumentError("$(label) curve must cover the reservoir operating elevation range; extrapolation is disabled"))
+end
+
+"""Exact graph of a linear interpolant; adjacent weights prevent convex-hull shortcuts."""
+function hydraulic_curve_value(model, input, points::Vector{Tuple{Float64,Float64}})
+    if input isa Real
+        points[1][1] <= input <= points[end][1] || throw(ArgumentError("curve input outside domain"))
+        return hydraulic_v3_interpolate(points, Float64(input))
+    end
+    @constraint(model, input >= points[1][1])
+    @constraint(model, input <= points[end][1])
+    if length(points) == 2
+        (x0, y0), (x1, y1) = points
+        return y0 + (input - x0) * ((y1 - y0) / (x1 - x0))
+    end
+    weights = @variable(model, [1:length(points)], lower_bound = 0, upper_bound = 1)
+    @constraint(model, sum(weights) == 1)
+    @constraint(model, input == sum(weights[i] * points[i][1] for i in eachindex(points)))
+    @constraint(model, weights in SOS2())
+    return sum(weights[i] * points[i][2] for i in eachindex(points))
 end
 
 function validate_hydraulic_v3_curve(
@@ -1557,8 +1597,7 @@ function run_hydraulic_v3_system_case(
     unit_flow_min = zeros(n_units)
     unit_flow_max = zeros(n_units)
     unit_power_max = Union{Float64,Nothing}[nothing for _ in 1:n_units]
-    unit_power_slope = zeros(n_units)
-    unit_power_intercept = zeros(n_units)
+    unit_power_curves = Vector{Vector{Tuple{Float64,Float64}}}(undef, n_units)
     for (unit_index, unit) in enumerate(units)
         unit_id = unit_ids[unit_index]
         flow_power = hydraulic_v3_curve_tuples(
@@ -1566,13 +1605,9 @@ function run_hydraulic_v3_system_case(
             "flow_m3s",
             "power_mw",
         )
-        if length(flow_power) != 2
-            throw(ArgumentError("unit $(unit_id) flow_power solver support is limited to two points"))
-        end
-        flow_a, power_a = flow_power[1]
-        flow_b, power_b = flow_power[2]
-        unit_power_slope[unit_index] = (power_b - power_a) / (flow_b - flow_a)
-        unit_power_intercept[unit_index] = power_a - unit_power_slope[unit_index] * flow_a
+        unit_power_curves[unit_index] = flow_power
+        flow_a = first(flow_power)[1]
+        flow_b = last(flow_power)[1]
         min_flow = optional_float(get(unit, "min_flow_m3s", nothing), "unit $(unit_id) min_flow_m3s")
         max_flow = optional_float(get(unit, "max_flow_m3s", nothing), "unit $(unit_id) max_flow_m3s")
         unit_flow_min[unit_index] = min_flow === nothing ? flow_a : min_flow
@@ -1624,6 +1659,24 @@ function run_hydraulic_v3_system_case(
     # water from their intake to their discharge; both participate in balances.
     @variable(model, reach_flow[1:n_reaches, 1:n_periods] >= 0)
 
+    # Evaluate each source level once per boundary, sharing it across seepage reaches.
+    source_levels = Dict{Tuple{Int,Int},Any}()
+    for (reach_index, reach) in enumerate(reaches)
+        behavior = get(reach, "flow_behavior", nothing)
+        behavior === nothing && continue
+        reservoir_index = reservoir_index_by_id[reach["from_node"]]
+        curve = hydraulic_v3_curve_tuples(behavior["curve"], "elevation_masl", "flow_m3s")
+        for period in 1:n_periods
+            boundary = behavior["level_timing"] == "start" ? period - 1 : period
+            level = get!(source_levels, (reservoir_index, boundary)) do
+                volume = boundary == 0 ? initial_storage[reservoir_index] : storage[reservoir_index, boundary]
+                hydraulic_curve_value(model, volume, reservoir_curves[reservoir_index])
+            end
+            flow = hydraulic_curve_value(model, level, curve)
+            @constraint(model, reach_flow[reach_index, period] == flow)
+        end
+    end
+
     if haskey(document, "component_rules")
         rules = document["component_rules"]
         object_units = Dict(object["id"] => findfirst(==(object["unit_key"]), unit_ids) for object in rules["objects"] if haskey(object, "unit_key"))
@@ -1658,10 +1711,11 @@ function run_hydraulic_v3_system_case(
     for unit_index in 1:n_units, period_index in 1:n_periods
         @constraint(model, turbine_flow[unit_index, period_index] >= unit_flow_min[unit_index])
         @constraint(model, turbine_flow[unit_index, period_index] <= unit_flow_max[unit_index])
+        power = hydraulic_curve_value(model, turbine_flow[unit_index, period_index], unit_power_curves[unit_index])
         @constraint(
             model,
             hydro_power[unit_index, period_index] ==
-                unit_power_intercept[unit_index] + unit_power_slope[unit_index] * turbine_flow[unit_index, period_index],
+                power,
         )
         if unit_power_max[unit_index] !== nothing
             @constraint(model, hydro_power[unit_index, period_index] <= unit_power_max[unit_index])
@@ -1852,6 +1906,16 @@ function write_hydraulic_v3_run_outputs(
     metadata["hydraulic_reach_ids"] = reach_ids
     metadata["active_constraint_flags"]["hydraulic_junction_balance"] = true
     metadata["active_constraint_flags"]["hydraulic_reach_flow"] = true
+    metadata["hydraulic_reach_behaviors"] = Dict(
+        reach["id"] => Dict("kind" => reach["flow_behavior"]["kind"],
+                            "level_timing" => reach["flow_behavior"]["level_timing"],
+                            "source_node" => reach["from_node"])
+        for reach in document["hydraulic_network"]["reaches"] if get(reach, "flow_behavior", nothing) !== nothing
+    )
+    metadata["active_constraint_flags"]["hydraulic_reach_seepage"] = !isempty(metadata["hydraulic_reach_behaviors"])
+    power_curve_sizes = [length(unit["curves"]["flow_power"]) for unit in document["hydraulic_network"]["units"]]
+    metadata["active_constraint_flags"]["hydraulic_unit_linear_flow_power"] = any(==(2), power_curve_sizes)
+    metadata["active_constraint_flags"]["hydraulic_unit_piecewise_flow_power"] = any(>(2), power_curve_sizes)
     write_json_file(model_metadata_path, metadata)
 
     return SystemRunOutput(

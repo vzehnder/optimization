@@ -1,6 +1,6 @@
 # Guía del motor Julia: `system_dispatch.jl` y `component_rules.jl`
 
-Esta guía explica cómo se carga un caso, se validan sus reglas, se construye el modelo matemático, se ejecuta HiGHS y se escriben los resultados. Describe la implementación presente en el árbol de trabajo al **28 de septiembre de 2026**, incluidos los cambios locales existentes en los dos archivos al elaborar el documento.
+Esta guía explica cómo se carga un caso, se validan sus reglas, se construye el modelo matemático, se ejecuta HiGHS y se escriben los resultados. Describe la implementación actualizada al **15 de octubre de 2026**, incluidos los caudales propios de los tramos y la filtración según cota.
 
 Las fuentes principales son [system_dispatch.jl](../src/system_dispatch.jl) y [component_rules.jl](../src/component_rules.jl). Las referencias indican funciones y líneas de esa versión. Los bloques identificados como **extracto del código** se copian directamente del archivo; las ecuaciones y los ejemplos identificados como ilustrativos explican su comportamiento.
 
@@ -74,9 +74,9 @@ En v1/v2 las etapas principales tienen funciones y estructuras separadas. En v3,
 
 La entrada común decide la ruta por `schema_version`:
 
-**Extracto del código:** [system_dispatch.jl, líneas 1438–1453](../src/system_dispatch.jl#L1438).
+**Extracto del código:** [system_dispatch.jl, líneas 1478–1493](../src/system_dispatch.jl#L1478).
 
-<!-- source: ../src/system_dispatch.jl:1438-1453 -->
+<!-- source: ../src/system_dispatch.jl:1478-1493 -->
 
 ```julia
 function run_system_case(
@@ -94,7 +94,6 @@ function run_system_case(
             run_timestamp,
         )
     end
-
 ```
 
 Una consecuencia práctica: `load_system_case` y `normalize_system_case` pertenecen al recorrido v1/v2. Para ejecutar un documento v3 se utiliza `run_system_case`, que lo deriva a la implementación hidráulica.
@@ -111,18 +110,18 @@ Una consecuencia práctica: `load_system_case` y `normalize_system_case` pertene
 | Estructuras | [L19](../src/system_dispatch.jl#L19) | Grafo, parámetros, datos normalizados, modelo, resultado y rutas de salida. |
 | Carga y validación v1/v2 | [L191](../src/system_dispatch.jl#L191) | JSON → `SystemGraphData`; comprueba grafo y datos. |
 | Validación hidráulica v3 | [L273](../src/system_dispatch.jl#L273) | Valida nodos, tramos, centrales, unidades, curvas y series. |
-| Normalización v1/v2 | [L617](../src/system_dispatch.jl#L617) | Convierte activos y series en vectores y matrices tipados. |
-| Parámetros de activos | [L711](../src/system_dispatch.jl#L711) | Lectura de renovables, red, baterías e hidro y validación de curvas. |
-| Construcción del modelo v1/v2 | [L989](../src/system_dispatch.jl#L989) | Variables, restricciones físicas, objetivo y reglas adicionales. |
-| Resolución v1/v2 | [L1347](../src/system_dispatch.jl#L1347) | Ejecuta el solver, extrae valores y calcula magnitudes derivadas. |
-| Entrada común | [L1438](../src/system_dispatch.jl#L1438) | Selecciona ruta según esquema y coordina la ejecución. |
-| Ejecución hidráulica v3 | [L1476](../src/system_dispatch.jl#L1476) | Modelo de red hidráulica y resolución. |
-| Salidas y utilidades v3 | [L1813](../src/system_dispatch.jl#L1813) | Archivos, interpolación de cotas, tablas, resumen y metadatos. |
-| Escritura v1/v2 | [L2102](../src/system_dispatch.jl#L2102) | Genera los cinco artefactos principales. |
-| Lectores y validadores auxiliares | [L2140](../src/system_dispatch.jl#L2140) | Rutas, nodos, conexiones, precios, conectividad y series. |
-| Cotas y cálculos auxiliares | [L2411](../src/system_dispatch.jl#L2411) | Límites de red, variación de energía, volúmenes y curvas. |
-| Tablas y resumen v1/v2 | [L2546](../src/system_dispatch.jl#L2546) | Agregados por período, detalle por activo y métricas. |
-| Reconstrucción del caso y utilidades | [L3076](../src/system_dispatch.jl#L3076) | Serialización del caso y lectura de valores requeridos/opcionales. |
+| Normalización v1/v2 | [L657](../src/system_dispatch.jl#L657) | Convierte activos y series en vectores y matrices tipados. |
+| Parámetros de activos | [L751](../src/system_dispatch.jl#L751) | Lectura de renovables, red, baterías e hidro y validación de curvas. |
+| Construcción del modelo v1/v2 | [L1029](../src/system_dispatch.jl#L1029) | Variables, restricciones físicas, objetivo y reglas adicionales. |
+| Resolución v1/v2 | [L1387](../src/system_dispatch.jl#L1387) | Ejecuta el solver, extrae valores y calcula magnitudes derivadas. |
+| Entrada común | [L1478](../src/system_dispatch.jl#L1478) | Selecciona ruta según esquema y coordina la ejecución. |
+| Ejecución hidráulica v3 | [L1516](../src/system_dispatch.jl#L1516) | Modelo de red hidráulica y resolución. |
+| Salidas y utilidades v3 | [L1867](../src/system_dispatch.jl#L1867) | Archivos, interpolación de cotas, tablas, resumen y metadatos. |
+| Escritura v1/v2 | [L2166](../src/system_dispatch.jl#L2166) | Genera los cinco artefactos principales. |
+| Lectores y validadores auxiliares | [L2204](../src/system_dispatch.jl#L2204) | Rutas, nodos, conexiones, precios, conectividad y series. |
+| Cotas y cálculos auxiliares | [L2475](../src/system_dispatch.jl#L2475) | Límites de red, variación de energía, volúmenes y curvas. |
+| Tablas y resumen v1/v2 | [L2610](../src/system_dispatch.jl#L2610) | Agregados por período, detalle por activo y métricas. |
+| Reconstrucción del caso y utilidades | [L3140](../src/system_dispatch.jl#L3140) | Serialización del caso y lectura de valores requeridos/opcionales. |
 
 ### `component_rules.jl`
 
@@ -243,15 +242,15 @@ La energía de batería y el almacenamiento hidráulico representados en el per�
 - Conectividad de todos los activos con el bus.
 - Series temporales y parámetros de activos válidos.
 
-La conectividad se comprueba mediante un recorrido del grafo en [L2285](../src/system_dispatch.jl#L2285). Para esa comprobación se agregan vecinos en ambos sentidos. Las conexiones v1/v2 son lógicas: `parse_system_edges`, en [L2163](../src/system_dispatch.jl#L2163), rechaza campos distintos de `from` y `to`. No hay flujos eléctricos por línea, impedancias ni pérdidas de transmisión en este modelo.
+La conectividad se comprueba mediante un recorrido del grafo en [L2349](../src/system_dispatch.jl#L2349). Para esa comprobación se agregan vecinos en ambos sentidos. Las conexiones v1/v2 son lógicas: `parse_system_edges`, en [L2227](../src/system_dispatch.jl#L2227), rechaza campos distintos de `from` y `to`. No hay flujos eléctricos por línea, impedancias ni pérdidas de transmisión en este modelo.
 
-La validación temporal de [L2360](../src/system_dispatch.jl#L2360) exige períodos no vacíos, timestamps estrictamente crecientes, precios finitos y duraciones positivas. No exige que el siguiente timestamp sea exactamente el actual más su duración. Esa contigüidad sí se comprueba dentro de las ventanas de acumulación de reglas.
+La validación temporal de [L2424](../src/system_dispatch.jl#L2424) exige períodos no vacíos, timestamps estrictamente crecientes, precios finitos y duraciones positivas. No exige que el siguiente timestamp sea exactamente el actual más su duración. Esa contigüidad sí se comprueba dentro de las ventanas de acumulación de reglas.
 
-Las series de disponibilidad renovable, demanda y afluente hidro deben contener, para cada período, los valores de los activos correspondientes; esos valores deben ser finitos y no negativos. La validación se reparte entre [L2311](../src/system_dispatch.jl#L2311) y `validate_required_nonnegative_series_value`.
+Las series de disponibilidad renovable, demanda y afluente hidro deben contener, para cada período, los valores de los activos correspondientes; esos valores deben ser finitos y no negativos. La validación se reparte entre [L2375](../src/system_dispatch.jl#L2375) y `validate_required_nonnegative_series_value`.
 
 ### 4.3. Precios simples y separados
 
-[`parse_system_period_prices`, L2250](../src/system_dispatch.jl#L2250), admite dos modalidades:
+[`parse_system_period_prices`, L2314](../src/system_dispatch.jl#L2314), admite dos modalidades:
 
 | Entrada del período | Interpretación |
 | --- | --- |
@@ -264,11 +263,11 @@ Si algún período usa precios separados, `system_price_mode` reporta `separate_
 
 ### 4.4. `normalize_system_case`: preparar matrices
 
-[`normalize_system_case`, L617](../src/system_dispatch.jl#L617), valida el grafo nuevamente, clasifica sus nodos por tipo y crea los vectores y matrices que consume el modelo.
+[`normalize_system_case`, L657](../src/system_dispatch.jl#L657), valida el grafo nuevamente, clasifica sus nodos por tipo y crea los vectores y matrices que consume el modelo.
 
-**Extracto del código:** [system_dispatch.jl, líneas 641–656](../src/system_dispatch.jl#L641).
+**Extracto del código:** [system_dispatch.jl, líneas 681–696](../src/system_dispatch.jl#L681).
 
-<!-- source: ../src/system_dispatch.jl:641-656 -->
+<!-- source: ../src/system_dispatch.jl:681-696 -->
 
 ```julia
 if isempty(batteries)
@@ -295,9 +294,9 @@ Las filas de `renewable_available_power_mw`, `load_demand_mw` e `hydro_inflow_m3
 
 ### 4.5. Parámetros por activo
 
-Los lectores entre [L711](../src/system_dispatch.jl#L711) y el final de [parse_hydro_reservoir_curve, L951](../src/system_dispatch.jl#L951) fijan valores por defecto y validan parámetros:
+Los lectores entre [L751](../src/system_dispatch.jl#L751) y el final de [parse_hydro_reservoir_curve, L991](../src/system_dispatch.jl#L991) fijan valores por defecto y validan parámetros:
 
-- **Batería:** por defecto impide carga/descarga simultánea, activa degradación por variación absoluta de energía y exige energía final igual a la inicial. La validación física reutiliza `validate_case_data` mediante un caso auxiliar de un período en [L2396](../src/system_dispatch.jl#L2396).
+- **Batería:** por defecto impide carga/descarga simultánea, activa degradación por variación absoluta de energía y exige energía final igual a la inicial. La validación física reutiliza `validate_case_data` mediante un caso auxiliar de un período en [L2460](../src/system_dispatch.jl#L2460).
 - **Red:** los límites pueden omitirse; por defecto impide importación/exportación simultánea en cada activo de red.
 - **Renovable:** la penalización por recorte es cero si se omite y debe ser no negativa.
 - **Hidro v2:** exige rango y almacenamiento inicial coherentes; acepta condiciones terminales `none`, `equal_initial` y `min_terminal`; valida penalizaciones, caudal mínimo de descarga y curvas.
@@ -309,11 +308,11 @@ Los lectores entre [L711](../src/system_dispatch.jl#L711) y el final de [parse_h
 
 ## 5. Construcción del modelo eléctrico e hidro de v1/v2
 
-[`build_system_dispatch_model`, L989](../src/system_dispatch.jl#L989), construye el modelo completo sin resolverlo. Acepta únicamente `HiGHS`, silencia su salida y aplica las opciones del solver mediante `set_optimizer_attribute`.
+[`build_system_dispatch_model`, L1029](../src/system_dispatch.jl#L1029), construye el modelo completo sin resolverlo. Acepta únicamente `HiGHS`, silencia su salida y aplica las opciones del solver mediante `set_optimizer_attribute`.
 
 ### 5.1. Variables de decisión
 
-Las variables principales se crean en [L1008](../src/system_dispatch.jl#L1008):
+Las variables principales se crean en [L1048](../src/system_dispatch.jl#L1048):
 
 | Grupo | Variables | Significado |
 | --- | --- | --- |
@@ -329,7 +328,7 @@ Las matrices auxiliares se crean si al menos un activo las necesita. Para activo
 
 ### 5.2. Límites y simultaneidad de la red
 
-En [L1020](../src/system_dispatch.jl#L1020) se obtienen cotas para ambos sentidos. Si un activo de red no tiene un límite explícito, se utiliza `derived_system_grid_bound`, definido en [L2427](../src/system_dispatch.jl#L2427):
+En [L1060](../src/system_dispatch.jl#L1060) se obtienen cotas para ambos sentidos. Si un activo de red no tiene un límite explícito, se utiliza `derived_system_grid_bound`, definido en [L2491](../src/system_dispatch.jl#L2491):
 
 ```text
 cota = max(1,
@@ -352,7 +351,7 @@ La restricción se aplica por activo de red. Con varias conexiones puede existir
 
 ### 5.3. Baterías: potencia, energía y condición terminal
 
-El bloque de baterías empieza en [L1057](../src/system_dispatch.jl#L1057). Además de limitar carga, descarga y energía, utiliza una binaria si se impide operar en ambos sentidos simultáneamente.
+El bloque de baterías empieza en [L1097](../src/system_dispatch.jl#L1097). Además de limitar carga, descarga y energía, utiliza una binaria si se impide operar en ambos sentidos simultáneamente.
 
 La ecuación de estado es:
 
@@ -363,9 +362,9 @@ E[t] = E[t-1] + eficiencia_carga × carga[t] × duración[t]
 
 Para el primer período se usa `initial_energy_mwh`:
 
-**Extracto del código:** [system_dispatch.jl, líneas 1094–1100](../src/system_dispatch.jl#L1094).
+**Extracto del código:** [system_dispatch.jl, líneas 1134–1140](../src/system_dispatch.jl#L1134).
 
-<!-- source: ../src/system_dispatch.jl:1094-1100 -->
+<!-- source: ../src/system_dispatch.jl:1134-1140 -->
 
 ```julia
 @constraint(
@@ -385,7 +384,7 @@ Las condiciones terminales actúan sobre el último período:
 
 ### 5.4. Degradación por variación absoluta de energía
 
-En [L1118](../src/system_dispatch.jl#L1118) se modela una variable auxiliar no negativa `d[t]` con:
+En [L1158](../src/system_dispatch.jl#L1158) se modela una variable auxiliar no negativa `d[t]` con:
 
 ```text
 d[t] >= E[t] - E[t-1]
@@ -398,7 +397,7 @@ Esta medida usa la variación **neta** del estado de carga. Si se permite cargar
 
 ### 5.5. Hidro v2: balance de agua y generación
 
-El bloque de [L1145](../src/system_dispatch.jl#L1145) agrega cotas de almacenamiento y turbina, además del caudal mínimo liberado:
+El bloque de [L1185](../src/system_dispatch.jl#L1185) agrega cotas de almacenamiento y turbina, además del caudal mínimo liberado:
 
 ```text
 caudal_turbina[t] + vertimiento[t] >= minimum_release_m3s
@@ -418,9 +417,9 @@ La generación se implementa de dos maneras:
 1. `linear`: `potencia = power_per_flow_mw_per_m3s × caudal_turbina`.
 2. `piecewise_linear`: la potencia sigue la curva de caudal-potencia suministrada.
 
-**Extracto del código:** [system_dispatch.jl, líneas 1178–1188](../src/system_dispatch.jl#L1178).
+**Extracto del código:** [system_dispatch.jl, líneas 1218–1228](../src/system_dispatch.jl#L1218).
 
-<!-- source: ../src/system_dispatch.jl:1178-1188 -->
+<!-- source: ../src/system_dispatch.jl:1218-1228 -->
 
 ```julia
 flow_breakpoints = hydro_generation_flow_breakpoints(hydro)
@@ -436,13 +435,13 @@ for period in 1:n_periods
 end
 ```
 
-La cota de embalse se enlaza con el almacenamiento mediante otra curva por tramos en [L1197](../src/system_dispatch.jl#L1197). Esa cota no modifica la curva de generación: no se calcula una eficiencia dependiente del salto hidráulico.
+La cota de embalse se enlaza con el almacenamiento mediante otra curva por tramos en [L1237](../src/system_dispatch.jl#L1237). Esa cota no modifica la curva de generación: no se calcula una eficiencia dependiente del salto hidráulico.
 
 El almacenamiento final puede quedar libre dentro de cotas, igualarse al inicial o respetar un mínimo terminal. Además, puede recibir un valor económico en el objetivo.
 
 ### 5.6. Renovables, demanda y balance eléctrico
 
-El bloque que comienza en [L1236](../src/system_dispatch.jl#L1236) impone:
+El bloque que comienza en [L1276](../src/system_dispatch.jl#L1276) impone:
 
 ```text
 renovable_utilizada[r,t] + recorte[r,t] = disponibilidad[r,t]
@@ -450,9 +449,9 @@ renovable_utilizada[r,t] + recorte[r,t] = disponibilidad[r,t]
 
 La demanda se toma como dato obligatorio del balance. No se introduce una variable de demanda no atendida. El balance de potencia del único bus es:
 
-**Extracto del código:** [system_dispatch.jl, líneas 1243–1253](../src/system_dispatch.jl#L1243).
+**Extracto del código:** [system_dispatch.jl, líneas 1283–1293](../src/system_dispatch.jl#L1283).
 
-<!-- source: ../src/system_dispatch.jl:1243-1253 -->
+<!-- source: ../src/system_dispatch.jl:1283-1293 -->
 
 ```julia
 @constraint(
@@ -472,11 +471,11 @@ Todas las sumas son potencias del mismo período. La duración aparece en las ec
 
 ### 5.7. Función objetivo v1/v2
 
-Los términos se preparan entre [L1255](../src/system_dispatch.jl#L1255) y L1289. El objetivo es:
+Los términos se preparan entre [L1295](../src/system_dispatch.jl#L1295) y L1289. El objetivo es:
 
-**Extracto del código:** [system_dispatch.jl, líneas 1291–1299](../src/system_dispatch.jl#L1291).
+**Extracto del código:** [system_dispatch.jl, líneas 1331–1339](../src/system_dispatch.jl#L1331).
 
-<!-- source: ../src/system_dispatch.jl:1291-1299 -->
+<!-- source: ../src/system_dispatch.jl:1331-1339 -->
 
 ```julia
 @objective(
@@ -505,7 +504,7 @@ Los ingresos y costos eléctricos multiplican precio por potencia y duración. L
 
 ### 5.8. Incorporación de reglas adicionales
 
-Después de definir el objetivo, [L1301](../src/system_dispatch.jl#L1301) agrega las filas de `component_rules` al mismo modelo. Se mantienen las ecuaciones físicas, cotas y condiciones terminales previamente creadas. La sección [13](#integracion) detalla esta traducción.
+Después de definir el objetivo, [L1341](../src/system_dispatch.jl#L1341) agrega las filas de `component_rules` al mismo modelo. Se mantienen las ecuaciones físicas, cotas y condiciones terminales previamente creadas. La sección [13](#integracion) detalla esta traducción.
 
 El retorno es `SystemDispatchModel`, que permite acceder tanto a `model` como a las matrices de variables. En este punto aún no se ha ejecutado `optimize!`.
 
@@ -517,9 +516,9 @@ El retorno es `SystemDispatchModel`, que permite acceder tanto a `model` como a 
 
 La sobrecarga que recibe `SystemGraphData` primero normaliza el caso. La que recibe `SystemOptimizationData` construye el modelo y lo resuelve:
 
-**Extracto del código:** [system_dispatch.jl, líneas 1347–1359](../src/system_dispatch.jl#L1347).
+**Extracto del código:** [system_dispatch.jl, líneas 1387–1399](../src/system_dispatch.jl#L1387).
 
-<!-- source: ../src/system_dispatch.jl:1347-1359 -->
+<!-- source: ../src/system_dispatch.jl:1387-1399 -->
 
 ```julia
 function solve_system_dispatch(system_case::SystemGraphData)::SystemDispatchResult
@@ -543,7 +542,7 @@ Si no hay valores, se lanza `NoPrimalSolution`, definida en [L183](../src/system
 
 ### 6.2. Extracción y cálculos derivados
 
-Desde [L1361](../src/system_dispatch.jl#L1361) se usa `value.(...)` para obtener matrices de números. Luego se calculan:
+Desde [L1401](../src/system_dispatch.jl#L1401) se usa `value.(...)` para obtener matrices de números. Luego se calculan:
 
 - Variación absoluta real de energía de cada batería, comparando cada período con el anterior o con el estado inicial.
 - Importación/exportación agregadas y sus costos/ingresos.
@@ -551,15 +550,15 @@ Desde [L1361](../src/system_dispatch.jl#L1361) se usa `value.(...)` para obtener
 - Volúmenes de afluente, turbina y vertimiento a partir de caudal y duración.
 - Penalización de vertimiento y valor terminal del agua por activo hidro.
 
-`period_sum`, en [L2454](../src/system_dispatch.jl#L2454), suma por columnas y devuelve un vector de ceros cuando no hay activos de ese tipo. `hydro_volume_matrix`, en [L2462](../src/system_dispatch.jl#L2462), aplica la conversión a hm³. `realized_system_delta_soc_abs`, en [L2441](../src/system_dispatch.jl#L2441), evita depender del valor de la variable auxiliar de degradación para informar el cambio físico real.
+`period_sum`, en [L2518](../src/system_dispatch.jl#L2518), suma por columnas y devuelve un vector de ceros cuando no hay activos de ese tipo. `hydro_volume_matrix`, en [L2526](../src/system_dispatch.jl#L2526), aplica la conversión a hm³. `realized_system_delta_soc_abs`, en [L2505](../src/system_dispatch.jl#L2505), evita depender del valor de la variable auxiliar de degradación para informar el cambio físico real.
 
 ### 6.3. Los cinco archivos principales
 
-`write_system_run_outputs`, en [L2102](../src/system_dispatch.jl#L2102), crea una carpeta por caso y ejecución mediante las utilidades compartidas de [results/writer.jl](../src/results/writer.jl#L180).
+`write_system_run_outputs`, en [L2166](../src/system_dispatch.jl#L2166), crea una carpeta por caso y ejecución mediante las utilidades compartidas de [results/writer.jl](../src/results/writer.jl#L180).
 
-**Extracto del código:** [system_dispatch.jl, líneas 2115–2125](../src/system_dispatch.jl#L2115).
+**Extracto del código:** [system_dispatch.jl, líneas 2179–2189](../src/system_dispatch.jl#L2179).
 
-<!-- source: ../src/system_dispatch.jl:2115-2125 -->
+<!-- source: ../src/system_dispatch.jl:2179-2189 -->
 
 ```julia
 dispatch_path = joinpath(output_dir, "dispatch.csv")
@@ -585,13 +584,13 @@ write_json_file(model_metadata_path, system_model_metadata_dict(data))
 
 ### 6.4. Cómo se organizan las tablas v1/v2
 
-[`system_dispatch_dataframe`, L2546](../src/system_dispatch.jl#L2546), calcula los agregados de red, renovables, demanda y baterías. Agrega columnas hidro si hay activos de ese tipo. `net_grid_export_mw` es exportación menos importación; `battery_net_discharge_mw` es descarga menos carga.
+[`system_dispatch_dataframe`, L2610](../src/system_dispatch.jl#L2610), calcula los agregados de red, renovables, demanda y baterías. Agrega columnas hidro si hay activos de ese tipo. `net_grid_export_mw` es exportación menos importación; `battery_net_discharge_mw` es descarga menos carga.
 
 `period_profit_usd` suma el valor de mercado y resta degradación, recorte y vertimiento. El valor terminal del agua se coloca solo en el último período.
 
-[`system_asset_dispatch_dataframe`, L2613](../src/system_dispatch.jl#L2613), crea filas de red, renovables, cargas y baterías; luego añade las filas hidro. Las columnas que no corresponden a un tipo de activo normalmente contienen cero. Para consumir esta tabla conviene seleccionar por `asset_type` y `asset_id`, sin depender del orden de las filas.
+[`system_asset_dispatch_dataframe`, L2677](../src/system_dispatch.jl#L2677), crea filas de red, renovables, cargas y baterías; luego añade las filas hidro. Las columnas que no corresponden a un tipo de activo normalmente contienen cero. Para consumir esta tabla conviene seleccionar por `asset_type` y `asset_id`, sin depender del orden de las filas.
 
-[`system_summary_dict`, L2956](../src/system_dispatch.jl#L2956), registra también `component_rule_adapter` y `component_rule_contract` cuando existen reglas. `system_case_dict`, en [L3076](../src/system_dispatch.jl#L3076), conserva el bloque de reglas mediante `deepcopy`. Esa copia mantiene la trazabilidad de las filas que llegaron al solver.
+[`system_summary_dict`, L3020](../src/system_dispatch.jl#L3020), registra también `component_rule_adapter` y `component_rule_contract` cuando existen reglas. `system_case_dict`, en [L3140](../src/system_dispatch.jl#L3140), conserva el bloque de reglas mediante `deepcopy`. Esa copia mantiene la trazabilidad de las filas que llegaron al solver.
 
 <a id="hidraulica-v3"></a>
 
@@ -611,28 +610,24 @@ write_json_file(model_metadata_path, system_model_metadata_dict(data))
 
 La función exige al menos un embalse, una central y una unidad. Comprueba IDs repetidos, referencias a nodos y centrales, pertenencia declarada de unidades, parámetros del embalse y curvas. Los tramos y las unidades no pueden conectar un nodo consigo mismo.
 
-Las conexiones de tramos y las conexiones toma→descarga de las unidades forman conjuntamente un grafo dirigido. [`validate_hydraulic_v3_acyclic`, L497](../src/system_dispatch.jl#L497), usa conjuntos de nodos en visita y ya visitados para detectar ciclos.
+Las conexiones de tramos y las conexiones toma→descarga de las unidades forman conjuntamente un grafo dirigido. [`validate_hydraulic_v3_acyclic`, L500](../src/system_dispatch.jl#L500), usa conjuntos de nodos en visita y ya visitados para detectar ciclos.
 
 La ruta solo admite generación: rechaza bombeo, reversibilidad y curvas de generación dependientes del salto. Los tramos requieren `routing_method = "none"` y tiempo de viaje cero. Los caudales se transportan dentro del mismo período.
 
 ### 7.2. Preparación de parámetros y curvas
 
-[`run_hydraulic_v3_system_case`, L1476](../src/system_dispatch.jl#L1476), valida el documento, extrae colecciones e índices y prepara los parámetros de embalses y unidades.
+[`run_hydraulic_v3_system_case`, L1516](../src/system_dispatch.jl#L1516), valida el documento, extrae colecciones e índices y prepara los parámetros de embalses y unidades.
 
-La validación genérica de curvas admite al menos dos puntos, pero el solver v3 implementado exige exactamente dos puntos en `flow_power`:
+Las curvas `flow_power` admiten dos o más puntos. El runner conserva todos los puntos y utiliza los extremos como límites de caudal por defecto:
 
-**Extracto del código:** [system_dispatch.jl, líneas 1569–1580](../src/system_dispatch.jl#L1569).
+**Extracto del código:** [system_dispatch.jl, líneas 1608–1615](../src/system_dispatch.jl#L1608).
 
-<!-- source: ../src/system_dispatch.jl:1569-1580 -->
+<!-- source: ../src/system_dispatch.jl:1608-1615 -->
 
 ```julia
-if length(flow_power) != 2
-    throw(ArgumentError("unit $(unit_id) flow_power solver support is limited to two points"))
-end
-flow_a, power_a = flow_power[1]
-flow_b, power_b = flow_power[2]
-unit_power_slope[unit_index] = (power_b - power_a) / (flow_b - flow_a)
-unit_power_intercept[unit_index] = power_a - unit_power_slope[unit_index] * flow_a
+unit_power_curves[unit_index] = flow_power
+flow_a = first(flow_power)[1]
+flow_b = last(flow_power)[1]
 min_flow = optional_float(get(unit, "min_flow_m3s", nothing), "unit $(unit_id) min_flow_m3s")
 max_flow = optional_float(get(unit, "max_flow_m3s", nothing), "unit $(unit_id) max_flow_m3s")
 unit_flow_min[unit_index] = min_flow === nothing ? flow_a : min_flow
@@ -640,15 +635,17 @@ unit_flow_max[unit_index] = max_flow === nothing ? flow_b : max_flow
 unit_power_max[unit_index] = optional_float(get(unit, "max_power_mw", nothing), "unit $(unit_id) max_power_mw")
 ```
 
-La recta es `P = intercepto + pendiente × Q`. Los extremos de caudal de la curva sirven como valores por defecto de las cotas. Si se suministran `min_flow_m3s` o `max_flow_m3s`, el runner utiliza esos valores directamente. La validación de reglas aplica además su propia aproximación de cotas físicas al analizar restricciones de una variable; ambas rutas deben revisarse al modificar el dominio permitido.
+`hydraulic_curve_value` enlaza el caudal con la potencia mediante interpolación lineal exacta: usa una expresión afín para dos puntos y pesos adyacentes SOS2 para curvas de más puntos. Impone el dominio de la curva sin extrapolar. Los límites opcionales `min_flow_m3s` y `max_flow_m3s` se añaden a ese dominio. La validación de reglas comprueba también las cotas físicas al analizar restricciones de una variable.
 
-La curva almacenamiento-cota se utiliza después de resolver para interpolar la cota reportada. En v3 no se crea una variable de cota enlazada al modelo, a diferencia de la ruta v2.
+La curva almacenamiento-cota se utiliza para reportar la cota y, cuando hay filtración, para enlazarla al almacenamiento dentro del modelo. Un tramo con `flow_behavior.kind = "seepage"` impone `Q = f(H)` mediante una curva cota-caudal. El origen debe ser un embalse y la curva debe cubrir su rango operativo de cotas, con caudales no negativos.
+
+`level_timing = "start"` toma el almacenamiento inicial en el primer período y el almacenamiento final del período anterior en los siguientes. Con `"end"`, la cota y la filtración se resuelven junto con el balance del período actual. Las expresiones de cota se comparten entre tramos del mismo embalse y límite temporal; el caudal de filtración participa en los balances de origen y destino.
 
 ### 7.3. Variables e índices de la red
 
-**Extracto del código:** [system_dispatch.jl, líneas 1619–1625](../src/system_dispatch.jl#L1619).
+**Extracto del código:** [system_dispatch.jl, líneas 1654–1660](../src/system_dispatch.jl#L1654).
 
-<!-- source: ../src/system_dispatch.jl:1619-1625 -->
+<!-- source: ../src/system_dispatch.jl:1654-1660 -->
 
 ```julia
 @variable(model, turbine_flow[1:n_units, 1:n_periods] >= 0)
@@ -662,11 +659,11 @@ La curva almacenamiento-cota se utiliza después de resolver para interpolar la 
 
 Cada tramo tiene un caudal propio `reach_flow[r,t]`. Cada unidad tiene `turbine_flow[u,t]` y `hydro_power[u,t]`. Cada embalse tiene almacenamiento y vertimiento. Los caudales de tramos y turbinas participan en los balances de los nodos a los que están conectados.
 
-Las reglas adicionales v3 se incorporan inmediatamente después de declarar estas variables, antes de añadir los balances físicos. Ese orden no cambia que todas las restricciones formen parte del mismo modelo.
+Las leyes de filtración y las reglas adicionales v3 se incorporan después de declarar estas variables, antes de añadir los balances físicos. Ese orden no cambia que todas las restricciones formen parte del mismo modelo.
 
 ### 7.4. Balance en cada nodo
 
-En [L1671](../src/system_dispatch.jl#L1671) se identifican tramos entrantes/salientes y unidades que toman o descargan agua. Para cada período se forman:
+En [L1725](../src/system_dispatch.jl#L1725) se identifican tramos entrantes/salientes y unidades que toman o descargan agua. Para cada período se forman:
 
 ```text
 received = caudales de tramos entrantes + caudales descargados por unidades
@@ -687,9 +684,9 @@ El estado anterior de un embalse es el inicial en el primer período y el almace
 
 El siguiente bloque evita contar dos veces la misma agua:
 
-**Extracto del código:** [system_dispatch.jl, líneas 1684–1697](../src/system_dispatch.jl#L1684).
+**Extracto del código:** [system_dispatch.jl, líneas 1738–1751](../src/system_dispatch.jl#L1738).
 
-<!-- source: ../src/system_dispatch.jl:1684-1697 -->
+<!-- source: ../src/system_dispatch.jl:1738-1751 -->
 
 ```julia
 if node["type"] == "reservoir"
@@ -712,19 +709,19 @@ Si hay tramos `spillway` salientes del embalse, `spill_flow` es la suma de sus c
 
 ### 7.6. Caudales mínimos de los tramos
 
-El bloque de [L1583](../src/system_dispatch.jl#L1583) construye `reach_min_flow[r,t]` con esta prioridad:
+El bloque de [L1618](../src/system_dispatch.jl#L1618) construye `reach_min_flow[r,t]` con esta prioridad:
 
 1. Valor de `time_series[t].minimum_flow_m3s[reach_id]`, si existe y no es `nothing`.
 2. Valor fijo `flow_min_m3s` del tramo.
 3. Cero.
 
-En [L1714](../src/system_dispatch.jl#L1714) se impone `reach_flow[r,t] >= reach_min_flow[r,t]`. Un tramo puede transportar agua sin generar electricidad. Las reglas con `reach_key` actúan sobre este caudal, no sobre una turbina asociada por aproximación.
+En [L1768](../src/system_dispatch.jl#L1768) se impone `reach_flow[r,t] >= reach_min_flow[r,t]`. Un tramo puede transportar agua sin generar electricidad. Las reglas con `reach_key` actúan sobre este caudal, no sobre una turbina asociada por aproximación.
 
 ### 7.7. Objetivo v3 y su interpretación
 
-**Extracto del código:** [system_dispatch.jl, líneas 1718–1730](../src/system_dispatch.jl#L1718).
+**Extracto del código:** [system_dispatch.jl, líneas 1772–1784](../src/system_dispatch.jl#L1772).
 
-<!-- source: ../src/system_dispatch.jl:1718-1730 -->
+<!-- source: ../src/system_dispatch.jl:1772-1784 -->
 
 ```julia
 @objective(
@@ -748,11 +745,11 @@ La guía conserva este detalle porque afecta la interpretación de resultados. P
 
 ### 7.8. Resultados hidráulicos
 
-Tras `optimize!`, el control de valores disponibles es el mismo que en v1/v2. Se extraen caudales, potencia y almacenamiento; las cotas se calculan con [`hydraulic_v3_interpolate`, L1900](../src/system_dispatch.jl#L1900).
+Tras `optimize!`, el control de valores disponibles es el mismo que en v1/v2. Se extraen caudales, potencia y almacenamiento; las cotas se calculan con [`hydraulic_v3_interpolate`, L1964](../src/system_dispatch.jl#L1964).
 
 Se reutiliza `SystemDispatchResult`, dejando vacíos los campos de activos eléctricos y en cero los importes de mercado que no intervienen en esta ruta. El caudal de los tramos se pasa aparte al escritor mediante `reach_values`; no hay un campo dedicado a él en esa estructura.
 
-[`write_hydraulic_v3_run_outputs`, L1813](../src/system_dispatch.jl#L1813), escribe los mismos cinco nombres de archivo, con contenido hidráulico:
+[`write_hydraulic_v3_run_outputs`, L1867](../src/system_dispatch.jl#L1867), escribe los mismos cinco nombres de archivo, con contenido hidráulico:
 
 - `dispatch.csv`: agregados por período.
 - `asset_dispatch.csv`: filas `hydraulic_unit`, `hydraulic_reservoir` y `hydraulic_reach`; estas últimas usan `hydraulic_flow_m3s`.
@@ -1202,11 +1199,11 @@ Las cotas del validador y las del modelo no son idénticas en todos los casos. P
 
 ### 13.1. Resolución de IDs en v1/v2
 
-En el bloque de [L1301](../src/system_dispatch.jl#L1301), `assets` agrupa los activos por tipo. Para cada objeto, `component_key` busca el índice de su activo dentro del vector correspondiente. Un diccionario `variables` asocia los nombres de reglas en español con las matrices JuMP.
+En el bloque de [L1341](../src/system_dispatch.jl#L1341), `assets` agrupa los activos por tipo. Para cada objeto, `component_key` busca el índice de su activo dentro del vector correspondiente. Un diccionario `variables` asocia los nombres de reglas en español con las matrices JuMP.
 
-**Extracto del código:** [system_dispatch.jl, líneas 1302–1311](../src/system_dispatch.jl#L1302).
+**Extracto del código:** [system_dispatch.jl, líneas 1342–1351](../src/system_dispatch.jl#L1342).
 
-<!-- source: ../src/system_dispatch.jl:1302-1311 -->
+<!-- source: ../src/system_dispatch.jl:1342-1351 -->
 
 ```julia
 rules = data.graph.component_rules
@@ -1225,9 +1222,9 @@ La matriz se elige por `variable`; su fila, por el ID resuelto del objeto; su co
 
 ### 13.2. Construcción de la expresión
 
-**Extracto del código:** [system_dispatch.jl, líneas 1312–1324](../src/system_dispatch.jl#L1312).
+**Extracto del código:** [system_dispatch.jl, líneas 1352–1364](../src/system_dispatch.jl#L1352).
 
-<!-- source: ../src/system_dispatch.jl:1312-1324 -->
+<!-- source: ../src/system_dispatch.jl:1352-1364 -->
 
 ```julia
 for row in rules["rows"]
@@ -1251,11 +1248,11 @@ En esta fase no se interpretan ventanas ni políticas del primer período: sus e
 
 ### 13.3. Resolución de IDs en v3
 
-La implementación de [L1627](../src/system_dispatch.jl#L1627) construye tres índices separados: unidades, embalses y tramos. Después selecciona la matriz:
+La implementación de [L1680](../src/system_dispatch.jl#L1680) construye tres índices separados: unidades, embalses y tramos. Después selecciona la matriz:
 
-**Extracto del código:** [system_dispatch.jl, líneas 1634–1647](../src/system_dispatch.jl#L1634).
+**Extracto del código:** [system_dispatch.jl, líneas 1687–1700](../src/system_dispatch.jl#L1687).
 
-<!-- source: ../src/system_dispatch.jl:1634-1647 -->
+<!-- source: ../src/system_dispatch.jl:1687-1700 -->
 
 ```julia
 for term in row["terms"]
@@ -1402,7 +1399,7 @@ Para ejecutar y persistir artefactos:
 julia --project=. scripts/run_system_case.jl data/cases/hybrid_system/system_case.json --output-root outputs
 ```
 
-La CLI de ejecución funciona también con un documento v3 porque pasa por `run_system_case`. En éxito escribe un JSON con rutas y estados en stdout. En error escribe el JSON de error en stderr y retorna código 1. La validación v3 puede aceptar ciertas estructuras que el runner aún no resuelve, como una curva de generación con más de dos puntos; validar y resolver son etapas diferentes.
+La CLI de ejecución funciona también con un documento v3 porque pasa por `run_system_case`. En éxito escribe un JSON con rutas y estados en stdout. En error escribe el JSON de error en stderr y retorna código 1. Validar y resolver son etapas diferentes: las curvas de generación de más de dos puntos están soportadas, pero superar la validación no garantiza que las restricciones combinadas sean factibles.
 
 <a id="limites"></a>
 
@@ -1412,15 +1409,15 @@ La CLI de ejecución funciona también con un documento v3 porque pasa por `run_
 
 | Mensaje o condición | Dónde mirar | Interpretación |
 | --- | --- | --- |
-| `system_case JSON could not be parsed` | [L191](../src/system_dispatch.jl#L191), [L1468](../src/system_dispatch.jl#L1468) | Falló lectura o parseo del documento. |
+| `system_case JSON could not be parsed` | [L191](../src/system_dispatch.jl#L191), [L1508](../src/system_dispatch.jl#L1508) | Falló lectura o parseo del documento. |
 | `system graph must contain exactly one bus or PCC node` | [L238](../src/system_dispatch.jl#L238) | La topología v1/v2 no cumple el modelo de bus único. |
 | `component rules grid differs from snapshot` | [component_rules L68](../src/component_rules.jl#L68) | Las reglas se prepararon para otro horizonte o duraciones. |
 | `component rules object outside snapshot` | [component_rules L96](../src/component_rules.jl#L96) | El objeto no corresponde al caso o su vínculo/tipo es inválido. |
 | `unsupported component rules variable or unit` | [component_rules L165](../src/component_rules.jl#L165) | Variable incompatible o conversión de unidades no admitida. |
 | `unsupported component rules period reference` | [component_rules L188](../src/component_rules.jl#L188) | Período negativo, futuro o uso temporal no permitido. |
 | `contradictory component rule` | [component_rules L212](../src/component_rules.jl#L212) | Intersección vacía de cotas de una variable. |
-| `flow_power solver support is limited to two points` | [L1569](../src/system_dispatch.jl#L1569) | Limitación del runner v3, posterior a validación genérica. |
-| `NoPrimalSolution` | [L1356](../src/system_dispatch.jl#L1356), [L1734](../src/system_dispatch.jl#L1734) | El solver no dejó valores que puedan extraerse; revisar sus estados. |
+| `curve must cover the reservoir operating elevation range` | `validate_hydraulic_v3_flow_behavior` | La curva de filtración no cubre todas las cotas operativas; no se permite extrapolar. |
+| `NoPrimalSolution` | [L1396](../src/system_dispatch.jl#L1396), [L1788](../src/system_dispatch.jl#L1788) | El solver no dejó valores que puedan extraerse; revisar sus estados. |
 
 Las comprobaciones explícitas suelen lanzar `ArgumentError`, pero algunos bloques acceden directamente a claves del documento. Una estructura incompleta también puede producir errores de acceso o conversión; no hay una garantía general de que todo error de contrato tenga un único tipo o mensaje.
 
@@ -1428,8 +1425,8 @@ Las comprobaciones explícitas suelen lanzar `ArgumentError`, pero algunos bloqu
 
 - **v1/v2 usa un bus eléctrico único.** Las conexiones validan pertenencia a un sistema conectado; no modelan una red eléctrica con flujos por línea.
 - **v3 tiene una ruta independiente.** `SYSTEM_SUPPORTED_SCHEMA_VERSIONS` incluye v1/v2 para el cargador tipado; v3 se deriva antes hacia funciones propias.
-- **El runner v3 usa curvas de generación de dos puntos.** La validación genérica de curvas es más amplia y no basta para asegurar soporte de ejecución.
-- **`min_power_mw` de unidad v3 se valida si existe, pero el runner no agrega una restricción explícita con ese parámetro.** En [L1658](../src/system_dispatch.jl#L1658) se usan las cotas de caudal, la recta potencia-caudal y `max_power_mw`. Una potencia mínima puede surgir de esas condiciones, pero no debe atribuirse al uso directo de `min_power_mw`.
+- **Las curvas v3 se interpolan dentro de su dominio.** Dos puntos producen una relación afín; más puntos usan SOS2. La filtración combina las curvas almacenamiento-cota y cota-caudal, con evaluación al inicio o al final del período.
+- **`min_power_mw` de unidad v3 se valida si existe, pero el runner no agrega una restricción explícita con ese parámetro.** En [L1711](../src/system_dispatch.jl#L1711) se usan las cotas de caudal, la curva potencia-caudal y `max_power_mw`. Una potencia mínima puede surgir de esas condiciones, pero no debe atribuirse al uso directo de `min_power_mw`.
 - **La validación temporal v3 no reutiliza íntegramente `validate_system_time_series`.** Valida timestamps y duraciones individualmente; no contiene allí el mismo chequeo de orden estricto de v1/v2. Las reglas agregan sus propias comprobaciones cuando están presentes.
 - **Las reglas son afines y obligatorias.** Estos archivos no admiten multiplicación entre decisiones ni relajan restricciones mediante costos automáticos.
 - **La validación de ventanas no recalcula días civiles, coeficientes ni valores iniciales.** Esos datos deben estar materializados correctamente en las filas.
@@ -1450,7 +1447,7 @@ Estas observaciones describen el código leído. La creación de esta guía no m
 | Cambio de balance hidráulico | Bloque de L1671, tratamiento de vertederos, salida de tramos y pruebas de conservación. |
 | Cambio de objetivo | Construcción del objetivo, interpretación/unidades, cálculos derivados y resúmenes. |
 
-La utilidad `hydraulic_v3_unit_source_reservoir`, en [L1880](../src/system_dispatch.jl#L1880), sigue definida, pero no se invoca en el recorrido actual de resolución. La conservación de agua depende de los balances por nodo y de las conexiones explícitas; leer esa utilidad aislada no describe el flujo actual.
+La utilidad `hydraulic_v3_unit_source_reservoir`, en [L1944](../src/system_dispatch.jl#L1944), sigue definida, pero no se invoca en el recorrido actual de resolución. La conservación de agua depende de los balances por nodo y de las conexiones explícitas; leer esa utilidad aislada no describe el flujo actual.
 
 <a id="pruebas"></a>
 
@@ -1466,6 +1463,7 @@ La utilidad `hydraulic_v3_unit_source_reservoir`, en [L1880](../src/system_dispa
 | [test/battery_rules.jl](../test/battery_rules.jl#L64) | Presupuestos con intervalos desiguales, reservas de energía y cambios de arbitraje. |
 | [test/electric_rules.jl](../test/electric_rules.jl#L76) | Límites eléctricos, exportación, generación, recorte y conservación del balance. |
 | [test/hydraulic_reach_rules.jl](../test/hydraulic_reach_rules.jl#L10) | Caudales independientes de tramos, conexiones en serie y vertederos contados una sola vez. |
+| [test/hydraulic_seepage.jl](../test/hydraulic_seepage.jl) | Filtración según cota al inicio y final del período, conservación de agua, curvas de más de dos puntos y validación del dominio. Se incluye en `runtests.jl`. |
 | [test/rule_compliance.jl](../test/rule_compliance.jl#L3) | Registro del estado primal y preservación de evidencia cuando no hay solución primal. |
 
 Las pruebas especializadas se pueden ejecutar por separado. Su mera presencia en `test/` no implica que estén incluidas automáticamente en `Pkg.test()`; el workflow [component-rules.yml](../.github/workflows/component-rules.yml#L36) invoca varias explícitamente.
@@ -1477,6 +1475,7 @@ julia --project=. test/simple_hydro_rules.jl
 julia --project=. test/battery_rules.jl
 julia --project=. test/electric_rules.jl
 julia --project=. test/hydraulic_reach_rules.jl
+julia --project=. test/hydraulic_seepage.jl
 julia --project=. test/rule_compliance.jl
 ```
 
@@ -1486,11 +1485,11 @@ Estos comandos son una guía de reproducción. Este documento no afirma que esas
 
 Los extractos se identifican con un comentario `source` que registra archivo y rango de líneas. Al cambiar los archivos Julia, debe actualizarse tanto el enlace visible como el extracto y su explicación. El nombre de la función sirve como referencia adicional si cambia la numeración.
 
-La guía está ligada a estas huellas SHA-256 de los archivos leídos, incluidos sus cambios locales:
+La guía está ligada a estas huellas SHA-256 del contenido UTF-8 con saltos de línea LF:
 
 | Archivo | SHA-256 |
 | --- | --- |
-| `src/system_dispatch.jl` | `cdd5ad080db80b2f04b993fe5e5dd33cf964886607d23824ba44821bb29a8a39` |
+| `src/system_dispatch.jl` | `7b510e9382a8535a7a016a016a0403c8896bc1d4cc10f4fbd685845efb18a9d3` |
 | `src/component_rules.jl` | `3f88c304189f1cea9004d569087f929065c293d44a66cd74cf544f6da2b3639c` |
 
 Para seguir una modificación de comportamiento conviene partir de la función pública `run_system_case`, elegir la ruta del esquema y revisar juntos el contrato de entrada, el validador, la restricción JuMP y el artefacto que informa el resultado.

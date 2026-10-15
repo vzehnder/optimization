@@ -19,6 +19,12 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from app.auth import VALID_USER_ROLES
+from app.hydraulic_behaviors import (
+    ELEVATION_FLOW_CURVE_SPEC,
+    flow_behavior_snapshot,
+    normalize_flow_behavior,
+    validate_flow_behaviors,
+)
 from app.database import connect_database, database_url_from_env, postgres_schema_from_sqlite
 from app.draft_editor import DraftGenerationError, generate_system_case_from_draft
 from app.input_variants import (
@@ -1518,6 +1524,7 @@ class AnalystStore:
         self._ensure_hydraulic_diagram_items_support_reaches()
         self._ensure_hydraulic_diagram_items_entity_types_postgres()
         self._ensure_column("case_hydraulic_plants", "non_modeled", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("case_hydraulic_reaches", "flow_behavior_json", "TEXT")
         self._ensure_column("case_hydraulic_plants", "min_power_mw", "REAL")
         self._ensure_column("case_hydraulic_plants", "max_power_mw", "REAL")
         self._ensure_column(
@@ -26550,6 +26557,26 @@ class AnalystStore:
                     routing_method=reach.get("routing_method", "none"),
                     travel_time_hours=reach.get("travel_time_hours", 0.0),
                 )
+                if reach.get("flow_behavior") is not None:
+                    behavior = reach["flow_behavior"]
+                    self.connection.execute(
+                        "UPDATE case_hydraulic_reaches SET flow_behavior_json = ? WHERE id = ?",
+                        (
+                            json.dumps({k: behavior[k] for k in ("kind", "level_timing")}),
+                            created_reach["case_hydraulic_reach_id"],
+                        ),
+                    )
+                    self._persist_hydraulic_curve(
+                        project_id=project_id,
+                        base_entity_id=created_reach["hydraulic_reach_id"],
+                        case_id=case_id,
+                        binding_entity_type="case_hydraulic_reach",
+                        binding_entity_id=created_reach["case_hydraulic_reach_id"],
+                        curve=behavior["curve"],
+                        spec=ELEVATION_FLOW_CURVE_SPEC,
+                        updated_by=updated_by,
+                        now=now,
+                    )
                 if reach.get("minimum_flow_series") is not None:
                     self._persist_hydraulic_inflow_series(
                         project_id=project_id,
@@ -26756,6 +26783,15 @@ class AnalystStore:
 
         minimum_flow_series_by_key: dict[str, list[dict[str, float]]] = {}
         for reach in diagram["reaches"]:
+            if reach.get("flow_behavior") is not None:
+                curves.append(
+                    {
+                        "entity_type": "hydraulic_reach",
+                        "entity_id": reach["technical_key"],
+                        "curve_role": "elevation_flow",
+                        "points": flow_behavior_snapshot(reach["flow_behavior"])["curve"],
+                    }
+                )
             series_points = hydraulic_natural_inflow_series_points(
                 reach.get("minimum_flow_series")
             )
@@ -26774,6 +26810,8 @@ class AnalystStore:
                     "flow_min_m3s": None if has_series else reach.get("flow_min_m3s"),
                     "flow_min_source": "series" if has_series else "scalar",
                     "spill_penalty_usd_per_hm3": reach.get("spill_penalty_usd_per_hm3"),
+                    **({"flow_behavior": flow_behavior_snapshot(reach["flow_behavior"])}
+                       if reach.get("flow_behavior") is not None else {}),
                 }
             )
 
@@ -26941,6 +26979,7 @@ class AnalystStore:
         errors.extend(self._validate_active_plants_and_units(case_id, active_node_ids))
         errors.extend(self._validate_node_inflow_series(case_id))
         errors.extend(self._validate_reach_controls(case_id))
+        errors.extend(validate_flow_behaviors(self.get_hydraulic_diagram(scenario_id)))
         errors.extend(self._validate_unsupported_topology(case_id, active_node_ids))
 
         validation = {
@@ -32404,6 +32443,7 @@ class AnalystStore:
                 case_hydraulic_diagram_items.metadata_json,
                 case_hydraulic_reaches.id AS entity_id,
                 case_hydraulic_reaches.hydraulic_reach_id AS base_reach_id,
+                case_hydraulic_reaches.flow_behavior_json,
                 case_hydraulic_reaches.flow_min_m3s,
                 case_hydraulic_reaches.spill_penalty_usd_per_hm3,
                 hydraulic_reaches.reach_key AS technical_key,
@@ -32433,7 +32473,7 @@ class AnalystStore:
         ).fetchall()
         reaches = [hydraulic_diagram_reach_row_to_dict(row) for row in reach_rows]
         for reach, row in zip(reaches, reach_rows):
-            self._attach_reach_minimum_flow_detail(
+            self._attach_reach_detail(
                 reach,
                 case_id=case_id,
                 project_id=project_id,
@@ -33254,7 +33294,7 @@ class AnalystStore:
         node["natural_inflow_series"] = bound
         node["available_inflow_series"] = available
 
-    def _attach_reach_minimum_flow_detail(
+    def _attach_reach_detail(
         self,
         reach: dict[str, Any],
         *,
@@ -33273,6 +33313,20 @@ class AnalystStore:
         )
         reach["minimum_flow_series"] = bound
         reach["available_minimum_flow_series"] = available
+        bound_curve, available_curves = self._entity_curve_detail(
+            project_id=project_id,
+            base_entity_type="hydraulic_reach",
+            base_entity_id=base_reach_id,
+            case_id=case_id,
+            binding_entity_type="case_hydraulic_reach",
+            binding_entity_id=int(reach["entity_id"]),
+            curve_key="elevation_flow",
+        )
+        reach["available_elevation_flow_curves"] = available_curves
+        if reach.get("flow_behavior") is not None:
+            reach["flow_behavior"]["curve"] = bound_curve or {
+                "curve_set_id": None, "version_label": None, "points": []
+            }
 
     def _entity_curve_detail(
         self,
@@ -35096,6 +35150,9 @@ def normalize_hydraulic_diagram_reaches(reaches: list[dict[str, Any]]) -> list[d
                     reach.get("spill_penalty_usd_per_hm3")
                 ),
                 "minimum_flow_series": minimum_flow_series,
+                "flow_behavior": normalize_flow_behavior(
+                    reach.get("flow_behavior"), normalize_hydraulic_curve_points
+                ),
                 "from_anchor": _optional_anchor(reach.get("from_anchor")),
                 "to_anchor": _optional_anchor(reach.get("to_anchor")),
             }
@@ -35242,6 +35299,7 @@ def hydraulic_diagram_reach_row_to_dict(row: Mapping[str, Any] | sqlite3.Row) ->
         ),
         "minimum_flow_series": None,
         "available_minimum_flow_series": [],
+        "flow_behavior": json.loads(value["flow_behavior_json"]) if value.get("flow_behavior_json") else None,
         "from_anchor": _optional_float(metadata.get("from_anchor")),
         "to_anchor": _optional_float(metadata.get("to_anchor")),
         "z_index": int(value["z_index"] or 0),
