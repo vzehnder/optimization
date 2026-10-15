@@ -3734,6 +3734,9 @@ describe("application shell", () => {
       "/react/scenarios/10/hydraulic-reaches/reach_reservoir_1_junction_1/rules",
     );
     expect(
+      screen.getByRole("button", { name: "exportar diagram_info_constr.md" }),
+    ).toBeVisible();
+    expect(
       screen.getByLabelText("Caudal minimo m3/s reach_reservoir_1_junction_1"),
     ).toHaveValue(4);
     expect(

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
+import { downloadDiagramConstraintInfo } from "./hydraulicConstraintExport";
 import {
   DragEvent,
   FormEvent,
@@ -7778,6 +7779,22 @@ function HydraulicDiagramEditor({
           <span>Revision {revision}</span>
           <button type="submit" disabled={saveMutation.isPending}>
             Guardar diagrama
+          </button>
+          <button
+            type="button"
+            className="secondary-action"
+            onClick={() =>
+              downloadDiagramConstraintInfo({
+                scenarioId: scenario.id,
+                scenarioName: scenario.name,
+                revision,
+                saved: saveStatus === "saved",
+                nodes,
+                reaches,
+              })
+            }
+          >
+            exportar diagram_info_constr.md
           </button>
           <button
             type="button"
