@@ -310,9 +310,12 @@ function validate_hydraulic_v3_system_case_document(document)::Dict{String,Any}
     end
 
     hydraulic_edges = Tuple{String,String}[]
+    reach_ids_seen = Set{String}()
     for (index, raw_reach) in enumerate(reaches)
         reach = to_string_key_dict(raw_reach)
         reach_id = required_string(reach, "id")
+        reach_id in reach_ids_seen && throw(ArgumentError("duplicate hydraulic reach $(reach_id)"))
+        push!(reach_ids_seen, reach_id)
         reach_type = required_string(reach, "type")
         if !(reach_type in HYDRAULIC_V3_REACH_TYPES)
             throw(ArgumentError("reach $(reach_id) has unsupported type $(reach_type)"))
@@ -1507,7 +1510,6 @@ function run_hydraulic_v3_system_case(
 
     reservoir_ids = [required_string(reservoir, "id") for reservoir in reservoirs]
     reservoir_index_by_id = Dict(reservoir_id => index for (index, reservoir_id) in enumerate(reservoir_ids))
-    node_type_by_id = Dict(required_string(node, "id") => required_string(node, "type") for node in nodes)
 
     storage_min = zeros(n_reservoirs)
     storage_max = zeros(n_reservoirs)
@@ -1552,7 +1554,6 @@ function run_hydraulic_v3_system_case(
     end
 
     unit_ids = [required_string(unit, "id") for unit in units]
-    unit_reservoir_index = zeros(Int, n_units)
     unit_flow_min = zeros(n_units)
     unit_flow_max = zeros(n_units)
     unit_power_max = Union{Float64,Nothing}[nothing for _ in 1:n_units]
@@ -1560,8 +1561,6 @@ function run_hydraulic_v3_system_case(
     unit_power_intercept = zeros(n_units)
     for (unit_index, unit) in enumerate(units)
         unit_id = unit_ids[unit_index]
-        unit_reservoir = hydraulic_v3_unit_source_reservoir(unit, reaches, node_type_by_id)
-        unit_reservoir_index[unit_index] = reservoir_index_by_id[unit_reservoir]
         flow_power = hydraulic_v3_curve_tuples(
             required_vector(required_dict(unit, "curves"), "flow_power"),
             "flow_m3s",
@@ -1586,7 +1585,6 @@ function run_hydraulic_v3_system_case(
     reach_source_reservoir = zeros(Int, n_reaches)
     reach_is_spillway = falses(n_reaches)
     reach_min_flow = zeros(n_reaches, n_periods)
-    reservoir_spill_penalty = zeros(n_reservoirs)
     period_minimum_flows = [
         haskey(period, "minimum_flow_m3s") ? to_string_key_dict(required_dict(period, "minimum_flow_m3s")) : Dict{String,Any}()
         for period in periods
@@ -1595,7 +1593,7 @@ function run_hydraulic_v3_system_case(
         reach_id = reach_ids[reach_index]
         from_node = required_string(reach, "from_node")
         reach_is_spillway[reach_index] = required_string(reach, "type") == "spillway"
-        if get(node_type_by_id, from_node, "") == "reservoir"
+        if haskey(reservoir_index_by_id, from_node)
             reach_source_reservoir[reach_index] = reservoir_index_by_id[from_node]
         end
         scalar_min = optional_float(get(reach, "flow_min_m3s", nothing), "reach $(reach_id) flow_min_m3s")
@@ -1610,10 +1608,6 @@ function run_hydraulic_v3_system_case(
                 reach_min_flow[reach_index, period_index] = scalar_min
             end
         end
-        spill_penalty = optional_float(get(reach, "spill_penalty_usd_per_hm3", nothing), "reach $(reach_id) spill_penalty_usd_per_hm3")
-        if reach_is_spillway[reach_index] && spill_penalty !== nothing && reach_source_reservoir[reach_index] != 0
-            reservoir_spill_penalty[reach_source_reservoir[reach_index]] += spill_penalty
-        end
     end
 
     model = Model(HiGHS.Optimizer)
@@ -1626,15 +1620,21 @@ function run_hydraulic_v3_system_case(
     @variable(model, hydro_power[1:n_units, 1:n_periods] >= 0)
     @variable(model, spill_flow[1:n_reservoirs, 1:n_periods] >= 0)
     @variable(model, storage[1:n_reservoirs, 1:n_periods])
+    # Each directed reach transports its own nonnegative flow. Units transport
+    # water from their intake to their discharge; both participate in balances.
+    @variable(model, reach_flow[1:n_reaches, 1:n_periods] >= 0)
 
     if haskey(document, "component_rules")
         rules = document["component_rules"]
         object_units = Dict(object["id"] => findfirst(==(object["unit_key"]), unit_ids) for object in rules["objects"] if haskey(object, "unit_key"))
         object_reservoirs = Dict(object["id"] => reservoir_index_by_id[object["node_key"]] for object in rules["objects"] if haskey(object, "node_key"))
+        object_reaches = Dict(object["id"] => findfirst(==(object["reach_key"]), reach_ids) for object in rules["objects"] if haskey(object, "reach_key"))
         for row in rules["rows"]
             expression = AffExpr(Float64(row["constant"]))
             for term in row["terms"]
-                variable, indices = if term["variable"] == "caudal"
+                variable, indices = if haskey(object_reaches, term["object_id"])
+                    reach_flow, object_reaches
+                elseif term["variable"] == "caudal"
                     turbine_flow, object_units
                 elseif term["variable"] == "potencia"
                     hydro_power, object_units
@@ -1668,22 +1668,42 @@ function run_hydraulic_v3_system_case(
         end
     end
 
-    for reservoir_index in 1:n_reservoirs
-        reservoir_unit_indices = [unit_index for unit_index in 1:n_units if unit_reservoir_index[unit_index] == reservoir_index]
+    for node in nodes
+        node_id = node["id"]
+        incoming = findall(r -> r["to_node"] == node_id, reaches)
+        outgoing = findall(r -> r["from_node"] == node_id, reaches)
+        intakes = findall(u -> u["intake_node"] == node_id, units)
+        discharges = findall(u -> u["discharge_node"] == node_id, units)
+        spillways = filter(r -> reach_is_spillway[r], outgoing)
         for period_index in 1:n_periods
-            previous_storage = period_index == 1 ? initial_storage[reservoir_index] : storage[reservoir_index, period_index - 1]
-            outgoing_turbine_flow = sum(turbine_flow[unit_index, period_index] for unit_index in reservoir_unit_indices)
-            @constraint(
-                model,
-                storage[reservoir_index, period_index] ==
-                    previous_storage +
-                    natural_inflow[reservoir_index, period_index] * durations[period_index] * HM3_PER_M3S_HOUR -
-                    outgoing_turbine_flow * durations[period_index] * HM3_PER_M3S_HOUR -
-                    spill_flow[reservoir_index, period_index] * durations[period_index] * HM3_PER_M3S_HOUR,
-            )
-            @constraint(model, storage[reservoir_index, period_index] >= storage_min[reservoir_index])
-            @constraint(model, storage[reservoir_index, period_index] <= storage_max[reservoir_index])
+            received = sum(reach_flow[r, period_index] for r in incoming; init=AffExpr(0.0)) +
+                       sum(turbine_flow[u, period_index] for u in discharges; init=AffExpr(0.0))
+            sent = sum(reach_flow[r, period_index] for r in outgoing; init=AffExpr(0.0)) +
+                   sum(turbine_flow[u, period_index] for u in intakes; init=AffExpr(0.0))
+            inflow = Float64(get(periods[period_index]["natural_inflow_m3s"], node_id, 0.0))
+            if node["type"] == "reservoir"
+                reservoir_index = reservoir_index_by_id[node_id]
+                previous_storage = period_index == 1 ? initial_storage[reservoir_index] : storage[reservoir_index, period_index - 1]
+                if !isempty(spillways)
+                    @constraint(model, spill_flow[reservoir_index, period_index] == sum(reach_flow[r, period_index] for r in spillways))
+                else
+                    # Preserve the implicit external spill outlet when no
+                    # explicit spillway is drawn. Never count a spill twice.
+                    sent += spill_flow[reservoir_index, period_index]
+                end
+                @constraint(model, storage[reservoir_index, period_index] == previous_storage +
+                    (inflow + received - sent) * durations[period_index] * HM3_PER_M3S_HOUR)
+                @constraint(model, storage[reservoir_index, period_index] >= storage_min[reservoir_index])
+                @constraint(model, storage[reservoir_index, period_index] <= storage_max[reservoir_index])
+            elseif isempty(outgoing) && isempty(intakes)
+                # A terminal junction is an external outlet with no storage.
+                @constraint(model, received + inflow >= 0)
+            else
+                @constraint(model, received + inflow == sent)
+            end
         end
+    end
+    for reservoir_index in 1:n_reservoirs
         if terminal_condition[reservoir_index] == "equal_initial"
             @constraint(model, storage[reservoir_index, n_periods] == initial_storage[reservoir_index])
         elseif terminal_condition[reservoir_index] == "min_terminal"
@@ -1691,29 +1711,8 @@ function run_hydraulic_v3_system_case(
         end
     end
 
-    for reach_index in 1:n_reaches
-        if !any(reach_min_flow[reach_index, period_index] > 0 for period_index in 1:n_periods)
-            continue
-        end
-        source_reservoir = reach_source_reservoir[reach_index]
-        if source_reservoir == 0
-            throw(ArgumentError("reach $(reach_ids[reach_index]) minimum flow is only supported on reaches leaving a reservoir"))
-        end
-        reservoir_unit_indices = [unit_index for unit_index in 1:n_units if unit_reservoir_index[unit_index] == source_reservoir]
-        for period_index in 1:n_periods
-            if reach_is_spillway[reach_index]
-                @constraint(model, spill_flow[source_reservoir, period_index] >= reach_min_flow[reach_index, period_index])
-            else
-                if isempty(reservoir_unit_indices)
-                    throw(ArgumentError("reach $(reach_ids[reach_index]) minimum flow requires a downstream unit"))
-                end
-                @constraint(
-                    model,
-                    sum(turbine_flow[unit_index, period_index] for unit_index in reservoir_unit_indices) >=
-                        reach_min_flow[reach_index, period_index],
-                )
-            end
-        end
+    for reach_index in 1:n_reaches, period_index in 1:n_periods
+        @constraint(model, reach_flow[reach_index, period_index] >= reach_min_flow[reach_index, period_index])
     end
 
     @objective(
@@ -1722,10 +1721,10 @@ function run_hydraulic_v3_system_case(
         sum(hydro_power[unit_index, period_index] * durations[period_index] for unit_index in 1:n_units, period_index in 1:n_periods) +
         sum(terminal_water_value[reservoir_index] * storage[reservoir_index, n_periods] for reservoir_index in 1:n_reservoirs) -
         sum(
-            reservoir_spill_penalty[reservoir_index] *
-            spill_flow[reservoir_index, period_index] *
+            something(get(reaches[reach_index], "spill_penalty_usd_per_hm3", nothing), 0.0) *
+            reach_flow[reach_index, period_index] *
             durations[period_index] * HM3_PER_M3S_HOUR
-            for reservoir_index in 1:n_reservoirs, period_index in 1:n_periods
+            for reach_index in 1:n_reaches, period_index in 1:n_periods
         ),
     )
     optimize!(model)
@@ -1751,9 +1750,12 @@ function run_hydraulic_v3_system_case(
     turbine_volume = hydraulic_v3_volume_matrix(turbine_values, durations)
     spill_volume = hydraulic_v3_volume_matrix(spill_values, durations)
     spill_penalty_volume = zeros(n_reservoirs, n_periods)
-    for reservoir_index in 1:n_reservoirs
-        spill_penalty_volume[reservoir_index, :] .=
-            reservoir_spill_penalty[reservoir_index] .* spill_volume[reservoir_index, :]
+    for reach_index in 1:n_reaches
+        reservoir_index = reach_source_reservoir[reach_index]
+        if reservoir_index != 0 && reach_is_spillway[reach_index]
+            spill_penalty_volume[reservoir_index, :] .+=
+                something(get(reaches[reach_index], "spill_penalty_usd_per_hm3", nothing), 0.0) .* value.(reach_flow[reach_index, :]) .* durations .* HM3_PER_M3S_HOUR
+        end
     end
     terminal_value = [
         terminal_water_value[reservoir_index] * storage_values[reservoir_index, n_periods]
@@ -1803,6 +1805,8 @@ function run_hydraulic_v3_system_case(
         output_root,
         run_timestamp,
         source_identifiers = system_case_source_identifiers(source_path),
+        reach_ids = reach_ids,
+        reach_values = value.(reach_flow),
     )
 end
 
@@ -1817,6 +1821,8 @@ function write_hydraulic_v3_run_outputs(
     output_root::AbstractString = "outputs",
     run_timestamp = nothing,
     source_identifiers = Dict{String,Any}(),
+    reach_ids::Vector{String} = String[],
+    reach_values::Matrix{Float64} = zeros(0, length(timestamps)),
 )::SystemRunOutput
     run_timestamp_id = format_run_timestamp(run_timestamp)
     case_output_root = joinpath(output_root, result.case_name)
@@ -1830,10 +1836,23 @@ function write_hydraulic_v3_run_outputs(
     model_metadata_path = joinpath(output_dir, "model_metadata.json")
 
     CSV.write(dispatch_path, hydraulic_v3_dispatch_dataframe(timestamps, durations, natural_inflow, result))
-    CSV.write(asset_dispatch_path, hydraulic_v3_asset_dispatch_dataframe(timestamps, durations, reservoir_ids, unit_ids, natural_inflow, result))
+    assets = hydraulic_v3_asset_dispatch_dataframe(timestamps, durations, reservoir_ids, unit_ids, natural_inflow, result)
+    assets.hydraulic_flow_m3s = zeros(nrow(assets))
+    for period in eachindex(timestamps), (reach_index, reach_id) in enumerate(reach_ids)
+        row = Dict{Symbol,Any}(name => 0.0 for name in propertynames(assets))
+        merge!(row, Dict(:timestamp => string(timestamps[period]), :duration_hours => durations[period],
+                        :asset_id => reach_id, :asset_type => "hydraulic_reach",
+                        :hydraulic_flow_m3s => reach_values[reach_index, period]))
+        push!(assets, row)
+    end
+    CSV.write(asset_dispatch_path, assets)
     write_json_file(summary_path, hydraulic_v3_summary_dict(result, durations, reservoir_ids, unit_ids, resolved_run_timestamp, source_identifiers))
     write_json_file(system_case_resolved_path, document)
-    write_json_file(model_metadata_path, hydraulic_v3_metadata_dict(reservoir_ids, unit_ids, length(timestamps)))
+    metadata = hydraulic_v3_metadata_dict(reservoir_ids, unit_ids, length(timestamps))
+    metadata["hydraulic_reach_ids"] = reach_ids
+    metadata["active_constraint_flags"]["hydraulic_junction_balance"] = true
+    metadata["active_constraint_flags"]["hydraulic_reach_flow"] = true
+    write_json_file(model_metadata_path, metadata)
 
     return SystemRunOutput(
         result.case_name,

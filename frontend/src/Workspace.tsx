@@ -7090,6 +7090,7 @@ function HydraulicPropertiesPanel({
     HydraulicNaturalInflowSeriesSummary[]
   >;
 }) {
+  const { scenarioId } = useParams();
   const plantLink = parseHydraulicPlantLinkKey(focusedEntityKey);
   if (plantLink && focusedEntityKey) {
     return (
@@ -7154,6 +7155,11 @@ function HydraulicPropertiesPanel({
             Eliminar componente
           </button>
         </div>
+        <Link
+          to={`/scenarios/${scenarioId}/hydraulic-reaches/${encodeURIComponent(reach.technical_key)}/rules`}
+        >
+          Cálculos y restricciones · {reach.technical_key}
+        </Link>
         <HydraulicReachList
           nodes={nodes}
           reaches={[reach]}

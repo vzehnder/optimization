@@ -163,7 +163,7 @@ def compile_operation(repository, applications, frozen, actor):
             objects = resolve_aliases(store, project_id, object_id, frozen["scope"]["scenario_id"],
                                       application.get("aliases", []), frozen["system_case"], application["code"])
             compilation = {**frozen, "objects": objects, "aliases": application.get("aliases", [])}
-            compilation.update({key: application["compilation"][key] for key in ("component_key", "unit_key", "adapter")
+            compilation.update({key: application["compilation"][key] for key in ("component_key", "unit_key", "reach_key", "adapter")
                                 if key in application["compilation"]})
             inputs = freeze_inputs(store, project_id, object_id, application.get("inputs", []), compilation)
             payload = {"code": application["code"], "parameters": application["parameters"], "runtime": runtime,

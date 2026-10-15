@@ -274,7 +274,7 @@ def contract_for(store, publication, object_id, project_id):
                   "affine_flow.v1")
     kind = by_id.get(object_id, {}).get("kind", "hydraulic_unit")
     required = attrs & set(VARIABLES[kind])
-    compatible = [target for target in ("hydraulic_unit", "hydro", "battery", "grid", "renewable") if required <= set(VARIABLES[target])
+    compatible = [target for target in ("hydraulic_unit", "hydraulic_reach", "hydro", "battery", "grid", "renewable") if required <= set(VARIABLES[target])
                   and ("energia_inicial" not in self_attrs or target == "battery")
                   and ("disponibilidad" not in self_attrs or target == "renewable")]
     return {

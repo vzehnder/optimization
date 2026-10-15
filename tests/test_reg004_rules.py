@@ -189,7 +189,8 @@ class RelatedRuleApiTests(unittest.TestCase):
         self.assertEqual(by_key["unit_1"]["variables"], {"caudal": "m3_per_s", "potencia": "mw"})
         self.assertEqual(by_key["plant_laja"]["variables"], {"potencia": "mw"})
         self.assertEqual(by_key["reservoir_alpha"]["variables"], {"almacenamiento": "hm3", "vertimiento": "m3_per_s"})
-        self.assertEqual(set(by_key), {"unit_1", "plant_laja", "reservoir_alpha"})
+        self.assertEqual(by_key["reach"]["variables"], {"caudal": "m3_per_s"})
+        self.assertEqual(set(by_key), {"unit_1", "plant_laja", "reservoir_alpha", "reach"})
         self.assertEqual(by_key["plant_laja"]["member_ids"], [by_key["unit_1"]["id"]])
 
     def test_unknown_or_foreign_models_and_objects_are_rejected_without_leaking_context(self):

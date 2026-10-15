@@ -62,6 +62,12 @@ def validate_model_bounds(rows, objects, document):
             flow_max = min(curve[-1]["flow_m3s"], unit["max_flow_m3s"] if unit.get("max_flow_m3s") is not None else float("inf"))
             physical[obj["id"], "caudal"] = (flow_min, flow_max)
             physical[obj["id"], "potencia"] = (0, min(curve[-1]["power_mw"], unit["max_power_mw"] if unit.get("max_power_mw") is not None else float("inf")))
+        elif obj["kind"] == "hydraulic_reach":
+            reach = next(r for r in network["reaches"] if r["id"] == obj["reach_key"])
+            physical[obj["id"], "caudal"] = (0, float("inf"))
+            for t, period in enumerate(document["time_series"]):
+                minimum = period.get("minimum_flow_m3s", {}).get(reach["id"], reach.get("flow_min_m3s") or 0)
+                physical[obj["id"], "caudal", t] = (minimum, float("inf"))
         elif obj["kind"] == "hydraulic_node":
             reservoir = next(n["reservoir"] for n in network["nodes"] if n["id"] == obj["node_key"])
             physical[obj["id"], "almacenamiento"] = (reservoir["storage_min_hm3"], reservoir["storage_max_hm3"])

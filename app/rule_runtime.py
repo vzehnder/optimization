@@ -136,7 +136,8 @@ class OCIExecutor:
                             value["windows"] = payload["windows"]
                         if "compilation" in payload:
                             compilation = payload["compilation"]
-                            unit = (next(n for n in compilation["system_case"]["nodes"] if n["id"] == compilation["component_key"])
+                            unit = (None if "reach_key" in compilation else
+                                    next(n for n in compilation["system_case"]["nodes"] if n["id"] == compilation["component_key"])
                                     if "component_key" in compilation else
                                     next(u for u in compilation["system_case"]["hydraulic_network"]["units"] if u["id"] == compilation["unit_key"]))
                             try:
@@ -144,7 +145,7 @@ class OCIExecutor:
                                     validate_model_bounds(value["ir"]["rows"], payload["objects"], compilation["system_case"])
                                 flow_rows = [r for r in value["ir"]["rows"] if r["unit"] == "m3_per_s" and all(
                                     t["object_id"] == payload["object"]["id"] and t["variable"] == "caudal" for t in r["terms"])]
-                                value["bounds"] = validate_bounds(flow_rows, unit, len(payload["grid"])) if flow_rows and not payload.get("temporal") else []
+                                value["bounds"] = validate_bounds(flow_rows, unit, len(payload["grid"])) if unit is not None and flow_rows and not payload.get("temporal") else []
                             except RuleBoundsError as error:
                                 error.problem["alias"] = next((a["alias"] for a in payload.get("aliases", []) if a["object_id"] == error.problem.get("object_id")), "objeto")
                                 return {"status": "failed", "error": error.problem, "runtime": runtime}

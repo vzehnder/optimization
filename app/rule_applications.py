@@ -125,6 +125,9 @@ def freeze_scope(store, project_id, scope, expected_bindings_revision=None, *, o
 
 def compile_context(store, project_id, object_id, scope):
     frozen = freeze_scope(store, project_id, scope, object_id=object_id)
+    if store.get_linkable_object(object_id)["object_kind"] == "hydraulic_reach":
+        obj = resolve_aliases(store, project_id, object_id, scope["scenario_id"], [], frozen["system_case"])[0]
+        return {**frozen, "reach_key": obj["reach_key"]}
     if frozen["system_case"]["schema_version"] in {"bess_system_dispatch.v1", "bess_system_dispatch.v2"}:
         obj = resolve_aliases(store, project_id, object_id, scope["scenario_id"], [], frozen["system_case"])[0]
         return {**frozen, "component_key": obj["component_key"], "adapter": "electric_system.v1" if obj["kind"] in {"grid", "renewable"} else "battery_system.v1" if obj["kind"] == "battery" else "hydro_v2.v1"}
@@ -454,6 +457,8 @@ def materialize_run(repository, scope, actor, request_id, validate_text, expecte
         if len(rows) > 100000 or sum(len(row["terms"]) for row in rows) > 500000:
             raise HTTPException(422, "Cuota de restricciones excedida")
         block_version = next((v for v in (BUDGET_IR_VERSION, TEMPORAL_IR_VERSION, HYDRAULIC_IR_VERSION) if any(a["ir"]["version"] == v for a in applications)), IR_VERSION)
+        if block_version == IR_VERSION and any("reach_key" in obj for obj in objects.values()):
+            block_version = HYDRAULIC_IR_VERSION
         block = {"version": block_version, "objects": list(objects.values()), "grid": frozen["grid"], "timezone": "UTC",
                  "rows": rows, "applications": snapshots, "context_hash": frozen["fingerprint"], "ir_hash": digest(rows)}
         if frozen["system_case"]["schema_version"] in {"bess_system_dispatch.v1", "bess_system_dispatch.v2"}:

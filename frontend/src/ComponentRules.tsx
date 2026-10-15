@@ -215,10 +215,12 @@ export function ComponentRulesView() {
 }
 
 export function HydraulicRulesEntryView() {
-  const { scenarioId, plantKey, unitKey, componentKey } = useParams();
+  const { scenarioId, plantKey, unitKey, componentKey, reachKey } = useParams();
   const endpoint = componentKey
     ? `/api/scenarios/${scenarioId}/components/${encodeURIComponent(componentKey)}/rule-context`
-    : `/api/scenarios/${scenarioId}/hydraulic-plants/${encodeURIComponent(plantKey ?? "")}/units/${encodeURIComponent(unitKey ?? "")}/rule-context`;
+    : reachKey
+      ? `/api/scenarios/${scenarioId}/hydraulic-reaches/${encodeURIComponent(reachKey)}/rule-context`
+      : `/api/scenarios/${scenarioId}/hydraulic-plants/${encodeURIComponent(plantKey ?? "")}/units/${encodeURIComponent(unitKey ?? "")}/rule-context`;
   const context = useQuery({
     queryKey: [endpoint],
     queryFn: () =>
@@ -237,9 +239,11 @@ export function HydraulicRulesEntryView() {
     <section className="content-panel rules-surface">
       <h1>Cálculos y restricciones</h1>
       <p role={context.isError ? "alert" : "status"}>
-        {context.isError ? String(context.error) : "Abriendo la unidad…"}
+        {context.isError
+          ? String(context.error)
+          : "Abriendo el editor de restricciones…"}
       </p>
-      <Link to={returnTo}>Volver a la unidad</Link>
+      <Link to={returnTo}>Volver al diagrama</Link>
     </section>
   );
 }
@@ -275,7 +279,9 @@ function RulesContent() {
             list.data?.object.kind ?? "",
           )
             ? "Volver al componente"
-            : "Volver a la unidad"}
+            : list.data?.object.kind === "hydraulic_reach"
+              ? "Volver al tramo"
+              : "Volver a la unidad"}
         </Link>
       )}
       {list.data && (
@@ -288,7 +294,9 @@ function RulesContent() {
                 ? "Red"
                 : list.data.object.kind === "renewable"
                   ? "Renovable"
-                  : "Unidad"}
+                  : list.data.object.kind === "hydraulic_reach"
+                    ? "Tramo"
+                    : "Unidad"}
           : {list.data.object.display_name} · Proyecto {projectId}
         </p>
       )}
@@ -356,6 +364,7 @@ function RulesContent() {
           root={root}
           initial={draft.data}
           battery={list.data.object.kind === "battery"}
+          reach={list.data.object.kind === "hydraulic_reach"}
           electricKind={
             list.data.object.kind === "grid" ||
             list.data.object.kind === "renewable"
@@ -379,6 +388,7 @@ function RuleForm({
   root,
   initial,
   battery,
+  reach,
   electricKind,
   available,
   onSaved,
@@ -386,6 +396,7 @@ function RuleForm({
   root: string;
   initial?: RuleDraft;
   battery: boolean;
+  reach: boolean;
   electricKind?: string;
   available: boolean;
   onSaved: (rule: RuleDraft) => void;
@@ -400,9 +411,11 @@ function RuleForm({
   );
   const defaultCode = electricKind
     ? electricCode(electricKind)
-    : battery
-      ? BATTERY_CODE
-      : DEFAULT_CODE;
+    : reach
+      ? 'def construir(ctx):\n    for t in ctx.periodos:\n        ctx.restriccion("maximo", t, ctx.objeto.caudal[t] <= ctx.parametros.capacidad * ctx.parametros.disponibilidad)\n'
+      : battery
+        ? BATTERY_CODE
+        : DEFAULT_CODE;
   const [code, setCode] = useState(initial?.code ?? defaultCode);
   const [parameters, setParameters] = useState(
     initial?.parameters ??
@@ -508,6 +521,13 @@ function RuleForm({
           onChange={(event) => setName(event.target.value)}
         />
       </label>
+      {reach && (
+        <p>
+          El caudal del tramo está en m³/s y sigue la dirección origen →
+          destino. Relaciona otros tramos o unidades mediante «Objetos y
+          variables del modelo». El modelo conserva el agua en las conexiones.
+        </p>
+      )}
       {electricKind ? (
         <p>
           Selecciona los alias de red y renovable del caso. La fracción es
@@ -592,6 +612,7 @@ function RuleForm({
       )}
       <RuleTemporal
         battery={battery}
+        flow={reach}
         powerVariable={
           electricKind === "grid"
             ? "exportacion"

@@ -17,12 +17,14 @@ export function RuleTemporal({
   onChange,
   objects,
   battery = false,
+  flow = false,
   powerVariable,
 }: {
   policy: TemporalPolicy | null;
   onChange: (policy: TemporalPolicy | null) => void;
   objects: RuleObject[];
   battery?: boolean;
+  flow?: boolean;
   powerVariable?: string;
 }) {
   const variables = objects.flatMap((object) =>
@@ -183,13 +185,18 @@ export function RuleTemporal({
         </>
       )}
       <details>
-        <summary>Ejemplo de rampas de potencia</summary>
+        <summary>Ejemplo de rampas de {flow ? "caudal" : "potencia"}</summary>
         <p>
-          Define subida y bajada en mw_per_h (MW/h).
-          {!battery && !powerVariable && " Para caudal, usa m3_per_s_per_h."}
+          {flow
+            ? "Define subida y bajada en m3_per_s_per_h (m³/s por hora)."
+            : "Define subida y bajada en mw_per_h (MW/h)."}
+          {!flow &&
+            !battery &&
+            !powerVariable &&
+            " Para caudal, usa m3_per_s_per_h."}
         </p>
         <pre>
-          {`def construir(ctx):\n    for paso in ctx.transiciones(ctx.objeto.${powerVariable ?? (battery ? "descarga" : "potencia")}):\n        diferencia = paso.actual - paso.anterior\n        ctx.restriccion("subida", paso.periodo, diferencia <= ctx.parametros.subida * paso.horas)\n        ctx.restriccion("bajada", paso.periodo, -diferencia <= ctx.parametros.bajada * paso.horas)`}
+          {`def construir(ctx):\n    for paso in ctx.transiciones(ctx.objeto.${flow ? "caudal" : (powerVariable ?? (battery ? "descarga" : "potencia"))}):\n        diferencia = paso.actual - paso.anterior\n        ctx.restriccion("subida", paso.periodo, diferencia <= ctx.parametros.subida * paso.horas)\n        ctx.restriccion("bajada", paso.periodo, -diferencia <= ctx.parametros.bajada * paso.horas)`}
         </pre>
       </details>
     </fieldset>

@@ -20,6 +20,11 @@ export const ruleExamples: Pick<
   "name" | "code" | "parameters" | "temporal" | "windows"
 >[] = [
   {
+    name: "Caudal mayor o igual a otros caudales",
+    parameters: [],
+    code: 'def construir(ctx):\n    # Agrega dos tramos o unidades con alias b y c.\n    for t in ctx.periodos:\n        ctx.restriccion("suma_caudales", t, ctx.objeto.caudal[t] >= ctx.objetos.b.caudal[t] + ctx.objetos.c.caudal[t])\n',
+  },
+  {
     name: "Máximo de caudal",
     parameters: [parameter("limite", "m3_per_s", 5)],
     code: 'def construir(ctx):\n    for t in ctx.periodos:\n        ctx.restriccion("maximo", t, ctx.objeto.caudal[t] <= ctx.parametros.limite)\n',

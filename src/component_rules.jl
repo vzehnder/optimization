@@ -92,13 +92,14 @@ function validate_component_rules(document)
     electric = simple_hydro ? Dict(n["id"] => n for n in document["nodes"] if n["type"] in ("grid", "renewable", "load")) : Dict()
     reservoirs = Set(n["id"] for n in network["nodes"] if n["type"] == "reservoir")
     plants = Set(p["id"] for p in network["plants"])
+    reaches = Dict(r["id"] => r for r in get(network, "reaches", []))
     objects = required_vector(rules, "objects")
     object_ids = Set{Int}()
     for object in objects
         id = get(object, "id", nothing)
         id isa Integer && !(id isa Bool) && id > 0 && !(id in object_ids) ||
             throw(ArgumentError("invalid component rules object identity"))
-        keys_present = [key for key in ("unit_key", "node_key", "plant_key", "component_key") if haskey(object, key)]
+        keys_present = [key for key in ("unit_key", "node_key", "plant_key", "reach_key", "component_key") if haskey(object, key)]
         length(keys_present) == 1 || throw(ArgumentError("ambiguous component rules object"))
         key = only(keys_present)
         valid = if simple_hydro
@@ -107,9 +108,9 @@ function validate_component_rules(document)
                  (get(object, "kind", nothing) == "battery" && rules["adapter"] in (BATTERY_RULE_ADAPTER, ELECTRIC_RULE_ADAPTER) && haskey(batteries, object[key])) ||
                  (rules["adapter"] == ELECTRIC_RULE_ADAPTER && haskey(electric, object[key]) && get(object, "kind", nothing) == electric[object[key]]["type"]))
         else
-            expected_kind = get(Dict("unit_key" => "hydraulic_unit", "node_key" => "hydraulic_node", "plant_key" => "hydraulic_plant"), key, nothing)
+            expected_kind = get(Dict("unit_key" => "hydraulic_unit", "node_key" => "hydraulic_node", "plant_key" => "hydraulic_plant", "reach_key" => "hydraulic_reach"), key, nothing)
             expected_kind !== nothing && get(object, "kind", expected_kind) == expected_kind &&
-                (key == "unit_key" ? object[key] in units : extended && (key == "node_key" ? object[key] in reservoirs : key == "plant_key" && object[key] in plants))
+                (key == "unit_key" ? object[key] in units : extended && (key == "reach_key" ? haskey(reaches, object[key]) : key == "node_key" ? object[key] in reservoirs : key == "plant_key" && object[key] in plants))
         end
         valid || throw(ArgumentError("component rules object outside snapshot"))
         push!(object_ids, id)
@@ -171,6 +172,8 @@ function validate_component_rules(document)
                     get(Dict("potencia" => "mw", "almacenamiento" => "hm3", "vertimiento" => "m3_per_s"), variable, nothing)
             elseif haskey(object, "unit_key")
                 variable == "caudal" ? "m3_per_s" : extended && variable == "potencia" ? "mw" : nothing
+            elseif extended && haskey(object, "reach_key")
+                variable == "caudal" ? "m3_per_s" : nothing
             elseif extended && haskey(object, "node_key")
                 variable == "almacenamiento" ? "hm3" : variable == "vertimiento" ? "m3_per_s" : nothing
             else
@@ -223,6 +226,11 @@ function validate_component_rules(document)
                 variable == "caudal" ? (hydro_turbine_flow_lower_bound(hydro), hydro_turbine_flow_upper_bound(hydro)) :
                     variable == "potencia" ? (0.0, hydro_power_upper_bound(hydro)) :
                     variable == "almacenamiento" ? (hydro.storage_min_hm3, hydro.storage_max_hm3) : (0.0, Inf)
+            elseif haskey(by_id[id], "reach_key")
+                reach = reaches[by_id[id]["reach_key"]]
+                scalar = get(reach, "flow_min_m3s", nothing)
+                minimum = get(get(periods[term_period + 1], "minimum_flow_m3s", Dict()), reach["id"], scalar === nothing ? 0.0 : scalar)
+                (Float64(minimum), Inf)
             elseif variable in ("caudal", "potencia")
                 unit = object_units[id]
                 curve = unit["curves"]["flow_power"]

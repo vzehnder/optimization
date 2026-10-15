@@ -119,9 +119,11 @@ export function RuleLibrary({
                     .map((kind) =>
                       kind === "hydraulic_unit"
                         ? "Unidad hidráulica"
-                        : kind === "hydro"
-                          ? "Hidro simple"
-                          : kind,
+                        : kind === "hydraulic_reach"
+                          ? "Tramo hidráulico"
+                          : kind === "hydro"
+                            ? "Hidro simple"
+                            : kind,
                     )
                     .join(", ")}{" "}
                   · Capacidades:{" "}

@@ -536,6 +536,14 @@ function AuthenticatedRoutes({
             </Suspense>
           }
         />
+        <Route
+          path="scenarios/:scenarioId/hydraulic-reaches/:reachKey/rules"
+          element={
+            <Suspense fallback={<p role="status">Cargando editor…</p>}>
+              <HydraulicRulesEntryView />
+            </Suspense>
+          }
+        />
         <Route path="system" element={<SystemStatus />} />
         <Route
           path="scenarios/:scenarioId/components/:componentKey/rules"

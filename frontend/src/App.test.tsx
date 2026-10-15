@@ -3726,6 +3726,14 @@ describe("application shell", () => {
     );
     expect(screen.getByDisplayValue("Spillway A")).toBeVisible();
     expect(
+      screen.getByRole("link", {
+        name: "Cálculos y restricciones · reach_reservoir_1_junction_1",
+      }),
+    ).toHaveAttribute(
+      "href",
+      "/react/scenarios/10/hydraulic-reaches/reach_reservoir_1_junction_1/rules",
+    );
+    expect(
       screen.getByLabelText("Caudal minimo m3/s reach_reservoir_1_junction_1"),
     ).toHaveValue(4);
     expect(

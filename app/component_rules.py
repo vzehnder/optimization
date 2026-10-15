@@ -495,8 +495,8 @@ def rule_router(store):
             raise HTTPException(404, "Objeto no encontrado") from None
         if obj["project_id"] != project_id:
             raise HTTPException(404, "Objeto no encontrado")
-        if (obj["object_kind"] != "hydraulic_unit" and obj["object_type_key"] not in {"component:hydro", "component:battery", "component:grid", "component:renewable"}) or obj["status"] != "active":
-            raise HTTPException(422, "Esta capacidad requiere una unidad hidráulica, hidro simple, batería, red o renovable activa")
+        if (obj["object_kind"] not in {"hydraulic_unit", "hydraulic_reach"} and obj["object_type_key"] not in {"component:hydro", "component:battery", "component:grid", "component:renewable"}) or obj["status"] != "active":
+            raise HTTPException(422, "Esta capacidad requiere un tramo o unidad hidráulica, hidro simple, batería, red o renovable activa")
         return user, obj
 
     @router.post("", status_code=201)
@@ -716,6 +716,26 @@ def rule_router(store):
     routes.include_router(library_router(repository, context))
     from app.rule_recovery import recovery_router
     routes.include_router(recovery_router(repository, context))
+
+    @routes.get("/api/scenarios/{scenario_id}/hydraulic-reaches/{reach_key}/rule-context", tags=["component-rules"])
+    def reach_context(scenario_id: int, reach_key: str, request: Request):
+        user = getattr(request.state, "current_user", None)
+        if not user or user["role"] not in {"analyst", "admin"}:
+            raise HTTPException(403 if user else 401, "Acceso denegado")
+        objects = store.linkable_object_table_names()["linkable_objects"]
+        with store._lock:
+            row = store.connection.execute(f"""
+                SELECT registered.project_id, registered.id AS object_id
+                FROM optimization_cases c
+                JOIN case_hydraulic_reaches cr ON cr.case_id = c.id
+                JOIN hydraulic_reaches r ON r.id = cr.hydraulic_reach_id
+                JOIN {objects} registered ON registered.hydraulic_reach_id = r.id
+                WHERE c.scenario_id = ? AND r.reach_key = ?
+                  AND cr.is_active = 1 AND registered.status = 'active'
+            """, (scenario_id, reach_key)).fetchone()
+        if row is None:
+            raise HTTPException(404, "Guarda primero el tramo activo en el diagrama")
+        return dict(row)
 
     @routes.get("/api/scenarios/{scenario_id}/hydraulic-plants/{plant_key}/units/{unit_key}/rule-context", tags=["component-rules"])
     def hydraulic_context(scenario_id: int, plant_key: str, unit_key: str, request: Request):

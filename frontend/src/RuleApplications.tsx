@@ -253,8 +253,8 @@ export function RuleApplications({
       )}
       {!scenario && (
         <p>
-          Abre esta regla desde la unidad del diagrama para seleccionar la
-          variante.
+          Abre esta regla desde la unidad o el tramo del diagrama para
+          seleccionar la variante.
         </p>
       )}
       {scope.data && (

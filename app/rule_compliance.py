@@ -117,6 +117,9 @@ def term_value(term, objects, grid, values):
                "importacion": "grid_import_mw", "exportacion": "grid_export_mw",
                "generacion": "renewable_used_mw", "recorte": "renewable_curtailed_mw"}
     obj = objects[term["object_id"]]
+    if "reach_key" in obj:
+        row = values[("hydraulic_reach", obj["reach_key"], instant(grid[term["period"]]["timestamp"]))]
+        return float(row["hydraulic_flow_m3s"]) * term["coefficient"]
     kind, key = ((obj["kind"], "component_key") if "component_key" in obj else
                  ("hydraulic_unit", "unit_key") if "unit_key" in obj else ("hydraulic_reservoir", "node_key"))
     row = values[(kind, obj[key], instant(grid[term["period"]]["timestamp"]))]

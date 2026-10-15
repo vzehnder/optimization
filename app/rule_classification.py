@@ -54,7 +54,8 @@ def seed_rule_classification(store):
              "canonical_unit_id": identity("measurement_units", "unit_key", unit_key),
              "association_allowed": 1, "execution_allowed": 1, "execution_contract_key": "component_rule_input", "is_system": 1},
             {"display_name": key.replace("_", " ").title()})
-        for target_type in (object_type, identity("linkable_object_types", "object_type_key", "component:hydro")):
+        for target_type in (object_type, identity("linkable_object_types", "object_type_key", "hydraulic_reach"),
+                            identity("linkable_object_types", "object_type_key", "component:hydro")):
             for semantic in semantics:
                 ensure(tables[2], {"semantic_type_id": semantic, "binding_role_id": role, "object_type_id": target_type, "rule_version": 1},
                     {"association_allowed": 1, "execution_allowed": 1},

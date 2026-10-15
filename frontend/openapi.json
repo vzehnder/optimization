@@ -14548,6 +14548,55 @@
         ]
       }
     },
+    "/api/scenarios/{scenario_id}/hydraulic-reaches/{reach_key}/rule-context": {
+      "get": {
+        "operationId": "reach_context_api_scenarios__scenario_id__hydraulic_reaches__reach_key__rule_context_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "reach_key",
+            "required": true,
+            "schema": {
+              "title": "Reach Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reach Context",
+        "tags": [
+          "component-rules"
+        ]
+      }
+    },
     "/api/scenarios/{scenario_id}/runs": {
       "get": {
         "operationId": "list_scenario_runs_api_scenarios__scenario_id__runs_get",

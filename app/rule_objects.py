@@ -10,6 +10,7 @@ VARIABLES = {
     "battery": {"carga": "mw", "descarga": "mw", "energia": "mwh"},
     "hydro": {"caudal": "m3_per_s", "vertimiento": "m3_per_s", "potencia": "mw", "almacenamiento": "hm3"},
     "hydraulic_unit": {"caudal": "m3_per_s", "potencia": "mw"},
+    "hydraulic_reach": {"caudal": "m3_per_s"},
     "hydraulic_plant": {"potencia": "mw"},
     "hydraulic_node": {"almacenamiento": "hm3", "vertimiento": "m3_per_s"},
 }
@@ -85,6 +86,7 @@ def model_objects(store, project_id, scenario_id, document=None, *, object_id=No
     table = store.linkable_object_table_names()["linkable_objects"]
     result = []
     for kind, plural, key, collection in (("hydraulic_unit", "units", "unit_key", "units"),
+                                         ("hydraulic_reach", "reaches", "reach_key", "reaches"),
                                          ("hydraulic_plant", "plants", "plant_key", "plants"),
                                          ("hydraulic_node", "nodes", "node_key", "nodes")):
         rows = store.connection.execute(f"""
