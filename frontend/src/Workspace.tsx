@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { downloadDiagramConstraintInfo } from "./hydraulicConstraintExport";
 import { HydraulicReachBehavior } from "./HydraulicReachBehavior";
+import { HydraulicConnectionHandle } from "./HydraulicConnectionHandle";
 import {
   DragEvent,
   FormEvent,
@@ -5435,6 +5436,7 @@ function HydraulicDiagramCanvas({
   reaches,
   viewport,
   updateNode,
+  updateReach,
   connectPorts,
   focusEntity,
   focusedEntityKey,
@@ -5445,6 +5447,10 @@ function HydraulicDiagramCanvas({
   updateNode: (
     technicalKey: string,
     patch: Partial<HydraulicDiagramNodeWrite>,
+  ) => void;
+  updateReach: (
+    technicalKey: string,
+    patch: Partial<HydraulicDiagramReachWrite>,
   ) => void;
   connectPorts: (
     fromNodeKey: string,
@@ -5489,8 +5495,12 @@ function HydraulicDiagramCanvas({
     if (!surface) return { x: 0, y: 0 };
     const rect = surface.getBoundingClientRect();
     return {
-      x: (event.clientX - rect.left + surface.scrollLeft) / zoom,
-      y: (event.clientY - rect.top + surface.scrollTop) / zoom,
+      x:
+        (event.clientX - rect.left - surface.clientLeft + surface.scrollLeft) /
+        zoom,
+      y:
+        (event.clientY - rect.top - surface.clientTop + surface.scrollTop) /
+        zoom,
     };
   }
 
@@ -5642,6 +5652,51 @@ function HydraulicDiagramCanvas({
     }
   }
 
+  const selectedReach = reaches.find(
+    (reach) => reach.technical_key === focusedEntityKey,
+  );
+  const selectedPlantEdge = plantEdges.find(
+    (edge) =>
+      hydraulicPlantLinkKey(edge.fromKey, edge.toKey) === focusedEntityKey,
+  );
+  const selectedConnection = selectedReach
+    ? {
+        fromKey: selectedReach.from_node_key,
+        toKey: selectedReach.to_node_key,
+        fromAnchor: selectedReach.from_anchor ?? 0.5,
+        toAnchor: selectedReach.to_anchor ?? 0.5,
+      }
+    : selectedPlantEdge;
+
+  function updateConnectionAnchor(endpoint: "from" | "to", anchor: number) {
+    if (selectedReach) {
+      updateReach(selectedReach.technical_key, {
+        [endpoint === "from" ? "from_anchor" : "to_anchor"]: anchor,
+      });
+    } else if (selectedPlantEdge) {
+      const plant = nodeByKey.get(selectedPlantEdge.plantKey);
+      if (!plant) return;
+      const anchorKey =
+        selectedPlantEdge.toKey === plant.technical_key
+          ? `in:${selectedPlantEdge.fromKey}`
+          : `out:${selectedPlantEdge.toKey}`;
+      updateNode(plant.technical_key, {
+        link_anchors: {
+          ...plant.link_anchors,
+          [anchorKey]: {
+            ...plant.link_anchors?.[anchorKey],
+            [endpoint]: anchor,
+          },
+        },
+      });
+    }
+  }
+
+  function selectConnection(key: string) {
+    setPendingConnector(null);
+    focusEntity(key);
+  }
+
   return (
     <>
       <div
@@ -5702,7 +5757,7 @@ function HydraulicDiagramCanvas({
                     // Presentation attribute: the CSS focused rule wins over it.
                     stroke={hydraulicReachTypeColors[reach.reach_type]}
                     style={{ cursor: "pointer", pointerEvents: "stroke" }}
-                    onClick={() => focusEntity(reach.technical_key)}
+                    onClick={() => selectConnection(reach.technical_key)}
                     d={edgePath(
                       fromNode,
                       toNode,
@@ -5727,7 +5782,7 @@ function HydraulicDiagramCanvas({
                       focusedEntityKey === linkKey ? "true" : undefined
                     }
                     style={{ cursor: "pointer", pointerEvents: "stroke" }}
-                    onClick={() => focusEntity(linkKey)}
+                    onClick={() => selectConnection(linkKey)}
                     d={edgePath(
                       fromNode,
                       toNode,
@@ -5842,6 +5897,33 @@ function HydraulicDiagramCanvas({
                 </div>
               );
             })}
+            {selectedConnection &&
+              (["from", "to"] as const).map((endpoint) => {
+                const node = nodeByKey.get(
+                  selectedConnection[`${endpoint}Key`],
+                );
+                if (!node) return null;
+                const anchor = selectedConnection[`${endpoint}Anchor`];
+                return (
+                  <HydraulicConnectionHandle
+                    key={`${focusedEntityKey}-${endpoint}`}
+                    label={`Mover ${endpoint === "from" ? "salida" : "entrada"} de conexion en ${node.display_name}`}
+                    x={node.x + hydraulicCanvasNodeWidth * anchor}
+                    y={
+                      node.y +
+                      (endpoint === "from" ? hydraulicCanvasNodeHeight : 0)
+                    }
+                    anchor={anchor}
+                    anchorFromClientX={(clientX) =>
+                      (pointFromEvent({ clientX, clientY: 0 }).x - node.x) /
+                      hydraulicCanvasNodeWidth
+                    }
+                    onChange={(value) =>
+                      updateConnectionAnchor(endpoint, value)
+                    }
+                  />
+                );
+              })}
             {!nodes.length ? (
               <div className="hydraulic-canvas-empty">
                 <EmptyState>
@@ -5852,6 +5934,11 @@ function HydraulicDiagramCanvas({
           </div>
         </div>
       </div>
+      {selectedConnection && (
+        <p className="hydraulic-connection-hint">
+          Arrastra los circulos para ajustar donde se conecta cada extremo.
+        </p>
+      )}
       <ul
         className="hydraulic-reach-legend"
         data-testid="hydraulic-reach-legend"
@@ -7940,6 +8027,7 @@ function HydraulicDiagramEditor({
             reaches={reaches}
             viewport={viewport}
             updateNode={updateNode}
+            updateReach={updateReach}
             connectPorts={connectPorts}
             focusEntity={setFocusedEntityKey}
             focusedEntityKey={focusedEntityKey}

@@ -11,7 +11,10 @@ const python =
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: "hydraulic-reach-rules.spec.ts",
+  testMatch: [
+    "hydraulic-reach-rules.spec.ts",
+    "hydraulic-connection-handles.spec.ts",
+  ],
   workers: 1,
   reporter: "line",
   use: {

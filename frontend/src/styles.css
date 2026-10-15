@@ -755,6 +755,53 @@ button:focus-visible {
   stroke-dasharray: 7 5;
 }
 
+.hydraulic-connection-handle {
+  position: absolute;
+  z-index: 3;
+  width: 26px;
+  height: 26px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  transform: translate(-50%, -50%);
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.hydraulic-connection-handle::after {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  border: 3px solid #c2410c;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgb(16 42 67 / 25%);
+}
+
+.hydraulic-connection-handle:hover::after,
+.hydraulic-connection-handle:active::after {
+  background: #ffedd5;
+}
+
+.hydraulic-connection-handle:hover,
+.hydraulic-connection-handle:focus-visible {
+  background: transparent;
+  outline: none;
+}
+
+.hydraulic-connection-handle:focus-visible {
+  outline: 2px solid #075985;
+  outline-offset: 2px;
+}
+
+.hydraulic-connection-hint {
+  margin: 0.5rem 0;
+  color: #486581;
+  font-size: 0.85rem;
+}
+
 .hydraulic-canvas-node {
   scroll-margin: 12px;
   position: absolute;
