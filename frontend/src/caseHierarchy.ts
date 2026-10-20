@@ -20,6 +20,15 @@ export interface CaseHierarchyProvenance {
   parameters?: CaseHierarchyProvenanceEntry;
   input_variant?: { id: number; display_name?: string };
   date_range?: { start: string; end: string };
+  source_scenario_version_id?: number;
+  source_version_number?: number;
+  hydraulic_simulation?: {
+    objective: "market_value" | "energy";
+    resolution_hours: number;
+    terminal_water_values_usd_per_hm3?: Record<string, number>;
+    mip_rel_gap?: number;
+    resampling?: string;
+  };
   automation?: {
     schedule_id: number;
     schedule_tick_id: number;
@@ -43,6 +52,7 @@ export function hierarchyProvenanceHashLabel(
 const hierarchyKindLabels: Record<string, string> = {
   structured_draft: "Draft estructurado",
   hydraulic_diagram_v3: "Diagrama hidraulico v3",
+  hydraulic_simulation: "Simulación hidráulica",
 };
 
 export function hierarchyKindLabel(kind: string | undefined): string {

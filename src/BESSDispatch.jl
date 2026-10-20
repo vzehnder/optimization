@@ -5,6 +5,7 @@ include(joinpath("io", "loaders.jl"))
 include(joinpath("model", "base_model.jl"))
 include(joinpath("results", "writer.jl"))
 include("hydraulic_transit.jl")
+include("run_progress.jl")
 include("system_dispatch.jl")
 include("component_rules.jl")
 

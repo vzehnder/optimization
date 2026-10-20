@@ -2026,6 +2026,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scenario-versions/{version_id}/hydraulic-simulation/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Hydraulic Simulation */
+        post: operations["hydraulic_simulation_api_scenario_versions__version_id__hydraulic_simulation_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenario-versions/{version_id}/hydraulic-simulation/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Hydraulic Simulation */
+        post: operations["hydraulic_simulation_api_scenario_versions__version_id__hydraulic_simulation_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scenarios/{scenario_id}": {
         parameters: {
             query?: never;
@@ -2629,6 +2663,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scenarios/{scenario_id}/hydraulic-simulation/prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Price Options */
+        get: operations["price_options_api_scenarios__scenario_id__hydraulic_simulation_prices_get"];
+        put?: never;
+        /** Import Prices */
+        post: operations["import_prices_api_scenarios__scenario_id__hydraulic_simulation_prices_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scenarios/{scenario_id}/runs": {
         parameters: {
             query?: never;
@@ -3075,6 +3127,24 @@ export interface components {
              */
             ts_next_canonical_read: boolean;
             user: components["schemas"]["CurrentUser"];
+        };
+        /** Body_import_prices_api_scenarios__scenario_id__hydraulic_simulation_prices_post */
+        Body_import_prices_api_scenarios__scenario_id__hydraulic_simulation_prices_post: {
+            /**
+             * Data Kind
+             * @default forecast
+             * @enum {string}
+             */
+            data_kind: "real" | "forecast" | "synthetic";
+            /** Set Name */
+            set_name: string;
+            /** Source File */
+            source_file: string;
+            /**
+             * Timezone Name
+             * @default UTC
+             */
+            timezone_name: string;
         };
         /** Body_prepare_object_series_file_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions_files_post */
         Body_prepare_object_series_file_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions_files_post: {
@@ -3955,6 +4025,37 @@ export interface components {
         HydraulicSeriesOriginRequest: {
             /** Kind */
             kind: string;
+        };
+        /** HydraulicSimulationRequest */
+        HydraulicSimulationRequest: {
+            /** Expected Preparation Hash */
+            expected_preparation_hash?: string | null;
+            /** Mip Rel Gap */
+            mip_rel_gap?: number | null;
+            /**
+             * Objective
+             * @default market_value
+             * @enum {string}
+             */
+            objective: "market_value" | "energy";
+            /**
+             * Price Signal Key
+             * @default price_usd_per_mwh
+             * @enum {string}
+             */
+            price_signal_key: "price_usd_per_mwh" | "export_price_usd_per_mwh";
+            /** Price Time Series Set Id */
+            price_time_series_set_id?: number | null;
+            /** Range End */
+            range_end: string;
+            /** Range Start */
+            range_start: string;
+            /** Resolution Hours */
+            resolution_hours: number;
+            /** Terminal Water Values Usd Per Hm3 */
+            terminal_water_values_usd_per_hm3?: {
+                [key: string]: number;
+            };
         };
         /** HydraulicStorageElevationCurveRequest */
         HydraulicStorageElevationCurveRequest: {
@@ -9554,6 +9655,76 @@ export interface operations {
             };
         };
     };
+    hydraulic_simulation_api_scenario_versions__version_id__hydraulic_simulation_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HydraulicSimulationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    hydraulic_simulation_api_scenario_versions__version_id__hydraulic_simulation_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HydraulicSimulationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_scenario_api_scenarios__scenario_id__get: {
         parameters: {
             query?: never;
@@ -11014,6 +11185,72 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    price_options_api_scenarios__scenario_id__hydraulic_simulation_prices_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_prices_api_scenarios__scenario_id__hydraulic_simulation_prices_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_prices_api_scenarios__scenario_id__hydraulic_simulation_prices_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };

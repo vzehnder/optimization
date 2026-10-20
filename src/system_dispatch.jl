@@ -272,6 +272,10 @@ end
 
 function validate_hydraulic_v3_system_case_document(document)::Dict{String,Any}
     validate_component_rules(document)
+    objective = get(document, "hydraulic_objective", "energy")
+    if !(objective in ("energy", "market_value"))
+        throw(ArgumentError("hydraulic_objective must be energy or market_value"))
+    end
     schema_version = required_string(document, "schema_version")
     if schema_version != SYSTEM_SCHEMA_VERSION_V3
         throw(ArgumentError("schema_version must be $(SYSTEM_SCHEMA_VERSION_V3); got $(schema_version)"))
@@ -454,6 +458,12 @@ function validate_hydraulic_v3_system_case_document(document)::Dict{String,Any}
     previous_duration = 0.0
     for (index, raw_period) in enumerate(periods)
         period = to_string_key_dict(raw_period)
+        if objective == "market_value"
+            price = parse_required_float(required_value(period, "price_usd_per_mwh"), "time_series[$index].price_usd_per_mwh")
+            if !isfinite(price)
+                throw(ArgumentError("time_series[$index].price_usd_per_mwh must be finite"))
+            end
+        end
         start = parse_required_datetime(required_value(period, "timestamp"), "time_series[$index].timestamp")
         duration_hours = parse_required_float(required_value(period, "duration_hours"), "time_series[$index].duration_hours")
         if !isfinite(duration_hours) || duration_hours <= 0
@@ -1395,13 +1405,14 @@ function build_system_dispatch_model(data::SystemOptimizationData)::SystemDispat
     )
 end
 
-function solve_system_dispatch(system_case::SystemGraphData)::SystemDispatchResult
-    return solve_system_dispatch(normalize_system_case(system_case))
+function solve_system_dispatch(system_case::SystemGraphData; kwargs...)::SystemDispatchResult
+    return solve_system_dispatch(normalize_system_case(system_case); kwargs...)
 end
 
-function solve_system_dispatch(data::SystemOptimizationData)::SystemDispatchResult
+function solve_system_dispatch(data::SystemOptimizationData; progress_path = nothing, solver_log_path = nothing)::SystemDispatchResult
+    emit_run_progress(progress_path, "building", "Construyendo el modelo de optimización en Julia.")
     dispatch_model = build_system_dispatch_model(data)
-    optimize!(dispatch_model.model)
+    optimize_with_progress!(dispatch_model.model; progress_path, solver_log_path)
 
     termination = string(termination_status(dispatch_model.model))
     solver_status = raw_solver_status(dispatch_model.model, termination)
@@ -1490,7 +1501,10 @@ function run_system_case(
     path::AbstractString;
     output_root::AbstractString = "outputs",
     run_timestamp = nothing,
+    progress_path = nothing,
+    solver_log_path = nothing,
 )::SystemRunOutput
+    emit_run_progress(progress_path, "preparing", "Leyendo y preparando los datos de la simulación en Julia.")
     resolved_path = resolve_system_case_path(path)
     document = read_system_case_document(resolved_path)
     if string(get(document, "schema_version", "")) == SYSTEM_SCHEMA_VERSION_V3
@@ -1499,13 +1513,16 @@ function run_system_case(
             resolved_path;
             output_root,
             run_timestamp,
+            progress_path,
+            solver_log_path,
         )
     end
 
     system_case = load_system_case(resolved_path)
     optimization_data = normalize_system_case(system_case)
-    result = solve_system_dispatch(optimization_data)
+    result = solve_system_dispatch(optimization_data; progress_path, solver_log_path)
 
+    emit_run_progress(progress_path, "saving", "Guardando los resultados de la simulación.")
     return write_system_run_outputs(
         system_case,
         optimization_data,
@@ -1529,8 +1546,11 @@ function run_hydraulic_v3_system_case(
     source_path::AbstractString;
     output_root::AbstractString = "outputs",
     run_timestamp = nothing,
+    progress_path = nothing,
+    solver_log_path = nothing,
 )::SystemRunOutput
     validate_hydraulic_v3_system_case_document(document)
+    emit_run_progress(progress_path, "building", "Construyendo el modelo hidráulico de optimización en Julia.")
     case_name = required_string(document, "case_name")
     solver = load_solver_config(required_value(document, "solver"))
     if solver.name != "HiGHS"
@@ -1815,10 +1835,13 @@ function run_hydraulic_v3_system_case(
         @constraint(model, reach_flow[reach_index, period_index] >= reach_min_flow[reach_index, period_index])
     end
 
+    market_value_objective = get(document, "hydraulic_objective", "energy") == "market_value"
+    generation_weights = market_value_objective ?
+        [Float64(period["price_usd_per_mwh"]) for period in periods] : ones(n_periods)
     @objective(
         model,
         Max,
-        sum(hydro_power[unit_index, period_index] * durations[period_index] for unit_index in 1:n_units, period_index in 1:n_periods) +
+        sum(generation_weights[period_index] * hydro_power[unit_index, period_index] * durations[period_index] for unit_index in 1:n_units, period_index in 1:n_periods) +
         sum(terminal_water_value[reservoir_index] * storage[reservoir_index, n_periods] for reservoir_index in 1:n_reservoirs) -
         sum(
             something(get(reaches[reach_index], "spill_penalty_usd_per_hm3", nothing), 0.0) *
@@ -1827,7 +1850,7 @@ function run_hydraulic_v3_system_case(
             for reach_index in 1:n_reaches, period_index in 1:n_periods
         ),
     )
-    optimize!(model)
+    optimize_with_progress!(model; progress_path, solver_log_path)
 
     termination = string(termination_status(model))
     solver_status = raw_solver_status(model, termination)
@@ -1894,6 +1917,7 @@ function run_hydraulic_v3_system_case(
         terminal_value,
     )
 
+    emit_run_progress(progress_path, "saving", "Guardando los resultados de la simulación.")
     return write_hydraulic_v3_run_outputs(
         document,
         timestamps,
@@ -1937,7 +1961,13 @@ function write_hydraulic_v3_run_outputs(
     system_case_resolved_path = joinpath(output_dir, "system_case_resolved.json")
     model_metadata_path = joinpath(output_dir, "model_metadata.json")
 
-    CSV.write(dispatch_path, hydraulic_v3_dispatch_dataframe(timestamps, durations, natural_inflow, result))
+    dispatch = hydraulic_v3_dispatch_dataframe(timestamps, durations, natural_inflow, result)
+    market_value_objective = get(document, "hydraulic_objective", "energy") == "market_value"
+    if market_value_objective
+        dispatch.price_usd_per_mwh = [Float64(period["price_usd_per_mwh"]) for period in document["time_series"]]
+        dispatch.hydro_revenue_usd = dispatch.price_usd_per_mwh .* dispatch.total_hydro_power_mw .* durations
+    end
+    CSV.write(dispatch_path, dispatch)
     assets = hydraulic_v3_asset_dispatch_dataframe(timestamps, durations, reservoir_ids, unit_ids, natural_inflow, result)
     assets.hydraulic_flow_m3s = zeros(nrow(assets))
     assets.hydraulic_arrival_flow_m3s = zeros(nrow(assets))
@@ -1959,6 +1989,10 @@ function write_hydraulic_v3_run_outputs(
     end
     CSV.write(asset_dispatch_path, assets)
     summary = hydraulic_v3_summary_dict(result, durations, reservoir_ids, unit_ids, resolved_run_timestamp, source_identifiers)
+    summary["hydraulic_objective"] = get(document, "hydraulic_objective", "energy")
+    if market_value_objective
+        summary["hydraulic_v3_totals"]["total_revenue_usd"] = sum(dispatch.hydro_revenue_usd)
+    end
     summary["hydraulic_transport"] = transport
     write_json_file(summary_path, summary)
     write_json_file(system_case_resolved_path, document)

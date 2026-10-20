@@ -673,6 +673,9 @@ describe("results experience", () => {
     expect(
       await screen.findByText("En ejecución", { exact: true }),
     ).toBeVisible();
+    expect(
+      screen.getByRole("region", { name: "Avance de la simulación" }),
+    ).toBeVisible();
     completed = true;
     expect(
       await screen.findByText("Finalizada", { exact: true }, { timeout: 3000 }),

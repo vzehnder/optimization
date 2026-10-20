@@ -51,6 +51,7 @@ from app.forecast_connector import (
     HttpJsonForecastConnectorConfig,
 )
 from app.input_variants import InputVariantRangeError
+from app.hydraulic_simulation import register_hydraulic_simulation_routes
 from app.legacy_series_extraction import LegacyDraftExtractionError
 from app.required_signals import MissingRequiredSignalsError
 from app.variant_staleness import VariantStaleError
@@ -67,6 +68,7 @@ from app.persistence import (
 )
 from app.result_comparison import ComparisonError, compare_runs
 from app.result_indexing import rebuild_all_run_results, rebuild_run_results
+from app.run_progress import read_run_progress
 from app.result_retention import cleanup_project_result_data, cleanup_run_result_data
 from app.results import ResultReadError, apply_dashboard_template, read_run_results
 from app.console_series import ConsoleSeriesError
@@ -1467,6 +1469,8 @@ def create_app(
         )
         local_run_queue.enqueue(run["id"])
         return run
+
+    register_hydraulic_simulation_routes(app, analyst_store, service, create_and_enqueue_run, configured_input_source_root)
 
     def publication_download_artifacts(
         publication: dict[str, Any],
@@ -6248,7 +6252,7 @@ def create_app(
             run = analyst_store.get_run(run_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        return {"run": run}
+        return {"run": {**run, "progress": read_run_progress(run, configured_artifact_root)}}
 
     @app.get("/api/runs/{run_id}/results")
     async def get_run_results(run_id: int):

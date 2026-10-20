@@ -62,6 +62,92 @@ After `npm run build`, the normal FastAPI service serves the production React
 application at `http://127.0.0.1:8000/react`. The browser smoke test uses an
 isolated in-memory database and port `8123`; it does not modify application data.
 
+## Hydraulic simulation from a promoted version
+
+The run detail at `/react/runs/:id` shows live progress while waiting for results:
+Julia data validation/preparation, model construction, optimization, and output
+writing. It polls every second and displays elapsed time, the latest MIP gap
+reported by HiGHS, and a scrollable solver log. The gap remains unavailable until
+the solver reports it (continuous models may not report a MIP gap). Elapsed time
+includes preparation and stops when the run finishes, including failures.
+
+New executions retain `progress.jsonl` and `solver.log` in their artifact logs,
+including on timeout, and expose them as downloadable audit artifacts. The API
+returns only the last 64 KiB of each log. Existing runs launched before this
+instrumentation cannot reconstruct live solver progress. Rebuild the frontend
+and restart a backend running without reload to activate the feature.
+
+In the hydraulic diagram, **Preparar simulación** opens the latest promoted
+network. The same form is available at `/react/scenario-versions/:id` for a v3
+version. Choose a CMg series, a UTC range `[start, end)`, and a step in hours;
+then use **Revisar simulación** and **Ejecutar simulación**. For August through
+October 2026, the exclusive end is `2026-11-01T00:00:00Z`.
+
+CMg can be selected from the project's catalog or imported directly as CSV/XLSX
+(first sheet), with columns `timestamp`, `duration_hours`, and
+`price_usd_per_mwh`. Specify the file's time zone; explicit offsets are honored.
+Negative prices are supported. Changed imports under the same name create a new
+catalog version; identical values with the same data kind reuse the existing
+version. The draft editor is not involved in this workflow.
+
+The preparation uses the selected version's network, inflows, parameters,
+terminal conditions and initial state. It creates a new immutable executable
+version and preserves the source version and diagram. Initial reservoir volumes
+and steady initial flows apply at the selected start; explicit initial-arrival
+schedules retain their absolute timestamps and must be compatible with it.
+Change physical parameters in the diagram and promote again when needed.
+
+Resampling is explicit: inflows and CMg use duration-weighted means, reach minimum
+flows use the maximum over each target interval, and finer intervals retain
+constant source values. Refinement does not add information. Gaps, overlaps,
+missing coverage and incomplete target steps block preparation. The selected
+range, step, source version and CMg revision/hash are recorded with the run;
+changes after review require another review. Stale derived CMg sets must be
+regenerated. This adds a version-based workflow; existing draft/variant execution
+retains its own semantics.
+
+The v3 field `hydraulic_objective: "market_value"` requires a finite
+`price_usd_per_mwh` in every period. This common price applies to all units;
+the objective is generation revenue plus terminal water value minus configured
+reach penalties. `energy` (also the legacy default when the field is absent)
+preserves the existing energy objective. Economic outputs include prices and
+`hydro_revenue_usd` in `dispatch.csv`, and `total_revenue_usd` in the hydraulic
+summary totals. Julia still enforces the network's physical constraints.
+
+The simulation form also provides **Valor del agua al final del período** for
+each reservoir, in USD/hm³, and **Gap relativo de parada (%)**. Existing reservoir
+values and solver tolerances are loaded from the source version; absent values
+start at zero water value and 0.01% gap (the HiGHS default). A gap input of `1`
+means 1%, persisted as `solver.options.mip_rel_gap: 0.01`. This is a MIP stopping
+tolerance, not a time limit or a continuous-model tolerance; other configured
+stopping limits remain active. See the
+[HiGHS option definitions](https://ergo-code.github.io/HiGHS/dev/options/definitions/#mip_rel_gap).
+
+The economic objective adds `sum(water_value_usd_per_hm3 * final_storage_hm3)`
+once at the end, alongside generation revenue and configured penalties. For
+example, 2 hm³ remaining at 10,000 USD/hm³ contributes 20,000 USD. Final storage
+constraints still apply: `equal_initial` makes that reservoir's terminal value
+constant, while `min_terminal` remains a lower bound. For a cascade, specify the
+future value of water at each reservoir's location, considering its downstream
+generation opportunities. Pure energy preparation requires zero monetary water
+values to avoid adding USD to MWh.
+
+The preparation API accepts optional `terminal_water_values_usd_per_hm3` (a map
+from reservoir ID to nonnegative value) and `mip_rel_gap` (a nonnegative fraction).
+Omitted values inherit the source configuration. Overrides affect only the new
+execution version; other solver options and physical parameters are preserved.
+Both settings appear in the review and run provenance, and changing either
+requires a new review. Results report `terminal_water_value_usd` separately from
+generation revenue, with its CSV contribution only in the final period.
+
+API: `GET/POST /api/scenarios/:id/hydraulic-simulation/prices` lists/imports CMg;
+`POST /api/scenario-versions/:id/hydraulic-simulation/preview` validates the
+configuration; `/run` requires the returned `expected_preparation_hash` and uses
+the existing run queue. Python API tests are in `tests/test_hydraulic_simulation.py`
+(including a real Julia executor integration), browser-component tests in
+`frontend/src/HydraulicSimulation.test.tsx`, and solver examples in
+`test/hydraulic_economics.jl` and `test/hydraulic_economic_validation.jl`.
+
 ## Run The Sample Case
 
 This command loads `data/cases/arbitrage_mvp`, solves the dispatch model with

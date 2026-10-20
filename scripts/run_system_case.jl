@@ -69,6 +69,8 @@ function main(args::Vector{String})::Int
             system_case_path;
             output_root = output_root,
             run_timestamp = run_timestamp,
+            progress_path = get(ENV, "BESS_RUN_PROGRESS_PATH", nothing),
+            solver_log_path = get(ENV, "BESS_SOLVER_LOG_PATH", nothing),
         )
 
         JSON3.write(stdout, system_cli_success_payload(run_output))

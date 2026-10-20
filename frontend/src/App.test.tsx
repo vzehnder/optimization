@@ -5475,9 +5475,21 @@ describe("application shell", () => {
           });
         }
         if (path === "/api/scenarios/10/versions") {
-          return new Response(JSON.stringify({ versions: [] }), {
-            headers: { "Content-Type": "application/json" },
-          });
+          return new Response(
+            JSON.stringify({
+              versions: [
+                {
+                  id: 82,
+                  version_number: 2,
+                  schema_version: "bess_system_dispatch.v3",
+                  generation_metadata: { kind: "hydraulic_simulation" },
+                },
+              ],
+            }),
+            {
+              headers: { "Content-Type": "application/json" },
+            },
+          );
         }
         if (path === "/api/scenarios/10/runs") {
           return new Response(JSON.stringify({ runs: [] }), {
@@ -5719,6 +5731,12 @@ describe("application shell", () => {
     expect(promoteButton).toBeEnabled();
     await user.click(promoteButton);
     expect(await screen.findByText("Version v3 promovida: 1")).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "Preparar simulación" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "Preparar simulación" }),
+    ).toHaveAttribute("href", "/react/scenario-versions/81");
     expect(promoteCalls).toBe(1);
 
     await user.click(screen.getByRole("button", { name: "Validar topologia" }));

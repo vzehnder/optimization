@@ -23,6 +23,40 @@
         "title": "AuthSessionResponse",
         "type": "object"
       },
+      "Body_import_prices_api_scenarios__scenario_id__hydraulic_simulation_prices_post": {
+        "properties": {
+          "data_kind": {
+            "default": "forecast",
+            "enum": [
+              "real",
+              "forecast",
+              "synthetic"
+            ],
+            "title": "Data Kind",
+            "type": "string"
+          },
+          "set_name": {
+            "title": "Set Name",
+            "type": "string"
+          },
+          "source_file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "Source File",
+            "type": "string"
+          },
+          "timezone_name": {
+            "default": "UTC",
+            "title": "Timezone Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_file",
+          "set_name"
+        ],
+        "title": "Body_import_prices_api_scenarios__scenario_id__hydraulic_simulation_prices_post",
+        "type": "object"
+      },
       "Body_prepare_object_series_file_ingestion_api_projects__project_id__linkable_objects__linkable_object_id__time_series_object_series__signal_id__revision_ingestions_files_post": {
         "properties": {
           "file": {
@@ -2577,6 +2611,90 @@
           "kind"
         ],
         "title": "HydraulicSeriesOriginRequest",
+        "type": "object"
+      },
+      "HydraulicSimulationRequest": {
+        "properties": {
+          "expected_preparation_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Preparation Hash"
+          },
+          "mip_rel_gap": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mip Rel Gap"
+          },
+          "objective": {
+            "default": "market_value",
+            "enum": [
+              "market_value",
+              "energy"
+            ],
+            "title": "Objective",
+            "type": "string"
+          },
+          "price_signal_key": {
+            "default": "price_usd_per_mwh",
+            "enum": [
+              "price_usd_per_mwh",
+              "export_price_usd_per_mwh"
+            ],
+            "title": "Price Signal Key",
+            "type": "string"
+          },
+          "price_time_series_set_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Time Series Set Id"
+          },
+          "range_end": {
+            "title": "Range End",
+            "type": "string"
+          },
+          "range_start": {
+            "title": "Range Start",
+            "type": "string"
+          },
+          "resolution_hours": {
+            "exclusiveMinimum": 0.0,
+            "title": "Resolution Hours",
+            "type": "number"
+          },
+          "terminal_water_values_usd_per_hm3": {
+            "additionalProperties": {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "title": "Terminal Water Values Usd Per Hm3",
+            "type": "object"
+          }
+        },
+        "required": [
+          "range_start",
+          "range_end",
+          "resolution_hours"
+        ],
+        "title": "HydraulicSimulationRequest",
         "type": "object"
       },
       "HydraulicStorageElevationCurveRequest": {
@@ -12638,6 +12756,100 @@
         "summary": "Create Manual Run"
       }
     },
+    "/api/scenario-versions/{version_id}/hydraulic-simulation/preview": {
+      "post": {
+        "operationId": "hydraulic_simulation_api_scenario_versions__version_id__hydraulic_simulation_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HydraulicSimulationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Hydraulic Simulation"
+      }
+    },
+    "/api/scenario-versions/{version_id}/hydraulic-simulation/run": {
+      "post": {
+        "operationId": "hydraulic_simulation_api_scenario_versions__version_id__hydraulic_simulation_run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HydraulicSimulationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Hydraulic Simulation"
+      }
+    },
     "/api/scenarios/{scenario_id}": {
       "get": {
         "operationId": "get_scenario_api_scenarios__scenario_id__get",
@@ -14719,6 +14931,88 @@
         "tags": [
           "component-rules"
         ]
+      }
+    },
+    "/api/scenarios/{scenario_id}/hydraulic-simulation/prices": {
+      "get": {
+        "operationId": "price_options_api_scenarios__scenario_id__hydraulic_simulation_prices_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Price Options"
+      },
+      "post": {
+        "operationId": "import_prices_api_scenarios__scenario_id__hydraulic_simulation_prices_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_prices_api_scenarios__scenario_id__hydraulic_simulation_prices_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Prices"
       }
     },
     "/api/scenarios/{scenario_id}/runs": {

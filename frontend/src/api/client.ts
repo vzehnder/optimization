@@ -160,6 +160,98 @@ export interface ScenarioVersionDetail extends ScenarioVersion {
   validation_payload: unknown;
 }
 
+export interface HydraulicSimulationRequest {
+  range_start: string;
+  range_end: string;
+  resolution_hours: number;
+  objective: "market_value" | "energy";
+  price_time_series_set_id?: number;
+  price_signal_key?: "price_usd_per_mwh" | "export_price_usd_per_mwh";
+  terminal_water_values_usd_per_hm3?: Record<string, number>;
+  mip_rel_gap?: number;
+  expected_preparation_hash?: string;
+}
+
+export interface HydraulicSimulationPreview {
+  preparation_hash: string;
+  period_count: number;
+  preview_periods: Array<{
+    timestamp: string;
+    duration_hours: number;
+    price_usd_per_mwh?: number;
+    natural_inflow_m3s: Record<string, number>;
+  }>;
+  generation_metadata: CaseHierarchyProvenance;
+}
+
+export function previewHydraulicSimulation(
+  versionId: number,
+  payload: HydraulicSimulationRequest,
+) {
+  return postJsonWithCsrf<HydraulicSimulationPreview>(
+    `/api/scenario-versions/${versionId}/hydraulic-simulation/preview`,
+    payload,
+  );
+}
+
+export function runHydraulicSimulation(
+  versionId: number,
+  payload: HydraulicSimulationRequest,
+) {
+  return postJsonWithCsrf<ScenarioRun>(
+    `/api/scenario-versions/${versionId}/hydraulic-simulation/run`,
+    payload,
+  );
+}
+
+export async function importHydraulicPrices(
+  scenarioId: number,
+  file: File,
+  name: string,
+  timezone: string,
+  dataKind: string,
+) {
+  const body = new FormData();
+  body.append("source_file", file);
+  body.append("set_name", name);
+  body.append("timezone_name", timezone);
+  body.append("data_kind", dataKind);
+  const response = await requestJson<{ time_series_set: ProjectTimeSeriesSet }>(
+    `/api/scenarios/${scenarioId}/hydraulic-simulation/prices`,
+    {
+      method: "POST",
+      headers: { "X-CSRF-Token": await getCsrfToken() },
+      body,
+    },
+  );
+  return response.time_series_set;
+}
+
+export async function listHydraulicPrices(
+  scenarioId: number,
+  signal?: AbortSignal,
+) {
+  const response = await requestJson<{
+    time_series_sets: Array<
+      ProjectTimeSeriesSetSummary &
+        Pick<ProjectTimeSeriesSet, "signals" | "horizon">
+    >;
+  }>(`/api/scenarios/${scenarioId}/hydraulic-simulation/prices`, { signal });
+  return response.time_series_sets;
+}
+
+export interface RunProgress {
+  stage: string;
+  elapsed_seconds: number | null;
+  gap_percent: number | null;
+  best_objective: number | null;
+  best_bound: number | null;
+  solver_seconds: number | null;
+  events: Array<{ timestamp: string; stage: string; message: string }>;
+  solver_log: string;
+  log_truncated: boolean;
+}
+
 export interface ScenarioRun {
   id: number;
   scenario_version_id: number;
@@ -176,6 +268,7 @@ export interface ScenarioRun {
   stderr?: string;
   triggered_by?: string;
   trigger_type?: string;
+  progress?: RunProgress;
 }
 
 export type ResultCell = string | number | boolean | null;

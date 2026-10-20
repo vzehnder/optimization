@@ -4,6 +4,8 @@ import { downloadDiagramConstraintInfo } from "./hydraulicConstraintExport";
 import { HydraulicReachBehavior } from "./HydraulicReachBehavior";
 import { HydraulicTravelTime } from "./HydraulicTravelTime";
 import { HydraulicConnectionHandle } from "./HydraulicConnectionHandle";
+import { HydraulicSimulationForm } from "./hydro/HydraulicSimulationForm";
+import { RunProgressPanel } from "./RunProgress";
 import {
   DragEvent,
   FormEvent,
@@ -7411,10 +7413,28 @@ function HydraulicDiagramEditor({
   const [saveStatus, setSaveStatus] = useState<HydraulicSaveStatus>("saved");
   const [error, setError] = useState("");
   const [promotionMessage, setPromotionMessage] = useState("");
+  const promotedVersions = useQuery({
+    queryKey: scenarioVersionsQueryKey(scenario.id),
+    queryFn: ({ signal }) => listScenarioVersions(scenario.id, signal),
+  });
+  const latestHydraulicVersion = promotedVersions.data
+    ?.filter(
+      (version) =>
+        version.schema_version === "bess_system_dispatch.v3" &&
+        version.generation_metadata?.kind !== "hydraulic_simulation",
+    )
+    .reduce<
+      ScenarioVersion | undefined
+    >((latest, version) => (!latest || version.version_number > latest.version_number ? version : latest), undefined);
   const [validation, setValidation] =
     useState<HydraulicDiagramValidation | null>(() =>
       visibleHydraulicValidation(initialDiagram.validation),
     );
+  const [showV3Preview, setShowV3Preview] = useState(true);
+  const v3PreviewVisible = showV3Preview && Boolean(validation?.system_case);
+  const v3PreviewAvailable = Boolean(
+    validation?.system_case && !validation.stale,
+  );
   const [focusedEntityKey, setFocusedEntityKey] = useState<string | null>(null);
   const [availableCurves, setAvailableCurves] = useState<
     Record<string, HydraulicCurveSummary[]>
@@ -7492,6 +7512,7 @@ function HydraulicDiagramEditor({
     mutationFn: () => validateHydraulicV3Preview(scenario.id),
     onSuccess: (serverValidation) => {
       setValidation(serverValidation);
+      setShowV3Preview(true);
       setError("");
       setPromotionMessage("");
     },
@@ -7973,9 +7994,25 @@ function HydraulicDiagramEditor({
               saveMutation.isPending ||
               saveStatus !== "saved"
             }
-            onClick={() => v3PreviewMutation.mutate()}
+            aria-expanded={v3PreviewVisible}
+            aria-controls={
+              v3PreviewVisible ? "hydraulic-v3-preview-panel" : undefined
+            }
+            onClick={() => {
+              if (v3PreviewVisible) {
+                setShowV3Preview(false);
+              } else if (v3PreviewAvailable) {
+                setShowV3Preview(true);
+              } else {
+                v3PreviewMutation.mutate();
+              }
+            }}
           >
-            Generar preview v3
+            {v3PreviewVisible
+              ? "Ocultar preview"
+              : v3PreviewAvailable
+                ? "Mostrar preview"
+                : "Generar preview v3"}
           </button>
           <button
             type="button"
@@ -7997,6 +8034,19 @@ function HydraulicDiagramEditor({
         </div>
         {error ? <p role="alert">{error}</p> : null}
         {promotionMessage ? <p role="status">{promotionMessage}</p> : null}
+        {latestHydraulicVersion ? (
+          <p>
+            <Link
+              className="secondary-action"
+              to={`/scenario-versions/${latestHydraulicVersion.id}`}
+            >
+              Preparar simulación
+            </Link>
+            {" · Versión "}
+            {latestHydraulicVersion.version_number}
+            {" · CMg, período y resolución"}
+          </p>
+        ) : null}
         {validation ? (
           <section
             className="workspace-section validation-summary"
@@ -8037,8 +8087,9 @@ function HydraulicDiagramEditor({
                 fallbackMessage="Validacion hidraulica v3 stale"
               />
             ) : null}
-            {validation.system_case ? (
+            {v3PreviewVisible ? (
               <section
+                id="hydraulic-v3-preview-panel"
                 className="workspace-section"
                 aria-labelledby="hydraulic-v3-preview"
               >
@@ -9964,7 +10015,15 @@ export function ScenarioVersionDetailView() {
         <p>{version.data.case_name}</p>
       </header>
       <div className="workspace-stack">
-        <ScenarioVersionRunControl version={version.data} />
+        {version.data.schema_version === "bess_system_dispatch.v3" ? (
+          <HydraulicSimulationForm
+            key={version.data.id}
+            version={version.data}
+            projectId={scenario.data?.project_id ?? 0}
+          />
+        ) : (
+          <ScenarioVersionRunControl version={version.data} />
+        )}
         <section className="workspace-section" aria-labelledby="version-meta">
           <h2 id="version-meta">Metadata</h2>
           <VersionMetadata version={version.data} />
@@ -11048,6 +11107,11 @@ export function RunDetailView() {
             Reintentando consulta de la ejecución.
           </p>
         ) : null}
+        <RunProgressPanel
+          key={runData.id}
+          run={runData}
+          updatedAt={run.dataUpdatedAt}
+        />
         <RunRuleSummary document={version.data?.system_case_json} />
         {version.data?.system_case_json &&
         typeof version.data.system_case_json === "object" &&

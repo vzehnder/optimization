@@ -10,6 +10,7 @@ from typing import Any, Callable, Mapping, Protocol
 
 from app.persistence import AnalystStore
 from app.result_indexing import index_run_results
+from app.run_progress import append_run_progress
 from app.validation import JuliaValidationService, ValidationResult, resolve_julia_executable
 
 
@@ -101,6 +102,9 @@ class JuliaRunExecutor:
             input_snapshot_path=str(input_snapshot_path),
         )
 
+        progress_path = workspace_path / "logs" / "progress.jsonl"
+        append_run_progress(progress_path, "validating", "Preparando y validando los datos en Julia.")
+
         validation_result = self.validation_service.validate_file(input_snapshot_path)
         rules = scenario_version["system_case_json"].get("component_rules")
         if validation_result.ok and rules is not None:
@@ -138,16 +142,31 @@ class JuliaRunExecutor:
             return failed
 
         try:
+            append_run_progress(progress_path, "starting", "Datos validados. Iniciando Julia y cargando el motor de optimización.")
             completed = self._run_julia(input_snapshot_path, workspace_path / "outputs")
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as error:
+            stdout = error.stdout or ""
+            stderr = error.stderr or ""
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode("utf-8", errors="replace")
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", errors="replace")
+            stdout_log_path, stderr_log_path = self._write_log_files(workspace_path, stdout, stderr)
             failed = self.store.mark_run_failed(
                 run_id,
                 exit_code=None,
-                stdout="",
-                stderr="",
+                stdout=stdout,
+                stderr=stderr,
                 error_payload={"status": "error", "code": "RUN_SOLVER_TIMEOUT", "message": f"Julia run timed out after {self.timeout_seconds:g} seconds"},
+                stdout_log_path=str(stdout_log_path),
+                stderr_log_path=str(stderr_log_path),
             )
-            self._register_audit_artifacts(run_id, input_snapshot_path=input_snapshot_path)
+            self._register_audit_artifacts(
+                run_id,
+                input_snapshot_path=input_snapshot_path,
+                stdout_log_path=stdout_log_path,
+                stderr_log_path=stderr_log_path,
+            )
             return failed
         except FileNotFoundError:
             failed = self.store.mark_run_failed(
@@ -206,6 +225,7 @@ class JuliaRunExecutor:
                     return failed
 
                 # A visible succeeded status must already have its result files registered.
+                append_run_progress(progress_path, "saving", "Registrando los resultados de la simulación.")
                 self._register_audit_artifacts(
                     run_id,
                     input_snapshot_path=input_snapshot_path,
@@ -300,6 +320,11 @@ class JuliaRunExecutor:
             capture_output=True,
             text=True,
             timeout=self.timeout_seconds,
+            env={
+                **os.environ,
+                "BESS_RUN_PROGRESS_PATH": str((output_root.parent / "logs" / "progress.jsonl").resolve()),
+                "BESS_SOLVER_LOG_PATH": str((output_root.parent / "logs" / "solver.log").resolve()),
+            },
         )
 
     def _register_audit_artifacts(
@@ -311,6 +336,11 @@ class JuliaRunExecutor:
         stderr_log_path: Path | None = None,
         output_dir: str | None = None,
     ) -> None:
+        for artifact_type, filename in [("progress_log", "progress.jsonl"), ("solver_log", "solver.log")]:
+            self._register_artifact_if_file(
+                run_id, artifact_type, self._workspace_path(run_id) / "logs" / filename,
+                display_name=filename, media_type="text/plain",
+            )
         self._register_artifact_if_file(
             run_id,
             "input_snapshot",

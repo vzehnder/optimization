@@ -500,6 +500,7 @@ class JuliaRunExecutorTests(unittest.TestCase):
                     set(artifacts_by_type),
                     {
                         "input_snapshot",
+                        "progress_log",
                         "stdout_log",
                         "stderr_log",
                         "summary_json",
@@ -757,7 +758,7 @@ class JuliaRunExecutorTests(unittest.TestCase):
                 self.assertEqual(completed["status"], "failed")
                 self.assertIn("outside artifact root", completed["error_message"])
                 artifact_types = {artifact["artifact_type"] for artifact in store.list_run_artifacts(run["id"])}
-                self.assertEqual(artifact_types, {"input_snapshot", "stdout_log", "stderr_log"})
+                self.assertEqual(artifact_types, {"input_snapshot", "progress_log", "stdout_log", "stderr_log"})
             finally:
                 store.close()
 
@@ -806,7 +807,7 @@ class JuliaRunExecutorTests(unittest.TestCase):
                     '{"status":"error","message":"optimization failed before solve"}\n',
                 )
                 artifact_types = {artifact["artifact_type"] for artifact in store.list_run_artifacts(run["id"])}
-                self.assertEqual(artifact_types, {"input_snapshot", "stdout_log", "stderr_log"})
+                self.assertEqual(artifact_types, {"input_snapshot", "progress_log", "stdout_log", "stderr_log"})
             finally:
                 store.close()
 
