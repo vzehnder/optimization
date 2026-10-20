@@ -1,0 +1,72 @@
+{
+  "reference_date": "2026-10-20",
+  "purpose": "Referencia visual del prototipo; no evidencia de implementación ni de exactitud del solver.",
+  "source": "../../wayfinder/prototypes/mesa-optimizacion/index.html",
+  "frozen_copy": "prototipo-validado.html",
+  "variant": "A",
+  "tab": "overview",
+  "layout": "2x2",
+  "range_start": "2026-10-20",
+  "range_end_inclusive": "2026-10-20",
+  "intervals": 24,
+  "environment": {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "emulated_device_scale_factor": 1,
+    "os": "Windows",
+    "browser_user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+    "browser_locale": "en-US",
+    "observed_timezone": "America/Santiago",
+    "color_scheme": "light",
+    "reduced_motion": "reduce",
+    "fonts": "Local font stack from the frozen HTML"
+  },
+  "states": [
+    {
+      "file": "01-mesa-general-antes.png",
+      "run": null,
+      "comparison": "before",
+      "panel_modes": [
+        "chart",
+        "chart",
+        "chart",
+        "chart"
+      ]
+    },
+    {
+      "file": "02-mesa-comparacion-graficos-tabla.png",
+      "run": "fictitious-01",
+      "comparison": "compare",
+      "panel_modes": [
+        "chart",
+        "chart",
+        "chart",
+        "table"
+      ],
+      "toast_visible": false
+    }
+  ],
+  "files": [
+    {
+      "file": "prototipo-validado.html",
+      "bytes": 62370,
+      "sha256": "b0043be4c7566f35468e7ed75c78512f0040d9a46bba17ac3a8a677c1396f576"
+    },
+    {
+      "file": "01-mesa-general-antes.png",
+      "bytes": 150673,
+      "sha256": "2fb4f70d17e2006f1d4c7634143683c9a196baa79c6483ee305f4302db0c1a6e",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "02-mesa-comparacion-graficos-tabla.png",
+      "bytes": 164043,
+      "sha256": "7e74868f36fa524c1d7453700bd6ff677e6292a3cbfd67644d351d83fd28c88b",
+      "width": 1440,
+      "height": 900
+    }
+  ]
+}

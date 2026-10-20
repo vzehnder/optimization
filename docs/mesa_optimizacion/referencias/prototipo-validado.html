@@ -1,0 +1,456 @@
+<!doctype html>
+<!-- PROTOTIPO DESECHABLE. ¿Se puede preparar, visualizar y comparar una simulación
+     desde una sola mesa con pestañas por componente? Tres variantes: ?variant=A/B/C.
+     Archivo autónomo; datos ficticios, estado en memoria, sin conexiones al sistema. -->
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Prototipo interactivo de una mesa de optimización con componentes, series y simulaciones ficticias.">
+  <title>Mesa de optimización · Prototipo</title>
+  <style>
+    :root{font-family:Inter,"Segoe UI",system-ui,sans-serif;color:#243a43;background:#f4f6f7;font-synthesis:none;font-size:13px;--ink:#203942;--muted:#6e8188;--line:#dfe7e9;--green:#087e77;--mint:#e8f5f1;--navy:#163640;--radius:12px}
+    *{box-sizing:border-box}body{margin:0}button,input,select{font:inherit}button{cursor:pointer}button,input,select{accent-color:var(--green)}
+    button{color:inherit}button:disabled{cursor:not-allowed;opacity:.48}button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:3px solid #62bdb6;outline-offset:3px}
+    button svg,span svg{width:18px;height:18px;flex-shrink:0}svg{vertical-align:middle}h1,h2,h3,p{margin:0}button{border:0;background:none}input,select{min-width:0}
+    .rail{position:fixed;inset:0 auto 0 0;width:64px;background:var(--navy);display:flex;align-items:center;flex-direction:column;gap:14px;padding:18px 10px;z-index:10}
+    .brandmark{width:36px;height:36px;border-radius:11px;background:#b6f0d5;color:#123b3e;display:grid;place-items:center;margin-bottom:25px}
+    .brandmark svg{width:25px;height:25px}.rail button{width:40px;height:40px;display:grid;place-items:center;border-radius:9px;color:#b1c4c8}.rail button:hover,.rail button.selected{background:#2c4e57;color:#d3f7e9}.rail .bottom{margin-top:auto}
+    .app{margin-left:64px}.topbar{height:53px;border-bottom:1px solid var(--line);background:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 26px;gap:16px}
+    .breadcrumb{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:12px}.breadcrumb b{color:var(--ink);font-weight:600}.topmeta{display:flex;align-items:center;gap:16px;font-size:11px;color:var(--muted)}
+    .demo-badge{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:750;letter-spacing:.07em;color:#7d641d;background:#fcf4d9;padding:5px 8px;border-radius:5px;white-space:nowrap}
+    .avatar{width:28px;height:28px;display:grid;place-items:center;border-radius:50%;background:#eef3f3;font-size:10px;font-weight:700;color:#59717a}
+    main{padding:20px 26px 56px;min-height:calc(100dvh - 53px);display:flex;flex-direction:column;gap:15px;max-width:1920px;margin:auto}
+    .heading{display:flex;align-items:center;justify-content:space-between;gap:16px}.eyebrow{text-transform:uppercase;font-size:9px;font-weight:750;letter-spacing:.14em;color:var(--green);margin-bottom:5px}
+    h1{font-size:26px;letter-spacing:-.8px;font-weight:650;line-height:1.2}.subtitle{font-size:12px;color:var(--muted);margin-top:7px}.heading-tools{display:flex;gap:9px;align-items:center}
+    .btn{height:34px;display:inline-flex;gap:7px;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:7px;padding:0 12px;background:#fff;font-weight:600;font-size:11px;white-space:nowrap}
+    .btn:hover{background:#f0f6f5;border-color:#b8ceca}.btn.primary{color:white;background:var(--green);border-color:var(--green)}.btn.primary:hover{background:#086c67}.btn.quiet{background:transparent;border-color:transparent;color:var(--muted)}
+    .runbar{display:flex;align-items:center;gap:19px;padding:13px 16px;background:white;border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 2px 3px #183d4803;position:relative;overflow:hidden}
+    .runbar .date-group{display:flex;align-items:center;gap:12px}.field-label{display:block;color:var(--muted);font-size:10px;font-weight:600;margin-bottom:5px}
+    .date-field{display:flex;gap:6px;align-items:center}.date-field input{border:0;background:#f4f7f8;border-radius:5px;padding:6px 8px;color:var(--ink);font-size:12px;width:140px}
+    .run-divider{width:1px;height:32px;background:var(--line)}.resolution{font-size:11px;line-height:1.6}.resolution small{color:var(--muted);font-size:10px}.run-state{margin-left:auto;font-size:11px;display:flex;align-items:center;gap:7px;white-space:nowrap}
+    .status-dot{width:6px;height:6px;border-radius:50%;background:#a6b5bb}.status-dot.ready{background:#09977f;box-shadow:0 0 0 3px #e5f5ed}
+    .runbar .primary{height:38px;font-size:12px;min-width:179px}.progress{position:absolute;bottom:0;left:0;height:3px;background:#40b8a0;transition:width .3s}
+    .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.kpi{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:#fff;min-width:0}
+    .kpi-icon{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;background:#edf6f5;color:var(--green);flex-shrink:0}.kpi:nth-child(2) .kpi-icon{color:#ab7916;background:#fcf6e6}.kpi:nth-child(3) .kpi-icon{color:#477fab;background:#edf4fb}.kpi:nth-child(4) .kpi-icon{color:#8760ac;background:#f4eff8}
+    .kpi-label{font-size:10px;color:var(--muted);margin-bottom:4px}.kpi-value{font-size:21px;font-weight:650;letter-spacing:-.5px;white-space:nowrap}.kpi-value small{font-size:10px;font-weight:500;color:var(--muted);letter-spacing:0}.kpi-note{font-size:9px;color:var(--muted);margin-top:3px}
+    .workspace{min-width:0;flex:1}.tabs-wrap{display:flex;align-items:center;border-bottom:1px solid #d6e1e4;gap:10px;min-width:0}.tabs{display:flex;align-items:stretch;gap:5px;overflow:auto;scrollbar-width:thin;flex:1}
+    .tab{display:flex;align-items:center;gap:7px;height:45px;border-bottom:2px solid transparent;color:var(--muted);padding:0 13px;font-size:11px;white-space:nowrap}.tab svg{width:15px;height:15px}.tab[aria-selected="true"]{color:var(--green);border-bottom-color:var(--green);font-weight:700;background:linear-gradient(0deg,#e8f4f1,transparent)}
+    .tab:hover{color:var(--green)}.tab .count{font-size:9px;background:#e7eded;border-radius:4px;padding:2px 5px;color:#70868c}.tabs-wrap>.btn{flex-shrink:0;margin-bottom:3px}.tab-caption{display:none}
+    .board-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:13px 0}.board-context{display:flex;gap:10px;align-items:center;min-width:0}.board-context strong{font-size:12px;font-weight:650}.board-context small{font-size:10px;color:var(--muted)}
+    .board-controls{display:flex;align-items:center;gap:12px}.segmented{display:flex;padding:3px;border:1px solid #dce5e7;border-radius:7px;background:#eaf0f1;gap:2px}.segmented button{border-radius:4px;padding:4px 9px;font-size:10px;white-space:nowrap;color:#71848a}.segmented button.active{background:#fff;box-shadow:0 1px 3px #29434f15;color:var(--ink);font-weight:650}
+    .layout-select{border:1px solid var(--line);background:white;border-radius:6px;font-size:10px;padding:7px 26px 7px 9px;color:var(--ink)}.layout-label{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:10px}
+    .panel-grid{display:grid;grid-template-columns:repeat(var(--cols,2),minmax(0,1fr));gap:13px}.panel{border:1px solid #dbe5e8;border-radius:11px;background:#fff;overflow:hidden;min-width:0;display:flex;flex-direction:column;height:clamp(236px,calc((100dvh - 430px)/2),370px);box-shadow:0 2px 5px #16344003}
+    .panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:12px 14px 8px}.panel-title-line{display:flex;align-items:center;gap:7px;min-width:0}.component-icon{width:25px;height:25px;border-radius:7px;background:#eef6f4;color:var(--green);display:grid;place-items:center;flex-shrink:0}.component-icon svg{width:15px;height:15px}.panel h3{font-size:12px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.panel-component{font-size:10px;color:var(--muted);margin:4px 0 0 32px}
+    .panel-tools{display:flex;align-items:center;gap:6px;flex-shrink:0}.mode-toggle{display:flex;border:1px solid var(--line);padding:2px;border-radius:6px}.mode-toggle button{padding:3px 6px;color:#8ba0a7;border-radius:4px}.mode-toggle button svg{width:14px;height:14px}.mode-toggle button.active{background:#edf5f2;color:var(--green)}.icon-btn{display:grid;place-items:center;width:26px;height:26px;color:#7d9299;border-radius:5px}.icon-btn:hover{background:#edf4f4;color:var(--green)}.icon-btn svg{width:15px;height:15px}
+    .panel-main{min-height:0;flex:1;display:flex;flex-direction:column}.series-legend{display:flex;flex-wrap:wrap;gap:11px;font-size:9px;color:#617c86;padding:0 15px 5px;min-height:16px}.legend-item{display:flex;align-items:center;gap:4px}.legend-dot{width:6px;height:6px;border-radius:50%;background:var(--color)}
+    .chart-area{flex:1;min-height:0;position:relative;padding:0 9px 0 4px;overflow:auto}.chart-group{height:100%;min-height:120px;position:relative}.chart-area.multi .chart-group{height:130px}.chart{width:100%;height:100%;overflow:visible}.chart text{font-family:inherit;font-size:9px;fill:#8a9ca4}.chart .unit{font-size:9px;fill:#607b85}.chart .gridline{stroke:#e9eff1;stroke-width:1}.chart .trace{fill:none;stroke-linecap:round;stroke-linejoin:round;stroke-width:2}
+    .chart-hit{fill:transparent;cursor:crosshair}.chart-guide{stroke:#b8c8cd;stroke-width:1;stroke-dasharray:3 3;display:none}.chart-group:hover .chart-guide{display:block}.tooltip{position:fixed;pointer-events:none;z-index:80;padding:10px 12px;color:white;background:#203b45f5;border-radius:8px;box-shadow:0 4px 20px #16343e20;font-size:11px;line-height:1.7;max-width:270px}.tooltip b{display:block;font-size:10px;color:#a7c6ce;margin-bottom:3px}.tooltip-row{display:flex;justify-content:space-between;gap:16px}
+    .panel-foot{display:flex;align-items:center;justify-content:space-between;font-size:9px;color:#8c9da4;padding:6px 14px 8px;border-top:1px solid #f2f5f6;gap:8px}.panel-foot span{display:flex;align-items:center;gap:5px}.line-key{width:14px;height:0;border-top:2px solid #488e89}.line-key.before{border-top-style:dashed;border-color:#91a6ab}
+    .add-panel{border:1px dashed #bccfd0;border-radius:11px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:9px;color:#64847f;background:#f1f7f5;min-height:236px}.add-panel span{font-size:11px}.add-panel small{color:var(--muted);font-size:10px}
+    .data-scroll{overflow:auto;flex:1;min-height:0;border-top:1px solid #eef3f4}table{border-collapse:separate;border-spacing:0;width:100%;font-variant-numeric:tabular-nums;font-size:10px;white-space:nowrap}th{position:sticky;top:0;background:#f5f8f9;z-index:1;font-weight:600;color:#70858e;padding:7px 9px;border-bottom:1px solid var(--line);text-align:right}td{padding:6px 9px;text-align:right;border-bottom:1px solid #f0f4f5;color:#4b6873}td:first-child,th:first-child{text-align:left}td:first-child{color:#7e929a}tbody tr:hover{background:#f7fbfa}.table-input{font:inherit;width:64px;max-width:100%;text-align:right;border:1px solid transparent;border-radius:3px;background:transparent;padding:2px;color:inherit}.table-input:hover,.table-input:focus{border-color:#b7d6cf;background:#fff}.after-value{color:#087e77;font-weight:600}.delta{font-size:9px;color:#778d96}
+    .board-footer{display:flex;justify-content:space-between;gap:10px;padding-top:9px;font-size:9px;color:#82969e}.board-footer span{display:flex;gap:5px;align-items:center}.board-footer svg{width:12px;height:12px}
+    .variant-bar{position:fixed;bottom:12px;left:calc(50% + 32px);transform:translateX(-50%);display:flex;align-items:center;gap:10px;background:#203a44;color:#edf7f6;border-radius:30px;padding:5px 9px 5px 15px;box-shadow:0 4px 15px #15323f24;z-index:12;font-size:10px}.variant-bar small{color:#a7c5ce;border-right:1px solid #4d626a;padding-right:10px;font-size:9px}.variant-bar button{display:grid;place-items:center;color:#d2e3e6;border-radius:50%;width:25px;height:25px}.variant-bar button:hover{background:#3e5b64}.variant-name{min-width:119px;text-align:center}
+    .variant-B .workspace{display:grid;grid-template-columns:188px minmax(0,1fr);gap:20px}.variant-B .tabs-wrap{flex-direction:column;align-items:stretch;border:1px solid var(--line);border-radius:10px;background:#fff;padding:13px;height:fit-content;gap:12px}.variant-B .tabs{flex-direction:column;gap:5px;overflow:visible}.variant-B .tab{width:100%;height:auto;min-height:39px;border:0;border-radius:6px;white-space:normal;text-align:left;padding:9px}.variant-B .tab[aria-selected="true"]{background:#e6f3ee}.variant-B .tab-caption{display:block;color:var(--muted);font-size:9px;letter-spacing:.08em;text-transform:uppercase;padding:0 7px}.variant-B .tabs-wrap>.btn{font-size:10px}.variant-B .board-toolbar{padding-top:0}.variant-B .panel{height:clamp(250px,calc((100dvh - 390px)/2),390px)}
+    .variant-C .panel-grid{grid-template-columns:1fr!important}.variant-C .panel{display:grid;grid-template-columns:220px minmax(0,1fr);height:190px;position:relative}.variant-C .panel-head{flex-direction:column;justify-content:center;border-right:1px solid var(--line);padding:18px}.variant-C .panel-main{padding-top:10px}.variant-C .panel-foot{grid-column:1/-1;background:#fcfdfd}.variant-C .panel-tools{margin-left:32px}.variant-C .add-panel{min-height:100px}.variant-C .panel-component{white-space:normal}
+    dialog{border:1px solid #d4e1e3;border-radius:16px;padding:0;box-shadow:0 24px 100px #102f3e30;width:min(540px,calc(100% - 32px));max-height:90dvh;color:var(--ink)}dialog::backdrop{background:#16343e55;backdrop-filter:blur(3px)}.dialog-head{padding:22px 24px 15px;display:flex;align-items:flex-start;justify-content:space-between;gap:15px}.dialog-head h2{font-size:20px;font-weight:650;letter-spacing:-.4px}.dialog-head p{font-size:12px;color:var(--muted);margin-top:7px;line-height:1.6}.dialog-body{padding:2px 24px 22px;display:flex;flex-direction:column;gap:16px}.dialog-foot{display:flex;justify-content:flex-end;gap:9px;padding:15px 24px;background:#f7faf9;border-top:1px solid var(--line)}.form-field{display:flex;flex-direction:column;gap:7px;font-size:11px;font-weight:600}.form-field input,.form-field select{height:39px;border:1px solid #cbdcde;border-radius:7px;padding:0 11px;color:var(--ink);background:#fff;width:100%}.form-field small{font-size:10px;font-weight:400;color:var(--muted)}.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.series-options{display:flex;flex-direction:column;gap:7px}.check-option{padding:11px 12px;border:1px solid var(--line);border-radius:7px;display:flex;align-items:center;gap:9px;font-size:12px}.check-option:has(input:checked){background:#eff8f5;border-color:#9ccbbd}.check-option small{margin-left:auto;color:var(--muted);font-size:10px}.dialog-hint{background:#f0f6f5;padding:12px;border-radius:7px;color:#617e82;font-size:11px;line-height:1.7}.form-error{color:#b34b35;font-size:11px;min-height:14px}.danger{color:#aa584b;margin-right:auto}.toast{position:fixed;bottom:66px;left:calc(50% + 32px);transform:translateX(-50%);background:#173e47;color:#fff;padding:12px 18px;border-radius:9px;box-shadow:0 5px 20px #19394720;z-index:100;font-size:12px;max-width:calc(100vw - 40px)}[hidden]{display:none!important}.help-list{font-size:12px;line-height:1.8;padding-left:19px;margin:0}.history-row{border:1px solid var(--line);border-radius:8px;padding:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px}.history-row small{display:block;color:var(--muted);margin-top:5px;font-size:10px}.catalog-row{display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line);padding:10px 0;font-size:12px}.catalog-row small{font-size:10px;color:var(--muted);display:block;margin-top:4px}.catalog-row .btn{margin-left:auto}
+    @media(min-width:1550px){main{padding-left:34px;padding-right:34px}.panel-head{padding-top:15px}.panel h3{font-size:13px}.kpi{padding:15px 18px}}
+    @media(max-width:1150px){.topmeta>span:not(.demo-badge){display:none}.heading-tools .quiet{display:none}.runbar{gap:12px}.run-state{font-size:10px}.resolution small{display:none}.board-context small{display:none}.tab{padding:0 9px}.panel-head{padding-left:10px;padding-right:10px}.panel-tools{gap:2px}.kpi{gap:8px;padding:10px}.kpi-value{font-size:19px}}
+    @media(max-width:900px){.rail{width:52px;padding-left:6px;padding-right:6px}.app{margin-left:52px}.topbar{padding:0 17px}main{padding:17px 17px 65px}.heading-tools{display:none}.runbar{flex-wrap:wrap}.run-state{margin-left:0;flex:1}.run-divider{display:none}.resolution{margin-left:auto}.kpis{gap:8px}.kpi-icon{display:none}.board-controls{gap:7px}.board-context{display:none}.board-toolbar{justify-content:flex-end}.panel{height:260px}.variant-B .workspace{grid-template-columns:150px minmax(0,1fr);gap:12px}.variant-B .panel-grid{grid-template-columns:1fr}.variant-bar,.toast{left:calc(50% + 26px)}}
+    @media(max-width:640px){.rail{display:none}.app{margin-left:0}.topbar{height:46px;padding:0 12px}.breadcrumb{gap:6px;font-size:10px}.breadcrumb span:first-child,.avatar{display:none}.topmeta{gap:0}.demo-badge{font-size:8px;padding:4px 6px}main{padding:16px 12px 66px;gap:13px}h1{font-size:24px}.subtitle{line-height:1.5;font-size:11px}.runbar{padding:12px;gap:12px}.runbar .date-group{width:100%;gap:8px}.date-field{flex:1}.date-field label{width:100%}.date-field input{width:100%}.resolution{margin-left:0;font-size:10px}.run-state{justify-content:flex-end;font-size:9px}.runbar .primary{width:100%}.kpis{grid-template-columns:1fr 1fr}.kpi-icon{display:grid;width:30px;height:30px}.kpi-value{font-size:19px}.kpi-label{font-size:9px}.tabs-wrap{display:block}.tabs-wrap>.btn{margin:9px 0 5px}.tab{height:42px}.board-controls{width:100%;justify-content:space-between;gap:5px}.layout-label>span{display:none}.segmented button{padding:5px 8px}.panel-grid{grid-template-columns:1fr!important}.panel{height:272px}.board-footer{flex-direction:column;line-height:1.5}.variant-bar,.toast{left:50%;max-width:95vw}.variant-bar{gap:5px;bottom:10px;white-space:nowrap}.variant-bar small{font-size:8px;padding-right:6px}.variant-B .workspace{display:block}.variant-B .tabs-wrap{margin-bottom:12px}.variant-B .tabs{flex-direction:row;overflow:auto}.variant-B .tab{white-space:nowrap}.variant-B .tab-caption{display:none}.variant-B .tabs-wrap>.btn{margin:0}.variant-C .panel{display:flex;height:270px}.variant-C .panel-head{flex-direction:row;border:0;padding:12px}.variant-C .panel-tools{margin-left:0}.variant-C .panel-main{padding-top:0}.form-row{grid-template-columns:1fr}.dialog-head{padding:20px}.dialog-body{padding:0 20px 20px}}
+    .topbar{height:48px}main{gap:12px;padding-top:16px;min-height:calc(100dvh - 48px)}
+    .eyebrow{font-size:8px;margin-bottom:3px}h1{font-size:25px;line-height:1.15}.subtitle{font-size:11px;margin-top:4px}
+    .runbar{padding-top:10px;padding-bottom:10px}.field-label{margin-bottom:3px}.date-field input{padding-top:4px;padding-bottom:4px}
+    .kpi{padding:9px 13px}.kpi>div{display:grid;grid-template-columns:1fr auto;column-gap:9px;align-items:center;width:100%}.kpi-label{margin:0;line-height:1.3}.kpi-value{font-size:20px;line-height:1.2}.kpi-note{grid-column:1/-1;margin-top:4px;line-height:1.2}
+    .tab{height:41px}.board-toolbar{padding:9px 0}.chart{display:block}.chart text,.chart .unit{font-size:12px}
+    .variant-A .panel,.variant-B .panel{height:var(--panel-height,236px)}
+    .variant-A .chart-group,.variant-B .chart-group{min-height:0}
+    .panel-component{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .variant-A .add-panel,.variant-B .add-panel{min-height:var(--panel-height,236px)}
+    @media(min-width:901px) and (max-height:850px){
+      main{padding-top:12px;gap:10px}.eyebrow{display:none}.heading .subtitle{margin-top:5px}.runbar{padding-top:9px;padding-bottom:9px}.kpi{padding-top:8px;padding-bottom:8px}.kpi-note{display:none}.kpi-value{font-size:19px}.tab{height:39px}.board-toolbar{padding:9px 0}.chart-group{min-height:95px}.panel-head{padding-top:9px;padding-bottom:5px}.panel-foot{padding-top:4px;padding-bottom:5px}
+    }
+    @media(max-width:900px){.variant-A .panel,.variant-B .panel{height:260px}}
+    @media(max-width:640px){.variant-A .panel,.variant-B .panel{height:272px}.kpi>div{display:block}.kpi-label{margin-bottom:3px}.topbar{height:46px}}
+    @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+  </style>
+</head>
+<body>
+  <aside class="rail" aria-label="Navegación del prototipo">
+    <div class="brandmark" aria-label="Optimización"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8h8l-3 5h11M4 16h4m7-13-3 5m0 5-3 8"/></svg></div>
+    <button class="selected" data-action="overview" title="Mesa de trabajo" aria-label="Mesa de trabajo" data-icon="grid"></button>
+    <button data-action="catalog" title="Componentes del escenario" aria-label="Componentes del escenario" data-icon="layers"></button>
+    <button data-action="history" title="Simulaciones de esta sesión" aria-label="Simulaciones de esta sesión" data-icon="history"></button>
+    <button class="bottom" data-action="help" title="Cómo probar esta pantalla" aria-label="Cómo probar esta pantalla" data-icon="help"></button>
+  </aside>
+  <div class="app">
+    <header class="topbar">
+      <div class="breadcrumb"><span>Espacio de trabajo</span><span>›</span><b>Cuenca del Maule</b><span>›</span><span>Escenario base</span></div>
+      <div class="topmeta"><span>Laboratorio de operación</span><span class="demo-badge">PROTOTIPO · DATOS FICTICIOS</span><div class="avatar">OP</div></div>
+    </header>
+    <main>
+      <section class="heading">
+        <div><div class="eyebrow">Toda la operación, en un lugar</div><h1>Mesa de optimización</h1><p class="subtitle">Configura tus vistas, explora las series y compara una nueva simulación.</p></div>
+        <div class="heading-tools"><button class="btn quiet" data-action="help">Cómo probarlo <span data-icon="help"></span></button><button class="btn" data-action="history"><span data-icon="history"></span> Simulaciones <span id="history-count">0</span></button></div>
+      </section>
+      <section class="runbar" aria-label="Período y simulación">
+        <div class="date-group">
+          <div class="date-field"><label><span class="field-label">Desde</span><input id="date-start" type="date" value="2026-10-20" aria-label="Fecha de inicio" required></label></div>
+          <span style="color:#9aabb1;padding-top:16px">→</span>
+          <div class="date-field"><label><span class="field-label">Hasta</span><input id="date-end" type="date" value="2026-10-20" aria-label="Fecha de término" required></label></div>
+        </div>
+        <span class="run-divider"></span>
+        <div class="resolution"><strong id="period-count">24</strong> intervalos · 1 hora<br><small>Fecha final incluida · hasta 7 días</small></div>
+        <div class="run-state" role="status" aria-live="polite"><span class="status-dot" id="status-dot"></span><span id="run-status">Sin ejecutar · valores base</span></div>
+        <button class="btn primary" data-action="run" id="run-button"><span data-icon="play"></span> Simular escenario</button>
+        <div class="progress" id="run-progress" style="width:0"></div>
+      </section>
+      <section class="kpis" id="kpis" aria-label="Resumen del escenario"></section>
+      <section class="workspace" id="workspace" aria-label="Vistas de componentes"></section>
+    </main>
+  </div>
+  <nav class="variant-bar" aria-label="Alternativas de diseño del prototipo">
+    <small>EXPLORAR DISEÑOS</small>
+    <button data-action="prev-variant" title="Diseño anterior" aria-label="Diseño anterior">←</button>
+    <span class="variant-name" id="variant-name"></span>
+    <button data-action="next-variant" title="Diseño siguiente" aria-label="Diseño siguiente">→</button>
+  </nav>
+  <dialog id="dialog"></dialog>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <div class="tooltip" id="tooltip" hidden></div>
+  <script>
+    'use strict';
+    const icons = {
+      grid:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+      battery:'<rect x="3" y="6" width="16" height="12" rx="2"/><path d="M22 10v4M11 8l-3 5h5l-3 4"/>',
+      demand:'<path d="M4 20V9l8-6 8 6v11H4Z"/><path d="M9 20v-7h6v7"/>',
+      sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/>',
+      hydro:'<path d="M12 2S5 10 5 15a7 7 0 0 0 14 0c0-5-7-13-7-13Z"/><path d="M9 15a3 3 0 0 0 3 3"/>',
+      reservoir:'<path d="m3 15 5-12h5l3 12m-9 0 3-8m-8 12c3-3 5 3 8 0s5 3 8 0 3 0 4 0M15 8h5m-4 4h5"/>',
+      manual:'<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3" fill="white"/><circle cx="15" cy="17" r="3" fill="white"/>',
+      chart:'<path d="M4 3v17h17M7 14l4-5 4 3 5-7"/>',
+      table:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M10 4v16"/>',
+      settings:'<path d="m14 4 6 6M4 20l5-1L21 7a2.8 2.8 0 0 0-4-4L5 15l-1 5Z"/>',
+      play:'<path d="m8 4 12 8-12 8V4Z" fill="currentColor" stroke="none"/>',
+      plus:'<path d="M12 5v14M5 12h14"/>',
+      close:'<path d="m6 6 12 12M6 18 18 6"/>',
+      history:'<path d="M3 11a9 9 0 1 1 2 7M3 4v7h7m2-4v5l3 2"/>',
+      help:'<circle cx="12" cy="12" r="9"/><path d="M9 9a3 3 0 1 1 5 2c-2 1-2 1-2 3m0 2v1"/>',
+      layers:'<path d="m3 7 9-4 9 4-9 4-9-4Zm0 5 9 4 9-4M3 17l9 4 9-4"/>',
+      check:'<path d="m5 12 4 4L19 6"/>',
+      download:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>',
+      arrow:'<path d="M4 12h16m-6-6 6 6-6 6"/>'
+    };
+    const icon = name => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(icons[name]||icons.manual)+'</svg>';
+    const esc = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const fmt = (n,d=1) => Number(n).toLocaleString('es-CL',{maximumFractionDigits:d,minimumFractionDigits:d});
+    const typeNames = {battery:'BESS',demand:'Demanda',sun:'Generación renovable',hydro:'Central hidráulica',reservoir:'Embalse',manual:'Componente manual'};
+    const colors = ['#158b83','#597fc2','#c58c3c','#9870b3'];
+    const components = [
+      {id:'bess',name:'BESS',detail:'Batería Norte · 50 MW / 200 MWh',type:'battery',source:'Componente del escenario',series:[{key:'charge',name:'Potencia de carga',unit:'MW'},{key:'discharge',name:'Potencia de descarga',unit:'MW'},{key:'soc',name:'Estado de carga',unit:'%'}]},
+      {id:'demand',name:'Demanda',detail:'Consumo del sistema',type:'demand',source:'Componente del escenario',series:[{key:'load',name:'Demanda eléctrica',unit:'MW'},{key:'grid',name:'Compra a la red',unit:'MW'}]},
+      {id:'renewable',name:'Renovables',detail:'Parque solar Los Aromos · 90 MW',type:'sun',source:'Componente del escenario',series:[{key:'available',name:'Generación disponible',unit:'MW'},{key:'used',name:'Generación aprovechada',unit:'MW'},{key:'curtailment',name:'Vertimiento renovable',unit:'MW'}]},
+      {id:'hydro',name:'Central Los Maitenes',detail:'Serie hidráulica · central de 60 MW',type:'hydro',source:'Serie hidráulica de ejemplo',series:[{key:'power',name:'Potencia generada',unit:'MW'},{key:'flow',name:'Caudal turbinado',unit:'m³/s'},{key:'inflow',name:'Caudal afluente',unit:'m³/s'}]},
+      {id:'reservoir',name:'Embalse El Alto',detail:'Serie hidráulica · capacidad de 120 hm³',type:'reservoir',source:'Serie hidráulica de ejemplo',series:[{key:'volume',name:'Volumen almacenado',unit:'hm³'},{key:'inflow',name:'Caudal afluente',unit:'m³/s'},{key:'outflow',name:'Caudal de salida',unit:'m³/s'},{key:'level',name:'Cota del embalse',unit:'m'}]}
+    ];
+    let panelCounter=0;
+    const panel = (component,series,mode='chart') => ({id:++panelCounter,component,series,mode});
+    const boards = {overview:{layout:'2x2',panels:[{...panel('bess',['charge','discharge']),title:'Carga y descarga'},{...panel('demand',['load','grid']),title:'Demanda y suministro'},{...panel('hydro',['power']),title:'Generación hidráulica'},{...panel('reservoir',['volume']),title:'Reserva de agua'}]}};
+    components.forEach(c=>{boards[c.id]={layout:'2x2',panels:c.series.map(s=>panel(c.id,[s.key]))};});
+    const state = {active:'overview',variant:['A','B','C'].includes(new URLSearchParams(location.search).get('variant'))?new URLSearchParams(location.search).get('variant'):'A',start:'2026-10-20',end:'2026-10-20',compare:'before',results:null,run:null,running:false,dirty:false,history:[],edits:new Map()};
+    const componentById = id => components.find(c=>c.id===id);
+    const board = () => boards[state.active];
+    const allPanels = () => Object.values(boards).flatMap(b=>b.panels);
+    const panelById = id => allPanels().find(p=>p.id===Number(id));
+    const hours = () => Math.round((Date.parse(state.end+'T00:00:00Z')-Date.parse(state.start+'T00:00:00Z'))/3600000)+24;
+    const stamp = i => new Date(Date.parse(state.start+'T00:00:00Z')+i*3600000);
+    const dateText = value => new Date(value+'T00:00:00Z').toLocaleDateString('es-CL',{day:'2-digit',month:'short',timeZone:'UTC'});
+    const timeText = i => String(stamp(i).getUTCHours()).padStart(2,'0')+':00';
+    const fullTime = i => (hours()>24?dateText(stamp(i).toISOString().slice(0,10))+' · ':'')+timeText(i);
+    const editKey = (c,s,i) => c.id+'|'+s.key+'|'+stamp(i).toISOString();
+    const solar = h => Math.max(0,Math.sin((h-6)/13*Math.PI))*82;
+    function baseValue(c,s,i){
+      const edited=state.edits.get(editKey(c,s,i)); if(edited!==undefined)return edited;
+      const h=i%24,day=stamp(i).getUTCDate(),wiggle=Math.sin(h*.8+day*.3),peak=Math.exp(-Math.pow((h-19)/3,2)),sun=solar(h),wave=Math.sin((h-7)/24*Math.PI*2);
+      let v=0;
+      if(c.type==='battery'){v=s.key==='charge'?Math.max(0,sun*.38-5):s.key==='discharge'?7+peak*24:56+21*Math.sin((h-5)/24*Math.PI*2);}
+      else if(c.type==='demand'){v=s.key==='load'?112+wave*16+peak*35+wiggle*3:70+wave*8+peak*28-sun*.48;}
+      else if(c.type==='sun'){v=s.key==='available'?sun:s.key==='used'?sun*.86:sun*.14;}
+      else if(c.type==='hydro'){v=s.key==='power'?29+peak*16+wave*5+wiggle*1.5:s.key==='flow'?43+peak*21+wave*7:58+wiggle*4+Math.cos(h/4)*3;}
+      else if(c.type==='reservoir'){v=s.key==='volume'?87.4-h*.14+Math.sin(h/4)*.7:s.key==='level'?612.2-h*.035+Math.sin(h/4)*.2:s.key==='inflow'?64+wiggle*5:53+peak*13;}
+      else{v=c.base*(1+.12*wave+.03*wiggle);}
+      return Math.round(Math.max(0,v)*10)/10;
+    }
+    function value(c,s,i,after=false){return after&&state.results?state.results[c.id][s.key][i]:baseValue(c,s,i);}
+    function invalidate(message){
+      const hadResults=!!state.results;state.results=null;state.run=null;state.compare='before';state.dirty=true;
+      if(hadResults)toast(message||'Valores base actualizados. Simula otra vez para generar la comparación.');
+    }
+    function toast(message){const el=document.getElementById('toast');el.textContent=message;el.hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.hidden=true,4200);}
+    function hydrateIcons(root=document){root.querySelectorAll('[data-icon]').forEach(el=>el.innerHTML=icon(el.dataset.icon));}
+    function render(){
+      document.body.className='variant-'+state.variant;
+      document.getElementById('variant-name').textContent=({A:'A · Paneles',B:'B · Explorador',C:'C · Series en filas'})[state.variant];
+      document.getElementById('history-count').textContent=state.history.length;
+      document.getElementById('period-count').textContent=hours();
+      document.getElementById('date-start').value=state.start;document.getElementById('date-end').value=state.end;
+      document.getElementById('date-start').disabled=state.running;document.getElementById('date-end').disabled=state.running;
+      document.getElementById('run-button').disabled=state.running;
+      document.getElementById('run-button').innerHTML=icon('play')+' '+(state.running?'Simulando…':state.results?'Volver a simular':'Simular escenario');
+      if(!state.running){
+        document.getElementById('run-status').textContent=state.results?'Simulación '+String(state.run.number).padStart(2,'0')+' · completada':state.dirty?'Cambios pendientes de simular':'Sin ejecutar · valores base';
+        document.getElementById('status-dot').className='status-dot'+(state.results?' ready':'');
+        document.getElementById('run-progress').style.width='0';
+      }
+      renderKpis();renderWorkspace();hydrateIcons();fitGrid();
+      const tabs=document.querySelector('.tabs'),selected=document.getElementById('tab-'+state.active);
+      if(tabs&&selected&&state.variant!=='B'){const outer=tabs.getBoundingClientRect(),inner=selected.getBoundingClientRect();if(inner.right>outer.right)tabs.scrollLeft+=inner.right-outer.right;if(inner.left<outer.left)tabs.scrollLeft-=outer.left-inner.left;}
+    }
+    function fitGrid(){
+      const grid=document.querySelector('.panel-grid');if(!grid||state.variant==='C'||innerWidth<=900)return;
+      const rows=Number(board().layout.split('x')[0]),top=grid.getBoundingClientRect().top+scrollY;
+      const height=Math.max(innerHeight<=850?171:176,Math.floor((innerHeight-top-80-(rows-1)*13)/rows));
+      grid.style.setProperty('--panel-height',height+'px');
+    }
+    function renderKpis(){
+      const specs=[['demand','load','Energía demandada','demand','MWh','sum'],['sun','used','Generación renovable','sun','MWh','sum'],['hydro','power','Generación hidráulica','hydro','MWh','sum'],['battery','discharge','Pico de descarga BESS','battery','MW','max']];
+      document.getElementById('kpis').innerHTML=specs.map(([type,key,label,ic,unit,agg])=>{
+        const group=components.filter(c=>c.type===type);
+        const total=after=>{const a=Array.from({length:hours()},(_,i)=>group.reduce((sum,c)=>sum+value(c,c.series.find(s=>s.key===key),i,after),0));return agg==='max'?Math.max(...a):a.reduce((a,b)=>a+b,0);};
+        const before=total(false),after=state.results&&state.compare!=='before',shown=total(after);
+        return '<article class="kpi"><span class="kpi-icon">'+icon(ic)+'</span><div><div class="kpi-label">'+label+'</div><div class="kpi-value">'+fmt(shown,0)+' <small>'+unit+'</small></div><div class="kpi-note">'+(after?'Antes: '+fmt(before,0)+' '+unit+' · Δ '+(shown-before>0?'+':'')+fmt(shown-before,0):'Base · '+(hours()/24)+' día'+(hours()>24?'s':''))+'</div></div></article>';
+      }).join('');
+    }
+    function tabHtml(id,name,type,count){
+      return '<button role="tab" aria-selected="'+(state.active===id)+'" aria-controls="active-board" id="tab-'+id+'" class="tab" data-action="tab" data-id="'+id+'">'+icon(type)+'<span>'+esc(name)+'</span>'+(count?'<span class="count">'+count+'</span>':'')+'</button>';
+    }
+    function renderWorkspace(){
+      const b=board(),[rows,cols]=b.layout.split('x').map(Number),capacity=rows*cols,shown=b.panels.slice(0,capacity),remaining=Math.max(0,b.panels.length-capacity);
+      const name=state.active==='overview'?'Vista general':componentById(state.active).name;
+      document.getElementById('workspace').innerHTML=
+        '<div class="tabs-wrap"><div class="tab-caption">Componentes del escenario</div><div class="tabs" role="tablist" aria-label="Componentes">'+tabHtml('overview','Vista general','grid')+components.map(c=>tabHtml(c.id,c.name,c.type,c.series.length)).join('')+'</div><button class="btn quiet" data-action="add-component">'+icon('plus')+' Componente</button></div>'+
+        '<div class="board" id="active-board" role="tabpanel" aria-labelledby="tab-'+state.active+'"><div class="board-toolbar"><div class="board-context"><strong>'+esc(name)+'</strong><small>'+shown.length+' de '+capacity+' vistas'+(remaining?' · '+remaining+' oculta'+(remaining>1?'s':''):'')+'</small>'+(state.active!=='overview'?'<button class="icon-btn" data-action="edit-component" data-id="'+state.active+'" title="Editar componente" aria-label="Editar componente">'+icon('settings')+'</button>':'')+'</div>'+
+        '<div class="board-controls"><div class="segmented" role="group" aria-label="Comparación de valores">'+[['before','Antes'],['compare','Comparar'],['after','Después']].map(([key,label])=>'<button data-action="compare" data-value="'+key+'" class="'+(state.compare===key?'active':'')+'" aria-pressed="'+(state.compare===key)+'" '+(key!=='before'&&!state.results?'disabled title="Ejecuta una simulación para comparar"':'')+'>'+label+'</button>').join('')+'</div>'+
+        '<label class="layout-label"><span>'+(state.variant==='C'?'Vistas visibles':'Distribución')+'</span><select id="layout" class="layout-select" aria-label="Distribución de las vistas">'+[['1x1','1 × 1 · 1 vista'],['1x2','1 × 2 · 2 vistas'],['2x2','2 × 2 · 4 vistas'],['2x3','2 × 3 · 6 vistas']].map(([v,label])=>'<option value="'+v+'" '+(b.layout===v?'selected':'')+'>'+(state.variant==='C'?label.split(' · ')[1]:label)+'</option>').join('')+'</select></label>'+
+        '<button class="icon-btn" data-action="export" aria-label="Descargar CSV de las vistas" title="Descargar CSV de las vistas">'+icon('download')+'</button></div></div>'+
+        '<div class="panel-grid" style="--cols:'+cols+'">'+shown.map(renderPanel).join('')+(shown.length<capacity?'<button class="add-panel" data-action="add-panel">'+icon('plus')+'<span>Agregar una vista</span><small>Elige un componente y sus series</small></button>':'')+'</div>'+
+        '<div class="board-footer"><span>'+icon('help')+' '+(state.results?'Línea discontinua: antes · línea continua: después':'Edita los valores base desde las tablas. Ejecuta la simulación para comparar.')+'</span><span>Datos inventados · '+hours()+' puntos por serie · cambios solo en esta sesión'+(remaining?' · '+remaining+' vistas ocultas por la distribución':'')+'</span></div></div>';
+    }
+    function panelTitle(p,c){return p.title|| (p.series.length===1?c.series.find(s=>s.key===p.series[0]).name:p.series.length===c.series.length?'Todas las series':'Comparación de series');}
+    function renderPanel(p){
+      const c=componentById(p.component),series=p.series.map(key=>c.series.find(s=>s.key===key));
+      return '<article class="panel" data-panel="'+p.id+'"><header class="panel-head"><div style="min-width:0"><div class="panel-title-line"><span class="component-icon">'+icon(c.type)+'</span><h3 title="'+esc(panelTitle(p,c))+'">'+esc(panelTitle(p,c))+'</h3></div><p class="panel-component">'+esc(c.name)+' · '+(c.source.includes('hidráulica')?'Serie hidráulica':c.type==='manual'?'Manual':c.name===typeNames[c.type]?esc(c.detail):typeNames[c.type])+'</p></div>'+
+        '<div class="panel-tools"><div class="mode-toggle" role="group" aria-label="Formato de '+esc(c.name)+'">'+['chart','table'].map(mode=>'<button data-action="mode" data-id="'+p.id+'" data-mode="'+mode+'" aria-label="Ver '+(mode==='chart'?'gráfico':'tabla')+' de '+esc(c.name)+'" title="'+(mode==='chart'?'Gráfico':'Tabla editable')+'" class="'+(p.mode===mode?'active':'')+'" aria-pressed="'+(p.mode===mode)+'">'+icon(mode)+'</button>').join('')+'</div><button class="icon-btn" data-action="configure" data-id="'+p.id+'" title="Configurar vista" aria-label="Configurar vista de '+esc(c.name)+'">'+icon('settings')+'</button></div></header>'+
+        '<div class="panel-main"><div class="series-legend">'+series.map((s,j)=>'<span class="legend-item"><span class="legend-dot" style="--color:'+colors[j%colors.length]+'"></span>'+esc(s.name)+' <span style="color:#99a8ae">('+esc(s.unit)+')</span></span>').join('')+'</div>'+
+        (p.mode==='table'?renderTable(p,c,series):renderCharts(p,c,series))+'</div><footer class="panel-foot"><span>'+dateText(state.start)+(state.start!==state.end?' – '+dateText(state.end):'')+' · 1 h</span><span>'+(p.mode==='table'?(state.compare==='after'?'Resultados de solo lectura':'Valores «Antes» editables'):(state.compare!=='after'?'<i class="line-key before"></i> Antes':'')+(state.compare!=='before'?' <i class="line-key"></i> Después':''))+'</span></footer></article>';
+    }
+    function renderCharts(p,c,series){
+      const units=[...new Set(series.map(s=>s.unit))];
+      return '<div class="chart-area '+(units.length>1?'multi':'')+'">'+units.map(unit=>chartSvg(p,c,series.filter(s=>s.unit===unit),series,unit)).join('')+'</div>';
+    }
+    function chartSvg(p,c,series,allSeries,unit){
+      const n=hours(),before=state.compare!=='after',after=state.compare!=='before'&&!!state.results,values=[];
+      series.forEach(s=>{for(let i=0;i<n;i++){if(before)values.push(value(c,s,i));if(after)values.push(value(c,s,i,true));}});
+      let min=Math.min(...values),max=Math.max(...values);const span=Math.max(max-min,Math.abs(max)*.05,1);
+      min=unit==='%'?0:Math.max(0,min-span*.13);max=unit==='%'?100:max+span*.16;
+      if(max<=min)max=min+1;
+      const left=48,right=578,top=23,bottom=139;
+      const x=i=>left+i/(n-1)*(right-left),y=v=>bottom-(v-min)/(max-min)*(bottom-top);
+      let svg='<svg class="chart" viewBox="0 0 600 163" preserveAspectRatio="none" role="img" aria-label="'+esc(c.name+' · '+series.map(s=>s.name).join(', ')+' en '+unit)+'"><text class="unit" x="48" y="13">'+esc(unit)+'</text>';
+      for(let tick=0;tick<4;tick++){const v=min+(max-min)*tick/3,yy=y(v);svg+='<line class="gridline" x1="'+left+'" y1="'+yy+'" x2="'+right+'" y2="'+yy+'"/><text x="39" y="'+(yy+3)+'" text-anchor="end">'+fmt(v,max-min<10?1:0)+'</text>';}
+      [0,Math.round((n-1)*.25),Math.round((n-1)*.5),Math.round((n-1)*.75),n-1].forEach(i=>svg+='<text x="'+x(i)+'" y="157" text-anchor="middle">'+(n>24?dateText(stamp(i).toISOString().slice(0,10))+' '+timeText(i):timeText(i))+'</text>');
+      series.forEach(s=>{
+        const color=colors[allSeries.indexOf(s)%colors.length];
+        const path=after=>Array.from({length:n},(_,i)=>(i?'L':'M')+x(i).toFixed(2)+','+y(value(c,s,i,after)).toFixed(2)).join(' ');
+        if(series.length===1){const area=path(after)+' L'+right+','+bottom+' L'+left+','+bottom+' Z';svg+='<path d="'+area+'" fill="'+color+'" opacity=".06"/>';}
+        if(before)svg+='<path class="trace" d="'+path(false)+'" stroke="'+color+'" stroke-dasharray="5 4" opacity="'+(after?'.42':'.85')+'"/>';
+        if(after)svg+='<path class="trace" d="'+path(true)+'" stroke="'+color+'"/>';
+      });
+      svg+='<line class="chart-guide" x1="48" x2="48" y1="'+top+'" y2="'+bottom+'"/><rect class="chart-hit" data-chart="'+p.id+'" data-unit="'+esc(unit)+'" x="'+left+'" y="'+top+'" width="'+(right-left)+'" height="'+(bottom-top)+'"/></svg>';
+      return '<div class="chart-group">'+svg+'</div>';
+    }
+    function renderTable(p,c,series){
+      const before=state.compare!=='after',after=state.compare!=='before'&&!!state.results;
+      let html='<div class="data-scroll"><table><thead><tr><th>Hora</th>';
+      series.forEach(s=>{if(before)html+='<th>'+esc(s.name)+' · Antes ('+esc(s.unit)+')</th>';if(after)html+='<th>'+esc(s.name)+' · Después ('+esc(s.unit)+')</th>';if(before&&after)html+='<th>Δ '+esc(s.unit)+'</th>';});
+      html+='</tr></thead><tbody>';
+      for(let i=0;i<hours();i++){
+        html+='<tr><td>'+fullTime(i)+'</td>';
+        series.forEach(s=>{
+          const a=value(c,s,i),b=value(c,s,i,true);
+          if(before)html+='<td><input class="table-input" type="number" step="0.1" '+(s.unit==='%'?'min="0" max="100"':s.unit!=='°C'?'min="0"':'')+' value="'+a+'" data-edit-component="'+c.id+'" data-edit-series="'+s.key+'" data-index="'+i+'" aria-label="'+esc(c.name+' · '+s.name+' · '+fullTime(i)+' · Antes')+'"></td>';
+          if(after)html+='<td class="after-value">'+fmt(b)+'</td>';
+          if(before&&after)html+='<td class="delta">'+(b-a>0?'+':'')+fmt(b-a)+'</td>';
+        });html+='</tr>';
+      }return html+'</tbody></table></div>';
+    }
+    const dialog=document.getElementById('dialog');
+    function openDialog(title,description,body,footer){
+      dialog.innerHTML='<form id="modal-form"><header class="dialog-head"><div><h2>'+title+'</h2><p>'+description+'</p></div><button type="button" class="icon-btn" data-action="close" aria-label="Cerrar">'+icon('close')+'</button></header><div class="dialog-body">'+body+'</div>'+(footer?'<footer class="dialog-foot">'+footer+'</footer>':'')+'</form>';
+      dialog.querySelector('form').addEventListener('submit',e=>e.preventDefault());
+      if(!dialog.open)dialog.showModal();
+    }
+    function seriesOptions(c,selected){
+      return c.series.map(s=>'<label class="check-option"><input type="checkbox" name="series" value="'+s.key+'" '+(selected.includes(s.key)?'checked':'')+'>'+esc(s.name)+'<small>'+esc(s.unit)+'</small></label>').join('');
+    }
+    function configurePanel(id){
+      const existing=id?panelById(id):null,c=componentById(existing?existing.component:state.active==='overview'?'bess':state.active);
+      openDialog(existing?'Configurar vista':'Agregar una vista','Elige qué componente y qué series quieres ver en este panel.',
+        '<label class="form-field">Título de la vista <input id="panel-title" maxlength="70" placeholder="Automático según las series" value="'+esc(existing?.title||'')+'"></label>'+
+        '<label class="form-field">Componente<select id="panel-component">'+components.map(item=>'<option value="'+item.id+'" '+(item.id===c.id?'selected':'')+'>'+esc(item.name)+' · '+typeNames[item.type]+'</option>').join('')+'</select></label>'+
+        '<div class="form-field">Series del componente <div class="series-options" id="series-options">'+seriesOptions(c,existing?existing.series:[c.series[0].key])+'</div></div>'+
+        '<label class="form-field">Mostrar como<select id="panel-mode"><option value="chart">Gráfico</option><option value="table" '+(existing?.mode==='table'?'selected':'')+'>Tabla editable</option></select></label>'+
+        '<div class="dialog-hint">Puedes combinar varias series. Las unidades diferentes se muestran en gráficos separados para facilitar la lectura.</div><div class="form-error" id="form-error" role="alert"></div>',
+        (existing?'<button class="btn danger" type="button" id="remove-panel">Quitar vista</button>':'')+'<button class="btn" type="button" data-action="close">Cancelar</button><button class="btn primary" type="submit">Aplicar vista</button>');
+      document.getElementById('panel-component').onchange=e=>{const next=componentById(e.target.value);document.getElementById('series-options').innerHTML=seriesOptions(next,[next.series[0].key]);};
+      if(existing)document.getElementById('remove-panel').onclick=()=>{board().panels=board().panels.filter(p=>p.id!==existing.id);dialog.close();render();toast('Vista quitada. Puedes volver a agregarla.');};
+      dialog.querySelector('form').onsubmit=e=>{
+        e.preventDefault();const selected=[...dialog.querySelectorAll('input[name="series"]:checked')].map(i=>i.value);
+        if(!selected.length){document.getElementById('form-error').textContent='Selecciona al menos una serie.';return;}
+        const cid=document.getElementById('panel-component').value,mode=document.getElementById('panel-mode').value,title=document.getElementById('panel-title').value.trim();
+        if(existing)Object.assign(existing,{component:cid,series:selected,mode,title});
+        else board().panels.push({...panel(cid,selected,mode),title});
+        dialog.close();render();toast('Vista actualizada.');
+      };
+    }
+    function componentForm(id){
+      const c=id?componentById(id):null;
+      openDialog(c?'Editar componente':'Agregar componente',c?'Ajusta el nombre con el que aparece en la mesa.':'Los componentes nuevos tendrán su propia pestaña y series de ejemplo.',
+        '<label class="form-field">Nombre<input id="component-name" required maxlength="48" value="'+esc(c?.name||'')+'" placeholder="Ej. Central Río Claro"></label>'+
+        (c?'<div class="dialog-hint">'+typeNames[c.type]+' · '+c.series.length+' series<br>Los valores se editan en las tablas de cada vista.</div>':
+        '<label class="form-field">Tipo de componente<select id="component-type">'+Object.entries(typeNames).map(([type,name])=>'<option value="'+type+'" '+(type==='hydro'?'selected':'')+'>'+name+'</option>').join('')+'</select></label>'+
+        '<div id="manual-fields" hidden><div class="form-field" style="margin-bottom:14px">Nombre de la serie<input id="manual-series" maxlength="40" value="Serie manual"></div><div class="form-row"><label class="form-field">Unidad<select id="manual-unit"><option>MW</option><option>MWh</option><option>m³/s</option><option>hm³</option><option>%</option><option>m</option><option>°C</option><option>u</option></select></label><label class="form-field">Valor base<input id="manual-base" type="number" step="0.1" min="0" value="40"></label></div></div>'+
+        '<div class="dialog-hint">Centrales y embalses incluyen series hidráulicas ficticias. El tipo manual permite definir una serie propia y editarla hora a hora.</div>')+
+        '<div class="form-error" id="form-error" role="alert"></div>',
+        '<button class="btn" type="button" data-action="close">Cancelar</button><button class="btn primary" type="submit">'+(c?'Guardar nombre':'Agregar a la mesa')+'</button>');
+      if(!c)document.getElementById('component-type').onchange=e=>{document.getElementById('manual-fields').hidden=e.target.value!=='manual';};
+      dialog.querySelector('form').onsubmit=e=>{
+        e.preventDefault();const name=document.getElementById('component-name').value.trim();
+        if(!name||components.some(other=>other.id!==id&&other.name.toLowerCase()===name.toLowerCase())){document.getElementById('form-error').textContent='Escribe un nombre único para este componente.';return;}
+        if(c)c.name=name;
+        else{
+          const type=document.getElementById('component-type').value,newId='manual-'+Date.now(),template=components.find(item=>item.type===type),base=Number(document.getElementById('manual-base').value),unit=document.getElementById('manual-unit').value;
+          const seriesName=document.getElementById('manual-series').value.trim();
+          if(type==='manual'&&(!seriesName||!Number.isFinite(base)||base<0||(unit==='%'&&base>89))){document.getElementById('form-error').textContent='Completa la serie con un valor base válido (0 a 89 para un porcentaje con variación).';return;}
+          const series=type==='manual'?[{key:'custom',name:seriesName,unit}]:template.series.map(s=>({...s}));
+          const item={id:newId,name,type,source:'Agregado manualmente',detail:'Componente de ejemplo',series,base};
+          components.push(item);boards[newId]={layout:'2x2',panels:series.map(s=>panel(newId,[s.key],type==='manual'?'table':'chart'))};state.active=newId;invalidate('Componente agregado. Simula de nuevo para incluir sus series.');
+        }
+        dialog.close();render();toast(c?'Nombre actualizado.':'Componente agregado con sus series de ejemplo.');
+      };
+    }
+    function showHistory(){
+      openDialog('Simulaciones de esta sesión','Las ejecuciones de este prototipo son ficticias y se reinician al recargar.',
+        state.history.length?state.history.slice().reverse().map(r=>'<div class="history-row"><div><strong>Simulación '+String(r.number).padStart(2,'0')+'</strong><small>'+dateText(r.start)+' – '+dateText(r.end)+' · '+r.componentCount+' componentes · '+r.points+' intervalos</small></div><span style="color:#138779;font-size:10px">'+(state.run?.number===r.number?'En pantalla':'Completada')+'</span></div>').join(''):'<div class="dialog-hint">Todavía no has ejecutado una simulación. Elige un período y pulsa «Simular escenario».</div>',
+        '<button class="btn primary" type="button" data-action="close">Volver a la mesa</button>');
+    }
+    function showCatalog(){
+      openDialog('Componentes del escenario','Una pestaña por componente. Las vistas pueden combinar cualquier componente de esta lista.',
+        components.map(c=>'<div class="catalog-row"><span class="component-icon">'+icon(c.type)+'</span><div>'+esc(c.name)+'<small>'+typeNames[c.type]+' · '+c.series.length+' series · '+esc(c.source)+'</small></div><button type="button" class="btn" data-action="open-component" data-id="'+c.id+'">Ver</button></div>').join(''),
+        '<button class="btn primary" type="button" data-action="add-component">'+icon('plus')+' Agregar componente</button>');
+    }
+    function showHelp(){
+      openDialog('Prueba tu mesa de trabajo','La pregunta a validar: ¿puedes preparar y comparar el escenario sin salir de esta pantalla?',
+        '<ol class="help-list"><li>Elige una pestaña o usa <b>Vista general</b> para mezclar componentes.</li><li>Escoge cuántas vistas quieres: 1, 2, 4 o 6.</li><li>Usa el lápiz para elegir componente y una o varias series.</li><li>Cambia a tabla para editar los valores <b>Antes</b>.</li><li>Selecciona las fechas y pulsa <b>Simular escenario</b>.</li><li>Compara los valores antes y después en todas las pestañas.</li></ol>'+
+        '<div class="dialog-hint"><b>Solo una prueba de concepto.</b> Los nombres, series y resultados son inventados. La simulación aplica variaciones ilustrativas; no resuelve un modelo hidráulico ni económico. No hay backend ni persistencia. Al recargar, la mesa vuelve a su estado inicial.</div>'+
+        '<p style="font-size:11px;color:#6e8188;line-height:1.7">La barra inferior permite explorar tres organizaciones: <b>A · Paneles</b>, <b>B · Explorador lateral</b> y <b>C · Series en filas</b>. Las vistas y los datos se mantienen al cambiar de diseño.</p>',
+        '<button class="btn primary" type="button" data-action="close">Empezar a explorar</button>');
+    }
+    function simulate(){
+      if(state.running)return;state.running=true;render();
+      const label=document.getElementById('run-status'),progress=document.getElementById('run-progress');
+      label.textContent='Preparando series de ejemplo…';progress.style.width='18%';
+      setTimeout(()=>{label.textContent='Calculando resultados ficticios…';progress.style.width='63%';},600);
+      setTimeout(()=>{label.textContent='Actualizando las vistas…';progress.style.width='91%';},1250);
+      setTimeout(()=>{
+        const results={};components.forEach(c=>{results[c.id]={};c.series.forEach(s=>{
+          results[c.id][s.key]=Array.from({length:hours()},(_,i)=>{
+            const v=baseValue(c,s,i),h=i%24,peak=Math.exp(-Math.pow((h-19)/3,2));let next=v;
+            if(c.type==='battery')next=s.key==='charge'?v*1.14:s.key==='discharge'?v*(.91+.34*peak):Math.min(95,v+6*Math.sin((h-3)/24*Math.PI*2));
+            else if(c.type==='demand')next=s.key==='load'?v:v*(.83-.08*peak);
+            else if(c.type==='sun')next=s.key==='available'?v:s.key==='used'?v*1.09:v*.45;
+            else if(c.type==='hydro')next=s.key==='inflow'?v:v*(.94+.20*peak);
+            else if(c.type==='reservoir')next=s.key==='volume'?v+i*.025:s.key==='level'?v+i*.006:s.key==='inflow'?v:v*(.93+.09*peak);
+            else next=v*(.92+.05*Math.sin(h/4));
+            return Math.round((s.unit==='°C'?next:Math.max(0,next))*10)/10;
+          });
+        });});
+        state.results=results;state.running=false;state.dirty=false;state.compare='compare';
+        state.run={number:state.history.length+1,start:state.start,end:state.end,componentCount:components.length,points:hours()};
+        state.history.push({...state.run});render();toast('Simulación de ejemplo completada. Ya puedes comparar antes y después.');
+      },1900);
+    }
+    function setVariant(step){
+      const variants=['A','B','C'];state.variant=variants[(variants.indexOf(state.variant)+step+3)%3];
+      const url=new URL(location.href);url.searchParams.set('variant',state.variant);
+      try{history.replaceState(null,'',url);}catch{/* Algunos navegadores limitan replaceState en file://. */}
+      render();document.getElementById('tooltip').hidden=true;
+    }
+    function exportCsv(){
+      const b=board(),capacity=b.layout.split('x').map(Number).reduce((a,b)=>a*b),lines=[['Componente','Serie','Unidad','Fecha UTC de ejemplo','Antes','Después','Diferencia']];
+      b.panels.slice(0,capacity).forEach(p=>{const c=componentById(p.component);p.series.forEach(key=>{const s=c.series.find(s=>s.key===key);for(let i=0;i<hours();i++){const before=value(c,s,i),after=state.results?value(c,s,i,true):null;lines.push([c.name,s.name,s.unit,stamp(i).toISOString().replace('T',' ').slice(0,16),before,after??'',after===null?'':Math.round((after-before)*10)/10]);}});});
+      const csv='\ufeff'+lines.map(row=>row.map(cell=>'"'+String(cell).replaceAll('"','""')+'"').join(';')).join('\r\n');
+      const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download='prototipo-series-'+state.start+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('CSV de ejemplo descargado.');
+    }
+    document.addEventListener('click',e=>{
+      const button=e.target.closest('[data-action]');if(!button)return;
+      const a=button.dataset.action;if(state.running&&a!=='close'){toast('La simulación de ejemplo está en curso…');return;}
+      document.getElementById('tooltip').hidden=true;
+      if(a==='tab'){state.active=button.dataset.id;render();document.getElementById('tab-'+state.active)?.focus({preventScroll:true});}
+      else if(a==='overview'){state.active='overview';render();}
+      else if(a==='compare'){state.compare=button.dataset.value;render();}
+      else if(a==='mode'){const p=panelById(button.dataset.id);p.mode=button.dataset.mode;render();}
+      else if(a==='configure')configurePanel(button.dataset.id);
+      else if(a==='add-panel')configurePanel();
+      else if(a==='add-component')componentForm();
+      else if(a==='edit-component')componentForm(button.dataset.id);
+      else if(a==='open-component'){state.active=button.dataset.id;dialog.close();render();}
+      else if(a==='close')dialog.close();
+      else if(a==='run')simulate();
+      else if(a==='history')showHistory();
+      else if(a==='help')showHelp();
+      else if(a==='catalog')showCatalog();
+      else if(a==='prev-variant')setVariant(-1);
+      else if(a==='next-variant')setVariant(1);
+      else if(a==='export')exportCsv();
+    });
+    document.addEventListener('change',e=>{
+      const target=e.target;
+      if(state.running){render();return;}
+      if(target.id==='layout'){board().layout=target.value;render();}
+      if(target.id==='date-start'||target.id==='date-end'){
+        let start=document.getElementById('date-start').value,end=document.getElementById('date-end').value;
+        if(start&&end&&target.id==='date-start'&&start>end)end=start;
+        const days=(Date.parse(end+'T00:00:00Z')-Date.parse(start+'T00:00:00Z'))/86400000+1;
+        if(!start||!end||!Number.isFinite(days)||days<1||days>7){toast('Selecciona un período de 1 a 7 días, con la fecha final igual o posterior a la inicial.');render();return;}
+        state.start=start;state.end=end;invalidate('Período actualizado. Ejecuta una nueva simulación para comparar.');render();
+      }
+      if(target.matches('[data-edit-component]')){
+        const c=componentById(target.dataset.editComponent),s=c.series.find(s=>s.key===target.dataset.editSeries),i=Number(target.dataset.index),next=Number(target.value);
+        if(target.value===''||!Number.isFinite(next)||!target.checkValidity()){toast('Introduce un número válido'+(s.unit==='%'?' entre 0 y 100.':s.unit==='°C'?'.':' mayor o igual a cero.'));target.value=baseValue(c,s,i);return;}
+        state.edits.set(editKey(c,s,i),Math.round(next*10)/10);invalidate();
+        const scrolls=[...document.querySelectorAll('.data-scroll')].map(el=>({id:el.closest('[data-panel]').dataset.panel,top:el.scrollTop,left:el.scrollLeft}));
+        render();scrolls.forEach(pos=>{const el=document.querySelector('[data-panel="'+pos.id+'"] .data-scroll');if(el){el.scrollTop=pos.top;el.scrollLeft=pos.left;}});
+        const input=document.querySelector('[data-edit-component="'+c.id+'"][data-edit-series="'+s.key+'"][data-index="'+i+'"]');input?.focus({preventScroll:true});
+      }
+    });
+    document.addEventListener('keydown',e=>{
+      if(dialog.open||state.running||e.target.closest('input,select,textarea,[contenteditable="true"]'))return;
+      if(e.target.closest('[role="tab"]')&&(e.key==='ArrowLeft'||e.key==='ArrowRight')){
+        e.preventDefault();const ids=['overview',...components.map(c=>c.id)];state.active=ids[(ids.indexOf(state.active)+(e.key==='ArrowRight'?1:-1)+ids.length)%ids.length];render();document.getElementById('tab-'+state.active).focus();
+      }else if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();setVariant(e.key==='ArrowRight'?1:-1);}
+    });
+    document.addEventListener('pointermove',e=>{
+      const hit=e.target.closest('.chart-hit'),tip=document.getElementById('tooltip');if(!hit){tip.hidden=true;return;}
+      const p=panelById(hit.dataset.chart),c=componentById(p.component),series=p.series.map(key=>c.series.find(s=>s.key===key)).filter(s=>s.unit===hit.dataset.unit),rect=hit.getBoundingClientRect();
+      const i=Math.max(0,Math.min(hours()-1,Math.round((e.clientX-rect.left)/rect.width*(hours()-1))));
+      const x=48+i/(hours()-1)*530,guide=hit.parentNode.querySelector('.chart-guide');guide.setAttribute('x1',x);guide.setAttribute('x2',x);
+      tip.innerHTML='<b>'+esc(c.name)+' · '+fullTime(i)+'</b>'+series.map(s=>'<div>'+esc(s.name)+' ('+esc(s.unit)+')</div><div class="tooltip-row">'+(state.compare!=='after'?'<span>Antes: '+fmt(value(c,s,i))+'</span>':'')+(state.compare!=='before'?'<span>Después: '+fmt(value(c,s,i,true))+'</span>':'')+'</div>').join('');
+      tip.hidden=false;tip.style.left=Math.max(8,Math.min(e.clientX+14,window.innerWidth-tip.offsetWidth-12))+'px';tip.style.top=Math.max(8,Math.min(e.clientY+14,window.innerHeight-tip.offsetHeight-12))+'px';
+    });
+    window.addEventListener('blur',()=>document.getElementById('tooltip').hidden=true);
+    window.addEventListener('resize',fitGrid);
+    render();
+  </script>
+</body>
+</html>
