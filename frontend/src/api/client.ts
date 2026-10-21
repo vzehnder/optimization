@@ -1654,9 +1654,9 @@ function requestHeaders(init?: RequestInit): Headers {
 }
 
 async function errorFromResponse(response: Response): Promise<ApiError> {
-  const isJson = response.headers
-    .get("content-type")
-    ?.includes("application/json");
+  const contentType = response.headers.get("content-type") ?? "";
+  const isJson =
+    contentType.includes("application/json") || contentType.includes("+json");
   let body: StructuredErrorBody = {};
   if (isJson) {
     try {

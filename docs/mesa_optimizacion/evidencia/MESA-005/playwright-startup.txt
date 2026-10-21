@@ -1,0 +1,14 @@
+Error: Smoke server exited with 1
+
+   at global-setup.ts:39
+
+  37 |   while (Date.now() < deadline) {
+  38 |     if (server.exitCode !== null)
+> 39 |       throw new Error(`Smoke server exited with ${server.exitCode}`);
+     |             ^
+  40 |     try {
+  41 |       const response = await fetch(serverUrl);
+  42 |       if (response.ok) {
+    at waitForServer (C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\frontend\e2e\global-setup.ts:39:13)
+    at startSmokeServer (C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\frontend\e2e\global-setup.ts:73:5)
+

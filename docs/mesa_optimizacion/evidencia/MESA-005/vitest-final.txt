@@ -1,0 +1,52 @@
+
+> bess-react-ui@0.1.0 test
+> vitest run --maxWorkers=1
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ❯ src/ReportExperience.test.tsx (4 tests | 1 failed) 2331ms
+   × leads from an unconfigured report to the activation field and back to the chosen result 413ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ReportExperience.test.tsx > leads from an unconfigured report to the activation field and back to the chosen result
+Error: expect(element).toHaveFocus()
+
+Expected element with focus:
+  <select
+  id="portal-status"
+>
+  <option
+    value="draft"
+  >
+    Borrador
+  </option>
+  <option
+    value="active"
+  >
+    Activa
+  </option>
+</select>
+Received element with focus:
+  <h1
+  tabindex="-1"
+>
+  Planta Norte
+</h1>
+ ❯ src/ReportExperience.test.tsx:282:50
+    280|     }),
+    281|   );
+    282|   expect(await screen.findByLabelText("Estado")).toHaveFocus();
+       |                                                  ^
+    283|   expect(screen.getByLabelText("Estado")).toHaveValue("draft");
+    284|   await user.click(
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 36 passed (37)
+      Tests  1 failed | 335 passed (336)
+   Start at  20:16:41
+   Duration  265.57s (transform 3.36s, setup 10.60s, import 19.18s, tests 167.51s, environment 56.91s)
+

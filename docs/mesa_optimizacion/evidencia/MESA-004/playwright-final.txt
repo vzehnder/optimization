@@ -1,0 +1,21 @@
+﻿
+Running 13 tests using 1 worker
+
+
+
+(node:65104) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[1/13] e2e\optimization-mesa.spec.ts:32:1 › BESS y renovables separan parámetros, entradas y salidas ausentes
+[2/13] e2e\optimization-mesa.spec.ts:110:1 › seleccionar un run muestra descarga y energía por activo y conserva la consulta al recargar
+[3/13] e2e\optimization-mesa.spec.ts:178:1 › cambiar de run conserva una vista que todavía no se ha guardado
+[4/13] e2e\optimization-mesa.spec.ts:205:1 › cuatro vistas conservan títulos, series y modos al reducir y recargar
+[5/13] e2e\optimization-mesa.spec.ts:248:1 › dos pestañas personalizadas conservan su orden y distribución usando teclado
+[6/13] e2e\optimization-mesa.spec.ts:323:1 › un conflicto conserva la edición local y permite cargar la mesa guardada
+[7/13] e2e\optimization-mesa.spec.ts:365:1 › la matriz 2x2 cabe a 1440x900 y se adapta a 390 sin desbordar
+[8/13] e2e\optimization-mesa.spec.ts:453:1 › series de unidades distintas conservan selección y escalas separadas
+[9/13] e2e\optimization-mesa.spec.ts:528:1 › un componente retirado conserva identidad y se reconfigura sin reasignarse por nombre
+[10/13] e2e\optimization-mesa.spec.ts:580:1 › los errores de configuración permiten reintentar sin perder la edición
+[11/13] e2e\optimization-mesa.spec.ts:620:1 › mesa de optimización: demanda real en gráfico, tabla y recarga
+[12/13] e2e\optimization-mesa.spec.ts:709:1 › mesa de optimización: carga, error con reintento y caso vacío
+[13/13] e2e\optimization-mesa.spec.ts:767:1 › mesa de optimización: un período fuera de cobertura no muestra una curva parcial
+  13 passed (29.4s)

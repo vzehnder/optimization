@@ -473,11 +473,15 @@ class ResultLineageIndexingTests(unittest.TestCase):
             artifact_root = Path(temp_dir) / "artifacts"
             store = AnalystStore("sqlite:///:memory:")
             try:
+                project = store.create_project(name="TS4 Lineage Project")
+                scenario = store.create_scenario(project_id=project["id"], name="Lineage case")
+                case = store.get_or_create_case_for_scenario(scenario["id"])
+                variant = store.create_case_input_variant(case_id=case["id"], display_name="Dry year")
                 generation_metadata = {
                     "kind": "case_input_variant",
                     "topology": {"content_hash": "sha256:topology-v1"},
                     "parameters": {"content_hash": "sha256:parameters-v1"},
-                    "input_variant": {"id": 7, "display_name": "Dry year"},
+                    "input_variant": {"id": variant["id"], "display_name": "Dry year"},
                     "date_range": {
                         "start": "2026-01-01T00:00:00",
                         "end": "2026-01-01T01:00:00",
@@ -499,9 +503,12 @@ class ResultLineageIndexingTests(unittest.TestCase):
                         }
                     ],
                 }
-                run = create_completed_run_with_core_dispatch_artifacts(
-                    store, artifact_root, generation_metadata=generation_metadata
+                version = store.create_scenario_version(
+                    scenario_id=scenario["id"],
+                    system_case_json={"schema_version": "bess_system_dispatch.v1", "case_name": "lineage_case", "nodes": [], "time_series": []},
+                    validation_payload={"status": "ok"}, generation_metadata=generation_metadata,
                 )
+                run = create_completed_run_with_core_dispatch_artifacts(store, artifact_root, scenario_version=version)
                 scenario_version = store.get_scenario_version(
                     int(run["scenario_version_id"]), include_document=False
                 )
@@ -536,7 +543,7 @@ class ResultLineageIndexingTests(unittest.TestCase):
                     },
                     "topology_hash": scenario_metadata["topology"]["content_hash"],
                     "parameters_hash": scenario_metadata["parameters"]["content_hash"],
-                    "input_variant": {"id": 7, "display_name": "Dry year"},
+                    "input_variant": {"id": variant["id"], "display_name": "Dry year"},
                     "date_range": {
                         "start": "2026-01-01T00:00:00",
                         "end": "2026-01-01T01:00:00",

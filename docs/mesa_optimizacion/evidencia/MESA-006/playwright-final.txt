@@ -1,0 +1,28 @@
+
+Running 20 tests using 1 worker
+
+
+(node:61816) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1/20] e2e\optimization-mesa.spec.ts:33:1 › Edición de demanda guarda una revisión y la recupera en tabla y gráfico
+[2/20] e2e\optimization-mesa.spec.ts:87:1 › Edición pendiente advierte al cerrar y descartar no publica
+[3/20] e2e\optimization-mesa.spec.ts:129:1 › Conflicto de entrada conserva el borrador y permite comparar la revisión actual
+[4/20] e2e\optimization-mesa.spec.ts:192:1 › Edición valida números y protege la navegación a otro contexto
+[5/20] e2e\optimization-mesa.spec.ts:239:1 › Una pérdida de conexión conserva la edición y permite reintentar
+[6/20] e2e\optimization-mesa.spec.ts:272:1 › Hidráulica conserva centrales homónimas y consulta embalse con escalas separadas
+[7/20] e2e\optimization-mesa.spec.ts:375:1 › Hidráulica muestra pertenencia de unidades y conexiones de tramos en sus vistas
+[8/20] e2e\optimization-mesa.spec.ts:422:1 › BESS y renovables separan parámetros, entradas y salidas ausentes
+[9/20] e2e\optimization-mesa.spec.ts:500:1 › seleccionar un run muestra descarga y energía por activo y conserva la consulta al recargar
+[10/20] e2e\optimization-mesa.spec.ts:568:1 › cambiar de run conserva una vista que todavía no se ha guardado
+[11/20] e2e\optimization-mesa.spec.ts:595:1 › cuatro vistas conservan títulos, series y modos al reducir y recargar
+[12/20] e2e\optimization-mesa.spec.ts:638:1 › dos pestañas personalizadas conservan su orden y distribución usando teclado
+[13/20] e2e\optimization-mesa.spec.ts:713:1 › un conflicto conserva la edición local y permite cargar la mesa guardada
+[14/20] e2e\optimization-mesa.spec.ts:755:1 › la matriz 2x2 cabe a 1440x900 y se adapta a 390 sin desbordar
+[15/20] e2e\optimization-mesa.spec.ts:843:1 › series de unidades distintas conservan selección y escalas separadas
+[16/20] e2e\optimization-mesa.spec.ts:918:1 › un componente retirado conserva identidad y se reconfigura sin reasignarse por nombre
+[17/20] e2e\optimization-mesa.spec.ts:970:1 › los errores de configuración permiten reintentar sin perder la edición
+[18/20] e2e\optimization-mesa.spec.ts:1010:1 › mesa de optimización: demanda real en gráfico, tabla y recarga
+[19/20] e2e\optimization-mesa.spec.ts:1099:1 › mesa de optimización: carga, error con reintento y caso vacío
+[20/20] e2e\optimization-mesa.spec.ts:1157:1 › mesa de optimización: un período fuera de cobertura no muestra una curva parcial
+  20 passed (40.0s)

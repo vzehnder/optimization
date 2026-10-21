@@ -1,0 +1,4 @@
+Command: npx.cmd prettier --check src/MesaExecution.tsx src/OptimizationMesa.tsx src/optimizationMesa.css e2e/optimization-mesa.spec.ts src/api/schema.ts openapi.json
+
+Checking formatting...
+All matched files use Prettier code style!

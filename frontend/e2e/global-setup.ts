@@ -3,7 +3,6 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 const repoRoot = resolve("..");
-const serverUrl = "http://127.0.0.1:8123/api/auth/smoke-token";
 const smokeToken = `${process.pid}-${Date.now()}`;
 
 function pythonExecutable(): string {
@@ -30,7 +29,10 @@ async function stopServer(server: ChildProcess): Promise<void> {
   server.kill("SIGTERM");
 }
 
-async function waitForServer(server: ChildProcess): Promise<void> {
+async function waitForServer(
+  server: ChildProcess,
+  serverUrl: string,
+): Promise<void> {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (server.exitCode !== null)
@@ -56,33 +58,34 @@ async function waitForServer(server: ChildProcess): Promise<void> {
   throw new Error(`Smoke server did not become ready at ${serverUrl}`);
 }
 
-export default async function globalSetup() {
-  const server = spawn(
-    pythonExecutable(),
-    [
-      resolve(
-        repoRoot,
-        process.env.RULE_ACCEPTANCE_SERVER
-          ? "scripts/run_rule_acceptance_app.py"
-          : "scripts/run_react_smoke_app.py",
-      ),
-    ],
-    {
-      cwd: repoRoot,
-      env: {
-        ...process.env,
-        REACT_SMOKE_PORT: "8123",
-        REACT_SMOKE_TOKEN: smokeToken,
-      },
-      stdio: "ignore",
-      windowsHide: true,
+export async function startSmokeServer(script: string, port: number) {
+  const server = spawn(pythonExecutable(), [resolve(repoRoot, script)], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      REACT_SMOKE_PORT: String(port),
+      REACT_SMOKE_TOKEN: smokeToken,
     },
-  );
+    stdio: "ignore",
+    windowsHide: true,
+  });
   try {
-    await waitForServer(server);
+    await waitForServer(
+      server,
+      `http://127.0.0.1:${port}/api/auth/smoke-token`,
+    );
   } catch (error) {
     await stopServer(server);
     throw error;
   }
   return async () => stopServer(server);
+}
+
+export default async function globalSetup() {
+  return startSmokeServer(
+    process.env.RULE_ACCEPTANCE_SERVER
+      ? "scripts/run_rule_acceptance_app.py"
+      : "scripts/run_react_smoke_app.py",
+    8123,
+  );
 }

@@ -1,0 +1,5 @@
+Command: .venv\Scripts\python.exe .tmp\verify_mesa006_docs.py
+
+28 Markdown; 292 local links resolved; 14 consistent tickets; no dependency cycles.
+Statuses: {'Done': 8, 'Todo': 6}
+Two original PNGs (1440x900) and frozen HTML: sizes and SHA256 unchanged.

@@ -1,9 +1,9 @@
 # MESA-005 · Consultar centrales, embalses y otros objetos hidráulicos
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
-Assignee: —
+Assignee: Codex
 Source: [Plan de implementación](../plan_implementacion.md)
 User stories covered: HU-01, HU-03, HU-11
 
@@ -13,14 +13,14 @@ Conectar el inventario de la serie hidráulica construida al espacio de trabajo:
 
 ## Acceptance criteria
 
-- [ ] Inventariar centrales y embalses activos del caso; unidades/tramos existentes están disponibles en el selector sin perder su pertenencia.
-- [ ] Conservar la correspondencia entre componente de caso, activo base y entidad del resultado incluso con nombres duplicados.
-- [ ] Mostrar entradas de caudal, parámetros y salidas reales de potencia, caudal, volumen o cota según su rol y disponibilidad.
-- [ ] No usar un volumen inicial escalar como trayectoria «antes» ni atribuir a una central el caudal de otro nodo.
-- [ ] Unidades diferentes usan escalas separadas y todas las muestras incluyen período e identidad de fuente.
-- [ ] Una serie hidráulica sin preparar, un objeto inactivo y un resultado no compatible producen estados explicativos.
-- [ ] Las lecturas respetan caso/proyecto y usan el catálogo/adaptador vigente sin duplicar muestras del sistema hidráulico.
-- [ ] Verificar la consulta de una central y un embalse con datos persistidos a través de API y navegador.
+- [x] Inventariar centrales y embalses activos del caso; unidades/tramos existentes están disponibles en el selector sin perder su pertenencia.
+- [x] Conservar la correspondencia entre componente de caso, activo base y entidad del resultado incluso con nombres duplicados.
+- [x] Mostrar entradas de caudal, parámetros y salidas reales de potencia, caudal, volumen o cota según su rol y disponibilidad.
+- [x] No usar un volumen inicial escalar como trayectoria «antes» ni atribuir a una central el caudal de otro nodo.
+- [x] Unidades diferentes usan escalas separadas y todas las muestras incluyen período e identidad de fuente.
+- [x] Una serie hidráulica sin preparar, un objeto inactivo y un resultado no compatible producen estados explicativos.
+- [x] Las lecturas respetan caso/proyecto y usan el catálogo/adaptador vigente sin duplicar muestras del sistema hidráulico.
+- [x] Verificar la consulta de una central y un embalse con datos persistidos a través de API y navegador.
 
 ## Blocked by
 
@@ -40,9 +40,25 @@ Los objetos del diagrama aparecen como pestañas seleccionables y conservan sus 
 
 ## Evidencia y seguimiento
 
-- Inicio: pendiente.
-- Evidencia rojo → verde / revisión HITL: pendiente.
-- Pruebas y comandos ejecutados: pendiente.
-- Capturas de implementación y diferencias revisadas: pendiente, cuando aplique.
-- Decisiones o desviaciones respecto del plan: pendiente.
-- Cierre y responsable: pendiente.
+- Inicio: 2026-10-20, por Codex, a petición del usuario. MESA-002 Done; interfaces S1 navegador y S2 HTTP ya confirmadas. Primer ciclo: inventario de centrales homónimas con identidades y pertenencia preservadas.
+- Evidencia: [dieciséis ciclos rojo → verde, comandos y revisión AFK](../evidencia/MESA-005/validacion.md).
+- Implementación: inventario base/caso y pertenencia, entradas canónicas/legacy,
+  parámetros escalares, resultados v3 por entidad y consulta de hidro simple v2.
+  Las centrales agregan solo sus unidades completas y compatibles; estados
+  explicativos para inactividad, falta de preparación y resultados incompatibles.
+- Validación: diecisiete pruebas HTTP y dos de navegador nuevas. 172 pruebas Python
+  distintas verificadas entre ejecución amplia y focalizada; cinco PostgreSQL
+  omitidas. 15 MESA y cinco regresiones de navegador OK; 336 Vitest verificadas
+  entre suite y reintento del archivo con fallo de foco. Build, TypeScript, ESLint,
+  OpenAPI y formato modificado OK. El check global conserva 16 avisos de formato
+  preexistentes; los logs registran los intentos fallidos y las correcciones.
+- Capturas revisadas: [1440×900](../evidencia/MESA-005/mesa-hidraulica-1440.png) y
+  [390 px](../evidencia/MESA-005/mesa-hidraulica-390.png), con geometría y accesibilidad
+  comprobadas en navegador. Se conservan las referencias originales.
+- Alcance: consulta de entradas y artefactos/índices persistidos, sin modificar el
+  motor ni duplicar almacenamiento hidráulico. Los resultados de las fixtures son
+  deterministas; no se atribuyen a una nueva resolución Julia. Ejecutar desde la
+  mesa y comparar permanecen en MESA-008/010. Se actualizó la expectativa antigua
+  de artefactos de promoción para incluir el `progress_log` del worker vigente.
+- Cierre: **Done**, Codex, 2026-10-20, tras revisión técnica AFK y visual.
+  Siguiente entrega recomendada: MESA-006.

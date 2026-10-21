@@ -1,0 +1,93 @@
+Command: npx.cmd playwright test --config=playwright.mesa.config.ts -g La preparación hidráulica
+
+
+Running 1 test using 1 worker
+
+
+(node:30332) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1/1] e2e\mesa-hydraulic-execution.spec.ts:4:1 › La preparación hidráulica cambia con sus opciones y se recupera de una huella obsoleta
+  1) e2e\mesa-hydraulic-execution.spec.ts:4:1 › La preparación hidráulica cambia con sus opciones y se recupera de una huella obsoleta 
+
+    Error: expect(received).toEqual(expected) // deep equality
+
+    - Expected  -  1
+    + Received  + 52
+
+    - Array []
+    + Array [
+    +   Object {
+    +     "description": "Ensure elements that have scrollable content are accessible by keyboard in Safari",
+    +     "help": "Scrollable region must have keyboard access",
+    +     "helpUrl": "https://dequeuniversity.com/rules/axe/4.12/scrollable-region-focusable?application=playwright",
+    +     "id": "scrollable-region-focusable",
+    +     "impact": "serious",
+    +     "nodes": Array [
+    +       Object {
+    +         "all": Array [],
+    +         "any": Array [
+    +           Object {
+    +             "data": null,
+    +             "id": "focusable-content",
+    +             "impact": "serious",
+    +             "message": "Element should have focusable content",
+    +             "relatedNodes": Array [],
+    +           },
+    +           Object {
+    +             "data": null,
+    +             "id": "focusable-element",
+    +             "impact": "serious",
+    +             "message": "Element should be focusable",
+    +             "relatedNodes": Array [],
+    +           },
+    +         ],
+    +         "failureSummary": "Fix any of the following:
+    +   Element should have focusable content
+    +   Element should be focusable",
+    +         "html": "<div class=\"mesa-table-scroll\">",
+    +         "impact": "serious",
+    +         "none": Array [],
+    +         "target": Array [
+    +           ".mesa-table-scroll",
+    +         ],
+    +       },
+    +     ],
+    +     "tags": Array [
+    +       "cat.keyboard",
+    +       "wcag2a",
+    +       "wcag211",
+    +       "wcag213",
+    +       "TTv5",
+    +       "TT4.a",
+    +       "EN-301-549",
+    +       "EN-9.2.1.1",
+    +       "EN-9.2.1.3",
+    +       "RGAAv4",
+    +       "RGAA-7.3.2",
+    +     ],
+    +   },
+    + ]
+
+      34 |   await page.setViewportSize({ width: 390, height: 844 });
+      35 |   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    > 36 |   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+         |                                                                 ^
+      37 |   await page.screenshot({ path: testInfo.outputPath("mesa-red-preparacion-390.png"), fullPage: true });
+      38 |   await page.getByLabel("Gap relativo hidráulico").fill("0.02");
+      39 |   await expect(execute).toBeDisabled();
+        at C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\frontend\e2e\mesa-hydraulic-execution.spec.ts:36:65
+
+    Error Context: ..\.tmp\mesa-playwright-results\mesa-hydraulic-execution-L-8bab9-pera-de-una-huella-obsoleta\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    ..\.tmp\mesa-playwright-results\mesa-hydraulic-execution-L-8bab9-pera-de-una-huella-obsoleta\trace.zip
+    Usage:
+
+        npx playwright show-trace ..\.tmp\mesa-playwright-results\mesa-hydraulic-execution-L-8bab9-pera-de-una-huella-obsoleta\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+  1 failed
+    e2e\mesa-hydraulic-execution.spec.ts:4:1 › La preparación hidráulica cambia con sus opciones y se recupera de una huella obsoleta 

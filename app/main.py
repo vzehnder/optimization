@@ -51,6 +51,11 @@ from app.forecast_connector import (
     HttpJsonForecastConnectorConfig,
 )
 from app.input_variants import InputVariantRangeError
+from app.optimization_mesa import MesaResponse, read_mesa
+from app.mesa_editing import MesaEditConflict, MesaEditContext, MesaEditRequest, read_edit_context
+from app.mesa_execution import register_mesa_execution_routes
+from app.mesa_hydraulic_execution import register_mesa_hydraulic_execution_routes
+from app.mesa_preferences import MesaPreferencesConflict, MesaPreferencesRequest, MesaPreferencesResponse, read_preferences, save_preferences
 from app.hydraulic_simulation import register_hydraulic_simulation_routes
 from app.legacy_series_extraction import LegacyDraftExtractionError
 from app.required_signals import MissingRequiredSignalsError
@@ -1471,6 +1476,8 @@ def create_app(
         return run
 
     register_hydraulic_simulation_routes(app, analyst_store, service, create_and_enqueue_run, configured_input_source_root)
+    register_mesa_execution_routes(app, analyst_store, service, local_run_queue, configured_artifact_root)
+    register_mesa_hydraulic_execution_routes(app, analyst_store, service, local_run_queue, configured_artifact_root)
 
     def publication_download_artifacts(
         publication: dict[str, Any],
@@ -5007,6 +5014,75 @@ def create_app(
         case = analyst_store.get_or_create_case_for_scenario(scenario_id)
         variant = analyst_store.get_case_input_variant_for_case(case["id"], variant_id)
         return case, variant
+
+    @app.get("/api/scenarios/{scenario_id}/mesa", response_model=MesaResponse)
+    async def get_optimization_mesa(
+        scenario_id: int, case_id: int, variant_id: int,
+        range_start: str | None = None, range_end: str | None = None,
+        run_id: int | None = None,
+    ):
+        try:
+            return read_mesa(analyst_store, scenario_id=scenario_id, case_id=case_id, variant_id=variant_id,
+                             range_start=range_start, range_end=range_end, run_id=run_id, artifact_root=configured_artifact_root)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @app.get("/api/scenarios/{scenario_id}/mesa/inputs/{object_id}/{signal_key}", response_model=MesaEditContext)
+    async def get_mesa_input_edit(scenario_id: int, object_id: int, signal_key: str, case_id: int, variant_id: int):
+        try:
+            return read_edit_context(analyst_store, scenario_id=scenario_id, case_id=case_id,
+                                     variant_id=variant_id, object_id=object_id, signal_key=signal_key)
+        except MesaEditConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @app.post("/api/scenarios/{scenario_id}/mesa/inputs/{object_id}/{signal_key}/revisions", status_code=201)
+    async def post_mesa_input_revision(request: Request, scenario_id: int, object_id: int, signal_key: str, payload: MesaEditRequest):
+        try:
+            return analyst_store.save_mesa_input(scenario_id=scenario_id, object_id=object_id, signal_key=signal_key,
+                payload=payload, actor_user=request.state.current_user or {"id": None, "email": "auth-disabled", "role": "analyst"})
+        except MesaEditConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except ObjectSeriesError as error:
+            return object_series_refusal(error, request)
+        except BindingMutationError as error:
+            return JSONResponse(binding_error_payload(error, request_id=f"req_{secrets.token_hex(8)}"), status_code=409)
+        except MigrationControlError as error:
+            return JSONResponse({"detail": {"code": error.code, "context": error.context}}, status_code=409)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    def mesa_preferences_identity(request: Request, scenario_id: int, case_id: int) -> int:
+        user_id = current_user_id(request)
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Inicia sesión para guardar tu mesa.")
+        try:
+            case = analyst_store.get_or_create_case_for_scenario(scenario_id)
+            if case["id"] != case_id:
+                raise KeyError("El caso no pertenece al escenario.")
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return user_id
+
+    @app.get("/api/scenarios/{scenario_id}/mesa/preferences", response_model=MesaPreferencesResponse)
+    async def get_mesa_preferences(request: Request, scenario_id: int, case_id: int):
+        user_id = mesa_preferences_identity(request, scenario_id, case_id)
+        return read_preferences(analyst_store, user_id=user_id, case_id=case_id)
+
+    @app.put("/api/scenarios/{scenario_id}/mesa/preferences", response_model=MesaPreferencesResponse)
+    async def put_mesa_preferences(request: Request, scenario_id: int, case_id: int, payload: MesaPreferencesRequest):
+        user_id = mesa_preferences_identity(request, scenario_id, case_id)
+        try:
+            return save_preferences(analyst_store, user_id=user_id, case_id=case_id, request=payload)
+        except MesaPreferencesConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.get("/api/scenarios/{scenario_id}/case/default-variant")
     async def get_default_input_variant(scenario_id: int):

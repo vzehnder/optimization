@@ -1,0 +1,11 @@
+Command: npx.cmd playwright test --config=playwright.mesa.config.ts -g Red v3 prepara
+
+
+Running 1 test using 1 worker
+
+
+(node:43908) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1/1] e2e\mesa-hydraulic-execution.spec.ts:21:1 › Red v3 prepara, ejecuta y recupera potencia y volumen sin salir de la mesa
+  1 passed (1.9m)

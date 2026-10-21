@@ -1,0 +1,102 @@
+﻿
+Running 13 tests using 1 worker
+
+
+
+(node:41560) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[1/13] e2e\optimization-mesa.spec.ts:32:1 › BESS y renovables separan parámetros, entradas y salidas ausentes
+[2/13] e2e\optimization-mesa.spec.ts:110:1 › seleccionar un run muestra descarga y energía por activo y conserva la consulta al recargar
+[3/13] e2e\optimization-mesa.spec.ts:178:1 › cambiar de run conserva una vista que todavía no se ha guardado
+[4/13] e2e\optimization-mesa.spec.ts:205:1 › cuatro vistas conservan títulos, series y modos al reducir y recargar
+[5/13] e2e\optimization-mesa.spec.ts:248:1 › dos pestañas personalizadas conservan su orden y distribución usando teclado
+[6/13] e2e\optimization-mesa.spec.ts:323:1 › un conflicto conserva la edición local y permite cargar la mesa guardada
+[7/13] e2e\optimization-mesa.spec.ts:365:1 › la matriz 2x2 cabe a 1440x900 y se adapta a 390 sin desbordar
+[8/13] e2e\optimization-mesa.spec.ts:453:1 › series de unidades distintas conservan selección y escalas separadas
+[9/13] e2e\optimization-mesa.spec.ts:528:1 › un componente retirado conserva identidad y se reconfigura sin reasignarse por nombre
+  1) e2e\optimization-mesa.spec.ts:528:1 › un componente retirado conserva identidad y se reconfigura sin reasignarse por nombre 
+
+    Error: expect(locator).toHaveText(expected) failed
+
+    Locator:  getByRole('status')
+    Expected: "Sin fuente de demanda vinculada."
+    Received: "Sin fuente vinculada."
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toHaveText" with timeout 5000ms
+      - waiting for getByRole('status')
+        14 × locator resolved to <p role="status">Sin fuente vinculada.</p>
+           - unexpected value "Sin fuente vinculada."
+
+
+      572 |   await expect(page.getByText("Mesa guardada", { exact: true })).toBeVisible();
+      573 |   await page.reload();
+    > 574 |   await expect(page.getByRole("status")).toHaveText(
+          |                                          ^
+      575 |     "Sin fuente de demanda vinculada.",
+      576 |   );
+      577 |   await expect(page.locator(".mesa-panel")).toContainText("load_replacement");
+        at C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\frontend\e2e\optimization-mesa.spec.ts:574:42
+
+    Error Context: ..\.tmp\mesa-playwright-results\optimization-mesa-un-compo-76034--sin-reasignarse-por-nombre\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    ..\.tmp\mesa-playwright-results\optimization-mesa-un-compo-76034--sin-reasignarse-por-nombre\trace.zip
+    Usage:
+
+        npx playwright show-trace ..\.tmp\mesa-playwright-results\optimization-mesa-un-compo-76034--sin-reasignarse-por-nombre\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+
+(node:31452) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[10/13] e2e\optimization-mesa.spec.ts:580:1 › los errores de configuración permiten reintentar sin perder la edición
+[11/13] e2e\optimization-mesa.spec.ts:620:1 › mesa de optimización: demanda real en gráfico, tabla y recarga
+  2) e2e\optimization-mesa.spec.ts:620:1 › mesa de optimización: demanda real en gráfico, tabla y recarga 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByText('Caso #1 · Variante Demanda alternativa', { exact: true })
+    Expected: visible
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 5000ms
+      - waiting for getByText('Caso #1 · Variante Demanda alternativa', { exact: true })
+
+
+      701 |       exact: true,
+      702 |     }),
+    > 703 |   ).toBeVisible();
+          |     ^
+      704 | });
+      705 |
+      706 | test("mesa de optimización: carga, error con reintento y caso vacío", async ({
+        at C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\frontend\e2e\optimization-mesa.spec.ts:703:5
+
+    Error Context: ..\.tmp\mesa-playwright-results\optimization-mesa-mesa-de--085d5--en-gráfico-tabla-y-recarga\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    ..\.tmp\mesa-playwright-results\optimization-mesa-mesa-de--085d5--en-gráfico-tabla-y-recarga\trace.zip
+    Usage:
+
+        npx playwright show-trace ..\.tmp\mesa-playwright-results\optimization-mesa-mesa-de--085d5--en-gráfico-tabla-y-recarga\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+
+
+(node:56380) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[12/13] e2e\optimization-mesa.spec.ts:706:1 › mesa de optimización: carga, error con reintento y caso vacío
+[13/13] e2e\optimization-mesa.spec.ts:764:1 › mesa de optimización: un período fuera de cobertura no muestra una curva parcial
+  2 failed
+    e2e\optimization-mesa.spec.ts:528:1 › un componente retirado conserva identidad y se reconfigura sin reasignarse por nombre 
+    e2e\optimization-mesa.spec.ts:620:1 › mesa de optimización: demanda real en gráfico, tabla y recarga 
+  11 passed (45.4s)

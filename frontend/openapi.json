@@ -2925,6 +2925,1281 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "MesaComponent": {
+        "properties": {
+          "additional_series": {
+            "items": {
+              "$ref": "#/components/schemas/MesaSeries"
+            },
+            "title": "Additional Series",
+            "type": "array"
+          },
+          "base_entity_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Entity Id"
+          },
+          "case_entity_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Case Entity Id"
+          },
+          "component_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Component Type"
+          },
+          "entity_id": {
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_type": {
+            "title": "Entity Type",
+            "type": "string"
+          },
+          "from_entity_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Entity Id"
+          },
+          "is_active": {
+            "default": true,
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "linkable_object_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linkable Object Id"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/MesaParameter"
+            },
+            "title": "Parameters",
+            "type": "array"
+          },
+          "parent_entity_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Entity Id"
+          },
+          "series": {
+            "$ref": "#/components/schemas/MesaSeries"
+          },
+          "to_entity_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Entity Id"
+          }
+        },
+        "required": [
+          "linkable_object_id",
+          "entity_id",
+          "entity_type",
+          "name",
+          "series"
+        ],
+        "title": "MesaComponent",
+        "type": "object"
+      },
+      "MesaComponentReference": {
+        "additionalProperties": false,
+        "properties": {
+          "entity_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_type": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Entity Type",
+            "type": "string"
+          },
+          "linkable_object_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linkable Object Id"
+          }
+        },
+        "required": [
+          "entity_type",
+          "entity_id"
+        ],
+        "title": "MesaComponentReference",
+        "type": "object"
+      },
+      "MesaConfiguration": {
+        "additionalProperties": false,
+        "properties": {
+          "active_tab_id": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Active Tab Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "tabs": {
+            "items": {
+              "$ref": "#/components/schemas/MesaTabPreference"
+            },
+            "maxItems": 24,
+            "minItems": 1,
+            "title": "Tabs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "active_tab_id",
+          "tabs"
+        ],
+        "title": "MesaConfiguration",
+        "type": "object"
+      },
+      "MesaContext": {
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "integer"
+          },
+          "model_contract": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Contract"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "integer"
+          },
+          "project_name": {
+            "title": "Project Name",
+            "type": "string"
+          },
+          "scenario_id": {
+            "title": "Scenario Id",
+            "type": "integer"
+          },
+          "scenario_name": {
+            "title": "Scenario Name",
+            "type": "string"
+          },
+          "variant_id": {
+            "title": "Variant Id",
+            "type": "integer"
+          },
+          "variant_name": {
+            "title": "Variant Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "project_name",
+          "scenario_id",
+          "scenario_name",
+          "case_id",
+          "variant_id",
+          "variant_name"
+        ],
+        "title": "MesaContext",
+        "type": "object"
+      },
+      "MesaEditContext": {
+        "properties": {
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "expected": {
+            "$ref": "#/components/schemas/MesaEditExpected"
+          },
+          "scope": {
+            "title": "Scope",
+            "type": "string"
+          },
+          "scope_message": {
+            "title": "Scope Message",
+            "type": "string"
+          },
+          "series": {
+            "$ref": "#/components/schemas/MesaSeries"
+          },
+          "source_reference": {
+            "title": "Source Reference",
+            "type": "string"
+          },
+          "validation_rules": {
+            "additionalProperties": true,
+            "title": "Validation Rules",
+            "type": "object"
+          }
+        },
+        "required": [
+          "series",
+          "expected",
+          "scope",
+          "scope_message",
+          "source_reference",
+          "actor",
+          "validation_rules"
+        ],
+        "title": "MesaEditContext",
+        "type": "object"
+      },
+      "MesaEditExpected": {
+        "additionalProperties": false,
+        "properties": {
+          "binding_id": {
+            "title": "Binding Id",
+            "type": "integer"
+          },
+          "bindings_revision": {
+            "title": "Bindings Revision",
+            "type": "integer"
+          },
+          "content_hash": {
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "revision_id": {
+            "title": "Revision Id",
+            "type": "integer"
+          },
+          "source_revision_id": {
+            "title": "Source Revision Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "binding_id",
+          "bindings_revision",
+          "revision_id",
+          "content_hash",
+          "source_revision_id"
+        ],
+        "title": "MesaEditExpected",
+        "type": "object"
+      },
+      "MesaEditPoint": {
+        "additionalProperties": false,
+        "properties": {
+          "end": {
+            "title": "End",
+            "type": "string"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "value"
+        ],
+        "title": "MesaEditPoint",
+        "type": "object"
+      },
+      "MesaEditRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "integer"
+          },
+          "confirm": {
+            "default": false,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "expected": {
+            "$ref": "#/components/schemas/MesaEditExpected"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/MesaEditPoint"
+            },
+            "minItems": 1,
+            "title": "Points",
+            "type": "array"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "variant_id": {
+            "title": "Variant Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "case_id",
+          "variant_id",
+          "expected",
+          "unit",
+          "points",
+          "reason"
+        ],
+        "title": "MesaEditRequest",
+        "type": "object"
+      },
+      "MesaExecutionPreview": {
+        "properties": {
+          "model_contract": {
+            "title": "Model Contract",
+            "type": "string"
+          },
+          "period_count": {
+            "title": "Period Count",
+            "type": "integer"
+          },
+          "preparation_hash": {
+            "title": "Preparation Hash",
+            "type": "string"
+          },
+          "range_end": {
+            "title": "Range End",
+            "type": "string"
+          },
+          "range_start": {
+            "title": "Range Start",
+            "type": "string"
+          },
+          "resolution_hours": {
+            "title": "Resolution Hours",
+            "type": "number"
+          },
+          "series_bindings": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Series Bindings",
+            "type": "array"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "preparation_hash",
+          "period_count",
+          "range_start",
+          "range_end",
+          "timezone",
+          "resolution_hours",
+          "model_contract",
+          "series_bindings"
+        ],
+        "title": "MesaExecutionPreview",
+        "type": "object"
+      },
+      "MesaExecutionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Case Id",
+            "type": "integer"
+          },
+          "range_end": {
+            "title": "Range End",
+            "type": "string"
+          },
+          "range_start": {
+            "title": "Range Start",
+            "type": "string"
+          },
+          "resolution_hours": {
+            "exclusiveMinimum": 0.0,
+            "title": "Resolution Hours",
+            "type": "number"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          },
+          "variant_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Variant Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "case_id",
+          "variant_id",
+          "range_start",
+          "range_end",
+          "timezone",
+          "resolution_hours"
+        ],
+        "title": "MesaExecutionRequest",
+        "type": "object"
+      },
+      "MesaExecutionRunRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Case Id",
+            "type": "integer"
+          },
+          "expected_preparation_hash": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Expected Preparation Hash",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "range_end": {
+            "title": "Range End",
+            "type": "string"
+          },
+          "range_start": {
+            "title": "Range Start",
+            "type": "string"
+          },
+          "resolution_hours": {
+            "exclusiveMinimum": 0.0,
+            "title": "Resolution Hours",
+            "type": "number"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          },
+          "variant_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Variant Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "case_id",
+          "variant_id",
+          "range_start",
+          "range_end",
+          "timezone",
+          "resolution_hours",
+          "expected_preparation_hash",
+          "idempotency_key"
+        ],
+        "title": "MesaExecutionRunRequest",
+        "type": "object"
+      },
+      "MesaHydraulicComponent": {
+        "properties": {
+          "component_type": {
+            "title": "Component Type",
+            "type": "string"
+          },
+          "entity_id": {
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_id",
+          "component_type",
+          "name"
+        ],
+        "title": "MesaHydraulicComponent",
+        "type": "object"
+      },
+      "MesaHydraulicRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Case Id",
+            "type": "integer"
+          },
+          "expected_preparation_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Preparation Hash"
+          },
+          "mip_rel_gap": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mip Rel Gap"
+          },
+          "objective": {
+            "default": "market_value",
+            "enum": [
+              "market_value",
+              "energy"
+            ],
+            "title": "Objective",
+            "type": "string"
+          },
+          "price_signal_key": {
+            "default": "price_usd_per_mwh",
+            "enum": [
+              "price_usd_per_mwh",
+              "export_price_usd_per_mwh"
+            ],
+            "title": "Price Signal Key",
+            "type": "string"
+          },
+          "price_time_series_set_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Time Series Set Id"
+          },
+          "range_end": {
+            "title": "Range End",
+            "type": "string"
+          },
+          "range_start": {
+            "title": "Range Start",
+            "type": "string"
+          },
+          "resolution_hours": {
+            "exclusiveMinimum": 0.0,
+            "title": "Resolution Hours",
+            "type": "number"
+          },
+          "source_scenario_version_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Source Scenario Version Id",
+            "type": "integer"
+          },
+          "terminal_water_values_usd_per_hm3": {
+            "additionalProperties": {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "title": "Terminal Water Values Usd Per Hm3",
+            "type": "object"
+          }
+        },
+        "required": [
+          "range_start",
+          "range_end",
+          "resolution_hours",
+          "case_id",
+          "source_scenario_version_id"
+        ],
+        "title": "MesaHydraulicRequest",
+        "type": "object"
+      },
+      "MesaHydraulicRunRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Case Id",
+            "type": "integer"
+          },
+          "expected_preparation_hash": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Expected Preparation Hash",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "mip_rel_gap": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mip Rel Gap"
+          },
+          "objective": {
+            "default": "market_value",
+            "enum": [
+              "market_value",
+              "energy"
+            ],
+            "title": "Objective",
+            "type": "string"
+          },
+          "price_signal_key": {
+            "default": "price_usd_per_mwh",
+            "enum": [
+              "price_usd_per_mwh",
+              "export_price_usd_per_mwh"
+            ],
+            "title": "Price Signal Key",
+            "type": "string"
+          },
+          "price_time_series_set_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Time Series Set Id"
+          },
+          "range_end": {
+            "title": "Range End",
+            "type": "string"
+          },
+          "range_start": {
+            "title": "Range Start",
+            "type": "string"
+          },
+          "resolution_hours": {
+            "exclusiveMinimum": 0.0,
+            "title": "Resolution Hours",
+            "type": "number"
+          },
+          "source_scenario_version_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Source Scenario Version Id",
+            "type": "integer"
+          },
+          "terminal_water_values_usd_per_hm3": {
+            "additionalProperties": {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "title": "Terminal Water Values Usd Per Hm3",
+            "type": "object"
+          }
+        },
+        "required": [
+          "range_start",
+          "range_end",
+          "resolution_hours",
+          "expected_preparation_hash",
+          "case_id",
+          "source_scenario_version_id",
+          "idempotency_key"
+        ],
+        "title": "MesaHydraulicRunRequest",
+        "type": "object"
+      },
+      "MesaHydraulicSource": {
+        "properties": {
+          "components": {
+            "items": {
+              "$ref": "#/components/schemas/MesaHydraulicComponent"
+            },
+            "title": "Components",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "mip_rel_gap": {
+            "title": "Mip Rel Gap",
+            "type": "number"
+          },
+          "range_end": {
+            "title": "Range End",
+            "type": "string"
+          },
+          "range_start": {
+            "title": "Range Start",
+            "type": "string"
+          },
+          "resolution_hours": {
+            "title": "Resolution Hours",
+            "type": "number"
+          },
+          "terminal_water_values_usd_per_hm3": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Terminal Water Values Usd Per Hm3",
+            "type": "object"
+          },
+          "version_number": {
+            "title": "Version Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version_number",
+          "range_start",
+          "range_end",
+          "resolution_hours",
+          "terminal_water_values_usd_per_hm3",
+          "mip_rel_gap",
+          "components"
+        ],
+        "title": "MesaHydraulicSource",
+        "type": "object"
+      },
+      "MesaHydraulicSources": {
+        "properties": {
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/MesaHydraulicSource"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sources"
+        ],
+        "title": "MesaHydraulicSources",
+        "type": "object"
+      },
+      "MesaPanelPreference": {
+        "additionalProperties": false,
+        "properties": {
+          "component": {
+            "$ref": "#/components/schemas/MesaComponentReference"
+          },
+          "id": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "chart",
+              "table"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "series_keys": {
+            "items": {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 12,
+            "minItems": 1,
+            "title": "Series Keys",
+            "type": "array"
+          },
+          "title": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "component",
+          "series_keys",
+          "mode"
+        ],
+        "title": "MesaPanelPreference",
+        "type": "object"
+      },
+      "MesaParameter": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "source": {
+            "const": "current_preparation",
+            "default": "current_preparation",
+            "title": "Source",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "value",
+          "unit"
+        ],
+        "title": "MesaParameter",
+        "type": "object"
+      },
+      "MesaPoint": {
+        "properties": {
+          "end": {
+            "title": "End",
+            "type": "string"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "value"
+        ],
+        "title": "MesaPoint",
+        "type": "object"
+      },
+      "MesaPreferencesRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "configuration": {
+            "$ref": "#/components/schemas/MesaConfiguration"
+          },
+          "expected_revision": {
+            "minimum": 0.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "configuration"
+        ],
+        "title": "MesaPreferencesRequest",
+        "type": "object"
+      },
+      "MesaPreferencesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "integer"
+          },
+          "configuration": {
+            "$ref": "#/components/schemas/MesaConfiguration"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "case_id",
+          "revision",
+          "configuration"
+        ],
+        "title": "MesaPreferencesResponse",
+        "type": "object"
+      },
+      "MesaResponse": {
+        "properties": {
+          "components": {
+            "items": {
+              "$ref": "#/components/schemas/MesaComponent"
+            },
+            "title": "Components",
+            "type": "array"
+          },
+          "context": {
+            "$ref": "#/components/schemas/MesaContext"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/MesaRun"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "selected_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MesaRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "context",
+          "components"
+        ],
+        "title": "MesaResponse",
+        "type": "object"
+      },
+      "MesaRun": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "model_contract": {
+            "title": "Model Contract",
+            "type": "string"
+          },
+          "scenario_version_id": {
+            "title": "Scenario Version Id",
+            "type": "integer"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          }
+        },
+        "required": [
+          "id",
+          "scenario_version_id",
+          "model_contract"
+        ],
+        "title": "MesaRun",
+        "type": "object"
+      },
+      "MesaSeries": {
+        "properties": {
+          "binding_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Binding State"
+          },
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Hash"
+          },
+          "editable": {
+            "default": false,
+            "title": "Editable",
+            "type": "boolean"
+          },
+          "message": {
+            "default": "",
+            "title": "Message",
+            "type": "string"
+          },
+          "name": {
+            "default": "Demanda",
+            "title": "Name",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/MesaPoint"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "revision_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Id"
+          },
+          "revision_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Number"
+          },
+          "role": {
+            "default": "input",
+            "enum": [
+              "input",
+              "output"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "scenario_version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scenario Version Id"
+          },
+          "signal_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal Id"
+          },
+          "signal_key": {
+            "default": "load_demand_mw",
+            "title": "Signal Key",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "status": {
+            "enum": [
+              "available",
+              "unbound",
+              "no_coverage",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "time_series_set_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Series Set Id"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          },
+          "unit": {
+            "default": "MW",
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "MesaSeries",
+        "type": "object"
+      },
+      "MesaTabPreference": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "layout": {
+            "enum": [
+              "1x1",
+              "1x2",
+              "2x2",
+              "2x3"
+            ],
+            "title": "Layout",
+            "type": "string"
+          },
+          "panels": {
+            "items": {
+              "$ref": "#/components/schemas/MesaPanelPreference"
+            },
+            "maxItems": 6,
+            "title": "Panels",
+            "type": "array"
+          },
+          "title": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "layout",
+          "panels"
+        ],
+        "title": "MesaTabPreference",
+        "type": "object"
+      },
       "ObjectSeriesArchiveRequest": {
         "additionalProperties": false,
         "properties": {
@@ -15013,6 +16288,694 @@
           }
         },
         "summary": "Import Prices"
+      }
+    },
+    "/api/scenarios/{scenario_id}/mesa": {
+      "get": {
+        "operationId": "get_optimization_mesa_api_scenarios__scenario_id__mesa_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "variant_id",
+            "required": true,
+            "schema": {
+              "title": "Variant Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "range_start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Range Start"
+            }
+          },
+          {
+            "in": "query",
+            "name": "range_end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Range End"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MesaResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Optimization Mesa"
+      }
+    },
+    "/api/scenarios/{scenario_id}/mesa/execution": {
+      "get": {
+        "operationId": "execution_state_api_scenarios__scenario_id__mesa_execution_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "variant_id",
+            "required": true,
+            "schema": {
+              "title": "Variant Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Execution State"
+      }
+    },
+    "/api/scenarios/{scenario_id}/mesa/execution/preview": {
+      "post": {
+        "operationId": "execution_preview_api_scenarios__scenario_id__mesa_execution_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MesaExecutionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MesaExecutionPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Execution Preview"
+      }
+    },
+    "/api/scenarios/{scenario_id}/mesa/execution/runs": {
+      "post": {
+        "operationId": "execution_run_api_scenarios__scenario_id__mesa_execution_runs_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MesaExecutionRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Execution Run"
+      }
+    },
+    "/api/scenarios/{scenario_id}/mesa/hydraulic-execution": {
+      "get": {
+        "operationId": "state_api_scenarios__scenario_id__mesa_hydraulic_execution_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "State"
+      }
+    },
+    "/api/scenarios/{scenario_id}/mesa/hydraulic-execution/preview": {
+      "post": {
+        "operationId": "preview_api_scenarios__scenario_id__mesa_hydraulic_execution_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MesaHydraulicRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview"
+      }
+    },
+    "/api/scenarios/{scenario_id}/mesa/hydraulic-execution/runs": {
+      "post": {
+        "operationId": "launch_api_scenarios__scenario_id__mesa_hydraulic_execution_runs_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MesaHydraulicRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Launch"
+      }
+    },
+    "/api/scenarios/{scenario_id}/mesa/hydraulic-execution/sources": {
+      "get": {
+        "operationId": "sources_api_scenarios__scenario_id__mesa_hydraulic_execution_sources_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MesaHydraulicSources"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sources"
+      }
+    },
+    "/api/scenarios/{scenario_id}/mesa/inputs/{object_id}/{signal_key}": {
+      "get": {
+        "operationId": "get_mesa_input_edit_api_scenarios__scenario_id__mesa_inputs__object_id___signal_key__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "signal_key",
+            "required": true,
+            "schema": {
+              "title": "Signal Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "variant_id",
+            "required": true,
+            "schema": {
+              "title": "Variant Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MesaEditContext"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Mesa Input Edit"
+      }
+    },
+    "/api/scenarios/{scenario_id}/mesa/inputs/{object_id}/{signal_key}/revisions": {
+      "post": {
+        "operationId": "post_mesa_input_revision_api_scenarios__scenario_id__mesa_inputs__object_id___signal_key__revisions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "signal_key",
+            "required": true,
+            "schema": {
+              "title": "Signal Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MesaEditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Mesa Input Revision"
+      }
+    },
+    "/api/scenarios/{scenario_id}/mesa/preferences": {
+      "get": {
+        "operationId": "get_mesa_preferences_api_scenarios__scenario_id__mesa_preferences_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MesaPreferencesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Mesa Preferences"
+      },
+      "put": {
+        "operationId": "put_mesa_preferences_api_scenarios__scenario_id__mesa_preferences_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MesaPreferencesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MesaPreferencesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Mesa Preferences"
       }
     },
     "/api/scenarios/{scenario_id}/runs": {

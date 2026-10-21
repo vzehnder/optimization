@@ -33,6 +33,7 @@ from app.hydraulic_transit import (
 from app.database import connect_database, database_url_from_env, postgres_schema_from_sqlite
 from app.draft_editor import DraftGenerationError, generate_system_case_from_draft
 from app.input_variants import (
+    canonical_variant_periods,
     InputVariantRangeError,
     materialize_variant_time_series,
     resolve_bound_signal_series,
@@ -434,6 +435,8 @@ class AnalystStore:
         self.database_backend, self.database_path, self.connection = connect_database(self.database_url)
         try:
             self._initialize_schema()
+            from app.mesa_preferences import initialize_preferences
+            initialize_preferences(self)
             from app.component_rules import RuleRepository
             RuleRepository(self)
         except Exception:
@@ -13884,9 +13887,9 @@ class AnalystStore:
                         hash_cache[revision_id] = actual_hash
                     if (
                         revision.get("state") != "sealed"
-                        or revision.get("content_hash")
-                        != binding["bound_content_hash"]
-                        or actual_hash != binding["bound_content_hash"]
+                        or str(revision.get("content_hash")).removeprefix("sha256:")
+                        != binding["bound_content_hash"].removeprefix("sha256:")
+                        or actual_hash.removeprefix("sha256:") != binding["bound_content_hash"].removeprefix("sha256:")
                     ):
                         raise BindingMutationError(
                             "TS_BINDING_EXECUTION_BLOCKED",
@@ -13919,7 +13922,8 @@ class AnalystStore:
                         )
                     adapted_set = {
                         "id": binding["time_series_set_id"],
-                        "periods": revision["periods"],
+                        "periods": canonical_variant_periods(revision),
+                        "timezone": revision["timezone"],
                         "values": [
                             {
                                 "period_index": int(period["period_index"]),
@@ -16089,6 +16093,10 @@ class AnalystStore:
         }
 
     # -- Points ingestion against an object target (chapters 7.6 to 7.8) ----
+
+    def read_object_series_binding_impact(self, *, project_id, linkable_object_id, signal_id):
+        series = self.read_object_series(project_id=project_id, linkable_object_id=linkable_object_id, signal_id=signal_id)
+        return self._object_series_binding_impact(signal_id=signal_id, set_id=series["set_id"])
 
     def _object_series_binding_impact(self, *, signal_id: int, set_id: int):
         """What the current bindings of this identity will feel (chapter 7.10)."""
@@ -20888,7 +20896,33 @@ class AnalystStore:
     def _database_transaction(self):
         if self.database_backend == "postgresql":
             return self.connection.transaction()
+        if getattr(self, "_mesa_transaction_active", False):
+            return self._run_materialization_transaction()
         return self.connection
+
+    def save_mesa_input(self, *, scenario_id, object_id, signal_key, payload, actor_user):
+        """Compose canonical publication and binding replacement atomically.
+
+        Nested SQLite service transactions use savepoints only for this unit;
+        a binding failure rolls back the new definition, staging and revision.
+        """
+        from app.mesa_editing import save_edit
+
+        with self._lock:
+            with self._run_materialization_transaction():
+                self._mesa_transaction_active = True
+                try:
+                    # Same variant/set/object lock order as the canonical binding
+                    # service. SQLite already holds BEGIN IMMEDIATE above.
+                    bindings = self.read_case_bindings(scenario_id=scenario_id, variant_id=payload.variant_id)
+                    self._lock_case_binding_batch(variant_id=payload.variant_id, normalized={"operations": [
+                        {"binding_id": b["binding_id"], "linkable_object_id": b["object"]["id"]}
+                        for b in bindings["items"] if b["status"] == "active"
+                    ]})
+                    return save_edit(self, scenario_id=scenario_id, object_id=object_id,
+                                     signal_key=signal_key, payload=payload, actor_user=actor_user)
+                finally:
+                    self._mesa_transaction_active = False
 
     def seed_time_series_classification_catalog(self) -> dict[str, Any]:
         with self._lock:
@@ -26692,6 +26726,39 @@ class AnalystStore:
                 raise KeyError(f"hydraulic diagram for scenario {scenario_id} not found")
             return self._hydraulic_diagram_response(updated_context)
 
+    def read_hydraulic_case_inventory(self, scenario_id: int) -> list[dict[str, Any]]:
+        """Project the diagram's case/base identities without creating a diagram."""
+        try:
+            diagram = self.get_hydraulic_diagram(scenario_id)
+        except KeyError:
+            return []
+        case_id = diagram["optimization_case"]["id"]
+        identities = {}
+        for kind, key in (("node", "node_key"), ("plant", "plant_key"),
+                          ("unit", "unit_key"), ("reach", "reach_key")):
+            plural = "reaches" if kind == "reach" else f"{kind}s"
+            rows = self.connection.execute(
+                f"SELECT member.id AS case_entity_id, member.hydraulic_{kind}_id AS base_entity_id, "
+                f"member.is_active, base.{key} AS technical_key "
+                f"FROM case_hydraulic_{plural} AS member "
+                f"JOIN hydraulic_{plural} AS base ON base.id = member.hydraulic_{kind}_id "
+                "WHERE member.case_id = ?", (case_id,),
+            ).fetchall()
+            for row in rows:
+                identities[(kind, row["technical_key"])] = row_to_dict(row)
+        items = []
+        for node in diagram["nodes"]:
+            kind = "plant" if node["component_type"] == "plant" else "node"
+            items.append({**node, **identities[(kind, node["technical_key"])], "entity_type": f"hydraulic_{kind}"})
+            for unit in node.get("units", []):
+                items.append({**unit, **identities[("unit", unit["technical_key"])],
+                              "entity_type": "hydraulic_unit", "component_type": "unit",
+                              "parent_entity_id": node["technical_key"]})
+        for reach in diagram["reaches"]:
+            items.append({**reach, **identities[("reach", reach["technical_key"])],
+                          "entity_type": "hydraulic_reach", "component_type": "reach"})
+        return items
+
     def generate_hydraulic_v3_preview(self, scenario_id: int) -> dict[str, Any]:
         diagram = self.get_hydraulic_diagram(scenario_id)
         network_nodes: list[dict[str, Any]] = []
@@ -27018,6 +27085,7 @@ class AnalystStore:
         validation_payload: dict[str, Any],
         generation_metadata: dict[str, Any] | None = None,
         created_by: str = "internal_analyst",
+        commit: bool = True,
     ) -> dict[str, Any]:
         self.get_scenario(scenario_id)
         metadata = extract_system_case_metadata(system_case_json)
@@ -27058,7 +27126,8 @@ class AnalystStore:
                 created_by,
             ),
         )
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
         return self.get_scenario_version(cursor.lastrowid, include_document=False)
 
     def list_scenario_versions(self, scenario_id: int) -> list[dict[str, Any]]:
@@ -27117,6 +27186,7 @@ class AnalystStore:
         source_case_id: int | None = None,
         layout_key: str = "default",
         created_by: str = "internal_analyst",
+        commit: bool = True,
     ) -> dict[str, Any]:
         self.get_scenario_version(scenario_version_id, include_document=False)
         snapshot_text = json.dumps(layout_snapshot, sort_keys=True)
@@ -27145,7 +27215,8 @@ class AnalystStore:
                 created_by,
             ),
         )
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
         return self.get_scenario_version_hydraulic_diagram_snapshot(
             scenario_version_id, layout_key=layout_key
         )
@@ -27330,6 +27401,7 @@ class AnalystStore:
         operator_console_id: int | None = None,
         operator_console_revision: int | None = None,
         materialized_lineage: Mapping[str, Any] | None = None,
+        commit: bool = True,
     ) -> dict[str, Any]:
         with self._lock:
             from app.rule_applications import guard_version_run
@@ -27363,7 +27435,8 @@ class AnalystStore:
                     json.dumps(materialized_lineage or {}, sort_keys=True),
                 ),
             )
-            self.connection.commit()
+            if commit:
+                self.connection.commit()
             return self.get_run(cursor.lastrowid)
 
     def _get_case_for_schedule(self, *, scenario_id: int, case_input_variant_id: int) -> dict[str, Any]:
@@ -31725,7 +31798,8 @@ class AnalystStore:
                 values = revision["values"].get(item["signal"]["series_key"], [])
                 adapted = {
                     "id": item["time_series_set_id"],
-                    "periods": revision["periods"],
+                    "periods": canonical_variant_periods(revision),
+                    "timezone": revision["timezone"],
                     "values": [
                         {
                             "period_index": period["period_index"],
@@ -31778,6 +31852,7 @@ class AnalystStore:
             required = discover_required_signals(base, separate_grid_prices=protected)
             model_status = "available"
         except (KeyError, DraftGenerationError):
+            base = {}
             required = []
             model_status = "unavailable"
         statuses = [
@@ -31810,6 +31885,8 @@ class AnalystStore:
         return {
             "binding_mode": "protected" if protected else "legacy",
             "model_status": model_status,
+            "model_contract": base.get("schema_version"),
+            "model_components": base.get("nodes", []),
             "bindings_revision": page["meta"]["bindings_revision"],
             "required_signals": statuses,
             "sources": sources,

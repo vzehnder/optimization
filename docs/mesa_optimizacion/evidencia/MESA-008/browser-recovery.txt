@@ -1,0 +1,11 @@
+Command: npx.cmd playwright test --config=playwright.mesa.config.ts -g El avance hidráulico
+
+
+Running 1 test using 1 worker
+
+
+(node:26852) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1/1] e2e\mesa-hydraulic-execution.spec.ts:4:1 › El avance hidráulico conserva el run al desconectar y muestra el fallo sin resultados
+  1 passed (15.5s)

@@ -1,0 +1,13 @@
+
+Running 5 tests using 1 worker
+
+
+(node:37172) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1/5] e2e\react-foundation.spec.ts:200:1 › React auth handles bootstrap, login, refresh, roles, logout, and deactivation
+[2/5] e2e\react-foundation.spec.ts:297:1 › React hydraulic diagram persists reservoir parameters curves junction and plant nodes across reload
+[3/5] e2e\react-foundation.spec.ts:887:1 › UX-005 confirms sources, reloads, reviews an explicit period and submits one variant run
+[4/5] e2e\react-foundation.spec.ts:1190:1 › React analyst workspace creates a project and scenario, then preserves direct scenario refresh
+[5/5] e2e\react-foundation.spec.ts:2843:1 › UX-006 reads results, audits the snapshot and compares the chosen execution through the real API
+  5 passed (30.4s)

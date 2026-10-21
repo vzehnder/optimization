@@ -1,0 +1,369 @@
+Command: npm.cmd test -- --maxWorkers=1 --reporter=verbose
+
+
+> bess-react-ui@0.1.0 test
+> vitest run --maxWorkers=1 --reporter=verbose
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ✓ src/App.test.tsx > application shell > renders succeeded run results with Plotly charts, bounded tables, and safe artifacts 1257ms
+ ✓ src/App.test.tsx > application shell > launches one manual run from an immutable version and navigates before completion 412ms
+ ✓ src/App.test.tsx > application shell > labels the version's case name as a name, not as a separate case entity, in version metadata 79ms
+ ✓ src/App.test.tsx > application shell > polls nonterminal runs, recovers from a temporary polling failure, and shows failure logs 4207ms
+ ✓ src/App.test.tsx > application shell > lets analysts create, edit, save, recover, remove, and reopen a structured draft 3305ms
+ ✓ src/App.test.tsx > application shell > binds a price series to the default input variant and runs it from the scenario page 532ms
+ ✓ src/App.test.tsx > application shell > shows the selected variant name and run date range in run detail lineage 208ms
+ ✓ src/App.test.tsx > application shell > shows per-binding input set revisions and content hashes in run detail lineage 179ms
+ ✓ src/App.test.tsx > application shell > hides the generated technical snapshot by default and reveals it on demand from run detail 236ms
+ ✓ src/App.test.tsx > application shell > binds entity-scoped required signals independently before running 678ms
+ ✓ src/App.test.tsx > application shell > clones variants, switches them and persists selection 1204ms
+ ✓ src/App.test.tsx > application shell > remaps missing rule objects before cloning a variant 1328ms
+ ✓ src/App.test.tsx > application shell > surfaces input variant coverage errors before launching 678ms
+ ✓ src/App.test.tsx > application shell > surfaces input variant horizon mismatches before launching 665ms
+ ✓ src/App.test.tsx > application shell > shows a stale input variant, blocks the run button, and clears the marker after revalidating 228ms
+ ✓ src/App.test.tsx > application shell > saves the draft and opens the hydraulic diagram when editing a hydro component 414ms
+ ✓ src/App.test.tsx > application shell > opens a persisted hydraulic diagram, saves visible nodes, recovers from save failure, and reloads server data 867ms
+ ✓ src/App.test.tsx > application shell > moves a node, saves the layout, and reloads the persisted position 294ms
+ ✓ src/App.test.tsx > application shell > creates directed hydraulic reaches by drag, edits them through the fallback form, and displays validation errors 1330ms
+ ✓ src/App.test.tsx > application shell > wires a plant through ports: intake from the input port, discharge from the output port, auto-creating a unit 383ms
+ ✓ src/App.test.tsx > application shell > only links output ports to input ports and allows fan-in and fan-out 353ms
+ ✓ src/App.test.tsx > application shell > shows a contextual properties panel for the selected object and never exposes x/y there 157ms
+ ✓ src/App.test.tsx > application shell > deletes the selected component and removes its connections 333ms
+ ✓ src/App.test.tsx > application shell > draws plant connection edges and routes edges between the node ports 329ms
+ ✓ src/App.test.tsx > application shell > selects a plant connection edge and deletes only that link 338ms
+ ✓ src/App.test.tsx > application shell > anchors reaches at the exact border point where the connection is dropped 398ms
+ ✓ src/App.test.tsx > application shell > colors reaches by type and shows a reach type legend 314ms
+ ✓ src/App.test.tsx > application shell > edits reservoir parameters and a storage-elevation curve, then shows reservoir validation errors 1491ms
+ ✓ src/App.test.tsx > application shell > edits a plant panel with a generation unit and flow-power curve, then shows unit validation errors 2203ms
+ ✓ src/App.test.tsx > application shell > keeps newer local draft edits when an older save response arrives late 739ms
+ ✓ src/App.test.tsx > application shell > warns which active consoles a saved case change blocked without cancelling the save 432ms
+ ✓ src/App.test.tsx > application shell > imports an uploaded CSV source into the TS-2 catalog with multiple mapped signals and shows the created set confirmation 3261ms
+ ✓ src/App.test.tsx > application shell > lists available XLSX sheets after upload and re-imports the preview when the analyst picks another one 488ms
+ ✓ src/App.test.tsx > application shell > lets analysts inspect, validate, stale, and promote a generated system_case once 1178ms
+ ✓ src/App.test.tsx > application shell > shows topology and parameter provenance on the generated system_case panel 132ms
+ ✓ src/App.test.tsx > application shell > keeps expert version paste/upload, immutable detail, and protected delete visible 1071ms
+ ✓ src/App.test.tsx > application shell > shows topology and parameter provenance on scenario version detail, with graceful fallback for versions without it 357ms
+ ✓ src/App.test.tsx > application shell > shows which input variant produced each run in the case run list 79ms
+ ✓ src/App.test.tsx > application shell > shows run detail provenance inherited from its scenario version 165ms
+ ✓ src/App.test.tsx > application shell > visually distinguishes topology-stale from parameters-stale hydraulic v3 validation 160ms
+ ✓ src/App.test.tsx > application shell > lets internal users create projects and scenarios, then refresh a direct scenario link 1491ms
+ ✓ src/App.test.tsx > application shell > lets internal users retry a failed project deletion after confirmation 260ms
+ ✓ src/App.test.tsx > application shell > lets admins manage users and external project capabilities without a document reload 4334ms
+ ✓ src/App.test.tsx > application shell > renders the read-only client portal and clears protected data after authorization failure 307ms
+ ✓ src/App.test.tsx > application shell > bootstraps the first admin through the JSON contract 736ms
+ ✓ src/App.test.tsx > application shell > logs in to the safe pre-login destination and logs out immediately 765ms
+ ✓ src/App.test.tsx > application shell > keeps external users out of the analyst root 30ms
+ ✓ src/App.test.tsx > application shell > loads current identity and renders the authenticated user 36ms
+ ✓ src/App.test.tsx > application shell > renders login when no server session exists 29ms
+ ✓ src/App.test.tsx > application shell > shows a recoverable error state when identity loading fails 101ms
+ ✓ src/App.test.tsx > application shell > navigates within the shell without a document reload 122ms
+ ✓ src/App.test.tsx > application shell > browses the project time-series catalog and opens a set's detail 300ms
+ ✓ src/App.test.tsx > application shell > labels an extracted set's legacy origin distinctly from its source-file origin 93ms
+ ✓ src/App.test.tsx > application shell > labels a migrated set's legacy origin distinctly from its source-file origin 88ms
+ ✓ src/App.test.tsx > application shell > lists a legacy hydraulic series set in the project catalog and opens its detail 237ms
+ ✓ src/App.test.tsx > application shell > shows a legacy hydraulic set's migration status on load, without needing to click migrate again 250ms
+ ✓ src/App.test.tsx > application shell > edits a time-series set value and creates a new auditable revision 594ms
+ ✓ src/App.test.tsx > application shell > replaces a time-series set with a corrected file upload and keeps its identity stable 1050ms
+ ✓ src/ProtectedMutationJourney.test.tsx > shows the full destination at every step and returns with the original variant and filters 1526ms
+ ✓ src/ProtectedMutationJourney.test.tsx > provides a local exit when the journey has no return URL 61ms
+ ✓ src/ProtectedMutationJourney.test.tsx > updates the destination when the execution variant changes 239ms
+ ✓ src/ProtectedMutationJourney.test.tsx > UX-004 refuses an incomplete or invalid journey destination (entry=object&project_id=0&object_id=7) 45ms
+ ✓ src/ProtectedMutationJourney.test.tsx > UX-004 refuses an incomplete or invalid journey destination (entry=object&project_id=1&object_id=9007199254740993) 38ms
+ ✓ src/ProtectedMutationJourney.test.tsx > UX-004 refuses an incomplete or invalid journey destination (entry=object&project_id=1&object_id=7&intent=update_shared&association_id=bad) 36ms
+ ✓ src/ProtectedMutationJourney.test.tsx > UX-004 never offers an arbitrary return destination (https://example.com) 58ms
+ ✓ src/ProtectedMutationJourney.test.tsx > UX-004 never offers an arbitrary return destination (//example.com) 62ms
+ ✓ src/ProtectedMutationJourney.test.tsx > UX-004 never offers an arbitrary return destination (/admin/users) 52ms
+ ✓ src/ProtectedMutationJourney.test.tsx > UX-004 never offers an arbitrary return destination (/scenarios/4?return_to=https://example.com) 56ms
+ ✓ src/ProtectedMutationJourney.test.tsx > UX-004 retries a failed prevalidation with the same selected source 641ms
+ ✓ src/ProtectedMutationJourney.test.tsx > filters needs by object and blocks a stale incompatible need from the URL 412ms
+ ✓ src/ProtectedMutationJourney.test.tsx > showing all sources preserves the search but resets the page and selected source 538ms
+ ✓ src/ProtectedMutationJourney.test.tsx > UX-004 changing the need discards its candidate and cursor 480ms
+ ✓ src/ProtectedMutationJourney.test.tsx > UX-004 explains a refused candidate query and retries without losing the need 233ms
+ ✓ src/ProtectedMutationJourney.test.tsx > UX-004 searches and pages candidates on the server before choosing a source 631ms
+ ✓ src/ProtectedMutationJourney.test.tsx > UX-004 opens compatible sources with the need and variant from the model 261ms
+ ✓ src/ProtectedMutationJourney.test.tsx > suggests an editable definition for grid_import_price and submits the displayed defaults 422ms
+ ✓ src/ProtectedMutationJourney.test.tsx > suggests an editable definition for grid_export_price and submits the displayed defaults 340ms
+ ✓ src/ProtectedMutationJourney.test.tsx > suggests an editable definition for load_demand and submits the displayed defaults 358ms
+ ✓ src/ProtectedMutationJourney.test.tsx > suggests an editable definition for renewable_available_power and submits the displayed defaults 401ms
+ ✓ src/ProtectedMutationJourney.test.tsx > suggests an editable definition for hydro_inflow and submits the displayed defaults 383ms
+ ✓ src/ProtectedMutationJourney.test.tsx > suggests an editable definition for natural_inflow and submits the displayed defaults 300ms
+ ✓ src/ProtectedMutationJourney.test.tsx > suggests an editable definition for minimum_flow and submits the displayed defaults 352ms
+ ✓ src/ProtectedMutationJourney.test.tsx > preserves edits when context arrives late and inherits untouched fields from the current variant 1407ms
+ ✓ src/ProtectedMutationJourney.test.tsx > updates untouched defaults when the need changes and keeps manual type and unit choices 916ms
+ ✓ src/ProtectedMutationJourney.test.tsx > single protected mutation journey > takes the catalog entry point through the same review and commits many rows as one atomic batch 680ms
+ ✓ src/ProtectedMutationJourney.test.tsx > single protected mutation journey > keeps the draft and states that nothing was written when the commit is refused 663ms
+ ✓ src/ProtectedMutationJourney.test.tsx > single protected mutation journey > publishes for everyone only with the reason, the acknowledgement and the observed fingerprint 2049ms
+ ✓ src/ProtectedMutationJourney.test.tsx > single protected mutation journey > offers the local alternative first when the declared intent is local and never says Guardar 236ms
+ ✓ src/ProtectedMutationJourney.test.tsx > single protected mutation journey > replaces a binding only after showing the comparison and taking a reason (41) 1330ms
+ ✓ src/ProtectedMutationJourney.test.tsx > single protected mutation journey > replaces a binding only after showing the comparison and taking a reason (42) 1384ms
+ ✓ src/ProtectedMutationJourney.test.tsx > single protected mutation journey > keeps the draft when stepping back and forces a new prevalidation when the source changes 1018ms
+ ✓ src/ProtectedMutationJourney.test.tsx > single protected mutation journey > pins the observed revision, prevalidates once and commits with token, ETag and idempotency key 590ms
+ ✓ src/ProtectedMutationJourney.test.tsx > single protected mutation journey > explains an incompatible candidate with its stable code and never lets it be chosen 428ms
+ ✓ src/ProtectedMutationJourney.test.tsx > single protected mutation journey > makes origin and scope explicit before anything can be selected 290ms
+ ✓ src/ProtectedMutationJourney.test.tsx > single protected mutation journey > defines an object-specific series, stages puntos and seals it in the same four steps 2630ms
+ ✓ src/ProtectedMutationJourney.test.tsx > single protected mutation journey > defines an object-specific series, stages CSV and seals it in the same four steps 2349ms
+ ✓ src/ProtectedMutationJourney.test.tsx > single protected mutation journey > defines an object-specific series, stages XLSX and seals it in the same four steps 2378ms
+ ✓ src/ProtectedMutationJourney.test.tsx > single protected mutation journey > defines an object-specific series, stages CSV corregido and seals it in the same four steps 2356ms
+ ✓ src/ProtectedMutationJourney.test.tsx > single protected mutation journey > takes the object entry point into the four steps and keeps object and scope in the rail 141ms
+ ✓ src/PortalConfiguration.test.tsx > portal configuration workspace > opens a closed section and focuses its invalid field when saving 1053ms
+ ✓ src/PortalConfiguration.test.tsx > portal configuration workspace > keeps the leave confirmation reachable while the report section is hidden 793ms
+ ✓ src/PortalConfiguration.test.tsx > portal configuration workspace > accepts the normalized configuration returned by a successful save 564ms
+ ✓ src/PortalConfiguration.test.tsx > portal configuration workspace > protects pending report configuration when leaving and allows continuing the same edits 788ms
+ ✓ src/PortalConfiguration.test.tsx > portal configuration workspace > keeps pending configuration when a background refresh fails and recovers without clearing it 582ms
+ ✓ src/PortalConfiguration.test.tsx > portal configuration workspace > does not adopt another session's revision while editing and preserves work after a conflict 667ms
+ ✓ src/PortalConfiguration.test.tsx > portal configuration workspace > keeps unsaved branding when uploading a logo and saves against the accepted logo revision 751ms
+ ✓ src/PortalConfiguration.test.tsx > portal configuration workspace > preserves configured content while editing branding and changing sections before saving and reopening 1195ms
+ ✓ src/PortalConfiguration.test.tsx > portal configuration workspace > lets an analyst upload a PNG logo at the current revision 232ms
+ ✓ src/PortalConfiguration.test.tsx > portal configuration workspace > lets an analyst remove the current logo at the current revision 158ms
+ ✓ src/PortalConfiguration.test.tsx > portal configuration workspace > lets an analyst declare a display name, a KPI label and one KPI 2331ms
+ ✓ src/PortalConfiguration.test.tsx > portal configuration workspace > surfaces a rejected document without clearing the analyst's edits 457ms
+ ✓ src/PortalConfiguration.test.tsx > portal configuration workspace > lets an analyst publish a chart, a table and the downloads from the catalog 1610ms
+ ✓ src/PortalConfiguration.test.tsx > portal configuration workspace > never offers a chart or column outside the backend catalog 234ms
+ ✓ src/GuidedImport.test.tsx > guided time-series import > keeps one submission in flight when confirmation is double clicked 1364ms
+ ✓ src/GuidedImport.test.tsx > guided time-series import > opens the page containing a reported error and focuses that cell 908ms
+ ✓ src/GuidedImport.test.tsx > guided time-series import > labels proposed columns and shows source examples, units and scope before explicit confirmation 585ms
+ ✓ src/GuidedImport.test.tsx > guided time-series import > lets the analyst correct rows beyond the first window without losing earlier edits 2453ms
+ ✓ src/GuidedImport.test.tsx > guided time-series import > explains staging and preserves the import when cancelling navigation away 566ms
+ ✓ src/GuidedImport.test.tsx > guided time-series import > preserves an uncertain import and requires checking the catalog before another attempt 861ms
+ ✓ src/GuidedImport.test.tsx > guided time-series import > directs canonical imports to the model need instead of offering a legacy writer 166ms
+ ✓ src/GuidedImport.test.tsx > guided time-series import > selects an XLSX sheet and focuses the invalid cell so it can be corrected 1835ms
+ ✓ src/GuidedImport.test.tsx > guided time-series import > keeps column choices and edited values when going back before saving and checking 1197ms
+ ✓ src/GuidedImport.test.tsx > guided time-series import > reviews a CSV and explicitly imports it with a link to its resource and original scenario 1121ms
+ ✓ src/OperatorConsole.test.tsx > operator consoles in the scenario workspace > shows pinned operational rules with their review link 375ms
+ ✓ src/OperatorConsole.test.tsx > operator consoles in the scenario workspace > creates a draft console from a chosen source variant 697ms
+ ✓ src/OperatorConsole.test.tsx > operator consoles in the scenario workspace > shows the console state and links to configure and to test it 165ms
+ ✓ src/OperatorConsole.test.tsx > operator consoles in the scenario workspace > revalidates the owned variant from a moved-dependency recovery row 175ms
+ ✓ src/OperatorConsole.test.tsx > operator consoles in the scenario workspace > links an unavailable parameter to its exact configuration target 144ms
+ ✓ src/OperatorConsole.test.tsx > operator consoles in the scenario workspace > offers only field correction while a field and moved dependency coexist 128ms
+ ✓ src/OperatorConsole.test.tsx > operator consoles in the scenario workspace > shows an old-origin-copy badge without presenting it as a block 130ms
+ ✓ src/OperatorConsole.test.tsx > operator consoles in the scenario workspace > links the latest operator failure reference to internal run detail 150ms
+ ✓ src/OperatorConsole.test.tsx > operator consoles in the scenario workspace > activates a console at its current revision from the configuration editor 155ms
+ ✓ src/OperatorConsole.test.tsx > operator consoles in the scenario workspace > reports a stale revision without pretending the console was saved 136ms
+ ✓ src/OperatorConsole.test.tsx > operator consoles in the scenario workspace > marks the exact unavailable parameter inside the configuration editor 46ms
+ ✓ src/OperatorConsole.test.tsx > operator consoles in the scenario workspace > lets an administrator release a stuck group and restore an older copy revision 164ms
+ ✓ src/OperatorConsole.test.tsx > the console configuration editor and the canonical signal catalog > presents column choices, units and nonnegative rules from the catalog 77ms
+ ✓ src/OperatorConsole.test.tsx > the console configuration editor and the canonical signal catalog > takes the entity type of a chosen signal from the catalog 230ms
+ ✓ src/OperatorConsole.test.tsx > the console configuration editor and the canonical signal catalog > offers a newly declared catalog signal without any editor change 176ms
+ ✓ src/OperatorConsole.test.tsx > the console configuration editor and the canonical signal catalog > refuses to save a column signal the catalog does not declare 149ms
+ ✓ src/OperatorConsole.test.tsx > the operator console shell > preserves pending parameters while refreshing preparation and keeps execution closed after a read failure 359ms
+ ✓ src/OperatorConsole.test.tsx > the operator console shell > keeps pending group edits after losing the edit session and guides recovery without engineering review 540ms
+ ✓ src/OperatorConsole.test.tsx > the operator console shell > lists the operator's consoles across projects and opens one 124ms
+ ✓ src/OperatorConsole.test.tsx > the operator console shell > shows an internal tester their real identity and the way back 62ms
+ ✓ src/OperatorConsole.test.tsx > the operator console shell > saves a scalar override before enabling and enqueueing a run 406ms
+ ✓ src/OperatorConsole.test.tsx > the operator console shell > opens one completed run and renders its configured result block 1225ms
+ ✓ src/OperatorConsole.test.tsx > the operator console shell > switches a named series source and reloads the table 155ms
+ ✓ src/OperatorConsole.test.tsx > the operator console shell > edits one exposed series and only then re-enables running 394ms
+ ✓ src/OperatorConsole.test.tsx > the operator console shell > shows public edit history and undoes the current save while holding the lease 156ms
+ ✓ src/OperatorConsole.test.tsx > the operator console shell > heartbeats the group lease when editing starts 95ms
+ ✓ src/OperatorConsole.test.tsx > the operator console shell > pastes a rectangular block from the anchored cell and normalizes unambiguous numbers 218ms
+ ✓ src/OperatorConsole.test.tsx > the operator console shell > rejects structurally ambiguous pasted numbers without staging a partial block 226ms
+ ✓ src/OperatorConsole.test.tsx > the operator console shell > skips an accidental header and locked columns while pasting 256ms
+ ✓ src/OperatorConsole.test.tsx > the operator console shell > truncates paste overflow at the configured range and warns until save 272ms
+ ✓ src/OperatorConsole.test.tsx > the operator console shell > offers an optional review diff without making it a save prerequisite 345ms
+ ✓ src/OperatorConsole.test.tsx > the operator console shell > virtualizes all 8760 full-horizon rows and can scroll to the last one 472ms
+ ✓ src/OperatorConsole.test.tsx > the operator console shell > names the cells a refused save rejected and keeps running disabled 272ms
+ ✓ src/OperatorConsole.test.tsx > the operator console shell > keeps the table read-only while another operator holds the lock 64ms
+ ✓ src/OperatorConsole.test.tsx > the operator console shell > requests engineering review on a blocked console and shows the wait 121ms
+ ✓ src/OperatorConsole.test.tsx > the operator console shell > compares two runs of the history without leaving the console 287ms
+ ✓ src/OperatorConsole.test.tsx > the operator console shell > states a comparison side that has no results without explaining why 214ms
+stderr | src/ConsoleExperience.test.tsx > console configuration experience > keeps an incomplete numeric field in the form when advanced mode is requested
+Received NaN for the `max` attribute. If this is expected, cast the value to a string.
+
+ ✓ src/ConsoleExperience.test.tsx > console configuration experience > opens a collapsed results section to correct an incomplete field before saving 1319ms
+ ✓ src/ConsoleExperience.test.tsx > console configuration experience > keeps an incomplete numeric field in the form when advanced mode is requested 360ms
+ ✓ src/ConsoleExperience.test.tsx > console configuration experience > retains the configuration through a failed background read and a retry 740ms
+ ✓ src/ConsoleExperience.test.tsx > console configuration experience > requires an accepted save before activation and protects edits during that save 581ms
+ ✓ src/ConsoleExperience.test.tsx > console configuration experience > keeps malformed expert text available and refuses saving or leaving expert mode 432ms
+ ✓ src/ConsoleExperience.test.tsx > console configuration experience > preserves local work and its starting revision after another session saves 599ms
+ ✓ src/ConsoleExperience.test.tsx > console configuration experience > configures KPI chart and table content from forms and the server catalog 1348ms
+stderr | src/ConsoleExperience.test.tsx > console configuration experience > adds a direct numeric model field and persists its label unit bounds and default
+Received NaN for the `min` attribute. If this is expected, cast the value to a string.
+
+ ✓ src/ConsoleExperience.test.tsx > console configuration experience > adds a direct numeric model field and persists its label unit bounds and default 1101ms
+ ✓ src/ConsoleExperience.test.tsx > console configuration experience > round trips expert settings while changing the public name in the form 806ms
+ ✓ src/ConsoleExperience.test.tsx > console configuration experience > persists a battery limit edited without JSON when the engineer reopens the console 369ms
+ ✓ src/AdminExperience.test.tsx > understandable administration > keeps reviewed permissions after a failed save and accepts an explicit retry 517ms
+ ✓ src/AdminExperience.test.tsx > understandable administration > moves keyboard focus to the access review before confirmation 209ms
+ ✓ src/AdminExperience.test.tsx > understandable administration > focuses a rejected schedule date without losing the selected range or cadence 1819ms
+ ✓ src/AdminExperience.test.tsx > understandable administration > recovers a failed access query before offering project permissions 97ms
+ ✓ src/AdminExperience.test.tsx > understandable administration > separates scheduling from users while retaining both unfinished forms 993ms
+ ✓ src/AdminExperience.test.tsx > understandable administration > identifies a duplicate email and preserves the form for a corrected retry 1443ms
+ ✓ src/AdminExperience.test.tsx > understandable administration > adds console access without removing the existing report permission 220ms
+ ✓ src/AdminExperience.test.tsx > understandable administration > reviews the person and project before granting reports without console access 226ms
+ ✓ src/AdminExperience.test.tsx > understandable administration > creates one external identity and shows its readable role after reopening 1039ms
+ ✓ src/DraftExperience.test.tsx > progressive model editing > keeps newer edits in the form when a save requested before opening hydro arrives late 1465ms
+ ✓ src/DraftExperience.test.tsx > progressive model editing > opens the hydraulic diagram after accepting an explicitly edited solver document 496ms
+ ✓ src/DraftExperience.test.tsx > progressive model editing > edits network limits while keeping technical solver options and empty limits after reopening 649ms
+ ✓ src/DraftExperience.test.tsx > progressive model editing > reveals and focuses a hidden hydro curve error without losing battery edits 1639ms
+ ✓ src/DraftExperience.test.tsx > progressive model editing > keeps a terminal condition and basic capacity across closed panels and save 1326ms
+ ✓ src/DraftExperience.test.tsx > progressive model editing > selects a battery and preserves its accepted capacity when reopening the model 733ms
+ ✓ src/VariantPreparation.test.tsx > UX-004 restores the variant in the return URL over the saved preference 536ms
+ ✓ src/VariantPreparation.test.tsx > variant preparation > shows the missing import price separately and links to its exact role 217ms
+ ✓ src/VariantPreparation.test.tsx > variant preparation > shows the missing export price separately and links to its exact role 155ms
+ ✓ src/VariantPreparation.test.tsx > variant preparation > offers the first generic source from an unbound legacy variant (true, false) 262ms
+ ✓ src/VariantPreparation.test.tsx > variant preparation > offers the first generic source from an unbound legacy variant (true, true) 235ms
+ ✓ src/VariantPreparation.test.tsx > variant preparation > offers the first generic source from an unbound legacy variant (false, false) 205ms
+ ✓ src/VariantPreparation.test.tsx > variant preparation > keeps a local source choice pending when another session changes the saved binding during review 318ms
+ ✓ src/VariantPreparation.test.tsx > variant preparation > explains unavailable canonical access instead of linking to a hidden journey 163ms
+ ✓ src/VariantPreparation.test.tsx > variant preparation > preserves the period when refreshing preparation fails and requires a new review after retry 415ms
+ ✓ src/VariantPreparation.test.tsx > variant preparation > takes a missing canonical need to the existing protected journey 257ms
+ ✓ src/VariantPreparation.test.tsx > variant preparation > applies the server-checked coverage only on request and requires reviewing the changed period 384ms
+ ✓ src/VariantPreparation.test.tsx > variant preparation > locks the reviewed inputs and accepts one run while a double click submission is pending 363ms
+ ✓ src/VariantPreparation.test.tsx > variant preparation > explains an unavailable model and directs the analyst to correct it before reviewing 207ms
+ ✓ src/VariantPreparation.test.tsx > variant preparation > reports partial source acceptance and keeps the pending choice without executing 368ms
+ ✓ src/VariantPreparation.test.tsx > variant preparation > keeps an uncertain run submission blocked and offers the history without retrying it 502ms
+ ✓ src/VariantPreparation.test.tsx > variant preparation > keeps the explicit period and offset when choosing a source with a missing hour 525ms
+ ✓ src/VariantPreparation.test.tsx > variant preparation > uses the protected source journey and reviews the exact canonical revision before running 306ms
+ ✓ src/VariantPreparation.test.tsx > variant preparation > confirms sources, reviews two hours and opens the accepted run without binding again or promoting manually 422ms
+ ✓ src/VariantPreparation.test.tsx > variant preparation > identifies a missing signal and takes the analyst to its source selector while execution stays blocked 299ms
+stderr | src/RunExperience.test.tsx > results experience > identifies the frozen rule revision and effective parameters used by a run
+Encountered two children with the same key, `99`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+
+stderr | src/RunExperience.test.tsx > results experience > identifies the frozen rule revision and effective parameters used by a run
+Encountered two children with the same key, `99`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+
+stderr | src/RunExperience.test.tsx > results experience > identifies the frozen rule revision and effective parameters used by a run
+Encountered two children with the same key, `99`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+
+ ✓ src/RunExperience.test.tsx > results experience > identifies the frozen rule revision and effective parameters used by a run 659ms
+ ✓ src/RunExperience.test.tsx > results experience > keeps comparison and artifact access when a successful execution has no result sections 398ms
+ ✓ src/RunExperience.test.tsx > results experience > chooses an available series when changing to executions with different indexed signals 308ms
+ ✓ src/RunExperience.test.tsx > results experience > starts a fresh comparison after returning from a candidate without selecting that execution twice 367ms
+ ✓ src/RunExperience.test.tsx > results experience > removes a previously visible result when the server rejects further access 152ms
+ ✓ src/RunExperience.test.tsx > results experience > recovers artifact downloads from audit without losing the result 232ms
+ ✓ src/RunExperience.test.tsx > results experience > keeps the result while recovering its unavailable version context without inventing a manual origin 229ms
+ ✓ src/RunExperience.test.tsx > results experience > explains an API comparison rejection and retries without losing the selected executions 161ms
+ ✓ src/RunExperience.test.tsx > results experience > requires a new selection when a linked baseline is unavailable instead of comparing another run silently 145ms
+ ✓ src/RunExperience.test.tsx > results experience > warns about different comparison periods and leaves nonoverlapping values unavailable 128ms
+ ✓ src/RunExperience.test.tsx > results experience > lets the analyst consult table rows beyond the first page and preserves the page when closing details 417ms
+ ✓ src/RunExperience.test.tsx > results experience > distinguishes missing legacy results from zero and preserves available hydro results and downloads 288ms
+ ✓ src/RunExperience.test.tsx > results experience > starts comparison from the chosen execution with known differences, units and return links 447ms
+ ✓ src/RunExperience.test.tsx > results experience > keeps an accepted result visible when a background refresh fails 220ms
+ ✓ src/RunExperience.test.tsx > results experience > follows a running execution and retries unavailable results without launching another execution 1198ms
+ ✓ src/RunExperience.test.tsx > results experience > explains a failed execution before opening its diagnostic logs 170ms
+ ✓ src/RunExperience.test.tsx > results experience > shows the successful result and exact period with its immutable snapshot available on demand 277ms
+ ✓ src/GlobalCatalog.test.tsx > layered catalog read surface > UX-004 retains only public origin context while filtering the general catalog 846ms
+ ✓ src/GlobalCatalog.test.tsx > layered catalog read surface > UX-004 recovers an expired cursor without discarding the applied search 227ms
+ ✓ src/GlobalCatalog.test.tsx > layered catalog read surface > UX-004 returns from the protected journey to the same catalog page and inspector 446ms
+ ✓ src/GlobalCatalog.test.tsx > layered catalog read surface > UX-004 restores applied filters and the inspector when reopening the catalog URL 547ms
+ ✓ src/GlobalCatalog.test.tsx > layered catalog read surface > lists one row per signal with owner, scope, contract, coverage and resolution 87ms
+ ✓ src/GlobalCatalog.test.tsx > layered catalog read surface > sends every filter to the server and shows only what the server answered 722ms
+ ✓ src/GlobalCatalog.test.tsx > layered catalog read surface > pages forward and back with the server cursor and never in memory 333ms
+ ✓ src/GlobalCatalog.test.tsx > layered catalog read surface > inspects contract, provenance, revision hash, coverage and consumers without points 246ms
+ ✓ src/GlobalCatalog.test.tsx > layered catalog read surface > renders a bounded preview that cites the exact revision it asked for 367ms
+ ✓ src/GlobalCatalog.test.tsx > layered catalog read surface > surfaces an over-limit preview as a readable refusal, never a silent cut 330ms
+ ✓ src/GlobalCatalog.test.tsx > layered catalog read surface > hands the inspector off to the protected journey instead of mutating 209ms
+ ✓ src/GlobalCatalog.test.tsx > layered catalog read surface > offers no mutation affordance and never leaves the read verbs 204ms
+ ✓ src/GlobalCatalog.test.tsx > layered catalog read surface > keeps the filters, names the request and confirms nothing changed on a refusal 361ms
+ ✓ src/GlobalCatalog.test.tsx > layered catalog read surface > keeps the pre-cutover behaviour for an internal user outside verification 58ms
+ ✓ src/GlobalCatalog.test.tsx > layered catalog read surface > answers an external identity the way it answers a route that is not there 40ms
+ ✓ src/ReusableRules.test.tsx > offers hydro templates only when the contextual object supports their variables 375ms
+ ✓ src/ReusableRules.test.tsx > filters series candidates by the required template port and uses its alias 211ms
+ ✓ src/ReusableRules.test.tsx > compares local values and shows the compiled rows of each instance 205ms
+ ✓ src/ReusableRules.test.tsx > requires compatible aliases and new initial conditions for a temporal template 998ms
+ ✓ src/ReusableRules.test.tsx > creates a local instance from the project library with explicit typed values 1986ms
+ ✓ src/CalculatedSeries.test.tsx > publishes a calculated output through the four protected steps and returns to its catalog 2788ms
+ ✓ src/CalculatedSeries.test.tsx > reviews a stale recipe and explicitly regenerates it using the new successful test 714ms
+ ✓ src/ComponentRules.test.tsx > publishes, previews and applies a flow restriction to the selected variant 1625ms
+ ✓ src/ComponentRules.test.tsx > reopens a 'succeeded' preview with its numerical result or localized error 85ms
+ ✓ src/ComponentRules.test.tsx > reopens a 'failed' preview with its numerical result or localized error 95ms
+ ✓ src/ComponentRules.test.tsx > saves and reopens a contextual Python draft with units and a return link 703ms
+ ✓ src/ComponentRules.test.tsx > starts an asynchronous preview and lets the analyst cancel it 280ms
+ ✓ src/ComponentRules.test.tsx > opens rules from hydraulic-plants/plant/units/unit and retains its contextual return destination 410ms
+ ✓ src/ComponentRules.test.tsx > opens rules from hydraulic-reaches/canal and retains its contextual return destination 149ms
+ ✓ src/ComponentRules.test.tsx > opens rules from components/hydro_1 and retains its contextual return destination 100ms
+ ✓ src/WorkspaceNavigation.test.tsx > workspace task navigation > lets an analyst reach the model when execution history is unavailable 544ms
+ ✓ src/WorkspaceNavigation.test.tsx > workspace task navigation > keeps model preparation unknown during a failed query and its pending retry 343ms
+ ✓ src/WorkspaceNavigation.test.tsx > workspace task navigation > focuses the destination heading when opening the editor and returning to the scenario 471ms
+ ✓ src/WorkspaceNavigation.test.tsx > workspace task navigation > separates project tasks without losing a pending scenario name and links to scenario consoles 780ms
+ ✓ src/WorkspaceNavigation.test.tsx > workspace task navigation > keeps expert JSON edits while moving between task sections and exposes versions and hydraulics 743ms
+ ✓ src/WorkspaceNavigation.test.tsx > workspace task navigation > returns from comparison to the same scenario's executions and preserves other query parameters 347ms
+ ✓ src/WorkspaceNavigation.test.tsx > workspace task navigation > opens the same scenario's editor from Crear modelo when no model exists 252ms
+ ✓ src/ReportExperience.test.tsx > saves a report draft from the chosen result and opens its client preview without publishing 1383ms
+ ✓ src/ReportExperience.test.tsx > publishes explicitly from the preview and offers the authorized portal link and unpublishing 188ms
+ ✓ src/ReportExperience.test.tsx > leads from an unconfigured report to the activation field and back to the chosen result 653ms
+ ✓ src/ReportExperience.test.tsx > requires saving or cancelling an edited draft before previewing or publishing it 622ms
+ ✓ src/ElectricRules.test.tsx > offers grid rules with electrical signs, known data and contextual return 1850ms
+ ✓ src/ElectricRules.test.tsx > offers renewable rules with electrical signs, known data and contextual return 790ms
+ ✓ src/TemporalRules.test.tsx > shows omitted comparisons and exact term instants and requires a new preview when the horizon changes 487ms
+ ✓ src/TemporalRules.test.tsx > reports a negative reference as its Python index instead of a fictitious period zero 45ms
+ ✓ src/TemporalRules.test.tsx > saves an explicit initial value with its unit and instant and preserves the contextual return 1696ms
+ ✓ src/RelatedRules.test.tsx > discovers real variables and saves a plant alias without applying it 2180ms
+ ✓ src/RelatedRules.test.tsx > identifies both affected units and the power unit in the compiled preview 138ms
+ ✓ src/BudgetRules.test.tsx > enables publication after saving an existing window policy returned in canonical key order 1344ms
+ ✓ src/BudgetRules.test.tsx > previews actual window duration, full budget and component terms with bounded pagination 169ms
+ ✓ src/BudgetRules.test.tsx > saves the civil timezone and explicit partial-day consent without applying on edit 730ms
+ ✓ src/HourlyRules.test.tsx > selects an exact input through the protected steps and saves it only in the rule draft 1446ms
+ ✓ src/HourlyRules.test.tsx > shows hourly bounds and numeric outputs with units, pagination and stale validation 515ms
+ ✓ src/HourlyRules.test.tsx > locates an input grid refusal by alias and period before application 291ms
+ ✓ src/RuleRecovery.test.tsx > compares the applied revision, tests a replacement and requires a reason before confirming 1158ms
+ ✓ src/RuleRecovery.test.tsx > lets the analyst change local parameters before comparing the replacement 271ms
+ ✓ src/RuleRecovery.test.tsx > requires an explicit compatible destination for a new alias in the target revision 188ms
+ ✓ src/RuleRecovery.test.tsx > archives a definition with an explicit reason and optimistic revision 453ms
+ ✓ src/RuleRecovery.test.tsx > shows the exact code and hashes consumed by a historical run without reading current definitions 79ms
+ ✓ src/HydraulicSimulation.test.tsx > prepares a promoted hydraulic network with CMg, range and resolution before running 1602ms
+ ✓ src/HydraulicSimulation.test.tsx > imports a CMg spreadsheet and selects its saved catalog series 481ms
+ ✓ src/HydraulicSimulation.test.tsx > shows the source version, objective and resolution in run provenance 31ms
+ ✓ src/ObjectTimeSeriesSummary.test.tsx > contextual object time-series summary > UX-004 recovers the object cursor without losing its origin or filters 419ms
+stderr | src/ObjectTimeSeriesSummary.test.tsx > contextual object time-series summary > UX-004 keeps object filters and scenario context through the source journey
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["project",1]
+
+ ✓ src/ObjectTimeSeriesSummary.test.tsx > contextual object time-series summary > UX-004 keeps object filters and scenario context through the source journey 333ms
+ ✓ src/ObjectTimeSeriesSummary.test.tsx > contextual object time-series summary > shows both source kinds, separate association and usage states, and blocked staleness 211ms
+ ✓ src/ObjectTimeSeriesSummary.test.tsx > contextual object time-series summary > sends contextual filters to the server and renders only its answer 457ms
+ ✓ src/ObjectTimeSeriesSummary.test.tsx > contextual object time-series summary > pages with the server cursor and returns through the cursor trail 311ms
+ ✓ src/ObjectTimeSeriesSummary.test.tsx > contextual object time-series summary > keeps the contextual route absent outside the verification accounts 31ms
+ ✓ src/BatteryRules.test.tsx > offers a battery reserve with explicit signs, units and contextual return 1481ms
+ ✓ src/Admin.test.tsx > external project capabilities > shows the pinned rules for a scheduled execution 340ms
+ ✓ src/Admin.test.tsx > external project capabilities > offers external as an identity role in administration 65ms
+ ✓ src/Admin.test.tsx > external project capabilities > lets an administrator list, grant, change, and revoke both capabilities 828ms
+ ✓ src/PortalResults.test.tsx > configured portal KPIs > renders the configured section label and KPI presentation 247ms
+ ✓ src/PortalResults.test.tsx > configured portal KPIs > applies the configured decimals and sign 20ms
+ ✓ src/PortalResults.test.tsx > configured portal KPIs > marks an emphasized KPI so the portal can highlight it 5ms
+ ✓ src/PortalResults.test.tsx > configured portal KPIs > renders nothing when no section is configured 2ms
+ ✓ src/PortalResults.test.tsx > configured portal charts > renders the configured chart under its section label 78ms
+ ✓ src/PortalResults.test.tsx > configured portal charts > lists each configured series with its public label and unit 20ms
+ ✓ src/PortalResults.test.tsx > configured portal charts > shows an empty state when the section has no available chart 12ms
+ ✓ src/PortalResults.test.tsx > configured portal tables > renders the configured columns and rows 66ms
+ ✓ src/PortalResults.test.tsx > configured portal tables > shows an empty state when a configured table has no rows 18ms
+ ✓ src/PortalResults.test.tsx > configured portal tables > shows an empty state when the section has no available table 11ms
+ ✓ src/PortalResults.test.tsx > the configured publication report > keeps the fixed macro order of the portal shell 29ms
+ ✓ src/PortalResults.test.tsx > the configured publication report > offers every configured download 28ms
+ ✓ src/PortalResults.test.tsx > the configured publication report > says the results are unavailable without naming an artifact 10ms
+ ✓ src/PortalResults.test.tsx > client portal publication > uses the project brand without rendering the analyst product mark 149ms
+ ✓ src/PortalResults.test.tsx > client portal publication > shows the whole configured report to the external viewer 110ms
+ ✓ src/PortalResults.test.tsx > client portal publication > never shows the client a run, a template or a scenario version 68ms
+ ✓ src/PortalResults.test.tsx > internal publication preview > shows the analyst exactly the report the client will see 139ms
+ ✓ src/RuleCompliance.test.tsx > removes previously displayed technical data if access is denied on reconstruction 361ms
+ ✓ src/RuleCompliance.test.tsx > shows frozen compliance, full counts, sample labels and server-side filters and pages 256ms
+ ✓ src/RuleCompliance.test.tsx > explains absence of primal values and links evidence without claiming a unique cause 90ms
+ ✓ src/ApplicationRoots.test.tsx > the three sibling application roots > lands where the backend says, with no second calculation 318ms
+ ✓ src/ApplicationRoots.test.tsx > the three sibling application roots > gives the console root its own header instead of the analyst one 76ms
+ ✓ src/ApplicationRoots.test.tsx > the three sibling application roots > keeps an external identity out of the analyst root, id or not 25ms
+ ✓ src/ApplicationRoots.test.tsx > the three sibling application roots > keeps an internal identity out of the portal root 43ms
+ ✓ src/ApplicationRoots.test.tsx > the three sibling application roots > keeps the console list on its own route with a single row 59ms
+ ✓ src/HydraulicTravelTime.test.tsx > lets the analyst specify pre-horizon flow and explains the initial water inventory 405ms
+ ✓ src/hydro/HydraulicInflowPanel.test.tsx > HydraulicInflowPanel import > imports afluentes from a csv file, replacing points 374ms
+ ✓ src/hydro/HydraulicInflowPanel.test.tsx > HydraulicInflowPanel import > shows imported points read-only with no manual add or edit 45ms
+ ✓ src/hydro/HydraulicInflowPanel.test.tsx > HydraulicInflowPanel import > surfaces a helpful error when the file is malformed 74ms
+ ✓ src/RunProgress.test.tsx > simulation progress > shows Julia preparation immediately and advances elapsed time between polls 276ms
+ ✓ src/RunProgress.test.tsx > simulation progress > updates the real gap and log and freezes elapsed time on completion 42ms
+ ✓ src/RunProgress.test.tsx > simulation progress > distinguishes queueing and old runs without fabricating progress 14ms
+ ✓ src/ExternalAccess.test.tsx > external identity compatibility > keeps a migrated external viewer in the existing client portal 295ms
+ ✓ src/ErrorBoundary.test.tsx > ErrorBoundary > contains unexpected view failures and explains recovery 193ms
+ ✓ src/hydro/inflowImport.test.ts > parseInflowCsv > parses a 3-column csv with header into inflow points 7ms
+ ✓ src/hydro/inflowImport.test.ts > parseInflowCsv > throws a helpful error when a required column is missing 4ms
+ ✓ src/hydro/inflowImport.test.ts > parseInflowCsv > throws pointing at the offending data row when a number is invalid 1ms
+ ✓ src/hydro/inflowImport.test.ts > parseInflowWorkbook > parses the first sheet of an xlsx workbook into inflow points 28ms
+ ✓ src/api/client.test.ts > API client > exposes structured JSON errors through one stable error type 13ms
+ ✓ src/api/client.test.ts > API client > returns non-JSON downloads with response metadata 3ms
+ ✓ src/api/client.test.ts > API client > forwards request cancellation without converting the abort error 2ms
+ ✓ src/hydraulicConstraintExport.test.ts > exports the current topology, exact data and a detailed independently usable Python guide 8ms
+ ✓ src/hydraulicConstraintExport.test.ts > reports missing endpoints without fabricating a Mermaid connection or claiming validity 2ms
+
+ Test Files  37 passed (37)
+      Tests  336 passed (336)
+   Start at  09:18:24
+   Duration  289.47s (transform 4.41s, setup 11.82s, import 21.31s, tests 182.97s, environment 61.54s)
+

@@ -1,0 +1,19 @@
+
+> bess-react-ui@0.1.0 build
+> tsc -b && vite build
+
+vite v8.0.16 building client environment for production...
+[2Ktransforming...✓ 139 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                             0.47 kB │ gzip:   0.30 kB
+dist/assets/index-DrUENBsx.css             42.92 kB │ gzip:   9.11 kB
+dist/assets/ComponentRules-DJzVEaz2.js    423.32 kB │ gzip: 139.90 kB
+dist/assets/index-aPgMwFfw.js           1,271.58 kB │ gzip: 365.40 kB
+
+✓ built in 942ms
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.

@@ -1492,6 +1492,7 @@ class HydraulicDiagramApiTests(unittest.TestCase):
                         "input_snapshot",
                         "stdout_log",
                         "stderr_log",
+                        "progress_log",
                         "summary_json",
                         "dispatch_csv",
                         "asset_dispatch_csv",

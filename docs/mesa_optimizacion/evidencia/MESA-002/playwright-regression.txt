@@ -1,0 +1,18 @@
+
+Running 4 tests using 1 worker
+
+
+
+npx.cmd : (node:44464) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+En línea: 2 Carácter: 1
++ npx.cmd playwright test e2e/react-foundation.spec.ts -g 'React auth h ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ((node:44464) Wa... env being set.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+(Use `node --trace-warnings ...` to show where the warning was created)
+[1/4] e2e\react-foundation.spec.ts:200:1 › React auth handles bootstrap, login, refresh, roles, logout, and deactivation
+[2/4] e2e\react-foundation.spec.ts:887:1 › UX-005 confirms sources, reloads, reviews an explicit period and submits one variant run
+[3/4] e2e\react-foundation.spec.ts:1190:1 › React analyst workspace creates a project and scenario, then preserves direct scenario refresh
+[4/4] e2e\react-foundation.spec.ts:2843:1 › UX-006 reads results, audits the snapshot and compares the chosen execution through the real API
+  4 passed (27.4s)

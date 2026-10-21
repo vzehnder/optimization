@@ -1,13 +1,33 @@
 # Plan de implementación de la mesa de optimización
 
 Fecha: 2026-10-20.
-Estado: desglose aprobado; prototipo conceptual validado por el usuario.
+Estado: desglose aprobado; prototipo conceptual validado por el usuario;
+[contratos de MESA-001](decision_record_mesa001.md) aceptados el 2026-10-20.
+MESA-002 implementa la primera consulta de demanda; su evidencia y revisión están
+en el [ticket](issues/MESA-002-abrir-caso-y-demanda-real.md).
+MESA-003 incorpora la configuración visual persistida por usuario/caso, con
+[contrato y migración](persistencia_vistas.md) y
+[evidencia de implementación](evidencia/MESA-003/validacion.md).
+MESA-004 amplía la consulta a BESS y renovables, parámetros y resultados existentes
+por activo; [evidencia y límites](evidencia/MESA-004/validacion.md).
+MESA-005 incorpora consulta hidráulica por identidad, entradas de caudal, parámetros
+y resultados existentes; [evidencia y límites](evidencia/MESA-005/validacion.md).
+MESA-006 incorpora edición de valores con revisiones canónicas, copia local,
+concurrencia servidor y preparación pendiente de revalidación;
+[evidencia y límites](evidencia/MESA-006/validacion.md).
+MESA-007 incorpora preparación y ejecución eléctrica por fechas, idempotencia,
+snapshot inmutable y avance recuperable con worker/Julia reales;
+[evidencia y límites](evidencia/MESA-007/validacion.md).
+MESA-008 incorpora ejecución de red v3 desde versión promovida, opciones económicas,
+remuestreo explícito, idempotencia y resultados recuperables de central y embalse;
+[evidencia y límites](evidencia/MESA-008/validacion.md). Siguiente: MESA-009.
 Seguimiento: [tracker](tracker.md).
 
 El usuario confirmó el 2026-10-20 mantener granularidad, dependencias y tipos
-del desglose, además de las interfaces S1/S2 y S3 condicional para TDD. Esa
-confirmación no decide por sí sola la necesidad de cooptimización mixta ni las
-otras decisiones técnicas que MESA-001 debe resolver.
+del desglose, además de las interfaces S1/S2 y S3 condicional para TDD.
+Posteriormente, ese mismo día, respondió «confirmo» al registro de MESA-001:
+quedan aceptados sus contratos y el alcance con los modelos actuales, sin exigir
+cooptimización de red hidráulica v3 con componentes eléctricos en el primer corte.
 
 ## Resultado esperado
 
@@ -33,7 +53,7 @@ Confirmado en la conversación:
 - Planificar primero; conectar e implementar posteriormente.
 - Conservar screenshots para validar la implementación mediante TDD.
 
-Propuestas que deberán fijarse en la primera entrega:
+Decisiones aceptadas en el registro de MESA-001 tras la conformidad HITL:
 
 - Tomar A · Paneles como diseño principal. B y C no se implementan en este corte.
 - Ubicar la mesa en la superficie interna del analista/admin, accesible desde el
@@ -67,25 +87,26 @@ de que los cambios locales ya estén integrados en una rama compartida.
 | Fachadas externas con permisos propios | [Arquitectura de configuración](../capa_configuracion/architecture_configuration_layer_final.md) | No convertir la consola externa en un editor hidráulico ni ampliar sus permisos. |
 | Motor eléctrico e hidráulico | [system_dispatch.jl](../../src/system_dispatch.jl) | Resolver según las capacidades reales de cada contrato de modelo. |
 
-La simulación hidráulica y el progreso tienen archivos nuevos o modificados sin
-commit en el árbol actual. Las entregas que los reutilicen deben comprobar su
-integración efectiva y coordinarse con ese trabajo; no asumir que están disponibles
-solo porque aparecen en este checkout.
+Actualización MESA-001 del 2026-10-20: simulación hidráulica y progreso ya están
+integrados en el commit `d206e78`, ancestro del HEAD inspeccionado `817bf25`.
+API, formulario, worker, motor y tipos están conectados; sus regresiones se
+documentan en el ticket. No queda una dependencia de archivos locales sin commit.
 
 ## Límite del modelo y componentes
 
 Los caminos eléctricos one-bus v1/v2 y la red hidráulica v3 no deben tratarse como
-un mismo contrato por compartir pantalla. La inspección muestra preparadores
-distintos; no demuestra que una red v3 pueda cooptimizar BESS, demanda y renovables
-en un único balance eléctrico.
+un mismo contrato por compartir pantalla. La revisión de MESA-001 comprobó que
+**v2 sí integra hidro simple con BESS, demanda y renovables en un balance común**;
+**v3 construye un modelo hidráulico separado, sin ese balance eléctrico**.
+La [matriz de capacidades](decision_record_mesa001.md) detalla límites y evidencias.
 
-La primera entrega debe documentar la matriz de capacidades y resolver si el caso
-objetivo necesita esa cooptimización. Si la necesita y no existe, debe incorporar
-una entrega vertical de extensión del motor antes de declarar completa la
-ejecución mixta. Ejecutar dos modelos por separado y sumar sus indicadores no
-satisface ese requisito.
+MESA-001 documentó la matriz y cerró el alcance con conformidad del usuario:
+la cooptimización de red v3 con componentes eléctricos no se exige en este corte.
+Si se solicita más adelante, necesita una entrega vertical de extensión del
+motor. Ejecutar dos modelos por separado y sumar sus indicadores no satisface
+una cooptimización.
 
-Mientras tanto, las entregas propuestas cubren la mesa para los contratos
+Las entregas aprobadas cubren la mesa para los contratos
 ejecutables existentes, con tipos admitidos, errores explícitos e identidad de la
 fuente. No se fabricarán resultados para componentes no modelados.
 
@@ -94,7 +115,7 @@ embalses, tramos y unidades usan las identidades del dominio, preservando la
 distinción entre el activo base y su participación en un caso. Dos componentes
 con igual nombre no se fusionan.
 
-## Contratos funcionales propuestos
+## Contratos funcionales acordados
 
 ### Configuración de la mesa
 
@@ -221,11 +242,11 @@ permiten tomar trabajo independiente; no asignan automáticamente agentes.
 - Criterios de aceptación marcados, evidencia y resultado registrados en el tracker.
 - Cambios ajenos del árbol de trabajo preservados.
 
-## Fuera del corte propuesto
+## Fuera del corte aprobado
 
 Publicación externa, rediseño del portal cliente, scheduling, edición colaborativa
 en tiempo real, diseñador de ecuaciones arbitrarias y reemplazo general del solver.
-La necesidad de un modelo mixto no se descarta aquí: se resuelve expresamente en
-la primera entrega y amplía el plan si forma parte del caso objetivo.
+La cooptimización de red hidráulica v3 con BESS, demanda y renovables queda fuera
+de este corte, conforme a la decisión aceptada en MESA-001.
 
 Las pruebas y regresión visual se detallan en [validacion_tdd.md](validacion_tdd.md).

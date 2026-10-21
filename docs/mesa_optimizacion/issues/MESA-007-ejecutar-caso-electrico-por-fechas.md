@@ -1,9 +1,9 @@
 # MESA-007 · Ejecutar un caso eléctrico por fechas y recuperar su avance
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
-Assignee: —
+Assignee: Codex
 Source: [Plan de implementación](../plan_implementacion.md)
 User stories covered: HU-05, HU-11
 
@@ -13,14 +13,14 @@ Ejecutar desde la mesa un caso admitido con BESS, demanda y renovables reutiliza
 
 ## Acceptance criteria
 
-- [ ] Seleccionar inicio, fin, zona y resolución admitida; convertir explícitamente fechas inclusivas a intervalos [inicio, fin) cuando aplique.
-- [ ] Comprobar cobertura, períodos, cambios de hora y compatibilidad antes de encolar; no aplicar remuestreo implícito.
-- [ ] Guardar/validar la preparación y congelar variante, revisiones de series, parámetros y rango en el snapshot utilizado por el run.
-- [ ] El servidor vuelve a comprobar vigencia y permisos al ejecutar y rechaza preparación obsoleta o cambios pendientes.
-- [ ] Doble clic o reintento no crea ejecuciones duplicadas; cada solicitud aceptada devuelve un identificador recuperable.
-- [ ] Mostrar cola, ejecución, fallo y éxito con avance real; recargar o perder conexión no pierde la referencia al run ni lo lanza nuevamente.
-- [ ] Tras éxito, las salidas se pueden consultar en la mesa por el mismo run; en fallo se conservan entradas y un mensaje accionable.
-- [ ] Probar el recorrido con worker/motor de prueba real y fixture pequeña; una prueba visual con mocks no basta para declarar ejecutable.
+- [x] Seleccionar inicio, fin, zona y resolución admitida; convertir explícitamente fechas inclusivas a intervalos [inicio, fin) cuando aplique. Se usan fecha/hora y fin explícitamente exclusivo.
+- [x] Comprobar cobertura, períodos, cambios de hora y compatibilidad antes de encolar; no aplicar remuestreo implícito.
+- [x] Guardar/validar la preparación y congelar variante, revisiones de series, parámetros y rango en el snapshot utilizado por el run.
+- [x] El servidor vuelve a comprobar vigencia y permisos al ejecutar y rechaza preparación obsoleta o cambios pendientes. Solo acepta la preparación guardada; la UI bloquea mientras hay edición abierta.
+- [x] Doble clic o reintento no crea ejecuciones duplicadas; cada solicitud aceptada devuelve un identificador recuperable.
+- [x] Mostrar cola, ejecución, fallo y éxito con avance real; recargar o perder conexión no pierde la referencia al run ni lo lanza nuevamente.
+- [x] Tras éxito, las salidas se pueden consultar en la mesa por el mismo run; en fallo se conservan entradas y un mensaje accionable.
+- [x] Probar el recorrido con worker/motor de prueba real y fixture pequeña; una prueba visual con mocks no basta para declarar ejecutable.
 
 ## Blocked by
 
@@ -41,9 +41,9 @@ Modificar una entrada, seleccionar fechas, ejecutar y ver el run completar sin n
 
 ## Evidencia y seguimiento
 
-- Inicio: pendiente.
-- Evidencia rojo → verde / revisión HITL: pendiente.
-- Pruebas y comandos ejecutados: pendiente.
-- Capturas de implementación y diferencias revisadas: pendiente, cuando aplique.
-- Decisiones o desviaciones respecto del plan: pendiente.
-- Cierre y responsable: pendiente.
+- Inicio: 2026-10-20, por instrucción del usuario. Dependencias MESA-004/MESA-006 Done; interfaces S1/S2 previamente confirmadas.
+- Evidencia: [13 ciclos rojo → verde, contratos y revisión](../evidencia/MESA-007/validacion.md).
+- Pruebas: 18 HTTP nuevas y tres de navegador nuevas; 151 Python OK y cinco PostgreSQL omitidas; 23 MESA y cinco regresiones de navegador OK. Vitest: 335/336 en suite y 4/4 en el reintento del archivo con foco intermitente; 336 distintas verificadas entre ambas ejecuciones.
+- Capturas: preparación a 1440 px, resultado recuperado a 390 px y matriz 2×2. Revisadas, con las referencias originales conservadas.
+- Decisiones: se reutilizan variantes, snapshots, cola y progreso. Se corrigieron normalización del hash canónico y timestamps UTC de series específicas. No cambia el motor ni se crean tablas.
+- Cierre: **Done**, Codex, 2026-10-20, después de revisión técnica AFK y visual. Límites y fallo intermitente de foco documentados; siguiente MESA-008.

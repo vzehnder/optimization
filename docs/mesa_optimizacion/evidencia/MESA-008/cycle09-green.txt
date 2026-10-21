@@ -1,0 +1,11 @@
+Command: npx.cmd playwright test --config=playwright.mesa.config.ts -g La preparación hidráulica
+
+
+Running 1 test using 1 worker
+
+
+(node:59672) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1/1] e2e\mesa-hydraulic-execution.spec.ts:4:1 › La preparación hidráulica cambia con sus opciones y se recupera de una huella obsoleta
+  1 passed (10.9s)

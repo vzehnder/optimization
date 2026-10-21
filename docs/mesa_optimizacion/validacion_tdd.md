@@ -1,7 +1,30 @@
 # Validación de la mesa con TDD
 
-Estado: interfaces de prueba confirmadas el 2026-10-20; no se han escrito pruebas de producto ni iniciado
-la implementación en este trabajo de planificación.
+Estado: interfaces de prueba confirmadas el 2026-10-20; MESA-001 Done con
+conformidad HITL registrada ese mismo día.
+MESA-001 ejecutó regresiones existentes para verificar la base, documentadas en su
+[ticket](issues/MESA-001-acordar-alcance-y-contratos.md), sin pruebas nuevas de producto.
+MESA-002 está Done e incorpora siete pruebas HTTP y tres de navegador, con seis ciclos
+rojo → verde y [evidencia de implementación](evidencia/MESA-002/validacion.md).
+MESA-003 está Done con cinco pruebas HTTP y siete de navegador nuevas, nueve
+ciclos rojo → verde, persistencia SQLite en disco y capturas revisadas.
+Ver [evidencia, regresiones y límites](evidencia/MESA-003/validacion.md).
+MESA-004 está Done con diez pruebas HTTP y tres de navegador nuevas, doce ciclos
+rojo → verde, consulta de resultados por activo y capturas a 1440/390 px.
+Ver [evidencia, regresiones y límites](evidencia/MESA-004/validacion.md).
+MESA-005 está Done con diecisiete pruebas HTTP y dos de navegador nuevas, dieciséis
+ciclos rojo → verde, consulta hidráulica por identidad y capturas a 1440/390 px.
+Ver [evidencia, regresiones y límites](evidencia/MESA-005/validacion.md).
+MESA-006 está Done con quince pruebas HTTP y cinco de navegador nuevas, quince
+ciclos rojo → verde, edición canónica, concurrencia entre conexiones SQLite y
+capturas a 1440/390 px. Ver [evidencia, regresiones y límites](evidencia/MESA-006/validacion.md).
+MESA-007 está Done con dieciocho pruebas HTTP y tres de navegador nuevas, trece
+ciclos rojo → verde y ejecución real de éxito/fallo con Julia y el worker.
+Ver [evidencia, capturas y límites](evidencia/MESA-007/validacion.md).
+MESA-008 está Done con once pruebas HTTP y tres de navegador nuevas, nueve
+ciclos rojo → verde, corrida hidráulica real y validación de topología con Julia.
+145 Python, 26 navegador MESA, cinco regresiones generales y 336 Vitest OK.
+Ver [evidencia, capturas y límites](evidencia/MESA-008/validacion.md).
 
 Habilidad solicitada: [TDD del repositorio](../../.agents/skills/tdd/SKILL.md).
 Apoyo: [pruebas](../../.agents/skills/tdd/tests.md) y
@@ -127,12 +150,15 @@ Usar el runner existente de cada área. Ejecutar primero la prueba específica;
 ampliar a las regresiones relevantes cuando toque el contrato correspondiente.
 
 - Frontend: npm.cmd test y npm.cmd run check.
-- Navegador: npm.cmd run test:browser -- -g "mesa de optimización".
-  El patrón es propuesto; hoy no existe esa suite.
+- Navegador de mesa: npm.cmd run test:browser -- --config=playwright.mesa.config.ts.
+  Usa su propia base/servidor autenticado para conservar el bootstrap de la suite general.
 - API: unittest para los módulos nuevos y los contratos afectados.
 - Si cambia API: npm.cmd run api:generate y npm.cmd run api:check.
 - Si cambia motor/artefactos: suite Julia del proyecto.
 
-Estos comandos son instrucciones para la implementación posterior, no resultados
-de pruebas ejecutadas ahora. El trabajo actual verifica documentos, enlaces,
-dependencias y archivos de referencia.
+Cada entrega registra sus comandos efectivamente ejecutados en su evidencia.
+Los comandos efectivamente ejecutados para MESA-001 y sus límites están en su
+ticket: 29 pruebas Python verificadas entre la ejecución inicial y el reintento
+de dos integraciones Julia, más seis regresiones React. No son un ciclo rojo →
+verde de producto nuevo ni validación visual de una mesa implementada. También
+se comprueban documentos, enlaces, dependencias y archivos de referencia.

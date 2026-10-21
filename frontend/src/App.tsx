@@ -45,6 +45,7 @@ import {
 import { ScenarioDraftEditorView } from "./DraftEditor";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { GlobalCatalogView } from "./GlobalCatalog";
+import { OptimizationMesaView } from "./OptimizationMesa";
 import { ObjectTimeSeriesSummaryView } from "./ObjectTimeSeriesSummary";
 import { ProtectedMutationJourneyView } from "./ProtectedMutationJourney";
 import {
@@ -462,6 +463,10 @@ function AuthenticatedRoutes({
           element={
             <ScenarioDetailView canonicalCatalogRead={canonicalCatalogRead} />
           }
+        />
+        <Route
+          path="scenarios/:scenarioId/mesa"
+          element={<OptimizationMesaView />}
         />
         <Route
           path="scenarios/:scenarioId/draft"

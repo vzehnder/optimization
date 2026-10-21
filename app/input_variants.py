@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Any
 
 from app.time_series_catalog import TIME_SERIES_SIGNAL_CATALOG
@@ -8,6 +9,18 @@ from app.time_series_catalog import TIME_SERIES_SIGNAL_CATALOG
 
 class InputVariantRangeError(ValueError):
     pass
+
+
+def canonical_variant_periods(revision):
+    """Canonical naive timestamps are UTC; the executable contract uses local hours."""
+    zone = ZoneInfo(revision["timezone"])
+    def local(value):
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(zone).isoformat()
+    return [{**period, "timestamp_start": local(period["timestamp_start"]),
+             "timestamp_end": local(period["timestamp_end"])} for period in revision["periods"]]
 
 
 def _parse_bound_signal_key(
@@ -72,26 +85,31 @@ def resolve_bound_signal_series(
     requested range or a value is missing for ``signal_key``.
     """
     set_id = time_series_set["id"]
+    zone = ZoneInfo(time_series_set.get("timezone") or "UTC")
+    def instant(value):
+        parsed = datetime.fromisoformat(value)
+        return (parsed.replace(tzinfo=zone) if parsed.tzinfo is None else parsed).astimezone(timezone.utc)
+    start, end = instant(range_start), instant(range_end)
     periods = sorted(
-        (period for period in time_series_set["periods"] if period["timestamp_start"] < range_end),
+        (period for period in time_series_set["periods"] if instant(period["timestamp_start"]) < end),
         key=lambda period: period["period_index"],
     )
-    periods = [period for period in periods if period["timestamp_end"] > range_start]
+    periods = [period for period in periods if instant(period["timestamp_end"]) > start]
 
     if not periods:
         raise _missing_coverage_error(signal_key, set_id, range_start, range_end)
-    if periods[0]["timestamp_start"] != range_start:
+    if instant(periods[0]["timestamp_start"]) != start:
         actual_start = periods[0]["timestamp_start"]
-        if actual_start > range_start:
+        if instant(actual_start) > start:
             raise _missing_coverage_error(signal_key, set_id, range_start, actual_start)
         raise _horizon_incompatible_error(
             signal_key,
             set_id,
             f"first period starts at {actual_start}, before requested range start {range_start}",
         )
-    if periods[-1]["timestamp_end"] != range_end:
+    if instant(periods[-1]["timestamp_end"]) != end:
         actual_end = periods[-1]["timestamp_end"]
-        if actual_end < range_end:
+        if instant(actual_end) < end:
             raise _missing_coverage_error(signal_key, set_id, actual_end, range_end)
         raise _horizon_incompatible_error(
             signal_key,
@@ -99,8 +117,8 @@ def resolve_bound_signal_series(
             f"last period ends at {actual_end}, after requested range end {range_end}",
         )
     for previous, current in zip(periods, periods[1:]):
-        if previous["timestamp_end"] != current["timestamp_start"]:
-            if previous["timestamp_end"] < current["timestamp_start"]:
+        if instant(previous["timestamp_end"]) != instant(current["timestamp_start"]):
+            if instant(previous["timestamp_end"]) < instant(current["timestamp_start"]):
                 raise _missing_coverage_error(
                     signal_key, set_id, previous["timestamp_end"], current["timestamp_start"]
                 )

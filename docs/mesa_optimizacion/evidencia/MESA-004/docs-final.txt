@@ -1,0 +1,11 @@
+{
+  "markdown_files": 24,
+  "local_links": 192,
+  "original_hashes_and_dimensions": 3,
+  "issues": 14,
+  "states": {
+    "Done": 4,
+    "Todo": 10
+  },
+  "dependencies": "acyclic"
+}

@@ -149,14 +149,17 @@ def main() -> None:
     comparison_root = Path(tempfile.mkdtemp(prefix="ux-results-", dir=artifact_root))
     project = store.create_project(name="UX-006 Resultados de referencia")
     scenario = store.create_scenario(project_id=project["id"], name="Invierno de referencia")
+    case = store.get_or_create_case_for_scenario(scenario["id"])
+    base_variant = store.get_or_create_default_input_variant(case["id"])
+    alternative_variant = store.create_case_input_variant(case_id=case["id"], display_name="Alternativa de invierno")
     base = create_indexed_run(
         store, comparison_root, scenario_id=scenario["id"], objective_value_usd=1000,
-        input_variant={"id": 1, "display_name": "Base de invierno"},
+        input_variant={"id": base_variant["id"], "display_name": "Base de invierno"},
         date_range={"start": "2026-01-01T00:00:00-03:00", "end": "2026-01-01T02:00:00-03:00"},
     )
     create_indexed_run(
         store, comparison_root, scenario_id=scenario["id"], objective_value_usd=1500,
-        input_variant={"id": 2, "display_name": "Alternativa de invierno"},
+        input_variant={"id": alternative_variant["id"], "display_name": "Alternativa de invierno"},
         date_range={"start": "2026-01-01T00:00:00-03:00", "end": "2026-01-01T02:00:00-03:00"},
     )
     failed = store.create_run(scenario_version_id=base["scenario_version_id"])

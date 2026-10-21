@@ -1,0 +1,109 @@
+.\.venv\Scripts\python.exe : C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\.venv\Lib\s
+ite-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is 
+deprecated; install `httpx2` instead.
+En línea: 2 Carácter: 1
++ .\.venv\Scripts\python.exe -m unittest -v tests.test_optimization_mes ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\vicen\...ttpx2` instead.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  from starlette.testclient import TestClient as TestClient  # noqa
+test_case_and_variant_ids_cannot_cross_scenario_contexts_even_with_equal_names (tests.test_optimization_mesa.Optimizati
+onMesaApiTests.test_case_and_variant_ids_cannot_cross_scenario_contexts_even_with_equal_names) ... ok
+test_demand_is_read_from_the_selected_canonical_revision_after_reload (tests.test_optimization_mesa.OptimizationMesaApi
+Tests.test_demand_is_read_from_the_selected_canonical_revision_after_reload) ... ok
+test_empty_case_and_unbound_variant_have_explicit_empty_states 
+(tests.test_optimization_mesa.OptimizationMesaApiTests.test_empty_case_and_unbound_variant_have_explicit_empty_states) 
+... ok
+test_exact_period_slice_and_invalid_ranges_are_not_silently_resampled (tests.test_optimization_mesa.OptimizationMesaApi
+Tests.test_exact_period_slice_and_invalid_ranges_are_not_silently_resampled) ... ok
+test_existing_legacy_variant_reads_its_own_demand_source 
+(tests.test_optimization_mesa.OptimizationMesaApiTests.test_existing_legacy_variant_reads_its_own_demand_source) ... ok
+test_external_operator_and_anonymous_session_cannot_read_the_internal_mesa (tests.test_optimization_mesa.OptimizationMe
+saApiTests.test_external_operator_and_anonymous_session_cannot_read_the_internal_mesa) ... ok
+test_uncovered_period_reports_no_coverage_without_inventing_zero (tests.test_optimization_mesa.OptimizationMesaApiTests
+.test_uncovered_period_reports_no_coverage_without_inventing_zero) ... ok
+test_bind_price_signal_then_run_launches_a_run 
+(tests.test_ts3_case_variant_api.CaseInputVariantApiTests.test_bind_price_signal_then_run_launches_a_run) ... ok
+test_default_variant_response_includes_not_stale_before_any_validation (tests.test_ts3_case_variant_api.CaseInputVarian
+tApiTests.test_default_variant_response_includes_not_stale_before_any_validation) ... ok
+test_get_default_variant_creates_it_lazily 
+(tests.test_ts3_case_variant_api.CaseInputVariantApiTests.test_get_default_variant_creates_it_lazily) ... ok
+test_hydraulic_diagram_case_discovers_and_runs_entity_scoped_variant_signals (tests.test_ts3_case_variant_api.CaseInput
+VariantApiTests.test_hydraulic_diagram_case_discovers_and_runs_entity_scoped_variant_signals) ... ok
+test_hydraulic_diagram_topology_change_after_validation_marks_variant_stale (tests.test_ts3_case_variant_api.CaseInputV
+ariantApiTests.test_hydraulic_diagram_topology_change_after_validation_marks_variant_stale) ... ok
+test_list_variants_clone_variant_and_rename_it 
+(tests.test_ts3_case_variant_api.CaseInputVariantApiTests.test_list_variants_clone_variant_and_rename_it) ... ok
+test_required_signals_reflect_a_bound_price 
+(tests.test_ts3_case_variant_api.CaseInputVariantApiTests.test_required_signals_reflect_a_bound_price) ... ok
+test_run_records_variant_name_range_and_series_lineage_immutably (tests.test_ts3_case_variant_api.CaseInputVariantApiTe
+sts.test_run_records_variant_name_range_and_series_lineage_immutably) ... ok
+test_run_with_a_missing_required_signal_returns_400 
+(tests.test_ts3_case_variant_api.CaseInputVariantApiTests.test_run_with_a_missing_required_signal_returns_400) ... ok
+test_run_with_range_not_covered_returns_400 
+(tests.test_ts3_case_variant_api.CaseInputVariantApiTests.test_run_with_range_not_covered_returns_400) ... ok
+test_series_edit_after_run_marks_variant_stale_and_blocks_further_runs (tests.test_ts3_case_variant_api.CaseInputVarian
+tApiTests.test_series_edit_after_run_marks_variant_stale_and_blocks_further_runs) ... ok
+test_two_variants_on_same_case_produce_distinct_runs_with_distinguishable_lineage (tests.test_ts3_case_variant_api.Case
+InputVariantApiTests.test_two_variants_on_same_case_produce_distinct_runs_with_distinguishable_lineage)
+BESS-TS3-008: running one case with two variants must yield distinct ... ok
+test_validate_endpoint_revalidates_and_clears_stale_marker_then_run_succeeds (tests.test_ts3_case_variant_api.CaseInput
+VariantApiTests.test_validate_endpoint_revalidates_and_clears_stale_marker_then_run_succeeds) ... ok
+test_get_default_variant_without_a_draft_returns_no_required_signals (tests.test_ts3_case_variant_api.DefaultVariantWit
+houtADraftYetTests.test_get_default_variant_without_a_draft_returns_no_required_signals) ... ok
+test_an_explicitly_revalidated_pin_executes_the_old_revision (tests.test_ts7_009_run_materialization.CanonicalRunMateri
+alizationApiTests.test_an_explicitly_revalidated_pin_executes_the_old_revision) ... ok
+test_failed_run_insert_rolls_back_the_new_scenario_version (tests.test_ts7_009_run_materialization.CanonicalRunMaterial
+izationApiTests.test_failed_run_insert_rolls_back_the_new_scenario_version) ... ok
+test_materialization_recomputes_the_pinned_hash_and_refuses_corrupt_values (tests.test_ts7_009_run_materialization.Cano
+nicalRunMaterializationApiTests.test_materialization_recomputes_the_pinned_hash_and_refuses_corrupt_values) ... ok
+test_missing_export_price_is_visible_and_blocks_validation_and_run_before_julia (tests.test_ts7_009_run_materialization
+.CanonicalRunMaterializationApiTests.test_missing_export_price_is_visible_and_blocks_validation_and_run_before_julia) 
+... ok
+test_run_uses_exact_bound_revision_and_reuses_identical_snapshot (tests.test_ts7_009_run_materialization.CanonicalRunMa
+terializationApiTests.test_run_uses_exact_bound_revision_and_reuses_identical_snapshot) ... ok
+test_an_explicitly_revalidated_pin_executes_the_old_revision (tests.test_ts7_009_run_materialization.PostgresCanonicalR
+unMaterializationApiTests.test_an_explicitly_revalidated_pin_executes_the_old_revision) ... skipped 'set 
+POSTGRES_TEST_DATABASE_URL to run the PostgreSQL contract tests'
+test_failed_run_insert_rolls_back_the_new_scenario_version (tests.test_ts7_009_run_materialization.PostgresCanonicalRun
+MaterializationApiTests.test_failed_run_insert_rolls_back_the_new_scenario_version) ... skipped 'set 
+POSTGRES_TEST_DATABASE_URL to run the PostgreSQL contract tests'
+test_materialization_recomputes_the_pinned_hash_and_refuses_corrupt_values (tests.test_ts7_009_run_materialization.Post
+gresCanonicalRunMaterializationApiTests.test_materialization_recomputes_the_pinned_hash_and_refuses_corrupt_values) 
+... skipped 'set POSTGRES_TEST_DATABASE_URL to run the PostgreSQL contract tests'
+test_missing_export_price_is_visible_and_blocks_validation_and_run_before_julia (tests.test_ts7_009_run_materialization
+.PostgresCanonicalRunMaterializationApiTests.test_missing_export_price_is_visible_and_blocks_validation_and_run_before_
+julia) ... skipped 'set POSTGRES_TEST_DATABASE_URL to run the PostgreSQL contract tests'
+test_run_uses_exact_bound_revision_and_reuses_identical_snapshot (tests.test_ts7_009_run_materialization.PostgresCanoni
+calRunMaterializationApiTests.test_run_uses_exact_bound_revision_and_reuses_identical_snapshot) ... skipped 'set 
+POSTGRES_TEST_DATABASE_URL to run the PostgreSQL contract tests'
+test_json_bootstrap_login_logout_deactivation_and_csrf_contract (tests.test_react_auth.ReactAuthenticationContractTests
+.test_json_bootstrap_login_logout_deactivation_and_csrf_contract) ... ok
+test_production_cookie_secure_flag_is_configurable 
+(tests.test_react_auth.ReactAuthenticationContractTests.test_production_cookie_secure_flag_is_configurable) ... ok
+test_admin_api_rejects_the_legacy_client_role 
+(tests.test_configuration_layer_access.ConfigurationLayerAccessApiTests.test_admin_api_rejects_the_legacy_client_role) 
+... ok
+test_admin_can_create_an_external_identity 
+(tests.test_configuration_layer_access.ConfigurationLayerAccessApiTests.test_admin_can_create_an_external_identity) 
+... ok
+test_admin_can_manage_independent_project_capabilities (tests.test_configuration_layer_access.ConfigurationLayerAccessA
+piTests.test_admin_can_manage_independent_project_capabilities) ... ok
+test_analyst_cannot_administer_external_capabilities (tests.test_configuration_layer_access.ConfigurationLayerAccessApi
+Tests.test_analyst_cannot_administer_external_capabilities) ... ok
+test_legacy_client_access_admin_endpoint_is_retired (tests.test_configuration_layer_access.ConfigurationLayerAccessApiT
+ests.test_legacy_client_access_admin_endpoint_is_retired) ... ok
+test_operate_only_external_cannot_enter_the_portal_api (tests.test_configuration_layer_access.ConfigurationLayerAccessA
+piTests.test_operate_only_external_cannot_enter_the_portal_api) ... ok
+test_portal_view_changes_apply_on_the_next_external_request (tests.test_configuration_layer_access.ConfigurationLayerAc
+cessApiTests.test_portal_view_changes_apply_on_the_next_external_request) ... ok
+test_legacy_client_assignment_migrates_without_expanding_access (tests.test_configuration_layer_access.ConfigurationLay
+erAccessMigrationTests.test_legacy_client_assignment_migrates_without_expanding_access) ... ok
+test_legacy_client_role_is_rejected_after_cutover (tests.test_configuration_layer_access.ConfigurationLayerAccessMigrat
+ionTests.test_legacy_client_role_is_rejected_after_cutover) ... ok
+
+----------------------------------------------------------------------
+Ran 42 tests in 72.084s
+
+OK (skipped=5)

@@ -1,9 +1,9 @@
 # MESA-008 · Ejecutar una red hidráulica desde la misma mesa
 
-Status: Todo
+Status: Done
 Type: AFK
 Triage: ready-for-agent
-Assignee: —
+Assignee: Codex
 Source: [Plan de implementación](../plan_implementacion.md)
 User stories covered: HU-05, HU-11
 
@@ -13,14 +13,14 @@ Adaptar el recorrido de ejecución a una red hidráulica válida, conservando su
 
 ## Acceptance criteria
 
-- [ ] Seleccionar una red/versionado válido y el período desde la mesa, con identidad de todos los componentes incluidos.
-- [ ] Exponer objetivo económico/energético, selección de CMg, valor terminal del agua y opciones admitidas necesarias para ese caso.
-- [ ] La preparación muestra cobertura y remuestreo explícito cuando el servicio lo aplique; no hereda silenciosamente reglas incompatibles del camino eléctrico.
-- [ ] Congelar entradas y configuración exactas y comprobar la huella de preparación al ejecutar; cambios intermedios bloquean el envío.
-- [ ] Una corrida real de red mínima entrega resultados consultables por central y embalse y recupera su estado después de recargar.
-- [ ] Los errores de topología, entrada o capacidad del motor señalan el componente afectado sin inventar resultados.
-- [ ] Si la entrega inicial exige cooptimización mixta, no cerrar este ticket sin la dependencia de motor acordada y su prueba pública.
-- [ ] Confirmar integración del trabajo previo de simulación/progreso antes de reutilizarlo; preservar los flujos hidráulicos existentes.
+- [x] Seleccionar una red/versionado válido y el período desde la mesa, con identidad de todos los componentes incluidos.
+- [x] Exponer objetivo económico/energético, selección de CMg, valor terminal del agua y opciones admitidas necesarias para ese caso.
+- [x] La preparación muestra cobertura y remuestreo explícito cuando el servicio lo aplique; no hereda silenciosamente reglas incompatibles del camino eléctrico.
+- [x] Congelar entradas y configuración exactas y comprobar la huella de preparación al ejecutar; cambios intermedios bloquean el envío.
+- [x] Una corrida real de red mínima entrega resultados consultables por central y embalse y recupera su estado después de recargar.
+- [x] Los errores de topología, entrada o capacidad del motor señalan el componente afectado sin inventar resultados.
+- [x] Si la entrega inicial exige cooptimización mixta, no cerrar este ticket sin la dependencia de motor acordada y su prueba pública. No se exige según los contratos aceptados de MESA-001; se conserva v3 por su camino propio.
+- [x] Confirmar integración del trabajo previo de simulación/progreso antes de reutilizarlo; preservar los flujos hidráulicos existentes.
 
 ## Blocked by
 
@@ -42,9 +42,10 @@ Elegir la fecha y objetivo, ejecutar la serie hidráulica y consultar potencia y
 
 ## Evidencia y seguimiento
 
-- Inicio: pendiente.
-- Evidencia rojo → verde / revisión HITL: pendiente.
-- Pruebas y comandos ejecutados: pendiente.
-- Capturas de implementación y diferencias revisadas: pendiente, cuando aplique.
-- Decisiones o desviaciones respecto del plan: pendiente.
-- Cierre y responsable: pendiente.
+- Inicio: 2026-10-21, por Codex. Dependencias Done; S1 navegador y S2 HTTP ya confirmadas. Primer ciclo: red mínima con worker real, resultados por entidad y recuperación HTTP. Se conserva el motor actual.
+- Evidencia: [nueve ciclos rojo → verde, contrato, comandos y revisión](../evidencia/MESA-008/validacion.md).
+- Pruebas nuevas: once HTTP y tres de navegador, incluyendo una corrida de red mínima con worker/Julia reales. 30 MW y 9.7336 hm³ observados por entidad, recarga y doble clic.
+- Capturas: preparación/resultados a 1440/390 px inspeccionados. Teclado, Axe y geometría existente verificados; referencias originales intactas.
+- Decisiones: ejecución desde versión promovida explícita, UTC y remuestreo hidráulico existente; snapshot/diagrama/run atómicos, huella revalidada e idempotencia por actor. Sin cambios del motor ni esquema de tablas.
+- Verificación final: 145 Python, 26 navegador MESA, cinco regresiones generales y 336 Vitest OK. OpenAPI, build, TypeScript, ESLint y formato modificado OK; el check global conserva los 16 avisos previos de formato ajenos a la entrega.
+- Cierre: **Done**, Codex, 2026-10-21, después de revisión técnica AFK y visual. PostgreSQL no está configurado; concurrencia comprobada con dos conexiones SQLite. Siguiente: MESA-009.

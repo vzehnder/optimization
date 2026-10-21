@@ -1,0 +1,3 @@
+26 Markdown; 233 local links resolved; 14 consistent tickets; no dependency cycles.
+Statuses: {'Done': 6, 'Todo': 8}
+Two original PNGs (1440x900) and frozen HTML: sizes and SHA256 unchanged.

@@ -9522,6 +9522,13 @@ function CaseInputVariantPanel({
       <h2 id="input-variant-panel">
         Variante de entrada: {activeVariant.display_name}
       </h2>
+      <p>
+        <Link
+          to={`/scenarios/${scenarioId}/mesa?case=${activeVariant.case_id}&variant=${activeVariant.id}`}
+        >
+          Abrir mesa de optimización
+        </Link>
+      </p>
       {cloneError ? <p role="alert">{cloneError}</p> : null}
       {variantQuery.isError ? (
         <div role="alert">

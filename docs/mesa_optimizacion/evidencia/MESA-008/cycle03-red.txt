@@ -1,0 +1,19 @@
+Command: .venv\Scripts\python.exe -m unittest -v tests.test_mesa_hydraulic_execution.MesaHydraulicExecutionTests.test_changed_cmg_blocks_old_preparation_but_keeps_the_accepted_snapshot
+
+C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+test_changed_cmg_blocks_old_preparation_but_keeps_the_accepted_snapshot (tests.test_mesa_hydraulic_execution.MesaHydraulicExecutionTests.test_changed_cmg_blocks_old_preparation_but_keeps_the_accepted_snapshot) ... FAIL
+
+======================================================================
+FAIL: test_changed_cmg_blocks_old_preparation_but_keeps_the_accepted_snapshot (tests.test_mesa_hydraulic_execution.MesaHydraulicExecutionTests.test_changed_cmg_blocks_old_preparation_but_keeps_the_accepted_snapshot)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\vicen\OneDrive\Documents\repositorios\Personales\General\optimization\tests\test_mesa_hydraulic_execution.py", line 120, in test_changed_cmg_blocks_old_preparation_but_keeps_the_accepted_snapshot
+    self.assertEqual(rejected.status_code, 409, rejected.text)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 201 != 409 : {"id":2,"scenario_version_id":3,"status":"queued","created_at":"2026-10-21T12:01:06+00:00","started_at":null,"finished_at":null,"duration_seconds":null,"exit_code":null,"workspace_path":null,"input_snapshot_path":null,"output_dir":null,"summary_path":null,"stdout_log_path":null,"stderr_log_path":null,"error_message":"","stdout":"","stderr":"","triggered_by":"mesa@example.local","trigger_type":"manual","triggered_by_user_id":1,"triggered_by_display_name":"Analista","operator_console_id":null,"operator_console_revision":null,"success_payload":{},"error_payload":{},"materialized_lineage":{"date_range":{"end":"2026-10-20T02:00:00+00:00","start":"2026-10-20T00:00:00+00:00"},"hydraulic_simulation":{"mip_rel_gap":0.01,"objective":"market_value","resampling":"duration_weighted_mean; minimum_flow_max; finer_steps_constant","resolution_hours":2.0,"terminal_water_values_usd_per_hm3":{"reservoir":1.0}},"kind":"hydraulic_simulation","mesa_hydraulic_execution":{"case_id":1,"mip_rel_gap":0.01,"objective":"market_value","price_signal_key":"price_usd_per_mwh","price_time_series_set_id":2,"range_end":"2026-10-20T02:00:00+00:00","range_start":"2026-10-20T00:00:00+00:00","resolution_hours":2.0,"source_scenario_version_id":1,"terminal_water_values_usd_per_hm3":{"reservoir":1.0}},"mesa_hydraulic_request":{"actor_id":1,"hash":"90a9c183fa8d0ee40dd0020073ad942a612cea73457b9b48272fa70a735faca0","key":"another-request"},"preparation_hash":"e54312f1b7d24f7fb2ce38dba5f78d45f091e932cd9dbfd61be41808ea9b2f98","series_bindings":[{"content_hash":"sha256:fd54e6f768a56f15b42ddade5fdd80198887adcba8654fd318e5c2738f6204e3","entity_id":null,"entity_type":null,"revision_number":2,"signal_key":"price_usd_per_mwh","time_series_set_id":2,"validated_range":{"end":"2026-10-20T02:00:00+00:00","start":"2026-10-20T00:00:00+00:00"},"version_label":"v1","version_number":1}],"source_content_hash":"69bf9f9ee323e0517046335cc346edf025c637af02fadc4ba0a3e4ff57204d20","source_scenario_version_id":1,"source_version_number":1}}
+
+----------------------------------------------------------------------
+Ran 1 test in 3.624s
+
+FAILED (failures=1)

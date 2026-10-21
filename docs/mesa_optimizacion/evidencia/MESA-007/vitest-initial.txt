@@ -1,0 +1,10 @@
+Command: npm.cmd test -- --maxWorkers=1
+
+
+> bess-react-ui@0.1.0 test
+> vitest run --maxWorkers=1
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+Detenida después de más de tres minutos sin resultados. La prueba RunProgress focalizada pasó 3/3; se reintenta la suite con el capturador de salida anterior.

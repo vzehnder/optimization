@@ -2681,6 +2681,194 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scenarios/{scenario_id}/mesa": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Optimization Mesa */
+        get: operations["get_optimization_mesa_api_scenarios__scenario_id__mesa_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/mesa/execution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Execution State */
+        get: operations["execution_state_api_scenarios__scenario_id__mesa_execution_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/mesa/execution/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Execution Preview */
+        post: operations["execution_preview_api_scenarios__scenario_id__mesa_execution_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/mesa/execution/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Execution Run */
+        post: operations["execution_run_api_scenarios__scenario_id__mesa_execution_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/mesa/hydraulic-execution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** State */
+        get: operations["state_api_scenarios__scenario_id__mesa_hydraulic_execution_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/mesa/hydraulic-execution/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview */
+        post: operations["preview_api_scenarios__scenario_id__mesa_hydraulic_execution_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/mesa/hydraulic-execution/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Launch */
+        post: operations["launch_api_scenarios__scenario_id__mesa_hydraulic_execution_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/mesa/hydraulic-execution/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sources */
+        get: operations["sources_api_scenarios__scenario_id__mesa_hydraulic_execution_sources_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/mesa/inputs/{object_id}/{signal_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Mesa Input Edit */
+        get: operations["get_mesa_input_edit_api_scenarios__scenario_id__mesa_inputs__object_id___signal_key__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/mesa/inputs/{object_id}/{signal_key}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post Mesa Input Revision */
+        post: operations["post_mesa_input_revision_api_scenarios__scenario_id__mesa_inputs__object_id___signal_key__revisions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenarios/{scenario_id}/mesa/preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Mesa Preferences */
+        get: operations["get_mesa_preferences_api_scenarios__scenario_id__mesa_preferences_get"];
+        /** Put Mesa Preferences */
+        put: operations["put_mesa_preferences_api_scenarios__scenario_id__mesa_preferences_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scenarios/{scenario_id}/runs": {
         parameters: {
             query?: never;
@@ -4138,6 +4326,450 @@ export interface components {
             next: string;
             /** Password */
             password: string;
+        };
+        /** MesaComponent */
+        MesaComponent: {
+            /** Additional Series */
+            additional_series?: components["schemas"]["MesaSeries"][];
+            /** Base Entity Id */
+            base_entity_id?: number | null;
+            /** Case Entity Id */
+            case_entity_id?: number | null;
+            /** Component Type */
+            component_type?: string | null;
+            /** Entity Id */
+            entity_id: string;
+            /** Entity Type */
+            entity_type: string;
+            /** From Entity Id */
+            from_entity_id?: string | null;
+            /**
+             * Is Active
+             * @default true
+             */
+            is_active: boolean;
+            /** Linkable Object Id */
+            linkable_object_id: number | null;
+            /** Name */
+            name: string;
+            /** Parameters */
+            parameters?: components["schemas"]["MesaParameter"][];
+            /** Parent Entity Id */
+            parent_entity_id?: string | null;
+            series: components["schemas"]["MesaSeries"];
+            /** To Entity Id */
+            to_entity_id?: string | null;
+        };
+        /** MesaComponentReference */
+        MesaComponentReference: {
+            /** Entity Id */
+            entity_id: string;
+            /** Entity Type */
+            entity_type: string;
+            /** Linkable Object Id */
+            linkable_object_id?: number | null;
+        };
+        /** MesaConfiguration */
+        MesaConfiguration: {
+            /** Active Tab Id */
+            active_tab_id: string;
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            /** Tabs */
+            tabs: components["schemas"]["MesaTabPreference"][];
+        };
+        /** MesaContext */
+        MesaContext: {
+            /** Case Id */
+            case_id: number;
+            /** Model Contract */
+            model_contract?: string | null;
+            /** Project Id */
+            project_id: number;
+            /** Project Name */
+            project_name: string;
+            /** Scenario Id */
+            scenario_id: number;
+            /** Scenario Name */
+            scenario_name: string;
+            /** Variant Id */
+            variant_id: number;
+            /** Variant Name */
+            variant_name: string;
+        };
+        /** MesaEditContext */
+        MesaEditContext: {
+            /** Actor */
+            actor: string;
+            expected: components["schemas"]["MesaEditExpected"];
+            /** Scope */
+            scope: string;
+            /** Scope Message */
+            scope_message: string;
+            series: components["schemas"]["MesaSeries"];
+            /** Source Reference */
+            source_reference: string;
+            /** Validation Rules */
+            validation_rules: {
+                [key: string]: unknown;
+            };
+        };
+        /** MesaEditExpected */
+        MesaEditExpected: {
+            /** Binding Id */
+            binding_id: number;
+            /** Bindings Revision */
+            bindings_revision: number;
+            /** Content Hash */
+            content_hash: string;
+            /** Revision Id */
+            revision_id: number;
+            /** Source Revision Id */
+            source_revision_id: number;
+        };
+        /** MesaEditPoint */
+        MesaEditPoint: {
+            /** End */
+            end: string;
+            /** Start */
+            start: string;
+            /** Value */
+            value: number;
+        };
+        /** MesaEditRequest */
+        MesaEditRequest: {
+            /** Case Id */
+            case_id: number;
+            /**
+             * Confirm
+             * @default false
+             */
+            confirm: boolean;
+            expected: components["schemas"]["MesaEditExpected"];
+            /** Points */
+            points: components["schemas"]["MesaEditPoint"][];
+            /** Reason */
+            reason: string;
+            /** Unit */
+            unit: string;
+            /** Variant Id */
+            variant_id: number;
+        };
+        /** MesaExecutionPreview */
+        MesaExecutionPreview: {
+            /** Model Contract */
+            model_contract: string;
+            /** Period Count */
+            period_count: number;
+            /** Preparation Hash */
+            preparation_hash: string;
+            /** Range End */
+            range_end: string;
+            /** Range Start */
+            range_start: string;
+            /** Resolution Hours */
+            resolution_hours: number;
+            /** Series Bindings */
+            series_bindings: {
+                [key: string]: unknown;
+            }[];
+            /** Timezone */
+            timezone: string;
+        };
+        /** MesaExecutionRequest */
+        MesaExecutionRequest: {
+            /** Case Id */
+            case_id: number;
+            /** Range End */
+            range_end: string;
+            /** Range Start */
+            range_start: string;
+            /** Resolution Hours */
+            resolution_hours: number;
+            /** Timezone */
+            timezone: string;
+            /** Variant Id */
+            variant_id: number;
+        };
+        /** MesaExecutionRunRequest */
+        MesaExecutionRunRequest: {
+            /** Case Id */
+            case_id: number;
+            /** Expected Preparation Hash */
+            expected_preparation_hash: string;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Range End */
+            range_end: string;
+            /** Range Start */
+            range_start: string;
+            /** Resolution Hours */
+            resolution_hours: number;
+            /** Timezone */
+            timezone: string;
+            /** Variant Id */
+            variant_id: number;
+        };
+        /** MesaHydraulicComponent */
+        MesaHydraulicComponent: {
+            /** Component Type */
+            component_type: string;
+            /** Entity Id */
+            entity_id: string;
+            /** Name */
+            name: string;
+        };
+        /** MesaHydraulicRequest */
+        MesaHydraulicRequest: {
+            /** Case Id */
+            case_id: number;
+            /** Expected Preparation Hash */
+            expected_preparation_hash?: string | null;
+            /** Mip Rel Gap */
+            mip_rel_gap?: number | null;
+            /**
+             * Objective
+             * @default market_value
+             * @enum {string}
+             */
+            objective: "market_value" | "energy";
+            /**
+             * Price Signal Key
+             * @default price_usd_per_mwh
+             * @enum {string}
+             */
+            price_signal_key: "price_usd_per_mwh" | "export_price_usd_per_mwh";
+            /** Price Time Series Set Id */
+            price_time_series_set_id?: number | null;
+            /** Range End */
+            range_end: string;
+            /** Range Start */
+            range_start: string;
+            /** Resolution Hours */
+            resolution_hours: number;
+            /** Source Scenario Version Id */
+            source_scenario_version_id: number;
+            /** Terminal Water Values Usd Per Hm3 */
+            terminal_water_values_usd_per_hm3?: {
+                [key: string]: number;
+            };
+        };
+        /** MesaHydraulicRunRequest */
+        MesaHydraulicRunRequest: {
+            /** Case Id */
+            case_id: number;
+            /** Expected Preparation Hash */
+            expected_preparation_hash: string;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Mip Rel Gap */
+            mip_rel_gap?: number | null;
+            /**
+             * Objective
+             * @default market_value
+             * @enum {string}
+             */
+            objective: "market_value" | "energy";
+            /**
+             * Price Signal Key
+             * @default price_usd_per_mwh
+             * @enum {string}
+             */
+            price_signal_key: "price_usd_per_mwh" | "export_price_usd_per_mwh";
+            /** Price Time Series Set Id */
+            price_time_series_set_id?: number | null;
+            /** Range End */
+            range_end: string;
+            /** Range Start */
+            range_start: string;
+            /** Resolution Hours */
+            resolution_hours: number;
+            /** Source Scenario Version Id */
+            source_scenario_version_id: number;
+            /** Terminal Water Values Usd Per Hm3 */
+            terminal_water_values_usd_per_hm3?: {
+                [key: string]: number;
+            };
+        };
+        /** MesaHydraulicSource */
+        MesaHydraulicSource: {
+            /** Components */
+            components: components["schemas"]["MesaHydraulicComponent"][];
+            /** Id */
+            id: number;
+            /** Mip Rel Gap */
+            mip_rel_gap: number;
+            /** Range End */
+            range_end: string;
+            /** Range Start */
+            range_start: string;
+            /** Resolution Hours */
+            resolution_hours: number;
+            /** Terminal Water Values Usd Per Hm3 */
+            terminal_water_values_usd_per_hm3: {
+                [key: string]: number;
+            };
+            /** Version Number */
+            version_number: number;
+        };
+        /** MesaHydraulicSources */
+        MesaHydraulicSources: {
+            /** Sources */
+            sources: components["schemas"]["MesaHydraulicSource"][];
+        };
+        /** MesaPanelPreference */
+        MesaPanelPreference: {
+            component: components["schemas"]["MesaComponentReference"];
+            /** Id */
+            id: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "chart" | "table";
+            /** Series Keys */
+            series_keys: string[];
+            /** Title */
+            title: string;
+        };
+        /** MesaParameter */
+        MesaParameter: {
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+            /**
+             * Source
+             * @default current_preparation
+             * @constant
+             */
+            source: "current_preparation";
+            /** Unit */
+            unit: string;
+            /** Value */
+            value: number | string | boolean;
+        };
+        /** MesaPoint */
+        MesaPoint: {
+            /** End */
+            end: string;
+            /** Start */
+            start: string;
+            /** Value */
+            value: number;
+        };
+        /** MesaPreferencesRequest */
+        MesaPreferencesRequest: {
+            configuration: components["schemas"]["MesaConfiguration"];
+            /** Expected Revision */
+            expected_revision: number;
+        };
+        /** MesaPreferencesResponse */
+        MesaPreferencesResponse: {
+            /** Case Id */
+            case_id: number;
+            configuration: components["schemas"]["MesaConfiguration"];
+            /** Revision */
+            revision: number;
+        };
+        /** MesaResponse */
+        MesaResponse: {
+            /** Components */
+            components: components["schemas"]["MesaComponent"][];
+            context: components["schemas"]["MesaContext"];
+            /** Runs */
+            runs?: components["schemas"]["MesaRun"][];
+            selected_run?: components["schemas"]["MesaRun"] | null;
+        };
+        /** MesaRun */
+        MesaRun: {
+            /** Id */
+            id: number;
+            /** Model Contract */
+            model_contract: string;
+            /** Scenario Version Id */
+            scenario_version_id: number;
+            /** Timezone */
+            timezone?: string | null;
+        };
+        /** MesaSeries */
+        MesaSeries: {
+            /** Binding State */
+            binding_state?: string | null;
+            /** Content Hash */
+            content_hash?: string | null;
+            /**
+             * Editable
+             * @default false
+             */
+            editable: boolean;
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /**
+             * Name
+             * @default Demanda
+             */
+            name: string;
+            /** Points */
+            points?: components["schemas"]["MesaPoint"][];
+            /** Revision Id */
+            revision_id?: number | null;
+            /** Revision Number */
+            revision_number?: number | null;
+            /**
+             * Role
+             * @default input
+             * @enum {string}
+             */
+            role: "input" | "output";
+            /** Run Id */
+            run_id?: number | null;
+            /** Scenario Version Id */
+            scenario_version_id?: number | null;
+            /** Signal Id */
+            signal_id?: number | null;
+            /**
+             * Signal Key
+             * @default load_demand_mw
+             */
+            signal_key: string;
+            /** Source */
+            source?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "available" | "unbound" | "no_coverage" | "unavailable";
+            /** Time Series Set Id */
+            time_series_set_id?: number | null;
+            /** Timezone */
+            timezone?: string | null;
+            /**
+             * Unit
+             * @default MW
+             */
+            unit: string;
+        };
+        /** MesaTabPreference */
+        MesaTabPreference: {
+            /** Id */
+            id: string;
+            /**
+             * Layout
+             * @enum {string}
+             */
+            layout: "1x1" | "1x2" | "2x2" | "2x3";
+            /** Panels */
+            panels: components["schemas"]["MesaPanelPreference"][];
+            /** Title */
+            title: string;
         };
         /** ObjectSeriesArchiveRequest */
         ObjectSeriesArchiveRequest: {
@@ -11256,6 +11888,426 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_optimization_mesa_api_scenarios__scenario_id__mesa_get: {
+        parameters: {
+            query: {
+                case_id: number;
+                variant_id: number;
+                range_start?: string | null;
+                range_end?: string | null;
+                run_id?: number | null;
+            };
+            header?: never;
+            path: {
+                scenario_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MesaResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    execution_state_api_scenarios__scenario_id__mesa_execution_get: {
+        parameters: {
+            query: {
+                case_id: number;
+                variant_id: number;
+            };
+            header?: never;
+            path: {
+                scenario_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    execution_preview_api_scenarios__scenario_id__mesa_execution_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MesaExecutionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MesaExecutionPreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    execution_run_api_scenarios__scenario_id__mesa_execution_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MesaExecutionRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    state_api_scenarios__scenario_id__mesa_hydraulic_execution_get: {
+        parameters: {
+            query: {
+                case_id: number;
+            };
+            header?: never;
+            path: {
+                scenario_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_api_scenarios__scenario_id__mesa_hydraulic_execution_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MesaHydraulicRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    launch_api_scenarios__scenario_id__mesa_hydraulic_execution_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MesaHydraulicRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sources_api_scenarios__scenario_id__mesa_hydraulic_execution_sources_get: {
+        parameters: {
+            query: {
+                case_id: number;
+            };
+            header?: never;
+            path: {
+                scenario_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MesaHydraulicSources"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_mesa_input_edit_api_scenarios__scenario_id__mesa_inputs__object_id___signal_key__get: {
+        parameters: {
+            query: {
+                case_id: number;
+                variant_id: number;
+            };
+            header?: never;
+            path: {
+                scenario_id: number;
+                object_id: number;
+                signal_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MesaEditContext"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_mesa_input_revision_api_scenarios__scenario_id__mesa_inputs__object_id___signal_key__revisions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: number;
+                object_id: number;
+                signal_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MesaEditRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_mesa_preferences_api_scenarios__scenario_id__mesa_preferences_get: {
+        parameters: {
+            query: {
+                case_id: number;
+            };
+            header?: never;
+            path: {
+                scenario_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MesaPreferencesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_mesa_preferences_api_scenarios__scenario_id__mesa_preferences_put: {
+        parameters: {
+            query: {
+                case_id: number;
+            };
+            header?: never;
+            path: {
+                scenario_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MesaPreferencesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MesaPreferencesResponse"];
                 };
             };
             /** @description Validation Error */

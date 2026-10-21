@@ -1,0 +1,17 @@
+
+> bess-react-ui@0.1.0 test
+> vitest run src/ReportExperience.test.tsx --maxWorkers=1 --reporter=verbose
+
+
+ RUN  v4.1.9 C:/Users/vicen/OneDrive/Documents/repositorios/Personales/General/optimization/frontend
+
+ ✓ src/ReportExperience.test.tsx > saves a report draft from the chosen result and opens its client preview without publishing 1258ms
+ ✓ src/ReportExperience.test.tsx > publishes explicitly from the preview and offers the authorized portal link and unpublishing 180ms
+ ✓ src/ReportExperience.test.tsx > leads from an unconfigured report to the activation field and back to the chosen result 564ms
+ ✓ src/ReportExperience.test.tsx > requires saving or cancelling an edited draft before previewing or publishing it 605ms
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  22:47:13
+   Duration  7.08s (transform 1.73s, setup 323ms, import 2.33s, tests 2.61s, environment 1.47s)
+

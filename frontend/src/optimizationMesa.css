@@ -1,0 +1,477 @@
+main:has(.mesa-view) {
+  width: min(1320px, calc(100% - 2rem));
+  padding: 1.25rem 0;
+}
+
+.workspace-view.mesa-view {
+  gap: 0.85rem;
+}
+
+.mesa-execution {
+  padding: 0.55rem 0.75rem;
+  background: #fff;
+  border: 1px solid #d7e4e8;
+  border-radius: 12px;
+  min-width: 0;
+  font-size: 0.85rem;
+  flex: 1;
+}
+.mesa-case-execution {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-width: 0;
+}
+.mesa-case-execution > p {
+  margin: 0;
+}
+.mesa-case-execution:has(.mesa-execution details[open]) {
+  flex-wrap: wrap;
+}
+.mesa-case-execution:has(.mesa-execution details[open]) > .mesa-execution {
+  flex-basis: 100%;
+}
+.mesa-execution-summary,
+.mesa-execution-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  justify-content: space-between;
+}
+.mesa-execution summary {
+  cursor: pointer;
+}
+.mesa-execution-form[open] {
+  width: 100%;
+}
+.mesa-execution fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0.7rem 0;
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-width: 0;
+}
+.mesa-execution label {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+}
+.mesa-execution input,
+.mesa-execution select {
+  width: 100%;
+  min-width: 0;
+  padding: 0.4rem;
+  box-sizing: border-box;
+}
+.mesa-execution p {
+  overflow-wrap: anywhere;
+}
+.mesa-execution button {
+  font-size: 0.8rem;
+  padding: 0.4rem 0.65rem;
+}
+.mesa-execution-progress {
+  margin-top: 0.35rem;
+}
+.mesa-execution-progress .run-progress {
+  min-width: 0;
+}
+@media (max-width: 800px) {
+  .mesa-case-execution {
+    flex-wrap: wrap;
+  }
+  .mesa-case-execution > .mesa-execution {
+    flex-basis: 100%;
+  }
+  .mesa-execution fieldset {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 480px) {
+  .mesa-execution fieldset {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.mesa-view .workspace-heading h1 {
+  max-width: none;
+  font-size: 1.75rem;
+  line-height: 1.2;
+}
+
+.mesa-view > p {
+  margin: 0;
+}
+
+.mesa-editor {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.mesa-tab-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+.mesa-editor > .mesa-toolbar,
+.mesa-editor > .mesa-grid,
+.mesa-editor > p {
+  grid-column: 1 / -1;
+}
+.mesa-editor button {
+  font-size: 0.8rem;
+  padding: 0.4rem 0.65rem;
+}
+.mesa-tabs {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+}
+.mesa-tabs button {
+  white-space: nowrap;
+}
+.mesa-tabs button[aria-selected="true"] {
+  background: #087f80;
+}
+.mesa-grid {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.mesa-grid[data-layout="1x1"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+.mesa-grid[data-layout="2x3"] {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.mesa-cell {
+  min-width: 0;
+}
+.mesa-dialog {
+  width: min(500px, calc(100% - 2rem));
+  max-height: 90dvh;
+  border: 1px solid #bcced6;
+  border-radius: 12px;
+  color: #16344a;
+}
+.mesa-dialog::backdrop {
+  background: #16344a70;
+}
+.mesa-dialog form {
+  display: grid;
+  gap: 1rem;
+}
+.mesa-dialog label {
+  display: grid;
+  gap: 0.4rem;
+}
+.mesa-dialog input,
+.mesa-dialog select {
+  padding: 0.5rem;
+  min-width: 0;
+  font: inherit;
+}
+.mesa-dialog .mesa-checkbox {
+  display: flex;
+  align-items: center;
+}
+.mesa-dialog footer {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: flex-end;
+}
+
+@media (max-width: 640px) {
+  .mesa-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+.mesa-view [role="status"],
+.mesa-view [role="alert"] {
+  margin: 0;
+  width: 100%;
+  box-shadow: none;
+}
+
+.mesa-context,
+.mesa-toolbar,
+.mesa-panel-heading,
+.mesa-panel-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.mesa-context {
+  justify-content: flex-start;
+  font-size: 0.9rem;
+}
+
+.mesa-toolbar {
+  margin: 0;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid #d7e4e8;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.mesa-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 0.8rem;
+}
+.mesa-toolbar p {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.mesa-toolbar select {
+  border: 1px solid #bcced6;
+  border-radius: 6px;
+  padding: 0.45rem;
+  font: inherit;
+  color: inherit;
+  background: #fff;
+}
+
+.mesa-panel {
+  min-width: 0;
+  border: 1px solid #d7e4e8;
+  border-radius: 12px;
+  background: #fff;
+  padding: 0.65rem 0.8rem;
+  height: 236px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+@media (min-width: 641px) {
+  .mesa-view:has(.mesa-execution) .mesa-panel {
+    height: 226px;
+  }
+  .mesa-view:has(> .mesa-toolbar) .mesa-panel {
+    height: 204px;
+  }
+  .mesa-view:has(.mesa-execution):has(> .mesa-toolbar) .mesa-panel {
+    height: 190px;
+  }
+}
+.mesa-panel-heading {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+.mesa-panel-heading > div:first-child {
+  min-width: 0;
+}
+.mesa-panel-heading p {
+  margin: 0.2rem 0 0;
+  font-size: 0.72rem;
+}
+
+.mesa-panel-heading h2 {
+  margin: 0;
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+
+.mesa-panel-heading p,
+.mesa-panel-footer,
+.mesa-note {
+  font-size: 0.85rem;
+  color: #526878;
+  overflow-wrap: anywhere;
+}
+
+.mesa-modes {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.mesa-modes button[aria-pressed="true"] {
+  background: #087f80;
+  color: #fff;
+}
+
+.mesa-series-label {
+  color: #086c6d;
+  font-size: 0.75rem;
+  margin: 0;
+}
+.mesa-series-content {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+.mesa-signal {
+  min-height: 160px;
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.mesa-parameters {
+  font-size: 0.75rem;
+  margin-bottom: 0.3rem;
+}
+.mesa-parameters summary {
+  cursor: pointer;
+  color: #086c6d;
+}
+.mesa-parameters table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.mesa-parameters th,
+.mesa-parameters td {
+  text-align: left;
+  padding: 0.25rem;
+  border-bottom: 1px solid #e5edf0;
+}
+.mesa-signal + .mesa-signal {
+  border-top: 1px solid #bcced6;
+  padding-top: 0.5rem;
+  margin-top: 0.5rem;
+}
+.mesa-signal:only-of-type {
+  min-height: 0;
+  flex: 1;
+}
+
+.mesa-chart {
+  width: 100%;
+  height: 140px;
+  min-height: 0;
+  flex: 1;
+}
+
+.mesa-chart text {
+  font-size: 19px;
+  fill: #526878;
+}
+
+.mesa-panel-footer {
+  padding-top: 0.3rem;
+  border-top: 1px solid #e5edf0;
+  margin-top: auto;
+  font-size: 0.7rem;
+  gap: 0.3rem;
+}
+
+.mesa-table-scroll {
+  max-width: 100%;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  margin-bottom: 0;
+}
+
+.mesa-table-scroll table {
+  width: 100%;
+  white-space: nowrap;
+  border-collapse: collapse;
+}
+
+.mesa-table-scroll th,
+.mesa-table-scroll td {
+  padding: 0.4rem;
+  font-size: 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #e5edf0;
+}
+
+.mesa-table-scroll th {
+  background: #f4f8fa;
+}
+
+.mesa-input-editor {
+  width: min(850px, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
+  box-sizing: border-box;
+}
+.mesa-input-editor form {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+}
+.mesa-input-editor p {
+  margin: 0.35rem 0;
+}
+.mesa-input-editor label {
+  display: grid;
+  gap: 0.3rem;
+}
+.mesa-input-editor .mesa-edit-confirm {
+  display: flex;
+  align-items: center;
+}
+.mesa-input-editor input:not([type="checkbox"]) {
+  min-width: 0;
+  max-width: 100%;
+}
+.mesa-input-table {
+  max-height: 35vh;
+}
+.mesa-input-table input {
+  width: 7rem;
+}
+.mesa-edit-entry {
+  align-self: flex-start;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.75rem;
+}
+
+@media (max-width: 640px) {
+  .mesa-input-table table {
+    table-layout: fixed;
+    white-space: normal;
+  }
+  .mesa-input-table th:last-child {
+    width: 6rem;
+  }
+  .mesa-input-table td {
+    overflow-wrap: anywhere;
+  }
+  .mesa-input-table input {
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .mesa-chart text {
+    font-size: 26px;
+  }
+  .mesa-editor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mesa-tab-actions {
+    flex-wrap: wrap;
+  }
+  .mesa-toolbar label {
+    flex-wrap: wrap;
+  }
+  .mesa-panel {
+    padding: 0.75rem;
+    height: 300px;
+  }
+  .mesa-panel-heading {
+    flex-wrap: wrap;
+  }
+  .mesa-toolbar select {
+    width: 100%;
+    min-width: 0;
+  }
+}

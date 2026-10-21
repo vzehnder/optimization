@@ -1,0 +1,23 @@
+
+Running 15 tests using 1 worker
+
+
+(node:28600) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1/15] e2e\optimization-mesa.spec.ts:33:1 › Hidráulica conserva centrales homónimas y consulta embalse con escalas separadas
+[2/15] e2e\optimization-mesa.spec.ts:136:1 › Hidráulica muestra pertenencia de unidades y conexiones de tramos en sus vistas
+[3/15] e2e\optimization-mesa.spec.ts:183:1 › BESS y renovables separan parámetros, entradas y salidas ausentes
+[4/15] e2e\optimization-mesa.spec.ts:261:1 › seleccionar un run muestra descarga y energía por activo y conserva la consulta al recargar
+[5/15] e2e\optimization-mesa.spec.ts:329:1 › cambiar de run conserva una vista que todavía no se ha guardado
+[6/15] e2e\optimization-mesa.spec.ts:356:1 › cuatro vistas conservan títulos, series y modos al reducir y recargar
+[7/15] e2e\optimization-mesa.spec.ts:399:1 › dos pestañas personalizadas conservan su orden y distribución usando teclado
+[8/15] e2e\optimization-mesa.spec.ts:474:1 › un conflicto conserva la edición local y permite cargar la mesa guardada
+[9/15] e2e\optimization-mesa.spec.ts:516:1 › la matriz 2x2 cabe a 1440x900 y se adapta a 390 sin desbordar
+[10/15] e2e\optimization-mesa.spec.ts:604:1 › series de unidades distintas conservan selección y escalas separadas
+[11/15] e2e\optimization-mesa.spec.ts:679:1 › un componente retirado conserva identidad y se reconfigura sin reasignarse por nombre
+[12/15] e2e\optimization-mesa.spec.ts:731:1 › los errores de configuración permiten reintentar sin perder la edición
+[13/15] e2e\optimization-mesa.spec.ts:771:1 › mesa de optimización: demanda real en gráfico, tabla y recarga
+[14/15] e2e\optimization-mesa.spec.ts:860:1 › mesa de optimización: carga, error con reintento y caso vacío
+[15/15] e2e\optimization-mesa.spec.ts:918:1 › mesa de optimización: un período fuera de cobertura no muestra una curva parcial
+  15 passed (32.4s)

@@ -1,0 +1,36 @@
+Command: npx.cmd playwright test --config=playwright.mesa.config.ts
+
+
+Running 26 tests using 1 worker
+
+
+(node:17128) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1/26] e2e\mesa-hydraulic-execution.spec.ts:4:1 › El avance hidráulico conserva el run al desconectar y muestra el fallo sin resultados
+[2/26] e2e\mesa-hydraulic-execution.spec.ts:83:1 › La preparación hidráulica cambia con sus opciones y se recupera de una huella obsoleta
+[3/26] e2e\mesa-hydraulic-execution.spec.ts:185:1 › Red v3 prepara, ejecuta y recupera potencia y volumen sin salir de la mesa
+[4/26] e2e\optimization-mesa.spec.ts:34:1 › Ejecución eléctrica valida, recupera el mismo run al recargar y consulta sus resultados
+[5/26] e2e\optimization-mesa.spec.ts:131:1 › La mesa conserva el run durante una desconexión y explica un fallo sin perder entradas
+[6/26] e2e\optimization-mesa.spec.ts:211:1 › Cambiar fechas o guardar una entrada exige volver a validar la ejecución
+[7/26] e2e\optimization-mesa.spec.ts:278:1 › Edición de demanda guarda una revisión y la recupera en tabla y gráfico
+[8/26] e2e\optimization-mesa.spec.ts:332:1 › Edición pendiente advierte al cerrar y descartar no publica
+[9/26] e2e\optimization-mesa.spec.ts:374:1 › Conflicto de entrada conserva el borrador y permite comparar la revisión actual
+[10/26] e2e\optimization-mesa.spec.ts:437:1 › Edición valida números y protege la navegación a otro contexto
+[11/26] e2e\optimization-mesa.spec.ts:484:1 › Una pérdida de conexión conserva la edición y permite reintentar
+[12/26] e2e\optimization-mesa.spec.ts:517:1 › Hidráulica conserva centrales homónimas y consulta embalse con escalas separadas
+[13/26] e2e\optimization-mesa.spec.ts:620:1 › Hidráulica muestra pertenencia de unidades y conexiones de tramos en sus vistas
+[14/26] e2e\optimization-mesa.spec.ts:667:1 › BESS y renovables separan parámetros, entradas y salidas ausentes
+[15/26] e2e\optimization-mesa.spec.ts:745:1 › seleccionar un run muestra descarga y energía por activo y conserva la consulta al recargar
+[16/26] e2e\optimization-mesa.spec.ts:813:1 › cambiar de run conserva una vista que todavía no se ha guardado
+[17/26] e2e\optimization-mesa.spec.ts:840:1 › cuatro vistas conservan títulos, series y modos al reducir y recargar
+[18/26] e2e\optimization-mesa.spec.ts:883:1 › dos pestañas personalizadas conservan su orden y distribución usando teclado
+[19/26] e2e\optimization-mesa.spec.ts:958:1 › un conflicto conserva la edición local y permite cargar la mesa guardada
+[20/26] e2e\optimization-mesa.spec.ts:1000:1 › la matriz 2x2 cabe a 1440x900 y se adapta a 390 sin desbordar
+[21/26] e2e\optimization-mesa.spec.ts:1088:1 › series de unidades distintas conservan selección y escalas separadas
+[22/26] e2e\optimization-mesa.spec.ts:1163:1 › un componente retirado conserva identidad y se reconfigura sin reasignarse por nombre
+[23/26] e2e\optimization-mesa.spec.ts:1215:1 › los errores de configuración permiten reintentar sin perder la edición
+[24/26] e2e\optimization-mesa.spec.ts:1255:1 › mesa de optimización: demanda real en gráfico, tabla y recarga
+[25/26] e2e\optimization-mesa.spec.ts:1344:1 › mesa de optimización: carga, error con reintento y caso vacío
+[26/26] e2e\optimization-mesa.spec.ts:1402:1 › mesa de optimización: un período fuera de cobertura no muestra una curva parcial
+  26 passed (5.2m)
