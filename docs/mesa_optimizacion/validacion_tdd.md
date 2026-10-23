@@ -25,6 +25,51 @@ MESA-008 está Done con once pruebas HTTP y tres de navegador nuevas, nueve
 ciclos rojo → verde, corrida hidráulica real y validación de topología con Julia.
 145 Python, 26 navegador MESA, cinco regresiones generales y 336 Vitest OK.
 Ver [evidencia, capturas y límites](evidencia/MESA-008/validacion.md).
+MESA-009 está Done con diez pruebas HTTP y cuatro de navegador nuevas, nueve
+ciclos rojo → verde y comparación eléctrica reproducible tras editar entradas.
+145 Python distintas verificadas entre suite/reintentos, 30 navegador MESA,
+cinco regresiones generales y 336 Vitest OK. Incluye concurrencia de lecturas,
+respuestas tardías y capturas 1440/390 px.
+Ver [evidencia, incidencias y límites](evidencia/MESA-009/validacion.md).
+MESA-010 está Done con trece pruebas HTTP y dos de navegador nuevas, trece ciclos
+rojo → verde y comparación de dos corridas reales de Julia por central/embalse.
+129 Python, 32 navegador MESA y cinco regresiones generales OK; seis comparaciones
+revalidadas después del ajuste móvil. Vitest: 335/336, con el fallo de foco previo
+de ReportExperience reproducido también en el reintento.
+Ver [evidencia, capturas y límites](evidencia/MESA-010/validacion.md).
+MESA-011 está Done con una prueba HTTP y nueve de navegador nuevas, diez ciclos
+rojo → verde y el recorrido de crear, recargar, promover y ejecutar activos nuevos
+con Julia real. 188 Python, 41 navegador MESA y cinco regresiones generales OK;
+Vitest 335/336 por el fallo previo de foco en ReportExperience. Editor a 1440/390 px,
+teclado, Axe, conflictos e invalidación de preparación comprobados por S1/S2.
+Ver [evidencia, capturas y límites](evidencia/MESA-011/validacion.md).
+
+MESA-013 está Done con diez pruebas HTTP y seis de navegador nuevas, once ciclos
+rojo → verde, recuperación histórica y CSV de la selección visible. 135 Python
+distintas, 47 navegador MESA, cinco regresiones generales y 336 Vitest verificadas.
+Incluye 256 intervalos, retención/fallback, autorización/CSRF, zonas no alineables,
+objetos eléctricos archivados y capturas 1440/390 px. Las pruebas Julia que fallaron
+por restricciones del sandbox pasaron fuera de él. El formato global mantiene
+los 16 avisos previos. [Evidencia y límites](evidencia/MESA-013/validacion.md).
+
+MESA-012 está Done con once pruebas HTTP y cinco de navegador nuevas, trece ciclos
+rojo → verde, series manuales canónicas, edición y vinculación explícita. 129
+Python distintas aprobadas, 336 Vitest verificadas entre suite/reintento, cinco
+regresiones generales y 51/52 MESA; la prueba hidráulica de activos agota 120 s,
+con solución OPTIMAL y guardado en progreso en el último estado observado. Una
+copia temporal con espera ampliada verificó el recorrido completo con Julia real
+en 3,0 min, conservando intacta la prueba original.
+Última revisión de matrices/recorridos manuales: 9/9. Capturas 1440/390, foco,
+conflictos, preparación, CSV y snapshots comprobados. PostgreSQL queda sin
+configurar y el formato global conserva 16 avisos previos.
+[Evidencia, revisión y limitaciones](evidencia/MESA-012/validacion.md).
+
+MESA-014 está In Review con seis ciclos TDD en S1: ayuda, cabecera, cierre móvil,
+matrices con avance eléctrico/hidráulico y procedencia sin recorte. 139 Python
+distintas, 336 Vitest, 53 navegador MESA y cinco regresiones generales verificadas;
+cuatro recorridos visuales y uno eléctrico con Julia real revalidados tras los
+ajustes. Capturas candidatas y entorno registrados; conformidad HITL y baseline
+pendientes. [Evidencia de aceptación](evidencia/MESA-014/validacion.md).
 
 Habilidad solicitada: [TDD del repositorio](../../.agents/skills/tdd/SKILL.md).
 Apoyo: [pruebas](../../.agents/skills/tdd/tests.md) y

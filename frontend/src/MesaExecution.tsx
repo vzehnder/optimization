@@ -48,7 +48,7 @@ export function MesaExecution({
   const context = data.context;
   const source = data.components
     .flatMap((c) => [c.series, ...(c.additional_series ?? [])])
-    .find((s) => s.role !== "output" && s.points?.length);
+    .find((s) => s.role === "input" && s.points?.length);
   const [form, setForm] = useState<Preparation>(() => ({
     case_id: context.case_id,
     variant_id: context.variant_id,
@@ -92,12 +92,14 @@ export function MesaExecution({
   const executed = run?.materialized_lineage?.mesa_execution;
   const active = !!run && ["queued", "running"].includes(run.status);
   const sourceSignature = JSON.stringify(
-    data.components.map((c) => [
-      c.entity_id,
-      c.parameters,
-      c.series,
-      ...(c.additional_series ?? []).filter((s) => s.role !== "output"),
-    ]),
+    data.components
+      .filter((c) => c.entity_type !== "manual_series")
+      .map((c) => [
+        c.entity_id,
+        c.parameters,
+        c.series,
+        ...(c.additional_series ?? []).filter((s) => s.role !== "output"),
+      ]),
   );
   const valid = !!prepared && prepared.source === sourceSignature && !editing;
   const enabled = [

@@ -74,6 +74,15 @@ def prepare(store, scenario_id, payload):
     if source["scenario_id"] != scenario_id:
         raise HTTPException(404, "La versión fuente no pertenece al escenario.")
     source, document, metadata, fingerprint = prepare_hydraulic_simulation(store, source["id"], payload)
+    try:
+        diagram_revision = store.get_hydraulic_diagram(scenario_id)["revision"]
+    except KeyError:
+        diagram_revision = None
+    # Revalidate the user's preparation after a case edit, even when its
+    # explicitly selected source version is immutable. Accepted retries are
+    # resolved before this check and retain their original snapshot.
+    metadata["mesa_hydraulic_diagram_revision"] = diagram_revision
+    fingerprint = digest({"source_preparation": fingerprint, "diagram_revision": diagram_revision})
     metadata["mesa_hydraulic_execution"] = payload.model_dump(exclude={"expected_preparation_hash", "idempotency_key"})
     preview = {"preparation_hash": fingerprint, "period_count": len(document["time_series"]),
         "preview_periods": document["time_series"][:12], "generation_metadata": metadata}

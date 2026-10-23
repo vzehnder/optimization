@@ -6,6 +6,8 @@ contratos y evidencia visual. MESA-002 incorpora la primera consulta funcional
 de demanda real desde el escenario.
 
 - [Plan y decisiones aceptadas](plan_implementacion.md).
+- [Guía de uso: acceso, vistas, ejecución, comparación y recuperación](guia_usuario.md).
+- [MESA-014: capturas, validación completa y revisión humana pendiente](evidencia/MESA-014/validacion.md).
 - [Tracker de las 14 entregas](tracker.md).
 - [Estrategia de validación con TDD](validacion_tdd.md).
 - [MESA-001: contratos y matriz de capacidades aceptados](decision_record_mesa001.md).
@@ -16,6 +18,10 @@ de demanda real desde el escenario.
 - [MESA-006: edición canónica, concurrencia y TDD](evidencia/MESA-006/validacion.md).
 - [MESA-007: ejecución eléctrica, recuperación y TDD con Julia real](evidencia/MESA-007/validacion.md).
 - [MESA-008: ejecución hidráulica por versión, recuperación y TDD con Julia real](evidencia/MESA-008/validacion.md).
+- [MESA-009: comparación eléctrica congelada, referencias, diferencias y TDD](evidencia/MESA-009/validacion.md).
+- [MESA-010: comparación hidráulica por entidad, parámetros congelados y TDD](evidencia/MESA-010/validacion.md).
+- [MESA-011: activos hidráulicos editables y ejecutables desde la mesa, TDD y Julia real](evidencia/MESA-011/validacion.md).
+- [MESA-013: historial recuperable y exportación CSV de vistas, rango y procedencia](evidencia/MESA-013/validacion.md).
 - [Contrato y migración de preferencias visuales](persistencia_vistas.md).
 - [Capturas y reproducción de la referencia](referencias/README.md).
 - [Copia autónoma del prototipo validado](referencias/prototipo-validado.html?variant=A).
@@ -42,7 +48,30 @@ idempotencia y recuperación del run con avance real; éxito y fallo probados co
 MESA-008 está **Done**: ejecución de una red v3 desde versión promovida, opciones
 económicas, remuestreo explícito, huella revalidada, idempotencia y resultados por
 central/embalse recuperables desde la mesa. Verificada con worker/Julia reales.
-La siguiente entrega del orden recomendado es MESA-009, comparación eléctrica con procedencia.
+MESA-009 está **Done**: modos Antes/Comparar/Después desde snapshots, referencias
+explícitas y Δ solamente para series compatibles. Las entradas editadas conservan
+su comparación histórica y las lecturas simultáneas se coordinan con el polling.
+MESA-010 está **Done**: comparación hidráulica con topología e intervalos
+compatibles, parámetros escalares congelados y separación de unidades. El histórico
+se conserva tras editar el caso; dos corridas reales verifican potencia y volumen.
+MESA-011 está **Done**: creación y edición de centrales/embalses desde el editor
+del dominio integrado en la mesa, con curvas, afluentes, unidades y conexiones.
+Conserva identidad, borradores y ejecuciones históricas; editar exige revalidar.
+El recorrido de crear, recargar, promover y ejecutar se verificó con Julia real.
+MESA-013 está **Done**: historial autorizado con estados y procedencia, consulta
+recuperable y CSV de vistas visibles con rango, referencias y diferencias válidas.
+Conserva datos de objetos retirados, reutiliza índices/fallback y protege textos
+para planillas. Once ciclos TDD, 135 Python, 47 MESA, cinco regresiones generales
+y 336 Vitest verificadas.
+MESA-012 está **Done**: series manuales canónicas, paneles persistidos, edición
+versionada y vinculación explícita a entradas compatibles, incluido hidro simple
+v2. El apoyo no altera la preparación ni recibe resultados ficticios; red v3
+conserva su fuente promovida. Trece ciclos TDD, once pruebas HTTP y cinco de
+navegador nuevas; [capturas, regresiones y límites](evidencia/MESA-012/validacion.md).
+**MESA-014 está In Review**: ayuda integrada, seis ciclos TDD, 139 Python,
+336 Vitest, 53 MESA y cinco regresiones generales verificadas. Revisión visual
+final 4/4 y recorrido eléctrico real ampliado 1/1. Las capturas y diferencias
+están listas para la conformidad humana; la baseline se fijará después de ella.
 
 El diseño acordado es **A · Paneles**: pestañas horizontales, matriz 2×2,
 configuración de cada vista, gráficos/tablas y ejecución desde la misma pantalla.

@@ -2,7 +2,16 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: ["optimization-mesa.spec.ts", "mesa-hydraulic-execution.spec.ts"],
+  testMatch: [
+    "mesa-acceptance.spec.ts",
+    "optimization-mesa.spec.ts",
+    "mesa-hydraulic-execution.spec.ts",
+    "mesa-comparison.spec.ts",
+    "mesa-hydraulic-comparison.spec.ts",
+    "mesa-hydraulic-assets.spec.ts",
+    "mesa-history.spec.ts",
+    "mesa-manual-series.spec.ts",
+  ],
   globalSetup: "./e2e/mesa-global-setup.ts",
   outputDir: "../.tmp/mesa-playwright-results",
   workers: 1,
@@ -14,7 +23,7 @@ export default defineConfig({
     locale: "en-US",
     timezoneId: "America/Santiago",
     colorScheme: "light",
-    reducedMotion: "reduce",
+    contextOptions: { reducedMotion: "reduce" },
     deviceScaleFactor: 1,
   },
 });

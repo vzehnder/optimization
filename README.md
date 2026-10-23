@@ -62,7 +62,17 @@ After `npm run build`, the normal FastAPI service serves the production React
 application at `http://127.0.0.1:8000/react`. The browser smoke test uses an
 isolated in-memory database and port `8123`; it does not modify application data.
 
+## Optimization desk
+
+The optimization desk is available to analysts/admins from **Escenario → Datos →
+Variante activa → Abrir mesa de optimización**, with contextual help under
+**Cómo usar la mesa**. It supports saved views, versioned inputs, electrical and
+hydraulic runs, comparisons, history and CSV export. See the
+[user guide](docs/mesa_optimizacion/guia_usuario.md) and
+[local delivery tracker](docs/mesa_optimizacion/tracker.md).
+
 ## Hydraulic simulation from a promoted version
+
 
 The run detail at `/react/runs/:id` shows live progress while waiting for results:
 Julia data validation/preparation, model construction, optimization, and output

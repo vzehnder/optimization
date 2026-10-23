@@ -55,10 +55,12 @@ export function MesaHydraulicExecution({
   data,
   editing,
   onResults,
+  caseRevision = 0,
 }: {
   data: Mesa;
   editing: boolean;
   onResults: (id: number) => void;
+  caseRevision?: number;
 }) {
   const { scenario_id: scenarioId, case_id: caseId } = data.context;
   const path = `/api/scenarios/${scenarioId}/mesa/hydraulic-execution`;
@@ -104,13 +106,16 @@ export function MesaHydraulicExecution({
   const source = sources.data?.sources.find(
     (s) => s.id === form?.source_scenario_version_id,
   );
-  const signature = JSON.stringify(
-    data.components.map((c) => [
-      c.entity_id,
-      c.parameters,
-      c.series.role === "output" ? null : c.series,
-    ]),
-  );
+  const signature = JSON.stringify([
+    caseRevision,
+    data.components
+      .filter((c) => c.entity_type !== "manual_series")
+      .map((c) => [
+        c.entity_id,
+        c.parameters,
+        c.series.role === "output" ? null : c.series,
+      ]),
+  ]);
   const valid = !!prepared && prepared.source === signature && !editing;
   const executed = run?.materialized_lineage?.mesa_hydraulic_execution;
 

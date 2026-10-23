@@ -8,8 +8,11 @@ Validación: [TDD y screenshots](validacion_tdd.md).
 
 - Prototipo conceptual: aceptado por el usuario para avanzar a planificación.
 - Desglose: aprobado por el usuario el 2026-10-20, manteniendo granularidad, dependencias y tipos.
-- Implementación funcional: MESA-002 a MESA-008 Done, demanda real, vistas persistidas, consulta eléctrica/hidráulica, edición versionada y ejecución eléctrica e hidráulica recuperable con TDD; [contratos de MESA-001](decision_record_mesa001.md) aceptados por el usuario el 2026-10-20.
-- Entregas: **14 planificadas · 6 Todo · 0 en curso · 0 en revisión · 8 completadas**.
+- Implementación funcional: MESA-002 a MESA-011 Done, demanda real, vistas persistidas, consulta eléctrica/hidráulica, edición versionada, ejecución recuperable, comparación histórica y creación/edición de activos hidráulicos ejecutables con TDD; [contratos de MESA-001](decision_record_mesa001.md) aceptados por el usuario el 2026-10-20.
+- Entregas: **14 planificadas · 0 Todo · 0 en curso · 1 en revisión · 13 completadas**.
+- MESA-014 In Review: ayuda, recorrido completo, regresiones y capturas listas; conformidad humana y baseline pendientes. [Evidencia de aceptación](evidencia/MESA-014/validacion.md).
+- MESA-013 Done: historial autorizado y CSV de vistas/rango con procedencia, recuperación y once ciclos TDD; [evidencia](evidencia/MESA-013/validacion.md).
+- MESA-012 Done: series manuales canónicas de apoyo, edición versionada y vínculos explícitos compatibles; trece ciclos TDD, [capturas y límites](evidencia/MESA-012/validacion.md).
 - Clasificación: **12 AFK y 2 HITL**.
 - Capturas: dos referencias reales conservadas en [referencias](referencias/README.md).
 
@@ -31,12 +34,12 @@ ni inicia automáticamente la implementación.
 | [MESA-006 · Editar entradas en tablas y guardar revisiones auditables](issues/MESA-006-editar-entradas-versionadas.md) | AFK | ready-for-agent | Done | Codex | MESA-002 | HU-04, HU-10, HU-11 |
 | [MESA-007 · Ejecutar un caso eléctrico por fechas y recuperar su avance](issues/MESA-007-ejecutar-caso-electrico-por-fechas.md) | AFK | ready-for-agent | Done | Codex | MESA-004, MESA-006 | HU-05, HU-11 |
 | [MESA-008 · Ejecutar una red hidráulica desde la misma mesa](issues/MESA-008-ejecutar-red-hidraulica.md) | AFK | ready-for-agent | Done | Codex | MESA-005, MESA-006, MESA-007 | HU-05, HU-11 |
-| [MESA-009 · Comparar entradas y resultados eléctricos con procedencia](issues/MESA-009-comparar-series-electricas.md) | AFK | ready-for-agent | Todo | — | MESA-007 | HU-03, HU-06 |
-| [MESA-010 · Comparar resultados hidráulicos sin mezclar objetos o unidades](issues/MESA-010-comparar-series-hidraulicas.md) | AFK | ready-for-agent | Todo | — | MESA-008, MESA-009 | HU-03, HU-06 |
-| [MESA-011 · Agregar y editar centrales y embalses ejecutables](issues/MESA-011-agregar-y-editar-activos-hidraulicos.md) | AFK | ready-for-agent | Todo | — | MESA-008, MESA-010 | HU-07, HU-05, HU-06 |
-| [MESA-012 · Crear series manuales de apoyo y vincular entradas admitidas](issues/MESA-012-crear-series-manuales.md) | AFK | ready-for-agent | Todo | — | MESA-003, MESA-006 | HU-08, HU-04 |
-| [MESA-013 · Recuperar ejecuciones y exportar la comparación](issues/MESA-013-historial-y-exportacion.md) | AFK | ready-for-agent | Todo | — | MESA-009, MESA-010 | HU-09, HU-06, HU-11 |
-| [MESA-014 · Validar la mesa completa y habilitar su acceso en el producto](issues/MESA-014-aceptacion-visual-y-funcional.md) | HITL | ready-for-agent | Todo | — | MESA-003, MESA-011, MESA-012, MESA-013 | HU-01, HU-02, HU-03, HU-04, HU-05, HU-06, HU-07, HU-08, HU-09, HU-10, HU-11 |
+| [MESA-009 · Comparar entradas y resultados eléctricos con procedencia](issues/MESA-009-comparar-series-electricas.md) | AFK | ready-for-agent | Done | Codex | MESA-007 | HU-03, HU-06 |
+| [MESA-010 · Comparar resultados hidráulicos sin mezclar objetos o unidades](issues/MESA-010-comparar-series-hidraulicas.md) | AFK | ready-for-agent | Done | Codex | MESA-008, MESA-009 | HU-03, HU-06 |
+| [MESA-011 · Agregar y editar centrales y embalses ejecutables](issues/MESA-011-agregar-y-editar-activos-hidraulicos.md) | AFK | ready-for-agent | Done | Codex | MESA-008, MESA-010 | HU-07, HU-05, HU-06 |
+| [MESA-012 · Crear series manuales de apoyo y vincular entradas admitidas](issues/MESA-012-crear-series-manuales.md) | AFK | ready-for-agent | Done | Codex | MESA-003, MESA-006 | HU-08, HU-04 |
+| [MESA-013 · Recuperar ejecuciones y exportar la comparación](issues/MESA-013-historial-y-exportacion.md) | AFK | ready-for-agent | Done | Codex | MESA-009, MESA-010 | HU-09, HU-06, HU-11 |
+| [MESA-014 · Validar la mesa completa y habilitar su acceso en el producto](issues/MESA-014-aceptacion-visual-y-funcional.md) | HITL | ready-for-agent | In Review | Codex | MESA-003, MESA-011, MESA-012, MESA-013 | HU-01, HU-02, HU-03, HU-04, HU-05, HU-06, HU-07, HU-08, HU-09, HU-10, HU-11 |
 
 ## Desglose aprobado
 
@@ -106,21 +109,27 @@ flowchart TD
 
 ## Frontera y orden sugerido
 
-**MESA-001 a MESA-008 están Done**. Los [contratos aceptados](decision_record_mesa001.md)
+**MESA-001 a MESA-011 están Done**. Los [contratos aceptados](decision_record_mesa001.md)
 se concretan en la [consulta de demanda real](evidencia/MESA-002/validacion.md)
 y la [persistencia de vistas](evidencia/MESA-003/validacion.md), ampliadas con
 [consulta eléctrica por componente](evidencia/MESA-004/validacion.md) y
 [consulta hidráulica por identidad](evidencia/MESA-005/validacion.md) y
 [edición de entradas versionadas](evidencia/MESA-006/validacion.md) y
 [ejecución eléctrica recuperable](evidencia/MESA-007/validacion.md) y
-[ejecución de red hidráulica desde versión promovida](evidencia/MESA-008/validacion.md).
-La siguiente entrega recomendada es **MESA-009**, comparación eléctrica con procedencia.
-Su dependencia MESA-007 está satisfecha; debe conservar las entradas congeladas,
-la identidad de las señales y la ausencia explícita de una referencia compatible.
+[ejecución de red hidráulica desde versión promovida](evidencia/MESA-008/validacion.md) y
+[comparación eléctrica con procedencia congelada](evidencia/MESA-009/validacion.md) y
+[comparación hidráulica por entidad y topología](evidencia/MESA-010/validacion.md) y
+[creación y edición de activos hidráulicos ejecutables](evidencia/MESA-011/validacion.md).
+**MESA-013 también está Done**, con [historial y exportación](evidencia/MESA-013/validacion.md).
+**MESA-012 también está Done**, con [series manuales y vínculos explícitos](evidencia/MESA-012/validacion.md).
+**MESA-014 está In Review**: sus cuatro dependencias están Done y la evidencia
+funcional/visual está preparada. La suite MESA pasó 53/53, incluido el recorrido
+hidráulico con espera ajustada; se conserva su aceptación humana HITL antes de
+fijar baselines y cerrar Done. No hay otra entrega Todo en este corte.
 
 Orden de recorrido recomendado: 001 → 002 → (003, 004, 005, 006) → 007 → 008 →
-009 → 010 → 011 → 013 → 014. MESA-012 puede tomarse desde que estén completas
-003 y 006. Este orden es orientativo; mandan las dependencias directas del registro.
+009 → 010 → 011 → 013 → 012 → 014. MESA-012 podía tomarse desde que estuvieran
+completas 003 y 006. Este orden es orientativo; mandan las dependencias directas del registro.
 
 El alcance aceptado usa los modelos existentes: hidro simple v2 en el balance
 eléctrico y red v3 por su camino propio. La cooptimización mixta de red v3 queda
@@ -158,6 +167,7 @@ ready-for-agent indica preparación del ticket, no que sus dependencias estén l
 
 | Fecha | Entrega | Cambio | Evidencia / nota |
 | --- | --- | --- | --- |
+| 2026-10-21 | MESA-014 | Todo → In Progress → In Review | Seis ciclos TDD de ayuda y disposición visible, recorrido eléctrico completo ampliado, acceso existente y rutas anteriores verificados. 139 Python distintas, 336 Vitest, 53 MESA y cinco regresiones generales; revisión visual final 4/4 y recorrido real adicional 1/1. Capturas y diferencias listas para conformidad HITL; baseline y Done pendientes de esa aceptación. [Evidencia](evidencia/MESA-014/validacion.md). |
 | 2026-10-20 | Referencia | Prototipo conceptual aceptado | El usuario indicó «me parece bien» y pidió plan local con tracker. No equivale a aprobación del desglose posterior. |
 | 2026-10-20 | Todas | Propuesta creada | 14 tickets verticales; implementación no iniciada. |
 | 2026-10-20 | Validación | Referencias conservadas | Dos PNG, HTML congelado y estrategia TDD. |
@@ -176,3 +186,8 @@ ready-for-agent indica preparación del ticket, no que sus dependencias estén l
 | 2026-10-20 | MESA-006 | Todo → In Progress → In Review → Done | Implementada por instrucción del usuario con S1/S2 confirmadas. Quince ciclos rojo → verde; quince tests HTTP y cinco de navegador nuevos. 142 Python OK, 62 PostgreSQL omitidos; 20 MESA, cinco regresiones de navegador y 336 Vitest OK. Edición canónica atómica, copia local, conflictos recuperables y borrador protegido al navegar/reconectar. Revisión AFK, capturas y límites en [evidencia](evidencia/MESA-006/validacion.md). Siguiente: MESA-007. |
 | 2026-10-20 | MESA-007 | Todo → In Progress → In Review → Done | Implementada por instrucción del usuario con S1/S2 confirmadas. Trece ciclos rojo → verde; dieciocho tests HTTP y tres de navegador nuevos. 151 Python OK y cinco PostgreSQL omitidos; 23 MESA y cinco regresiones de navegador OK. 336 Vitest verificadas entre suite 335/336 y reintento del archivo con foco intermitente 4/4. Preparación por fechas, snapshot atómico, idempotencia, recarga y ejecución de éxito/fallo con Julia/worker reales. Revisión AFK, capturas y límites en [evidencia](evidencia/MESA-007/validacion.md). Siguiente: MESA-008. |
 | 2026-10-21 | MESA-008 | Todo → In Progress → In Review → Done | Implementada por instrucción del usuario con S1/S2 confirmadas. Nueve ciclos rojo → verde; once tests HTTP y tres de navegador nuevos. 145 Python, 26 MESA, cinco regresiones de navegador y 336 Vitest OK. Fuente v3 explícita, opciones económicas, remuestreo, snapshot/diagrama/run atómicos, idempotencia y recuperación; potencia y volumen con worker/Julia reales. Revisión AFK, cuatro capturas y límites en [evidencia](evidencia/MESA-008/validacion.md). Siguiente: MESA-009. |
+| 2026-10-21 | MESA-009 | Todo → In Progress → In Review → Done | Nueve ciclos rojo → verde; diez tests HTTP y cuatro de navegador nuevos. Comparación eléctrica desde snapshot, referencia explícita, Δ compatible y lecturas concurrentes coordinadas. 145 Python distintas verificadas entre suite/reintentos, 30/30 MESA, cinco regresiones generales y 336/336 Vitest. Revisión AFK, capturas 1440/390, restricciones de Julia y formato previo en [evidencia](evidencia/MESA-009/validacion.md). Siguiente: MESA-010. |
+| 2026-10-21 | MESA-010 | Todo → In Progress → In Review → Done | Trece ciclos rojo → verde; trece tests HTTP y dos de navegador nuevos. Comparación hidráulica con identidad/topología congeladas, parámetros escalares, Δ compatible y unidades separadas. 129 Python OK, incluyendo dos corridas reales en una prueba HTTP; 32 MESA y cinco regresiones generales OK, seis comparaciones revalidadas tras ajuste móvil. Vitest 335/336 y reintento con el fallo de foco previo de ReportExperience; formato global mantiene 16 archivos ajenos. Revisión AFK, capturas y límites en [evidencia](evidencia/MESA-010/validacion.md). Siguiente: MESA-011. |
+| 2026-10-21 | MESA-011 | Todo → In Progress → In Review → Done | Diez ciclos rojo → verde; una prueba HTTP y nueve de navegador nuevas. Editor hidráulico integrado, identidad estable, borradores protegidos, vigencia de preparación y snapshots conservados. Embalse y central nuevos ejecutados con Julia real: 10 MW y 4,9352 hm³ finales. 188 Python, 41 MESA y cinco regresiones generales OK; Vitest 335/336 por fallo de foco previo y formato global pendiente en 16 archivos ajenos. Revisión técnica/visual AFK, capturas 1440/390 y límites en [evidencia](evidencia/MESA-011/validacion.md). Siguiente: MESA-013; MESA-012 también lista por dependencias. |
+| 2026-10-21 | MESA-013 | Todo → In Progress → In Review → Done | Once ciclos rojo → verde; diez pruebas HTTP y seis de navegador nuevas. Historial autorizado, recuperación de entidades archivadas, rango común y CSV de vistas visibles con procedencia, ausencia explícita y protección de planillas. 135 Python distintas, 47 MESA, cinco regresiones generales y 336 Vitest verificadas; Julia revalidada fuera del sandbox. Revisión AFK, capturas y límites en [evidencia](evidencia/MESA-013/validacion.md). Siguiente: MESA-012. |
+| 2026-10-21 | MESA-012 | Todo → In Progress → In Review → Done | Trece ciclos rojo → verde; once pruebas HTTP y cinco de navegador nuevas. Series manuales canónicas, apoyo persistido, revisiones y vínculo explícito con snapshots conservados. 129 Python distintas, 336 Vitest entre suite/reintento, cinco regresiones generales y 51/52 MESA; la prueba hidráulica de 120 s pasa en una copia temporal con mayor espera. Última revisión visual y funcional 9/9, build/contratos/lint OK; 33 PostgreSQL omitidas y formato previo en 16 archivos ajenos. Revisión AFK, capturas y límites en [evidencia](evidencia/MESA-012/validacion.md). Siguiente: MESA-014, HITL con dependencias satisfechas. |

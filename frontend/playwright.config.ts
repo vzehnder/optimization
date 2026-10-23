@@ -2,7 +2,8 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
-  testIgnore: "optimization-mesa.spec.ts",
+  // Mesa owns its authenticated fixture/server in playwright.mesa.config.ts.
+  testIgnore: ["optimization-mesa.spec.ts", "mesa-*.spec.ts"],
   globalSetup: "./e2e/global-setup.ts",
   fullyParallel: false,
   workers: 1,

@@ -20,7 +20,27 @@ snapshot inmutable y avance recuperable con worker/Julia reales;
 [evidencia y límites](evidencia/MESA-007/validacion.md).
 MESA-008 incorpora ejecución de red v3 desde versión promovida, opciones económicas,
 remuestreo explícito, idempotencia y resultados recuperables de central y embalse;
-[evidencia y límites](evidencia/MESA-008/validacion.md). Siguiente: MESA-009.
+[evidencia y límites](evidencia/MESA-008/validacion.md).
+MESA-009 incorpora comparación eléctrica de entradas congeladas y resultados,
+referencias explícitas, diferencias compatibles y lectura concurrente segura;
+[evidencia y límites](evidencia/MESA-009/validacion.md).
+MESA-010 incorpora comparación hidráulica por entidades del snapshot, topología,
+intervalos y unidades compatibles, con parámetros escalares históricos y dos
+corridas reales verificadas; [evidencia y límites](evidencia/MESA-010/validacion.md).
+MESA-011 incorpora creación y edición de activos hidráulicos mediante el editor
+del dominio integrado en la mesa, con identidad estable, borradores protegidos y
+preparación invalidada al guardar. La promoción y ejecución de nuevos embalse y
+central se verificaron con Julia real; [evidencia y límites](evidencia/MESA-011/validacion.md).
+MESA-013 incorpora historial autorizado y recuperable, inventario histórico
+eléctrico, consulta por rango y CSV de vistas visibles con procedencia, diferencias
+compatibles y protección de planillas; [evidencia y límites](evidencia/MESA-013/validacion.md).
+MESA-012 incorpora series manuales del catálogo canónico, vistas de apoyo,
+revisiones y vinculación explícita a entradas admitidas sin alterar snapshots.
+Incluye hidro simple v2; red v3 conserva la fuente promovida y permite apoyo.
+[Evidencia, capturas y límites](evidencia/MESA-012/validacion.md).
+MESA-014 está In Review: ayuda, recorrido completo, acceso, regresiones y capturas
+verificados. [Evidencia para aceptación](evidencia/MESA-014/validacion.md).
+Conformidad humana y fijación de baseline pendientes; no se marca Done todavía.
 Seguimiento: [tracker](tracker.md).
 
 El usuario confirmó el 2026-10-20 mantener granularidad, dependencias y tipos

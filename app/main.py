@@ -52,8 +52,12 @@ from app.forecast_connector import (
 )
 from app.input_variants import InputVariantRangeError
 from app.optimization_mesa import MesaResponse, read_mesa
+from app.mesa_comparison import MesaComparisonResponse, read_comparison
+from app.mesa_history import MesaHistoryResponse, read_history
+from app.mesa_export import MesaExportRequest, export_comparison
 from app.mesa_editing import MesaEditConflict, MesaEditContext, MesaEditRequest, read_edit_context
 from app.mesa_execution import register_mesa_execution_routes
+from app.mesa_manual_series import register_mesa_manual_routes
 from app.mesa_hydraulic_execution import register_mesa_hydraulic_execution_routes
 from app.mesa_preferences import MesaPreferencesConflict, MesaPreferencesRequest, MesaPreferencesResponse, read_preferences, save_preferences
 from app.hydraulic_simulation import register_hydraulic_simulation_routes
@@ -1143,7 +1147,8 @@ def create_app(
         token = request.cookies.get(session_cookie_name)
         if not token:
             return None
-        return authorization.user_for_session_token_hash(hash_session_token(token))
+        with analyst_store._lock:
+            return authorization.user_for_session_token_hash(hash_session_token(token))
 
     def public_current_user(user: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -1477,6 +1482,7 @@ def create_app(
 
     register_hydraulic_simulation_routes(app, analyst_store, service, create_and_enqueue_run, configured_input_source_root)
     register_mesa_execution_routes(app, analyst_store, service, local_run_queue, configured_artifact_root)
+    register_mesa_manual_routes(app, analyst_store)
     register_mesa_hydraulic_execution_routes(app, analyst_store, service, local_run_queue, configured_artifact_root)
 
     def publication_download_artifacts(
@@ -5022,8 +5028,47 @@ def create_app(
         run_id: int | None = None,
     ):
         try:
-            return read_mesa(analyst_store, scenario_id=scenario_id, case_id=case_id, variant_id=variant_id,
-                             range_start=range_start, range_end=range_end, run_id=run_id, artifact_root=configured_artifact_root)
+            with analyst_store._lock:
+                return read_mesa(analyst_store, scenario_id=scenario_id, case_id=case_id, variant_id=variant_id,
+                                 range_start=range_start, range_end=range_end, run_id=run_id, artifact_root=configured_artifact_root)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @app.get("/api/scenarios/{scenario_id}/mesa/history", response_model=MesaHistoryResponse)
+    async def get_mesa_history(scenario_id: int, case_id: int, variant_id: int):
+        try:
+            with analyst_store._lock:
+                return read_history(analyst_store, scenario_id=scenario_id, case_id=case_id, variant_id=variant_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @app.post("/api/scenarios/{scenario_id}/mesa/comparison/export", response_class=Response,
+              responses={200: {"content": {"text/csv": {"schema": {"type": "string"}}}}})
+    async def post_mesa_export(scenario_id: int, payload: MesaExportRequest):
+        try:
+            with analyst_store._lock:
+                content = export_comparison(analyst_store, scenario_id=scenario_id, payload=payload,
+                                            artifact_root=configured_artifact_root)
+            return Response(content=content, media_type="text/csv; charset=utf-8", headers={
+                "Content-Disposition": f'attachment; filename="mesa-run-{payload.run_id}.csv"',
+                "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @app.get("/api/scenarios/{scenario_id}/mesa/comparison", response_model=MesaComparisonResponse)
+    async def get_mesa_comparison(scenario_id: int, case_id: int, variant_id: int, run_id: int,
+                                  reference_run_id: int | None = None,
+                                  range_start: str | None = None, range_end: str | None = None):
+        try:
+            with analyst_store._lock:
+                return read_comparison(analyst_store, scenario_id=scenario_id, case_id=case_id,
+                    variant_id=variant_id, run_id=run_id, reference_run_id=reference_run_id,
+                    range_start=range_start, range_end=range_end,
+                    artifact_root=configured_artifact_root)
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         except ValueError as error:
@@ -5073,8 +5118,9 @@ def create_app(
 
     @app.get("/api/scenarios/{scenario_id}/mesa/preferences", response_model=MesaPreferencesResponse)
     async def get_mesa_preferences(request: Request, scenario_id: int, case_id: int):
-        user_id = mesa_preferences_identity(request, scenario_id, case_id)
-        return read_preferences(analyst_store, user_id=user_id, case_id=case_id)
+        with analyst_store._lock:
+            user_id = mesa_preferences_identity(request, scenario_id, case_id)
+            return read_preferences(analyst_store, user_id=user_id, case_id=case_id)
 
     @app.put("/api/scenarios/{scenario_id}/mesa/preferences", response_model=MesaPreferencesResponse)
     async def put_mesa_preferences(request: Request, scenario_id: int, case_id: int, payload: MesaPreferencesRequest):

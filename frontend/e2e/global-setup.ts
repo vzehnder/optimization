@@ -66,7 +66,7 @@ export async function startSmokeServer(script: string, port: number) {
       REACT_SMOKE_PORT: String(port),
       REACT_SMOKE_TOKEN: smokeToken,
     },
-    stdio: "ignore",
+    stdio: process.env.REACT_SMOKE_DEBUG ? "inherit" : "ignore",
     windowsHide: true,
   });
   try {

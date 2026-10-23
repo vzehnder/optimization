@@ -11,6 +11,8 @@ type Configuration = components["schemas"]["MesaConfiguration"];
 type Tab = Configuration["tabs"][number];
 type Props = {
   data: Mesa;
+  creationAction?: ReactNode;
+  renderSelectionActions?: (panels: Panel[]) => ReactNode;
   renderPanel: (
     panel: Panel,
     onMode: (mode: Panel["mode"]) => void,
@@ -296,6 +298,8 @@ function ConfiguredMesa({
   initial,
   path,
   renderPanel,
+  renderSelectionActions,
+  creationAction,
 }: Props & { initial: Preferences; path: string }) {
   const [configuration, setConfiguration] = useState<Configuration>(() => {
     const config = structuredClone(initial.configuration);
@@ -448,6 +452,7 @@ function ConfiguredMesa({
           ))}
         </div>
         <div className="mesa-tab-actions">
+          {creationAction}
           <button
             type="button"
             disabled={configuration.tabs.length >= 24}
@@ -506,6 +511,7 @@ function ConfiguredMesa({
           <button type="button" disabled={conflict} onClick={() => void save()}>
             Guardar mesa
           </button>
+          {renderSelectionActions?.(tab.panels.slice(0, capacity))}
         </div>
         <div
           className="mesa-grid"

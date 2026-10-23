@@ -7390,14 +7390,24 @@ function HydraulicPropertiesPanel({
   );
 }
 
-function HydraulicDiagramEditor({
+export function HydraulicDiagramEditor({
   scenario,
   project,
   initialDiagram,
+  embedded = false,
+  onSaved,
+  onDirtyChange,
+  onSavingChange,
+  onPrepare,
 }: {
   scenario: Scenario;
   project?: Project;
   initialDiagram: HydraulicDiagram;
+  embedded?: boolean;
+  onSaved?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
+  onSavingChange?: (saving: boolean) => void;
+  onPrepare?: () => void;
 }) {
   const queryClient = useQueryClient();
   const [nodes, setNodes] = useState<HydraulicDiagramNodeWrite[]>(() =>
@@ -7411,6 +7421,10 @@ function HydraulicDiagramEditor({
     defaultHydraulicViewport(initialDiagram),
   );
   const [saveStatus, setSaveStatus] = useState<HydraulicSaveStatus>("saved");
+  useEffect(() => {
+    onDirtyChange?.(saveStatus !== "saved");
+    onSavingChange?.(saveStatus === "saving");
+  }, [saveStatus, onDirtyChange, onSavingChange]);
   const [error, setError] = useState("");
   const [promotionMessage, setPromotionMessage] = useState("");
   const promotedVersions = useQuery({
@@ -7478,6 +7492,7 @@ function HydraulicDiagramEditor({
       setValidation(visibleHydraulicValidation(savedDiagram.validation));
       setSaveStatus("saved");
       setError("");
+      onSaved?.();
     },
     onError: (mutationError) => {
       setSaveStatus("failed");
@@ -7502,6 +7517,7 @@ function HydraulicDiagramEditor({
       setValidation(visibleHydraulicValidation(serverDiagram.validation));
       setSaveStatus("saved");
       setError("");
+      onSaved?.();
     },
     onError: (mutationError) => {
       setSaveStatus("failed");
@@ -7924,21 +7940,25 @@ function HydraulicDiagramEditor({
 
   return (
     <section className="workspace-view">
-      <Breadcrumbs>
-        <Link to="/projects">Proyectos</Link>
-        <span aria-hidden="true">/</span>
-        <Link to={`/projects/${scenario.project_id}`}>
-          {project?.name || "Proyecto"}
-        </Link>
-        <span aria-hidden="true">/</span>
-        <Link to={`/scenarios/${scenario.id}`}>{scenario.name}</Link>
-        <span aria-hidden="true">/</span>
-        <span>Diagrama hidraulico</span>
-      </Breadcrumbs>
-      <header className="workspace-heading">
-        <h1>Diagrama hidraulico</h1>
-        <p>{scenario.name}</p>
-      </header>
+      {!embedded && (
+        <>
+          <Breadcrumbs>
+            <Link to="/projects">Proyectos</Link>
+            <span aria-hidden="true">/</span>
+            <Link to={`/projects/${scenario.project_id}`}>
+              {project?.name || "Proyecto"}
+            </Link>
+            <span aria-hidden="true">/</span>
+            <Link to={`/scenarios/${scenario.id}`}>{scenario.name}</Link>
+            <span aria-hidden="true">/</span>
+            <span>Diagrama hidraulico</span>
+          </Breadcrumbs>
+          <header className="workspace-heading">
+            <h1>Diagrama hidraulico</h1>
+            <p>{scenario.name}</p>
+          </header>
+        </>
+      )}
       <form
         className="hydraulic-editor"
         onSubmit={(event) => {
@@ -8036,12 +8056,23 @@ function HydraulicDiagramEditor({
         {promotionMessage ? <p role="status">{promotionMessage}</p> : null}
         {latestHydraulicVersion ? (
           <p>
-            <Link
-              className="secondary-action"
-              to={`/scenario-versions/${latestHydraulicVersion.id}`}
-            >
-              Preparar simulación
-            </Link>
+            {embedded ? (
+              <button
+                type="button"
+                className="secondary-action"
+                disabled={saveStatus !== "saved"}
+                onClick={onPrepare}
+              >
+                Preparar versión en la mesa
+              </button>
+            ) : (
+              <Link
+                className="secondary-action"
+                to={`/scenario-versions/${latestHydraulicVersion.id}`}
+              >
+                Preparar simulación
+              </Link>
+            )}
             {" · Versión "}
             {latestHydraulicVersion.version_number}
             {" · CMg, período y resolución"}
@@ -8101,62 +8132,113 @@ function HydraulicDiagramEditor({
             ) : null}
           </section>
         ) : null}
-        <section className="workspace-section" aria-labelledby="diagram-tools">
-          <div className="draft-section-heading">
-            <h2 id="diagram-tools">Diagrama</h2>
-            <div className="draft-actions">
-              {(
-                ["reservoir", "junction", "plant"] as HydraulicComponentType[]
-              ).map((componentType) => (
-                <button
-                  key={componentType}
-                  type="button"
-                  onClick={() => addNode(componentType)}
-                >
-                  {hydraulicComponentButtonLabels[componentType]}
-                </button>
-              ))}
-            </div>
-          </div>
-          <HydraulicDiagramCanvas
-            nodes={nodes}
-            reaches={reaches}
-            viewport={viewport}
-            updateNode={updateNode}
-            updateReach={updateReach}
-            connectPorts={connectPorts}
-            focusEntity={setFocusedEntityKey}
-            focusedEntityKey={focusedEntityKey}
-          />
-        </section>
-        <section
-          className="workspace-section"
-          aria-labelledby="properties-tools"
+        <fieldset
+          disabled={saveMutation.isPending}
+          style={{
+            border: 0,
+            padding: 0,
+            margin: 0,
+            minWidth: 0,
+            display: "grid",
+            gap: "1rem",
+          }}
         >
-          <div className="draft-section-heading">
-            <h2 id="properties-tools">Propiedades</h2>
-          </div>
-          <HydraulicPropertiesPanel
-            nodes={nodes}
-            reaches={reaches}
-            focusedEntityKey={focusedEntityKey}
-            deleteEntity={deleteEntity}
-            updateNode={updateNode}
-            updateReservoir={updateReservoir}
-            updateCurve={updateCurve}
-            updateInflowSeries={updateInflowSeries}
-            updatePlant={updatePlant}
-            addUnit={addUnit}
-            updateUnit={updateUnit}
-            removeUnit={removeUnit}
-            updateUnitCurve={updateUnitCurve}
-            updateReach={updateReach}
-            availableCurves={availableCurves}
-            unitCurves={unitCurves}
-            availableInflowSeries={availableInflowSeries}
-            availableMinimumFlowSeries={availableMinimumFlowSeries}
-          />
-        </section>
+          <section
+            className="workspace-section"
+            aria-labelledby="diagram-tools"
+          >
+            {embedded && (
+              <>
+                <label>
+                  Usar activo existente
+                  <select
+                    value={focusedEntityKey ?? ""}
+                    onChange={(event) =>
+                      setFocusedEntityKey(event.target.value || null)
+                    }
+                  >
+                    <option value="">Selecciona un activo del caso</option>
+                    {nodes.map((node) => (
+                      <option
+                        key={node.technical_key}
+                        value={node.technical_key}
+                      >
+                        {node.display_name} · {node.technical_key}
+                      </option>
+                    ))}
+                    {reaches.map((reach) => (
+                      <option
+                        key={reach.technical_key}
+                        value={reach.technical_key}
+                      >
+                        {reach.display_name} · {reach.technical_key}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p>
+                  Seleccionar un activo conserva su identidad. Para mostrarlo en
+                  un panel, usa Agregar vista; las vistas no crean activos.
+                </p>
+                <h3>Crear activo en el caso</h3>
+              </>
+            )}
+            <div className="draft-section-heading">
+              <h2 id="diagram-tools">Diagrama</h2>
+              <div className="draft-actions">
+                {(
+                  ["reservoir", "junction", "plant"] as HydraulicComponentType[]
+                ).map((componentType) => (
+                  <button
+                    key={componentType}
+                    type="button"
+                    onClick={() => addNode(componentType)}
+                  >
+                    {hydraulicComponentButtonLabels[componentType]}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <HydraulicDiagramCanvas
+              nodes={nodes}
+              reaches={reaches}
+              viewport={viewport}
+              updateNode={updateNode}
+              updateReach={updateReach}
+              connectPorts={connectPorts}
+              focusEntity={setFocusedEntityKey}
+              focusedEntityKey={focusedEntityKey}
+            />
+          </section>
+          <section
+            className="workspace-section"
+            aria-labelledby="properties-tools"
+          >
+            <div className="draft-section-heading">
+              <h2 id="properties-tools">Propiedades</h2>
+            </div>
+            <HydraulicPropertiesPanel
+              nodes={nodes}
+              reaches={reaches}
+              focusedEntityKey={focusedEntityKey}
+              deleteEntity={deleteEntity}
+              updateNode={updateNode}
+              updateReservoir={updateReservoir}
+              updateCurve={updateCurve}
+              updateInflowSeries={updateInflowSeries}
+              updatePlant={updatePlant}
+              addUnit={addUnit}
+              updateUnit={updateUnit}
+              removeUnit={removeUnit}
+              updateUnitCurve={updateUnitCurve}
+              updateReach={updateReach}
+              availableCurves={availableCurves}
+              unitCurves={unitCurves}
+              availableInflowSeries={availableInflowSeries}
+              availableMinimumFlowSeries={availableMinimumFlowSeries}
+            />
+          </section>
+        </fieldset>
       </form>
     </section>
   );

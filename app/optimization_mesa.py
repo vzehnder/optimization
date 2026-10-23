@@ -82,7 +82,7 @@ class MesaPoint(BaseModel):
 class MesaSeries(BaseModel):
     signal_key: str = "load_demand_mw"
     name: str = "Demanda"
-    role: Literal["input", "output"] = "input"
+    role: Literal["input", "output", "support"] = "input"
     unit: str = "MW"
     editable: bool = False
     status: Literal["available", "unbound", "no_coverage", "unavailable"]
@@ -105,7 +105,8 @@ class MesaParameter(BaseModel):
     name: str
     value: float | str | bool
     unit: str
-    source: Literal["current_preparation"] = "current_preparation"
+    source: Literal["current_preparation", "executed_snapshot"] = "current_preparation"
+    scenario_version_id: int | None = None
 
 
 class MesaComponent(BaseModel):
@@ -525,6 +526,9 @@ def read_mesa(store, *, scenario_id: int, case_id: int, variant_id: int,
         for series in [component["series"], *component.get("additional_series", [])]:
             series["editable"] = bool(series.get("role", "input") == "input" and series.get("revision_id")
                                       and series.get("binding_state") == "valid_current" and series["status"] == "available")
+    from app.mesa_manual_series import read_manual_components
+    components.extend(read_manual_components(store, project_id=project["id"], case_id=case_id,
+        components=components, bindings=bindings, range_start=range_start, range_end=range_end))
     return {
         "context": {"project_id": project["id"], "project_name": project["name"],
                     "scenario_id": scenario_id, "scenario_name": scenario["name"],

@@ -49,6 +49,34 @@ test("Ejecución eléctrica valida, recupera el mismo run al recargar y consulta
     name: "Demanda · Demanda Norte",
     exact: true,
   });
+  await page.goto(
+    `/react/scenarios/${fixture.scenario.id}?section=data&variant=${fixture.variant.id}`,
+  );
+  await page.getByRole("link", { name: "Abrir mesa de optimización" }).click();
+  for (const [title, key, signal] of [
+    ["Descarga BESS", "battery_1", "Descarga BESS"],
+    ["Energía BESS", "battery_1", "Energía almacenada"],
+    ["Solar disponible", "solar_north", "Disponibilidad solar"],
+  ]) {
+    await page
+      .getByRole("button", { name: "Agregar vista", exact: true })
+      .click();
+    const view = page.getByRole("dialog", { name: "Configurar vista" });
+    const label = await view
+      .getByRole("option")
+      .filter({ hasText: key })
+      .textContent();
+    await view.getByLabel("Componente").selectOption({ label: label! });
+    await view.getByLabel("Título").fill(title);
+    for (const checkbox of await view.getByRole("checkbox").all())
+      await checkbox.uncheck();
+    await view.getByRole("checkbox", { name: new RegExp(signal) }).check();
+    await view.getByRole("button", { name: "Aplicar", exact: true }).click();
+  }
+  await page.getByRole("button", { name: "Guardar mesa", exact: true }).click();
+  await expect(page.getByText("Mesa guardada", { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.locator(".mesa-panel")).toHaveCount(4);
   await demand.getByRole("button", { name: "Tabla", exact: true }).click();
   await demand
     .getByRole("button", { name: "Editar entrada", exact: true })
@@ -114,6 +142,38 @@ test("Ejecución eléctrica valida, recupera el mismo run al recargar y consulta
   await expect(page.getByLabel("Resultados de ejecución")).toHaveValue(
     String(run.id),
   );
+  await page.getByRole("button", { name: "Comparar", exact: true }).click();
+  await expect(demand).toContainText("Después: 15 MW");
+  await expect(
+    page.getByRole("region", { name: "BESS · Descarga BESS", exact: true }),
+  ).toContainText("Sin referencia previa");
+  await page.getByText("Historial de ejecuciones", { exact: true }).click();
+  const historical = page
+    .getByRole("region", { name: "Historial de ejecuciones" })
+    .getByRole("row")
+    .filter({ hasText: `Run #${run.id} ·` });
+  await expect(historical).toContainText("Completada");
+  await historical
+    .getByRole("button", { name: "Consultar", exact: true })
+    .click();
+  await page.reload();
+  await expect(page.locator(".mesa-panel")).toHaveCount(4);
+  await expect(demand).toContainText("Después: 15 MW");
+  await expect(demand).toContainText(`Snapshot #${run.scenario_version_id}`);
+  await demand.getByRole("button", { name: "Tabla", exact: true }).click();
+  for (const panel of await page.locator(".mesa-panel").all()) {
+    const box = (await panel.boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual(900);
+    const origin = (await panel
+      .locator(".mesa-comparison-origins")
+      .boundingBox())!;
+    expect(origin.y + origin.height).toBeLessThanOrEqual(
+      box.y + box.height - 4,
+    );
+  }
+  await page.screenshot({
+    path: testInfo.outputPath("mesa-recorrido-completo-1440.png"),
+  });
   await page.setViewportSize({ width: 390, height: 844 });
   expect(
     await page.evaluate(

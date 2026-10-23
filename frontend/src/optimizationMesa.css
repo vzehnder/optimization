@@ -7,6 +7,59 @@ main:has(.mesa-view) {
   gap: 0.85rem;
 }
 
+.mesa-dialog.mesa-help {
+  width: min(720px, calc(100vw - 2rem));
+  line-height: 1.5;
+}
+.mesa-help li + li {
+  margin-top: 0.65rem;
+}
+.mesa-dialog.mesa-help form {
+  display: flex;
+  justify-content: flex-end;
+}
+.mesa-help > header {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-bottom: 0.75rem;
+  background: white;
+}
+.mesa-help h2 {
+  margin: 0;
+}
+.mesa-help button {
+  white-space: nowrap;
+  padding: 0.4rem 0.65rem;
+}
+
+.mesa-view .workspace-heading {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+.mesa-view .workspace-heading > button {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  font-size: 0.8rem;
+  padding: 0.4rem 0.65rem;
+}
+.mesa-view .workspace-heading > p {
+  grid-column: 1;
+}
+@media (max-width: 640px) {
+  .mesa-view .workspace-heading {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mesa-view .workspace-heading > button {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: start;
+  }
+}
+
 .mesa-execution {
   padding: 0.55rem 0.75rem;
   background: #fff;
@@ -24,6 +77,72 @@ main:has(.mesa-view) {
 }
 .mesa-case-execution > p {
   margin: 0;
+}
+.mesa-history {
+  min-width: 0;
+  font-size: 0.8rem;
+}
+.mesa-history summary {
+  cursor: pointer;
+}
+.mesa-history[open] {
+  flex-basis: 100%;
+  padding: 0.7rem;
+  background: white;
+  border: 1px solid #d7e4e8;
+  border-radius: 12px;
+}
+.mesa-case-execution:has(.mesa-history[open]) {
+  flex-wrap: wrap;
+}
+.mesa-history-scroll {
+  max-height: 260px;
+  overflow: auto;
+}
+.mesa-history table {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
+  text-align: left;
+}
+.mesa-query-range summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.mesa-query-range[open] {
+  flex-basis: 100%;
+}
+.mesa-query-range > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding-top: 0.5rem;
+}
+.mesa-query-range input {
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.4rem;
+}
+.mesa-history th,
+.mesa-history td {
+  padding: 0.45rem;
+  border-bottom: 1px solid #d7e4e8;
+  overflow-wrap: anywhere;
+}
+.mesa-hydraulic-trigger {
+  font-size: 0.8rem;
+  padding: 0.4rem 0.65rem;
+}
+.mesa-hydraulic-assets label {
+  display: grid;
+  gap: 0.3rem;
+}
+.mesa-hydraulic-assets input:not([type="checkbox"]),
+.mesa-hydraulic-assets select {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0.4rem;
 }
 .mesa-case-execution:has(.mesa-execution details[open]) {
   flex-wrap: wrap;
@@ -436,6 +555,109 @@ main:has(.mesa-view) {
   font-size: 0.75rem;
 }
 
+.mesa-comparison-modes {
+  flex-wrap: wrap;
+}
+.mesa-comparison-modes button {
+  font-size: 0.75rem;
+  padding: 0.35rem 0.55rem;
+}
+.mesa-comparison-message,
+.mesa-comparison-legend {
+  font-size: 0.72rem;
+  margin: 0;
+}
+.mesa-comparison-legend {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.mesa-comparison-origins {
+  gap: 0.2rem 0.5rem;
+  flex-shrink: 0;
+}
+.mesa-comparison-signal:only-of-type {
+  min-height: 0;
+}
+.mesa-comparison-signal {
+  gap: 0.15rem;
+}
+.mesa-comparison-signal .mesa-chart {
+  min-height: 80px;
+}
+.mesa-view .mesa-comparison-message[role="status"] {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 0.72rem;
+  width: auto;
+}
+.mesa-comparison-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.65rem;
+}
+.mesa-comparison-signal .mesa-table-scroll th,
+.mesa-comparison-signal .mesa-table-scroll td {
+  padding: 0.25rem;
+}
+.mesa-comparison-signal .mesa-table-scroll th {
+  white-space: normal;
+}
+@media (min-width: 1100px) {
+  main:has(.mesa-comparison-signal) {
+    padding-top: 0.5rem;
+  }
+  .workspace-view.mesa-view:has(.mesa-comparison-signal) {
+    gap: 0.35rem;
+  }
+  .mesa-view:has(.mesa-comparison-signal) .workspace-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .workspace-view.mesa-view:has(.mesa-comparison-signal) .mesa-panel {
+    height: 234px;
+  }
+  .workspace-view.mesa-view:has(.mesa-comparison-signal):has(
+      .mesa-execution-progress:not([open])
+    ) {
+    gap: 0.15rem;
+  }
+  .mesa-view:has(.mesa-comparison-signal):has(
+      .mesa-execution-progress:not([open])
+    )
+    .mesa-toolbar {
+    padding-block: 0.3rem;
+  }
+  .mesa-view:has(.mesa-comparison-signal):has(
+      .mesa-execution-progress:not([open])
+    )
+    .mesa-grid {
+    row-gap: 0.4rem;
+  }
+  .mesa-view:has(.mesa-comparison-signal):has(.mesa-hydraulic-trigger):has(
+      .mesa-execution-progress:not([open])
+    )
+    .mesa-panel {
+    height: 220px;
+    gap: 0.1rem;
+  }
+  .mesa-view:has(.mesa-comparison-signal):has(.mesa-hydraulic-trigger):has(
+      .mesa-execution-progress:not([open])
+    )
+    .mesa-parameters {
+    margin-bottom: 0;
+  }
+  .mesa-view:has(.mesa-comparison-signal):has(.mesa-hydraulic-trigger):has(
+      .mesa-execution-progress:not([open])
+    )
+    .mesa-comparison-signal {
+    gap: 0;
+  }
+}
+
 @media (max-width: 640px) {
   .mesa-input-table table {
     table-layout: fixed;
@@ -467,6 +689,9 @@ main:has(.mesa-view) {
     padding: 0.75rem;
     height: 300px;
   }
+  .mesa-view:has(.mesa-comparison-signal) .mesa-panel {
+    height: 380px;
+  }
   .mesa-panel-heading {
     flex-wrap: wrap;
   }
@@ -474,4 +699,29 @@ main:has(.mesa-view) {
     width: 100%;
     min-width: 0;
   }
+}
+.mesa-manual-fields {
+  display: grid;
+  gap: 0.7rem;
+  border: 0;
+  padding: 0;
+  min-width: 0;
+}
+.mesa-manual-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.mesa-view .mesa-manual-status {
+  padding: 0;
+  font-size: 0.72rem;
+  line-height: 1.25;
+}
+.mesa-manual-fields textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  resize: vertical;
 }

@@ -27,8 +27,9 @@ def bind_hydraulic_mesa_inflow(store, fixture, variant, values=(7, 9), *, reach=
     return receipt
 
 
-def seed_hydraulic_mesa_run(store, fixture, artifact_root):
-    document = store.generate_hydraulic_v3_preview(fixture["scenario"]["id"])
+def seed_hydraulic_mesa_run(store, fixture, artifact_root, *, document=None, volume=(9.8, 9.6), indexed=True,
+                            storage_column="hydro_storage_hm3"):
+    document = document or store.generate_hydraulic_v3_preview(fixture["scenario"]["id"])
     version = store.create_scenario_version(scenario_id=fixture["scenario"]["id"], system_case_json=document,
         validation_payload={"status": "ok"}, generation_metadata={"kind": "hydraulic_diagram_v3"})
     run = store.create_run(scenario_version_id=version["id"])
@@ -37,24 +38,26 @@ def seed_hydraulic_mesa_run(store, fixture, artifact_root):
     summary = root / "summary.json"
     summary.write_text(json.dumps({"termination_status": "OPTIMAL"}), encoding="utf8")
     path = root / "asset_dispatch.csv"
-    # Julia writes local DateTime strings without offset; snapshot retains UTC.
+    # Deterministic artifacts follow the supplied snapshot's intervals.
     with path.open("w", newline="", encoding="utf8") as output:
         writer = csv.writer(output)
         writer.writerow(["timestamp", "duration_hours", "asset_id", "asset_type", "hydro_power_mw",
-                         "hydro_turbine_flow_m3s", "hydro_storage_hm3", "hydro_reservoir_elevation_masl",
+                         "hydro_turbine_flow_m3s", storage_column, "hydro_reservoir_elevation_masl",
                          "hydro_spill_flow_m3s", "hydraulic_flow_m3s"])
-        for i in (0, 1):
-            start = f"2026-10-20T0{i}:00:00"
+        for i, period in enumerate(document["time_series"]):
+            start = period["timestamp"]
+            duration = period["duration_hours"]
             writer.writerows([
-                [start, 1, "unit_1", "hydraulic_unit", [3, 6][i], [4, 8][i], 0, 0, 0, 0],
-                [start, 1, "unit_2", "hydraulic_unit", [9, 12][i], [12, 16][i], 0, 0, 0, 0],
-                [start, 1, "reservoir", "hydraulic_reservoir", 0, 0, [9.8, 9.6][i], [709.8, 709.6][i], [1, 2][i], 0],
-                [start, 1, "reach", "hydraulic_reach", 0, 0, 0, 0, 0, [16, 24][i]],
+                [start, duration, "unit_1", "hydraulic_unit", [3, 6][i], [4, 8][i], 0, 0, 0, 0],
+                [start, duration, "unit_2", "hydraulic_unit", [9, 12][i], [12, 16][i], 0, 0, 0, 0],
+                [start, duration, "reservoir", "hydraulic_reservoir", 0, 0, volume[i], [709.8, 709.6][i], [1, 2][i], 0],
+                [start, duration, "reach", "hydraulic_reach", 0, 0, 0, 0, 0, [16, 24][i]],
             ])
     store.mark_run_running(run["id"], workspace_path=str(root), input_snapshot_path=str(root / "input.json"))
     run = store.mark_run_succeeded(run["id"], exit_code=0, stdout="", stderr="", success_payload={"termination_status": "OPTIMAL"}, output_dir=str(root), summary_path=str(summary))
     artifact = store.register_run_artifact(run_id=run["id"], artifact_type="asset_dispatch_csv", path=str(path), display_name="asset_dispatch.csv", media_type="text/csv")
-    index_run_asset_dispatch_results(store=store, run=run, artifacts=[artifact], artifact_root=artifact_root)
+    if indexed:
+        index_run_asset_dispatch_results(store=store, run=run, artifacts=[artifact], artifact_root=artifact_root)
     return run
 
 
