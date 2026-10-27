@@ -14,7 +14,7 @@ class MesaExportPanel(BaseModel):
     title: str = Field(min_length=1, max_length=120)
     entity_id: str = Field(min_length=1, max_length=200)
     entity_type: str = Field(min_length=1, max_length=100)
-    series_keys: list[str] = Field(min_length=1, max_length=30)
+    series_keys: list[str] = Field(min_length=1)
 
 
 class MesaExportRequest(BaseModel):

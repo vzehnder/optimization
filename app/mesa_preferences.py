@@ -17,12 +17,27 @@ class MesaComponentReference(VisualModel):
     entity_id: str = Field(min_length=1, max_length=160)
 
 
+class MesaPanelPlacement(VisualModel):
+    row: int = Field(ge=1, le=6)
+    column: int = Field(ge=1, le=6)
+    row_span: int = Field(default=1, ge=1, le=6)
+    column_span: int = Field(default=1, ge=1, le=6)
+
+
 class MesaPanelPreference(VisualModel):
     id: str = Field(min_length=1, max_length=80)
     title: str = Field(min_length=1, max_length=120)
     component: MesaComponentReference
-    series_keys: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=160)]] = Field(min_length=1, max_length=12)
+    series_keys: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=160)]] = Field(min_length=1)
+    series_axes: dict[str, Literal["primary", "secondary"]] = Field(default_factory=dict)
     mode: Literal["chart", "table"]
+    placement: MesaPanelPlacement | None = None
+
+    @model_validator(mode="after")
+    def valid_axes(self):
+        if not set(self.series_axes).issubset(self.series_keys):
+            raise ValueError("Los ejes solo pueden asignarse a series seleccionadas.")
+        return self
 
     @field_validator("series_keys")
     @classmethod
@@ -35,8 +50,9 @@ class MesaPanelPreference(VisualModel):
 class MesaTabPreference(VisualModel):
     id: str = Field(min_length=1, max_length=80)
     title: str = Field(min_length=1, max_length=120)
-    layout: Literal["1x1", "1x2", "2x2", "2x3"]
-    panels: list[MesaPanelPreference] = Field(max_length=6)
+    layout: str = Field(pattern=r"^[1-6]x[1-6]$")
+    panels: list[MesaPanelPreference] = Field(max_length=36)
+    row_heights: list[Annotated[int, Field(ge=180)] | None] = Field(default_factory=list, max_length=6)
 
     @field_validator("panels")
     @classmethod
@@ -44,6 +60,25 @@ class MesaTabPreference(VisualModel):
         if len(panels) != len({panel.id for panel in panels}):
             raise ValueError("Las vistas de una pestaña deben tener identificadores distintos.")
         return panels
+
+    @model_validator(mode="after")
+    def valid_placements(self):
+        rows, columns = map(int, self.layout.split("x"))
+        occupied = set()
+        for panel in self.panels:
+            area = panel.placement
+            # Old configurations use sequential, single-cell placement.
+            if area is None:
+                continue
+            if area.row + area.row_span - 1 > rows or area.column + area.column_span - 1 > columns:
+                raise ValueError(f'La vista "{panel.title}" queda fuera de la cuadrícula.')
+            cells = {(row, column)
+                     for row in range(area.row, area.row + area.row_span)
+                     for column in range(area.column, area.column + area.column_span)}
+            if occupied & cells:
+                raise ValueError("Las vistas no pueden solaparse: cada celda pertenece a una sola vista.")
+            occupied.update(cells)
+        return self
 
 
 class MesaConfiguration(VisualModel):

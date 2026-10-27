@@ -37,10 +37,10 @@ class MesaPreferencesApiTests(unittest.TestCase):
     def configuration(self):
         return {
             "schema_version": 1, "active_tab_id": "general",
-            "tabs": [{"id": "general", "title": "Vista general", "layout": "2x2", "panels": [
+            "tabs": [{"id": "general", "title": "Vista general", "layout": "2x2", "row_heights": [], "panels": [
                 {"id": f"view-{i}", "title": title, "mode": mode,
                  "component": {"linkable_object_id": self.fixture["object"]["id"], "entity_type": "component:load", "entity_id": "load_north"},
-                 "series_keys": ["load_demand_mw"]}
+                 "series_keys": ["load_demand_mw"], "series_axes": {}, "placement": None}
                 for i, (title, mode) in enumerate([
                     ("Consumo", "chart"), ("Detalle", "table"), ("Operación", "chart"), ("Auditoría", "table")
                 ])
@@ -83,6 +83,64 @@ class MesaPreferencesApiTests(unittest.TestCase):
         response = self.save(changed, latest["revision"])
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(self.client.get(self.path).json()["configuration"]["tabs"][0]["title"], "Otra sesión")
+
+    def test_axes_and_unbounded_row_heights_survive_reload_with_many_series(self):
+        config = self.configuration()
+        tab = config["tabs"][0]
+        tab["row_heights"] = [50000, None]
+        panel = tab["panels"][0]
+        panel["series_keys"] = [f"signal_{i}" for i in range(40)]
+        panel["series_axes"] = {key: "primary" if i % 2 else "secondary" for i, key in enumerate(panel["series_keys"])}
+        response = self.save(config, 0)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.client.get(self.path).json()["configuration"], config)
+
+    def test_legacy_preferences_default_to_primary_axes_and_automatic_height(self):
+        config = self.configuration()
+        del config["tabs"][0]["row_heights"]
+        for panel in config["tabs"][0]["panels"]:
+            del panel["series_axes"]
+            del panel["placement"]
+        response = self.save(config, 0)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["configuration"], self.configuration())
+
+    def test_rectangles_and_custom_grid_survive_database_reopen(self):
+        config = self.configuration()
+        tab = config["tabs"][0]
+        tab["layout"] = "4x5"
+        for panel, area in zip(tab["panels"], [(1, 1, 3, 2), (1, 3, 2, 3), (4, 1, 1, 5), (3, 3, 1, 3)]):
+            panel["placement"] = dict(zip(("row", "column", "row_span", "column_span"), area))
+        response = self.save(config, 0)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.client.close()
+        self.store.close()
+        self.store = AnalystStore(self.database_url)
+        self.open_client()
+        self.assertEqual(self.client.get(self.path).json()["configuration"], config)
+
+    def test_overlapping_and_out_of_bounds_rectangles_cannot_replace_saved_preferences(self):
+        config = self.configuration()
+        tab = config["tabs"][0]
+        tab["layout"] = "3x3"
+        tab["panels"] = tab["panels"][:2]
+        tab["panels"][0]["placement"] = {"row": 1, "column": 1, "row_span": 3, "column_span": 1}
+        tab["panels"][1]["placement"] = {"row": 2, "column": 2, "row_span": 1, "column_span": 1}
+        saved = self.save(config, 0)
+        self.assertEqual(saved.status_code, 200, saved.text)
+        for patch in ({"column_span": 3}, {"column": 2}, {"row_span": 4}, {"row": 0}, {"column_span": 0}, {"row_span": 1.5}):
+            invalid = copy.deepcopy(config)
+            invalid["tabs"][0]["panels"][0]["placement"].update(patch)
+            with self.subTest(patch=patch):
+                response = self.save(invalid, saved.json()["revision"])
+                self.assertEqual(response.status_code, 422, response.text)
+                self.assertEqual(self.client.get(self.path).json(), saved.json())
+        for layout in ("2x3", "3x1", "0x3", "7x3", "3x7", "3.5x3"):
+            invalid = copy.deepcopy(config)
+            invalid["tabs"][0]["layout"] = layout
+            response = self.save(invalid, saved.json()["revision"])
+            self.assertEqual(response.status_code, 422, response.text)
+            self.assertEqual(self.client.get(self.path).json(), saved.json())
 
     def test_visual_preferences_are_private_and_do_not_modify_case_inputs(self):
         sid = self.fixture["scenario"]["id"]
@@ -158,6 +216,14 @@ class MesaPreferencesApiTests(unittest.TestCase):
         config = self.configuration()
         config["schema_version"] = 2
         invalid.append(config)
+        for axes in ({"missing": "primary"}, {"load_demand_mw": "third"}):
+            config = self.configuration()
+            config["tabs"][0]["panels"][0]["series_axes"] = axes
+            invalid.append(config)
+        for heights in ([179], [-1], [200.5], [200] * 7):
+            config = self.configuration()
+            config["tabs"][0]["row_heights"] = heights
+            invalid.append(config)
         for config in invalid:
             with self.subTest(config=config):
                 response = self.save(config, saved["revision"])

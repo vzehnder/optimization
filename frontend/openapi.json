@@ -3634,7 +3634,6 @@
             "items": {
               "type": "string"
             },
-            "maxItems": 30,
             "minItems": 1,
             "title": "Series Keys",
             "type": "array"
@@ -4505,6 +4504,43 @@
         "title": "MesaManualRevision",
         "type": "object"
       },
+      "MesaPanelPlacement": {
+        "additionalProperties": false,
+        "properties": {
+          "column": {
+            "maximum": 6.0,
+            "minimum": 1.0,
+            "title": "Column",
+            "type": "integer"
+          },
+          "column_span": {
+            "default": 1,
+            "maximum": 6.0,
+            "minimum": 1.0,
+            "title": "Column Span",
+            "type": "integer"
+          },
+          "row": {
+            "maximum": 6.0,
+            "minimum": 1.0,
+            "title": "Row",
+            "type": "integer"
+          },
+          "row_span": {
+            "default": 1,
+            "maximum": 6.0,
+            "minimum": 1.0,
+            "title": "Row Span",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "row",
+          "column"
+        ],
+        "title": "MesaPanelPlacement",
+        "type": "object"
+      },
       "MesaPanelPreference": {
         "additionalProperties": false,
         "properties": {
@@ -4525,13 +4561,33 @@
             "title": "Mode",
             "type": "string"
           },
+          "placement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MesaPanelPlacement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "series_axes": {
+            "additionalProperties": {
+              "enum": [
+                "primary",
+                "secondary"
+              ],
+              "type": "string"
+            },
+            "title": "Series Axes",
+            "type": "object"
+          },
           "series_keys": {
             "items": {
               "maxLength": 160,
               "minLength": 1,
               "type": "string"
             },
-            "maxItems": 12,
             "minItems": 1,
             "title": "Series Keys",
             "type": "array"
@@ -4928,12 +4984,7 @@
             "type": "string"
           },
           "layout": {
-            "enum": [
-              "1x1",
-              "1x2",
-              "2x2",
-              "2x3"
-            ],
+            "pattern": "^[1-6]x[1-6]$",
             "title": "Layout",
             "type": "string"
           },
@@ -4941,8 +4992,24 @@
             "items": {
               "$ref": "#/components/schemas/MesaPanelPreference"
             },
-            "maxItems": 6,
+            "maxItems": 36,
             "title": "Panels",
+            "type": "array"
+          },
+          "row_heights": {
+            "items": {
+              "anyOf": [
+                {
+                  "minimum": 180.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxItems": 6,
+            "title": "Row Heights",
             "type": "array"
           },
           "title": {

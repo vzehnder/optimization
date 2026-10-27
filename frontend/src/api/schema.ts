@@ -4983,6 +4983,23 @@ export interface components {
             /** Variant Id */
             variant_id: number;
         };
+        /** MesaPanelPlacement */
+        MesaPanelPlacement: {
+            /** Column */
+            column: number;
+            /**
+             * Column Span
+             * @default 1
+             */
+            column_span: number;
+            /** Row */
+            row: number;
+            /**
+             * Row Span
+             * @default 1
+             */
+            row_span: number;
+        };
         /** MesaPanelPreference */
         MesaPanelPreference: {
             component: components["schemas"]["MesaComponentReference"];
@@ -4993,6 +5010,11 @@ export interface components {
              * @enum {string}
              */
             mode: "chart" | "table";
+            placement?: components["schemas"]["MesaPanelPlacement"] | null;
+            /** Series Axes */
+            series_axes?: {
+                [key: string]: "primary" | "secondary";
+            };
             /** Series Keys */
             series_keys: string[];
             /** Title */
@@ -5125,13 +5147,12 @@ export interface components {
         MesaTabPreference: {
             /** Id */
             id: string;
-            /**
-             * Layout
-             * @enum {string}
-             */
-            layout: "1x1" | "1x2" | "2x2" | "2x3";
+            /** Layout */
+            layout: string;
             /** Panels */
             panels: components["schemas"]["MesaPanelPreference"][];
+            /** Row Heights */
+            row_heights?: (number | null)[];
             /** Title */
             title: string;
         };
