@@ -261,16 +261,338 @@ main:has(.mesa-view) {
 .mesa-grid {
   display: grid;
   gap: 0.8rem;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-.mesa-grid[data-layout="1x1"] {
-  grid-template-columns: minmax(0, 1fr);
-}
-.mesa-grid[data-layout="2x3"] {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .mesa-cell {
   min-width: 0;
+  min-height: 0;
+}
+.mesa-row {
+  display: grid;
+  align-items: end;
+  min-width: 0;
+  min-height: 0;
+}
+.mesa-editor .mesa-row-resize {
+  width: 100%;
+  height: 24px;
+  padding: 0;
+  line-height: 10px;
+  border: 1px solid #bcced6;
+  border-radius: 5px;
+  color: #526878;
+  background: #e8f0f3;
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+}
+.mesa-editor .mesa-row-resize:hover,
+.mesa-editor .mesa-row-resize:focus-visible {
+  background: #cde6e7;
+  border-color: #087f80;
+}
+.mesa-series-axis-choice {
+  display: grid;
+  gap: 0.45rem;
+  padding-block: 0.5rem;
+}
+.mesa-grid-controls,
+.mesa-space-setting-heading,
+.mesa-space-legend,
+.mesa-space-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+.mesa-grid-controls {
+  font-size: 0.8rem;
+}
+.mesa-toolbar .mesa-grid-controls select {
+  width: auto;
+  min-width: 3rem;
+}
+.mesa-editor > .mesa-grid-hint,
+.mesa-editor > .mesa-space-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.8rem;
+}
+.mesa-editor .mesa-empty-cell {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  border: 1px dashed #9bb3bf;
+  border-radius: 12px;
+  background: #f5f9fa;
+  color: #426073;
+  padding: 0.5rem;
+  font-weight: 400;
+}
+.mesa-editor .mesa-empty-cell:hover {
+  border-color: #087f80;
+  background: #eaf6f5;
+  color: #075f60;
+}
+.mesa-empty-cell > span:first-child {
+  font-size: 1.6rem;
+}
+.mesa-empty-cell small {
+  font-size: 0.7rem;
+}
+.mesa-space-setting {
+  border: 1px solid #c7d9df;
+  background: #f6fafb;
+  border-radius: 10px;
+  padding: 0.8rem;
+  min-width: 0;
+}
+.mesa-space-setting-heading {
+  justify-content: space-between;
+}
+.mesa-space-setting p {
+  font-size: 0.8rem;
+  line-height: 1.45;
+  margin: 0.4rem 0;
+}
+.mesa-space-picker {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.7rem;
+}
+.mesa-space-map {
+  display: grid;
+  gap: 5px;
+}
+.mesa-space-coordinate {
+  align-self: center;
+  text-align: center;
+  color: #426073;
+  font-size: 0.75rem;
+}
+.mesa-space-map .mesa-space-cell {
+  min-width: 0;
+  min-height: 48px;
+  padding: 0.25rem;
+  border: 1px dashed #9bb3bf;
+  background: white;
+  color: #426073;
+  border-radius: 6px;
+  overflow: hidden;
+  font-size: 0.7rem;
+}
+.mesa-space-cell span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mesa-space-legend {
+  font-size: 0.75rem;
+}
+.mesa-space-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.mesa-space-legend i {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 1px dashed #9bb3bf;
+  border-radius: 3px;
+  background: white;
+}
+.mesa-space-map .is-selected,
+.mesa-space-legend .is-selected {
+  background: #d4efea;
+  border: 2px solid #087f80;
+  color: #075759;
+}
+.mesa-space-map .is-occupied,
+.mesa-space-legend .is-occupied {
+  background: repeating-linear-gradient(
+    135deg,
+    #e1e8ed,
+    #e1e8ed 5px,
+    #edf1f4 5px,
+    #edf1f4 10px
+  );
+  border: 1px solid #9bb3bf;
+  color: #3b5363;
+  cursor: not-allowed;
+}
+.mesa-space-map .is-invalid {
+  border: 2px solid #a52d32;
+  background: #ffe9e9;
+  color: #8a2025;
+}
+.mesa-space-error {
+  color: #93252b;
+}
+.mesa-space-actions {
+  justify-content: flex-end;
+}
+.mesa-space-actions button {
+  font-size: 0.75rem;
+}
+@media (min-width: 641px) {
+  .mesa-view:has(.mesa-execution) {
+    --mesa-grid-row-height: 226px;
+  }
+  .mesa-view:has(> .mesa-toolbar) {
+    --mesa-grid-row-height: 204px;
+  }
+  .mesa-view:has(.mesa-execution):has(> .mesa-toolbar) {
+    --mesa-grid-row-height: 190px;
+  }
+}
+@media (min-width: 1100px) {
+  .workspace-view.mesa-view:has(.mesa-comparison-signal) {
+    --mesa-grid-row-height: 242px;
+  }
+  .mesa-view:has(.mesa-comparison-signal):has(.mesa-hydraulic-trigger):has(
+      .mesa-execution-progress:not([open])
+    ) {
+    --mesa-grid-row-height: 224px;
+  }
+}
+.mesa-series-axis-choice + .mesa-series-axis-choice {
+  border-top: 1px solid #d7e4e8;
+}
+.mesa-combined-chart {
+  display: flex;
+  flex-direction: column;
+  flex: 1 0 auto;
+  min-height: 112px;
+  gap: 0.1rem;
+}
+.mesa-axis-labels {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
+}
+.mesa-axis-labels [data-axis="secondary"] {
+  text-align: right;
+}
+.mesa-chart-plot {
+  position: relative;
+  flex: 1;
+  min-height: 80px;
+}
+.mesa-chart-plot .mesa-chart {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.mesa-chart-plot .mesa-chart text {
+  font-size: 10px;
+}
+.mesa-chart-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.7rem;
+  color: #526878;
+  font-size: 0.7rem;
+}
+.mesa-chart-toolbar > span:first-child {
+  margin-right: auto;
+}
+.mesa-view .mesa-chart-toolbar button {
+  padding: 0.15rem 0.45rem;
+  font-size: 0.7rem;
+}
+.mesa-chart:focus-visible {
+  outline: 2px solid #087f80;
+  outline-offset: -2px;
+}
+.mesa-chart[tabindex] {
+  touch-action: none;
+  user-select: none;
+}
+.mesa-chart-hit-area {
+  cursor: crosshair;
+}
+.mesa-chart-selection {
+  fill: #087f8026;
+  stroke: #087f80;
+  pointer-events: none;
+}
+.mesa-chart-crosshair {
+  pointer-events: none;
+}
+.mesa-chart-tooltip {
+  position: fixed;
+  z-index: 20;
+  box-sizing: border-box;
+  max-height: min(400px, 45vh);
+  overflow: auto;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #bcced6;
+  border-radius: 6px;
+  background: #fff;
+  color: #20394a;
+  box-shadow: 0 3px 12px #20394a26;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+.mesa-chart-tooltip-series {
+  display: grid;
+  gap: 0.15rem;
+  padding-top: 0.4rem;
+  margin-top: 0.4rem;
+  border-top: 1px solid #e5edf0;
+}
+.mesa-chart-tooltip-series small {
+  color: #526878;
+}
+.mesa-chart-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  text-align: center;
+}
+.mesa-view .mesa-chart-empty [role="status"] {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  background: #fff;
+}
+.mesa-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.8rem;
+  font-size: 0.7rem;
+  max-height: 3.5em;
+  overflow: auto;
+  flex-shrink: 0;
+}
+.mesa-series-details {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+}
+.mesa-series-details > summary {
+  cursor: pointer;
+  padding-block: 0.3rem;
+}
+.mesa-series-details .mesa-signal {
+  min-height: 0;
+  flex: 0 0 auto;
+}
+.mesa-series-details .mesa-signal > div:empty {
+  display: none;
+}
+.mesa-series-tables {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 .mesa-dialog {
   width: min(500px, calc(100% - 2rem));
@@ -309,6 +631,18 @@ main:has(.mesa-view) {
 @media (max-width: 640px) {
   .mesa-grid {
     grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: none !important;
+  }
+  .mesa-cell {
+    grid-area: auto !important;
+    --mesa-panel-height: var(--mesa-mobile-height, 300px) !important;
+  }
+  .mesa-cell:has(.mesa-comparison-signal) {
+    --mesa-panel-height: var(--mesa-mobile-height, 380px) !important;
+  }
+  .mesa-row,
+  .mesa-empty-cell {
+    display: none !important;
   }
 }
 
@@ -371,24 +705,24 @@ main:has(.mesa-view) {
   border-radius: 12px;
   background: #fff;
   padding: 0.65rem 0.8rem;
-  height: 236px;
+  height: var(--mesa-panel-height, 236px);
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
 }
 @media (min-width: 641px) {
   .mesa-view:has(.mesa-execution) .mesa-panel {
-    height: 226px;
+    height: var(--mesa-panel-height, 226px);
   }
   .mesa-view:has(> .mesa-toolbar) .mesa-panel {
-    height: 204px;
+    height: var(--mesa-panel-height, 204px);
   }
   .mesa-view:has(.mesa-execution):has(> .mesa-toolbar) .mesa-panel {
-    height: 190px;
+    height: var(--mesa-panel-height, 190px);
   }
 }
 .mesa-panel-heading {
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 0.4rem;
 }
@@ -417,6 +751,7 @@ main:has(.mesa-view) {
 .mesa-modes {
   display: flex;
   gap: 0.3rem;
+  flex-wrap: wrap;
 }
 
 .mesa-modes button[aria-pressed="true"] {
@@ -609,8 +944,14 @@ main:has(.mesa-view) {
   main:has(.mesa-comparison-signal) {
     padding-top: 0.5rem;
   }
+  main:has(.mesa-comparison-signal):has(.mesa-execution-progress:not([open])) {
+    padding-top: 0;
+  }
   .workspace-view.mesa-view:has(.mesa-comparison-signal) {
-    gap: 0.35rem;
+    gap: 0.15rem;
+  }
+  .mesa-view:has(.mesa-comparison-signal) .mesa-editor {
+    gap: 0.2rem;
   }
   .mesa-view:has(.mesa-comparison-signal) .workspace-heading {
     display: flex;
@@ -618,7 +959,7 @@ main:has(.mesa-view) {
     justify-content: space-between;
   }
   .workspace-view.mesa-view:has(.mesa-comparison-signal) .mesa-panel {
-    height: 234px;
+    height: var(--mesa-panel-height, 242px);
   }
   .workspace-view.mesa-view:has(.mesa-comparison-signal):has(
       .mesa-execution-progress:not([open])
@@ -635,14 +976,15 @@ main:has(.mesa-view) {
       .mesa-execution-progress:not([open])
     )
     .mesa-grid {
-    row-gap: 0.4rem;
+    row-gap: 0;
   }
   .mesa-view:has(.mesa-comparison-signal):has(.mesa-hydraulic-trigger):has(
       .mesa-execution-progress:not([open])
     )
     .mesa-panel {
-    height: 220px;
+    height: var(--mesa-panel-height, 224px);
     gap: 0.1rem;
+    padding-block: 0.35rem;
   }
   .mesa-view:has(.mesa-comparison-signal):has(.mesa-hydraulic-trigger):has(
       .mesa-execution-progress:not([open])
@@ -655,6 +997,12 @@ main:has(.mesa-view) {
     )
     .mesa-comparison-signal {
     gap: 0;
+  }
+  .mesa-view:has(.mesa-comparison-signal):has(.mesa-hydraulic-trigger):has(
+      .mesa-execution-progress:not([open])
+    )
+    .mesa-panel-footer {
+    padding-top: 0.1rem;
   }
 }
 
@@ -687,10 +1035,10 @@ main:has(.mesa-view) {
   }
   .mesa-panel {
     padding: 0.75rem;
-    height: 300px;
+    height: var(--mesa-panel-height, 300px);
   }
   .mesa-view:has(.mesa-comparison-signal) .mesa-panel {
-    height: 380px;
+    height: var(--mesa-panel-height, 380px);
   }
   .mesa-panel-heading {
     flex-wrap: wrap;

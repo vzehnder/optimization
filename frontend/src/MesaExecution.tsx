@@ -8,6 +8,11 @@ import {
 } from "./api/client";
 import type { components } from "./api/schema";
 import { RunProgressPanel } from "./RunProgress";
+import {
+  executionChartRange,
+  initialExecutionWindow,
+} from "./mesaExecutionRange";
+import type { ChartRange } from "./mesaChartAggregation";
 
 type Mesa = components["schemas"]["MesaResponse"];
 type Preparation = components["schemas"]["MesaExecutionRequest"];
@@ -40,26 +45,18 @@ export function MesaExecution({
   data,
   editing,
   onResults,
+  onRangeChange,
 }: {
   data: Mesa;
   editing: boolean;
   onResults: (runId: number) => void;
+  onRangeChange: (range: ChartRange) => void;
 }) {
   const context = data.context;
-  const source = data.components
-    .flatMap((c) => [c.series, ...(c.additional_series ?? [])])
-    .find((s) => s.role === "input" && s.points?.length);
   const [form, setForm] = useState<Preparation>(() => ({
     case_id: context.case_id,
     variant_id: context.variant_id,
-    range_start: source?.points?.[0]?.start.slice(0, 16) ?? "",
-    range_end: source?.points?.at(-1)?.end.slice(0, 16) ?? "",
-    timezone: source?.timezone ?? "UTC",
-    resolution_hours: source?.points?.[0]
-      ? (Date.parse(source.points[0].end) -
-          Date.parse(source.points[0].start)) /
-        3600000
-      : 1,
+    ...initialExecutionWindow(data),
   }));
   const [prepared, setPrepared] = useState<Prepared | null>(null);
   const [pending, setPending] = useState(false);
@@ -108,7 +105,12 @@ export function MesaExecution({
   ].includes(context.model_contract ?? "");
 
   function change<K extends keyof Preparation>(key: K, value: Preparation[K]) {
-    setForm((previous) => ({ ...previous, [key]: value }));
+    const next = { ...form, [key]: value };
+    setForm(next);
+    if (["range_start", "range_end", "timezone"].includes(key)) {
+      const range = executionChartRange(next);
+      if (range) onRangeChange(range);
+    }
     setPrepared(null);
     setError("");
   }
@@ -217,8 +219,15 @@ export function MesaExecution({
               </fieldset>
               <p>
                 Intervalo [inicio, fin): el fin queda excluido. La zona y
-                resolución deben coincidir con las entradas; no se remuestrea.
+                resolución deben coincidir con las entradas; no se remuestrea.{" "}
+                Los gráficos se ajustan automáticamente al período elegido.
               </p>
+              {!executionChartRange(form) && (
+                <p role="status">
+                  Indica fechas válidas, con inicio anterior al fin, y una zona
+                  horaria válida para ajustar los gráficos.
+                </p>
+              )}
               {editing && (
                 <p role="status">
                   Guarda o descarta los cambios pendientes antes de validar.

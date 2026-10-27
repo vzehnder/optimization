@@ -1,4 +1,6 @@
 import { useRef, useState } from "react";
+import { executionChartRange } from "./mesaExecutionRange";
+import type { ChartRange } from "./mesaChartAggregation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ApiError,
@@ -55,11 +57,13 @@ export function MesaHydraulicExecution({
   data,
   editing,
   onResults,
+  onRangeChange,
   caseRevision = 0,
 }: {
   data: Mesa;
   editing: boolean;
   onResults: (id: number) => void;
+  onRangeChange: (range: ChartRange | null) => void;
   caseRevision?: number;
 }) {
   const { scenario_id: scenarioId, case_id: caseId } = data.context;
@@ -120,12 +124,20 @@ export function MesaHydraulicExecution({
   const executed = run?.materialized_lineage?.mesa_hydraulic_execution;
 
   function change(changes: Partial<Preparation>) {
-    setForm((previous) => (previous ? { ...previous, ...changes } : null));
+    const next = form ? { ...form, ...changes } : null;
+    setForm(next);
+    if (next && ("range_start" in changes || "range_end" in changes)) {
+      const range = executionChartRange({ ...next, timezone: "UTC" });
+      if (range) onRangeChange(range);
+    }
     setPrepared(null);
     setError("");
   }
   function selectSource(id: number) {
     const chosen = sources.data?.sources.find((s) => s.id === id);
+    onRangeChange(
+      chosen ? executionChartRange({ ...chosen, timezone: "UTC" }) : null,
+    );
     setPrepared(null);
     setError("");
     setForm(

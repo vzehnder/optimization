@@ -11,6 +11,8 @@ export default defineConfig({
     "mesa-hydraulic-assets.spec.ts",
     "mesa-history.spec.ts",
     "mesa-manual-series.spec.ts",
+    "mesa-charts.spec.ts",
+    "mesa-layout.spec.ts",
   ],
   globalSetup: "./e2e/mesa-global-setup.ts",
   outputDir: "../.tmp/mesa-playwright-results",

@@ -1,8 +1,27 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { useQuery } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { ApiError, getCsrfToken, requestJson } from "./api/client";
 import type { components } from "./api/schema";
+import { seriesAxis, type MesaAxis } from "./mesaChartData";
+import { MesaRow } from "./MesaRow";
+import { MesaSpacePicker } from "./MesaSpacePicker";
+import {
+  contains,
+  describePlacement,
+  firstFree,
+  fits,
+  gridSize,
+  overlaps,
+  placePanels,
+  type Placement,
+} from "./mesaLayout";
 
 type Mesa = components["schemas"]["MesaResponse"];
 type Panel = components["schemas"]["MesaPanelPreference"];
@@ -39,21 +58,29 @@ function PanelDialog({
   initial,
   onApply,
   onClose,
-  position,
-  count,
+  tab,
   onRemove,
 }: {
   data: Mesa;
   initial: Panel;
-  onApply: (panel: Panel, position: number) => void;
+  onApply: (panel: Panel) => void;
   onClose: () => void;
-  position: number;
-  count: number;
+  tab: Tab;
   onRemove?: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [draft, setDraft] = useState(initial);
-  const [order, setOrder] = useState(position);
+  const [choosingSpace, setChoosingSpace] = useState(false);
+  const { rows, columns } = gridSize(tab.layout);
+  const validPlacement =
+    !!draft.placement &&
+    fits(draft.placement, rows, columns) &&
+    !tab.panels.some(
+      (panel) =>
+        panel.id !== draft.id &&
+        panel.placement &&
+        overlaps(draft.placement!, panel.placement),
+    );
   const selected = data.components.findIndex(
     (c) =>
       c.entity_id === draft.component.entity_id &&
@@ -84,8 +111,14 @@ function PanelDialog({
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          if (draft.title.trim() && draft.series_keys.length && component)
-            onApply(draft, order);
+          if (
+            draft.title.trim() &&
+            draft.series_keys.length &&
+            component &&
+            validPlacement &&
+            !choosingSpace
+          )
+            onApply(draft);
         }}
       >
         <h2 id="mesa-dialog-title">Configurar vista</h2>
@@ -99,6 +132,40 @@ function PanelDialog({
             onChange={(e) => setDraft({ ...draft, title: e.target.value })}
           />
         </label>
+        <section
+          className="mesa-space-setting"
+          aria-label="Espacio en la cuadrícula"
+        >
+          <div className="mesa-space-setting-heading">
+            <div>
+              <strong>Espacio en la cuadrícula</strong>
+              <p>
+                {draft.placement
+                  ? describePlacement(draft.placement)
+                  : "Sin espacio asignado"}
+              </p>
+            </div>
+            <button
+              type="button"
+              aria-expanded={choosingSpace}
+              onClick={() => setChoosingSpace(!choosingSpace)}
+            >
+              Elegir espacio
+            </button>
+          </div>
+          {choosingSpace && draft.placement && (
+            <MesaSpacePicker
+              tab={tab}
+              panelId={draft.id}
+              initial={draft.placement}
+              onApply={(placement) => {
+                setDraft({ ...draft, placement });
+                setChoosingSpace(false);
+              }}
+              onCancel={() => setChoosingSpace(false)}
+            />
+          )}
+        </section>
         <label>
           Componente
           <select
@@ -109,6 +176,7 @@ function PanelDialog({
                 ...draft,
                 component: next.component,
                 series_keys: next.series_keys,
+                series_axes: {},
               });
             }}
           >
@@ -131,28 +199,66 @@ function PanelDialog({
           {component &&
             [component.series, ...(component.additional_series ?? [])].map(
               (series) => (
-                <label className="mesa-checkbox" key={series.signal_key}>
-                  <input
-                    type="checkbox"
-                    checked={draft.series_keys.includes(
-                      series.signal_key ?? "load_demand_mw",
-                    )}
-                    onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        series_keys: e.target.checked
-                          ? [
-                              ...draft.series_keys,
-                              series.signal_key ?? "load_demand_mw",
-                            ]
-                          : draft.series_keys.filter(
-                              (key) => key !== series.signal_key,
-                            ),
-                      })
-                    }
-                  />
-                  {series.name} · {series.unit}
-                </label>
+                <div
+                  className="mesa-series-axis-choice"
+                  key={series.signal_key}
+                >
+                  <label className="mesa-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={draft.series_keys.includes(
+                        series.signal_key ?? "load_demand_mw",
+                      )}
+                      onChange={(e) => {
+                        const axes = { ...draft.series_axes };
+                        if (!e.target.checked)
+                          delete axes[series.signal_key ?? "load_demand_mw"];
+                        else if (series.signal_key === "price_usd_per_mwh")
+                          axes[series.signal_key] = "secondary";
+                        setDraft({
+                          ...draft,
+                          series_axes: axes,
+                          series_keys: e.target.checked
+                            ? [
+                                ...draft.series_keys,
+                                series.signal_key ?? "load_demand_mw",
+                              ]
+                            : draft.series_keys.filter(
+                                (key) => key !== series.signal_key,
+                              ),
+                        });
+                      }}
+                    />
+                    {series.name} · {series.unit}
+                  </label>
+                  {draft.series_keys.includes(
+                    series.signal_key ?? "load_demand_mw",
+                  ) && (
+                    <label>
+                      Eje Y · {series.name}
+                      <select
+                        aria-label={`Eje Y · ${series.name}`}
+                        value={seriesAxis(
+                          series.signal_key ?? "load_demand_mw",
+                          draft.series_axes,
+                        )}
+                        onChange={(event) =>
+                          setDraft({
+                            ...draft,
+                            series_axes: {
+                              ...draft.series_axes,
+                              [series.signal_key ?? "load_demand_mw"]: event
+                                .target.value as MesaAxis,
+                            },
+                          })
+                        }
+                      >
+                        <option value="primary">Primario · izquierda</option>
+                        <option value="secondary">Secundario · derecha</option>
+                      </select>
+                    </label>
+                  )}
+                </div>
               ),
             )}
         </fieldset>
@@ -168,20 +274,11 @@ function PanelDialog({
             <option value="table">Tabla</option>
           </select>
         </label>
-        <p>La vista consulta las series del componente seleccionado.</p>
-        <label>
-          Posición de vista
-          <select
-            value={order}
-            onChange={(e) => setOrder(Number(e.target.value))}
-          >
-            {Array.from({ length: count }, (_, i) => (
-              <option key={i} value={i}>
-                {i + 1}
-              </option>
-            ))}
-          </select>
-        </label>
+        <p>
+          Puedes asignar todas las series del componente a cualquiera de los dos
+          ejes. Si mezclas unidades, el eje indicará cuáles son; los valores
+          conservan sus unidades originales.
+        </p>
         <footer>
           {onRemove && (
             <button type="button" onClick={onRemove}>
@@ -194,7 +291,11 @@ function PanelDialog({
           <button
             type="submit"
             disabled={
-              !component || !draft.series_keys.length || !draft.title.trim()
+              !component ||
+              !draft.series_keys.length ||
+              !draft.title.trim() ||
+              !validPlacement ||
+              choosingSpace
             }
           >
             Aplicar
@@ -305,7 +406,7 @@ function ConfiguredMesa({
     const config = structuredClone(initial.configuration);
     if (initial.revision === 0 && data.components.length)
       config.tabs[0].panels = [newPanel(data.components[0])];
-    return config;
+    return { ...config, tabs: config.tabs.map(placePanels) };
   });
   const [revision, setRevision] = useState(initial.revision);
   const [editing, setEditing] = useState<Panel | null>(null);
@@ -314,13 +415,47 @@ function ConfiguredMesa({
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [conflict, setConflict] = useState(false);
+  const [layoutError, setLayoutError] = useState("");
   const tab = configuration.tabs.find(
     (item) => item.id === configuration.active_tab_id,
   )!;
-  const capacity = { "1x1": 1, "1x2": 2, "2x2": 4, "2x3": 6 }[tab.layout];
+  const { rows, columns } = gridSize(tab.layout);
+  const visiblePanels = tab.panels
+    .filter((panel) => panel.placement)
+    .sort(
+      (a, b) =>
+        a.placement!.row - b.placement!.row ||
+        a.placement!.column - b.placement!.column,
+    );
+  const available = firstFree(tab.layout, tab.panels);
+  function changeGrid(nextRows: number, nextColumns: number) {
+    const outside = visiblePanels.filter(
+      (panel) => !fits(panel.placement!, nextRows, nextColumns),
+    );
+    if (outside.length) {
+      setLayoutError(
+        `No se puede reducir a ${nextRows} × ${nextColumns}: ${outside.map((panel) => `«${panel.title}»`).join(", ")} quedaría fuera. Mueve o reduce esas vistas desde Configurar → Elegir espacio.`,
+      );
+      return;
+    }
+    setLayoutError("");
+    update({
+      ...configuration,
+      tabs: configuration.tabs.map((item) =>
+        item.id === tab.id
+          ? placePanels({ ...item, layout: `${nextRows}x${nextColumns}` })
+          : item,
+      ),
+    });
+  }
+  function addView(placement: Placement | null = available) {
+    if (!placement || !data.components.length) return;
+    setEditing({ ...newPanel(data.components[0]), placement });
+  }
   function update(next: Configuration) {
     setConfiguration(next);
     setNotice("Cambios sin guardar");
+    setLayoutError("");
   }
   function updatePanel(panel: Panel, position?: number) {
     const previousIndex = tab.panels.findIndex((p) => p.id === panel.id);
@@ -370,7 +505,10 @@ function ConfiguredMesa({
     setSaving(true);
     try {
       const saved = await requestJson<Preferences>(path);
-      setConfiguration(saved.configuration);
+      setConfiguration({
+        ...saved.configuration,
+        tabs: saved.configuration.tabs.map(placePanels),
+      });
       setRevision(saved.revision);
       setConflict(false);
       setError("");
@@ -457,14 +595,16 @@ function ConfiguredMesa({
             type="button"
             disabled={configuration.tabs.length >= 24}
             onClick={() =>
-              setEditingTab({
-                id: crypto.randomUUID(),
-                title: data.components[0]?.name ?? "Nueva pestaña",
-                layout: "2x2",
-                panels: data.components.length
-                  ? [newPanel(data.components[0])]
-                  : [],
-              })
+              setEditingTab(
+                placePanels({
+                  id: crypto.randomUUID(),
+                  title: data.components[0]?.name ?? "Nueva pestaña",
+                  layout: "2x2",
+                  panels: data.components.length
+                    ? [newPanel(data.components[0])]
+                    : [],
+                }),
+              )
             }
           >
             Agregar pestaña
@@ -474,32 +614,49 @@ function ConfiguredMesa({
           </button>
         </div>
         <div className="mesa-toolbar">
-          <label>
-            Distribución de las vistas
-            <select
-              value={tab.layout}
-              onChange={(e) =>
-                update({
-                  ...configuration,
-                  tabs: configuration.tabs.map((item) =>
-                    item.id === tab.id
-                      ? { ...item, layout: e.target.value as typeof tab.layout }
-                      : item,
-                  ),
-                })
-              }
-            >
-              <option value="1x1">1 × 1 · 1 vista</option>
-              <option value="1x2">1 × 2 · 2 vistas</option>
-              <option value="2x2">2 × 2 · 4 vistas</option>
-              <option value="2x3">2 × 3 · 6 vistas</option>
-            </select>
-          </label>
+          <div
+            className="mesa-grid-controls"
+            role="group"
+            aria-label="Distribución de las vistas"
+          >
+            <span>Cuadrícula</span>
+            <label>
+              Filas
+              <select
+                aria-label="Filas"
+                value={rows}
+                onChange={(e) => changeGrid(Number(e.target.value), columns)}
+              >
+                {Array.from({ length: 6 }, (_, i) => (
+                  <option value={i + 1} key={i}>
+                    {i + 1}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span aria-hidden="true">×</span>
+            <label>
+              Columnas
+              <select
+                aria-label="Columnas"
+                value={columns}
+                onChange={(e) => changeGrid(rows, Number(e.target.value))}
+              >
+                {Array.from({ length: 6 }, (_, i) => (
+                  <option value={i + 1} key={i}>
+                    {i + 1}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
           <button
             type="button"
             id="mesa-add-view"
-            disabled={!data.components.length || tab.panels.length >= 6}
-            onClick={() => setEditing(newPanel(data.components[0]))}
+            disabled={
+              !data.components.length || !available || tab.panels.length >= 36
+            }
+            onClick={() => addView()}
           >
             Agregar vista
           </button>
@@ -511,17 +668,45 @@ function ConfiguredMesa({
           <button type="button" disabled={conflict} onClick={() => void save()}>
             Guardar mesa
           </button>
-          {renderSelectionActions?.(tab.panels.slice(0, capacity))}
+          {renderSelectionActions?.(visiblePanels)}
         </div>
+        {layoutError && (
+          <p className="mesa-space-error" role="alert">
+            {layoutError}
+          </p>
+        )}
         <div
           className="mesa-grid"
           data-layout={tab.layout}
+          style={{
+            gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr)) 20px`,
+            gridTemplateRows: Array.from({ length: rows }, (_, i) =>
+              tab.row_heights?.[i]
+                ? `${tab.row_heights[i]}px`
+                : "var(--mesa-grid-row-height, 236px)",
+            ).join(" "),
+          }}
           role="tabpanel"
           id="mesa-tab-content"
           aria-labelledby={`mesa-tab-${tab.id}`}
         >
-          {tab.panels.slice(0, capacity).map((panel) => (
-            <div className="mesa-cell" key={panel.id}>
+          {visiblePanels.map((panel) => (
+            <div
+              className="mesa-cell"
+              key={panel.id}
+              style={
+                {
+                  gridRow: `${panel.placement!.row} / span ${panel.placement!.row_span ?? 1}`,
+                  gridColumn: `${panel.placement!.column} / span ${panel.placement!.column_span ?? 1}`,
+                  "--mesa-panel-height": "100%",
+                  "--mesa-mobile-height": tab.row_heights?.[
+                    panel.placement!.row - 1
+                  ]
+                    ? `${tab.row_heights[panel.placement!.row - 1]}px`
+                    : undefined,
+                } as CSSProperties
+              }
+            >
               {renderPanel(
                 panel,
                 (mode) => updatePanel({ ...panel, mode }),
@@ -535,7 +720,65 @@ function ConfiguredMesa({
               )}
             </div>
           ))}
+          {Array.from({ length: rows * columns }, (_, index) => {
+            const row = Math.floor(index / columns) + 1;
+            const column = (index % columns) + 1;
+            if (
+              visiblePanels.some((panel) =>
+                contains(panel.placement!, row, column),
+              )
+            )
+              return null;
+            return (
+              <button
+                type="button"
+                className="mesa-empty-cell"
+                key={`empty-${row}-${column}`}
+                style={{ gridRow: row, gridColumn: column }}
+                disabled={!data.components.length || tab.panels.length >= 36}
+                aria-label={`Agregar vista en fila ${row}, columna ${column}`}
+                onClick={() =>
+                  addView({ row, column, row_span: 1, column_span: 1 })
+                }
+              >
+                <span aria-hidden="true">＋</span>
+                <span>Agregar aquí</span>
+                <small>
+                  Fila {row} · Columna {column}
+                </small>
+              </button>
+            );
+          })}
+          {Array.from({ length: rows }, (_, index) => (
+            <MesaRow
+              key={`${tab.id}:${tab.layout}:${index}`}
+              index={index}
+              height={tab.row_heights?.[index]}
+              onResize={(height) => {
+                if (tab.row_heights?.[index] === height) return;
+                const row_heights = Array.from(
+                  {
+                    length: Math.max(rows, tab.row_heights?.length ?? 0),
+                  },
+                  (_, i) =>
+                    i === index ? height : (tab.row_heights?.[i] ?? null),
+                );
+                update({
+                  ...configuration,
+                  tabs: configuration.tabs.map((item) =>
+                    item.id === tab.id ? { ...item, row_heights } : item,
+                  ),
+                });
+              }}
+            />
+          ))}
         </div>
+        {!available && (
+          <p className="mesa-grid-hint">
+            Cuadrícula completa. Agrega filas o columnas, o reduce el espacio de
+            una vista para añadir otra.
+          </p>
+        )}
         {!tab.panels.length && (
           <p role="status">
             {data.components.length
@@ -543,10 +786,10 @@ function ConfiguredMesa({
               : "Este caso no tiene componentes eléctricos disponibles."}
           </p>
         )}
-        {tab.panels.length > capacity && (
+        {tab.panels.length > visiblePanels.length && (
           <p>
-            {tab.panels.length - capacity} vistas ocultas; se conservan al
-            ampliar.
+            {tab.panels.length - visiblePanels.length} vistas ocultas; se
+            conservan al ampliar.
           </p>
         )}
       </fieldset>
@@ -554,16 +797,7 @@ function ConfiguredMesa({
         <PanelDialog
           data={data}
           initial={editing}
-          position={Math.max(
-            0,
-            tab.panels.some((p) => p.id === editing.id)
-              ? tab.panels.findIndex((p) => p.id === editing.id)
-              : tab.panels.length,
-          )}
-          count={
-            tab.panels.length +
-            (tab.panels.some((p) => p.id === editing.id) ? 0 : 1)
-          }
+          tab={tab}
           onRemove={
             tab.panels.some((p) => p.id === editing.id)
               ? () => {
@@ -582,8 +816,8 @@ function ConfiguredMesa({
                 }
               : undefined
           }
-          onApply={(panel, position) => {
-            updatePanel(panel, position);
+          onApply={(panel) => {
+            updatePanel(panel);
             setEditing(null);
           }}
           onClose={() => setEditing(null)}

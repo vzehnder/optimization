@@ -35,6 +35,7 @@ async function addBattery(page: Page) {
   await dialog.getByLabel("Título").fill("BESS Norte");
   await dialog.getByRole("checkbox", { name: /Carga BESS/ }).uncheck();
   await dialog.getByRole("checkbox", { name: /Descarga BESS/ }).check();
+  await dialog.getByLabel("Eje Y · Descarga BESS").selectOption("secondary");
   await dialog.getByRole("button", { name: "Aplicar", exact: true }).click();
   return page.getByRole("region", { name: "BESS · BESS Norte", exact: true });
 }
@@ -54,6 +55,9 @@ test("Comparar conserva entradas congeladas y sincroniza antes, después y delta
     battery.getByRole("img", { name: "Descarga BESS · MW" }),
   ).toContainText("Antes: 1 MW");
   await expect(battery.getByRole("img")).toContainText("Después: 2 MW");
+  await expect(
+    battery.locator('.mesa-chart g[data-axis="secondary"]'),
+  ).toHaveCount(2);
   await battery.getByRole("button", { name: "Tabla", exact: true }).click();
   const table = battery.getByRole("table", { name: "Descarga BESS · MW" });
   await expect(

@@ -103,7 +103,13 @@ test("La comparación hidráulica conserva muestras y parámetros ejecutados con
     .nth(1)
     .getByRole("cell")
     .allTextContents();
-  expect(Number(values[4])).toBeCloseTo(-0.2);
+  await expect(volume.getByRole("columnheader")).toHaveText([
+    "Inicio",
+    "Volumen almacenado · Antes (hm3)",
+    "Volumen almacenado · Después (hm3)",
+    "Δ (hm3)",
+  ]);
+  expect(Number(values[3])).toBeCloseTo(-0.2);
   await expect(
     reservoir
       .getByRole("table", { name: "Aporte natural · m3/s", exact: true })

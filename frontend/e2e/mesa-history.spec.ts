@@ -53,7 +53,12 @@ test("Historial recupera un run y conserva su procedencia al recargar", async ({
   await page
     .getByRole("button", { name: "Preparación actual", exact: true })
     .click();
-  await expect(page.getByRole("tabpanel")).toContainText("Entrada");
+  await expect(
+    page.getByRole("tabpanel").locator(".mesa-panel-footer"),
+  ).toContainText("Revisión 1 · Fuente #");
+  await expect(
+    page.getByRole("tabpanel").locator(".mesa-comparison-origins"),
+  ).toHaveCount(0);
 });
 
 test("CSV descarga las vistas visibles con todos sus intervalos y la referencia elegida", async ({
@@ -98,11 +103,17 @@ test("CSV descarga las vistas visibles con todos sus intervalos y la referencia 
     expect(file.suggestedFilename()).toBe(`mesa-run-${fixture.run.id}.csv`);
     return (await readFile((await file.path())!, "utf8")).trim().split(/\r?\n/);
   };
-  await page.getByLabel("Distribución de las vistas").selectOption("1x1");
+  await page
+    .getByRole("button", { name: "Agregar pestaña", exact: true })
+    .click();
+  await page
+    .getByRole("dialog", { name: "Configurar pestaña" })
+    .getByRole("button", { name: "Aplicar", exact: true })
+    .click();
   const hidden = await download();
   expect(hidden).toHaveLength(3);
   expect(hidden.join("\n")).not.toContain("bess_discharge_power_mw");
-  await page.getByLabel("Distribución de las vistas").selectOption("1x2");
+  await page.getByRole("tab", { name: "Vista general", exact: true }).click();
   const rows = await download();
   expect(rows).toHaveLength(5);
   const headers = rows[0].replace(/^\uFEFF/, "").split(",");

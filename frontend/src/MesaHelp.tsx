@@ -31,9 +31,26 @@ export function MesaHelp() {
           <ol>
             <li>
               <strong>Organiza tus vistas.</strong> Agrega pestañas y vistas,
-              elige sus componentes y señales, y alterna Gráfico/Tabla. Guardar
-              mesa conserva tu distribución para este caso. Reducirla oculta
-              vistas sin borrarlas.
+              elige cuántas filas y columnas tendrá cada cuadrícula y alterna
+              Gráfico/Tabla. En Configurar → Elegir espacio, marca una celda o
+              dos esquinas para ocupar un rectángulo. Las celdas de otras vistas
+              están bloqueadas. Para reducir la cuadrícula, mueve o reduce antes
+              las vistas que quedarían fuera. Guardar mesa conserva la
+              distribución.
+            </li>
+            <li>
+              <strong>Elige los ejes.</strong> En Configurar, selecciona las
+              series del componente y asigna cada una al eje Y primario
+              (izquierda) o secundario (derecha). Cada eje acepta varias series;
+              si tienen unidades distintas, muestra «Múltiples unidades» y las
+              enumera, sin convertir sus valores.
+            </li>
+            <li>
+              <strong>Ajusta la altura.</strong> Arrastra el control del borde
+              derecho de una fila para agrandar juntos sus gráficos. Puedes
+              seguir hacia abajo sin un límite fijo; también puedes enfocar la
+              barra y usar las flechas arriba y abajo. Guardar mesa conserva
+              ejes y alturas.
             </li>
             <li>
               <strong>Edita las entradas.</strong> En Tabla, usa Editar entrada,

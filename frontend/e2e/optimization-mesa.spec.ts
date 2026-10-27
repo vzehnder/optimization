@@ -574,7 +574,7 @@ test("Una pérdida de conexión conserva la edición y permite reintentar", asyn
   ).toBeVisible();
 });
 
-test("Hidráulica conserva centrales homónimas y consulta embalse con escalas separadas", async ({
+test("Hidráulica conserva centrales homónimas y consulta las series del embalse", async ({
   page,
 }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -646,7 +646,7 @@ test("Hidráulica conserva centrales homónimas y consulta embalse con escalas s
   await expect(
     reservoir.getByRole("img", { name: "Volumen almacenado · hm3" }),
   ).toContainText("9.8 hm3");
-  await expect(reservoir.getByRole("img")).toHaveCount(2);
+  await expect(reservoir.getByRole("img")).toHaveCount(1);
   await page.getByRole("button", { name: "Guardar mesa", exact: true }).click();
   await expect(page.getByText("Mesa guardada", { exact: true })).toBeVisible();
   await page.reload();
@@ -654,6 +654,8 @@ test("Hidráulica conserva centrales homónimas y consulta embalse con escalas s
     first.getByRole("cell", { name: "6", exact: true }),
   ).toBeVisible();
   await expect(reservoir).toContainText(`Run #${fixture.run.id}`);
+  // Compact panels keep provenance accessible through their internal scroll.
+  await second.locator(".mesa-panel-footer").scrollIntoViewIfNeeded();
   await expect(second.locator(".mesa-panel-footer")).toBeInViewport();
   for (const bottom of await page
     .locator(".mesa-panel")
@@ -751,7 +753,8 @@ test("BESS y renovables separan parámetros, entradas y salidas ausentes", async
   });
   await expect(battery).toContainText("Salida · Solo lectura");
   await expect(battery).toContainText("Sin resultado disponible");
-  await expect(battery.getByRole("img")).toHaveCount(0);
+  await expect(battery.getByRole("img")).toHaveCount(1);
+  await expect(battery.locator(".mesa-chart polyline")).toHaveCount(0);
   await battery.getByText("Parámetros actuales", { exact: true }).click();
   await expect(
     battery.getByRole("row").filter({ hasText: "Energía inicial" }),
@@ -897,7 +900,7 @@ test("cambiar de run conserva una vista que todavía no se ha guardado", async (
   ).toBeVisible();
 });
 
-test("cuatro vistas conservan títulos, series y modos al reducir y recargar", async ({
+test("cuatro vistas conservan títulos, series y modos al bloquear una reducción y recargar", async ({
   page,
 }) => {
   await openPersonalMesa(page, "Persistencia de paneles");
@@ -913,17 +916,17 @@ test("cuatro vistas conservan títulos, series y modos al reducir y recargar", a
   }
   await page.getByRole("button", { name: "Guardar mesa", exact: true }).click();
   await expect(page.getByText("Mesa guardada", { exact: true })).toBeVisible();
-  await page.getByLabel("Distribución de las vistas").selectOption("1x1");
+  await page.getByLabel("Filas", { exact: true }).selectOption("1");
+  await expect(page.getByRole("alert")).toContainText("quedaría fuera");
+  await page.getByLabel("Columnas", { exact: true }).selectOption("1");
   await page.getByRole("button", { name: "Guardar mesa", exact: true }).click();
   await expect(page.getByText("Mesa guardada", { exact: true })).toBeVisible();
   await page.reload();
-  await expect(page.locator(".mesa-panel")).toHaveCount(1);
-  await expect(
-    page.getByText("3 vistas ocultas; se conservan al ampliar.", {
-      exact: true,
-    }),
-  ).toBeVisible();
-  await page.getByLabel("Distribución de las vistas").selectOption("2x2");
+  await expect(page.locator(".mesa-panel")).toHaveCount(4);
+  await expect(page.getByLabel("Filas", { exact: true })).toHaveValue("2");
+  await expect(page.getByLabel("Columnas", { exact: true })).toHaveValue("2");
+  await page.getByLabel("Filas", { exact: true }).selectOption("2");
+  await page.getByLabel("Columnas", { exact: true }).selectOption("2");
   await expect(page.locator(".mesa-panel")).toHaveCount(4);
   await expect(
     page.getByRole("heading", { name: "Detalle", exact: true }),
@@ -954,17 +957,17 @@ test("dos pestañas personalizadas conservan su orden y distribución usando tec
   await expect(
     page.getByRole("tab", { name: "Demanda diaria" }),
   ).toHaveAttribute("aria-selected", "true");
-  await page.getByLabel("Distribución de las vistas").selectOption("1x2");
+  await page.getByLabel("Filas", { exact: true }).selectOption("1");
+  await page.getByLabel("Columnas", { exact: true }).selectOption("2");
   await page
     .getByRole("button", { name: "Agregar vista", exact: true })
     .click();
   dialog = page.getByRole("dialog", { name: "Configurar vista" });
   await dialog.getByLabel("Título").fill("Detalle diario");
-  await dialog.getByLabel("Posición de vista").selectOption("0");
   await dialog.getByRole("button", { name: "Aplicar" }).click();
   await expect(page.locator(".mesa-panel h2")).toHaveText([
-    "Detalle diario",
     "Demanda Norte",
+    "Detalle diario",
   ]);
   await page
     .getByRole("button", { name: "Configurar pestaña", exact: true })
@@ -979,15 +982,13 @@ test("dos pestañas personalizadas conservan su orden y distribución usando tec
     "Demanda diaria",
     "Vista general",
   ]);
-  await expect(page.getByLabel("Distribución de las vistas")).toHaveValue(
-    "1x2",
-  );
+  await expect(page.getByLabel("Filas", { exact: true })).toHaveValue("1");
+  await expect(page.getByLabel("Columnas", { exact: true })).toHaveValue("2");
   await page.getByRole("tab", { name: "Demanda diaria" }).focus();
   await page.keyboard.press("ArrowRight");
   await expect(page.getByRole("tab", { name: "Vista general" })).toBeFocused();
-  await expect(page.getByLabel("Distribución de las vistas")).toHaveValue(
-    "2x2",
-  );
+  await expect(page.getByLabel("Filas", { exact: true })).toHaveValue("2");
+  await expect(page.getByLabel("Columnas", { exact: true })).toHaveValue("2");
   await expect(page.locator(".mesa-panel")).toHaveCount(1);
   await page.keyboard.press("Home");
   await page
@@ -1025,35 +1026,34 @@ test("un conflicto conserva la edición local y permite cargar la mesa guardada"
   ).toBeVisible();
   const other = await context.newPage();
   await other.goto(page.url());
-  await expect(other.getByLabel("Distribución de las vistas")).toHaveValue(
-    "2x2",
-  );
-  await page.getByLabel("Distribución de las vistas").selectOption("1x2");
+  await expect(other.getByLabel("Filas", { exact: true })).toHaveValue("2");
+  await expect(other.getByLabel("Columnas", { exact: true })).toHaveValue("2");
+  await page.getByLabel("Filas", { exact: true }).selectOption("1");
+  await page.getByLabel("Columnas", { exact: true }).selectOption("2");
   await page.getByRole("button", { name: "Guardar mesa", exact: true }).click();
   await expect(page.getByText("Mesa guardada", { exact: true })).toBeVisible();
-  await other.getByLabel("Distribución de las vistas").selectOption("1x1");
+  await other.getByLabel("Filas", { exact: true }).selectOption("1");
+  await other.getByLabel("Columnas", { exact: true }).selectOption("1");
   await other
     .getByRole("button", { name: "Guardar mesa", exact: true })
     .click();
   await expect(other.getByRole("alert")).toContainText("otra sesión");
-  await expect(other.getByLabel("Distribución de las vistas")).toHaveValue(
-    "1x1",
-  );
+  await expect(other.getByLabel("Filas", { exact: true })).toHaveValue("1");
+  await expect(other.getByLabel("Columnas", { exact: true })).toHaveValue("1");
   await other
     .getByRole("button", { name: "Cargar mesa guardada", exact: true })
     .click();
-  await expect(other.getByLabel("Distribución de las vistas")).toHaveValue(
-    "1x2",
-  );
-  await other.getByLabel("Distribución de las vistas").selectOption("2x3");
+  await expect(other.getByLabel("Filas", { exact: true })).toHaveValue("1");
+  await expect(other.getByLabel("Columnas", { exact: true })).toHaveValue("2");
+  await other.getByLabel("Filas", { exact: true }).selectOption("2");
+  await other.getByLabel("Columnas", { exact: true }).selectOption("3");
   await other
     .getByRole("button", { name: "Guardar mesa", exact: true })
     .click();
   await expect(other.getByText("Mesa guardada", { exact: true })).toBeVisible();
   await page.reload();
-  await expect(page.getByLabel("Distribución de las vistas")).toHaveValue(
-    "2x3",
-  );
+  await expect(page.getByLabel("Filas", { exact: true })).toHaveValue("2");
+  await expect(page.getByLabel("Columnas", { exact: true })).toHaveValue("3");
   await other.close();
 });
 
@@ -1145,7 +1145,7 @@ test("la matriz 2x2 cabe a 1440x900 y se adapta a 390 sin desbordar", async ({
   });
 });
 
-test("series de unidades distintas conservan selección y escalas separadas", async ({
+test("series de unidades distintas conservan selección en el gráfico y la tabla", async ({
   page,
 }) => {
   await page.route("**/api/scenarios/*/mesa?*", async (route) => {
@@ -1183,12 +1183,12 @@ test("series de unidades distintas conservan selección y escalas separadas", as
     .check();
   await dialog.getByRole("button", { name: "Aplicar" }).click();
   await expect(
-    page.getByRole("img", { name: "Demanda medida · MW", exact: true }),
+    page.getByRole("img", { name: /Demanda medida · MW/ }),
   ).toContainText("10 MW");
   await expect(
     page.getByRole("img", {
       name: "Precio de suministro · USD/MWh",
-      exact: true,
+      exact: false,
     }),
   ).toContainText("70 USD/MWh");
   await page.getByRole("button", { name: "Tabla", exact: true }).click();
@@ -1350,10 +1350,10 @@ test("mesa de optimización: demanda real en gráfico, tabla y recarga", async (
   const chart = page.getByRole("img", { name: "Demanda medida · MW" });
   await expect(chart).toBeVisible();
   await expect(chart).toContainText(
-    "2026-10-20T00:00:00-03:00 → 2026-10-20T01:00:00-03:00: 10 MW",
+    "20-10-2026, 00:00 → 20-10-2026, 01:00: 10 MW",
   );
   await expect(chart).toContainText(
-    "2026-10-20T01:00:00-03:00 → 2026-10-20T02:00:00-03:00: 12 MW",
+    "20-10-2026, 01:00 → 20-10-2026, 02:00: 12 MW",
   );
   const panel = await page
     .getByRole("region", { name: "Demanda · Demanda Norte", exact: true })
@@ -1486,5 +1486,6 @@ test("mesa de optimización: un período fuera de cobertura no muestra una curva
   );
   await expect(
     page.getByRole("img", { name: "Demanda medida · MW" }),
-  ).toHaveCount(0);
+  ).toHaveCount(1);
+  await expect(page.locator(".mesa-chart polyline")).toHaveCount(0);
 });

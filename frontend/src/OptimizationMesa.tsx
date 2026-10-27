@@ -20,6 +20,17 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { requestJson } from "./api/client";
 import type { components } from "./api/schema";
 import "./optimizationMesa.css";
+import { MesaChart, type MesaChartSeries } from "./MesaChart";
+import type { ChartRange } from "./mesaChartAggregation";
+import {
+  executionChartRange,
+  initialExecutionWindow,
+} from "./mesaExecutionRange";
+import {
+  comparisonSides,
+  comparisonUnaligned,
+  type MesaAxis,
+} from "./mesaChartData";
 
 type Mesa = components["schemas"]["MesaResponse"];
 type Series = components["schemas"]["MesaSeries"];
@@ -32,77 +43,6 @@ function positiveId(value: string | null | undefined) {
     : null;
 }
 
-function SeriesChart({ series }: { series: Series }) {
-  const points = series.points ?? [];
-  const first = Date.parse(points[0].start);
-  const last = Date.parse(points[points.length - 1].end);
-  const max = Math.max(1, ...points.map((point) => point.value)) * 1.1;
-  const x = (instant: string) =>
-    60 + ((Date.parse(instant) - first) / (last - first)) * 660;
-  const y = (value: number) => 130 - (value / max) * 95;
-  return (
-    <svg
-      className="mesa-chart"
-      viewBox="0 0 760 180"
-      role="img"
-      aria-label={`${series.name} · ${series.unit}`}
-    >
-      <desc>
-        {points
-          .map(
-            (point) =>
-              `${point.start} → ${point.end}: ${point.value} ${series.unit}`,
-          )
-          .join("; ")}
-      </desc>
-      {[0, 0.5, 1].map((fraction) => (
-        <g key={fraction}>
-          <line
-            x1="60"
-            x2="720"
-            y1={y(max * fraction)}
-            y2={y(max * fraction)}
-            stroke="#dce6eb"
-          />
-          <text x="48" y={y(max * fraction) + 4} textAnchor="end">
-            {(max * fraction).toFixed(1)}
-          </text>
-        </g>
-      ))}
-      <text x="60" y="24">
-        {series.unit}
-      </text>
-      <polyline
-        points={points
-          .map((point) => `${x(point.start)},${y(point.value)}`)
-          .join(" ")}
-        fill="none"
-        stroke="#087f80"
-        strokeWidth="3"
-      />
-      {points.map((point) => (
-        <circle
-          key={point.start}
-          cx={x(point.start)}
-          cy={y(point.value)}
-          r="4"
-          fill="#087f80"
-        >
-          <title>
-            {point.start} → {point.end}: {point.value} {series.unit}
-          </title>
-        </circle>
-      ))}
-      <text x="60" y="165">
-        {points[0].start.slice(0, 16).replace("T", " ")}
-      </text>
-      <text x="720" y="165" textAnchor="end">
-        {points[points.length - 1].end.slice(0, 16).replace("T", " ")}
-      </text>
-    </svg>
-  );
-}
-
 function SeriesPanel({
   component,
   title,
@@ -110,6 +50,8 @@ function SeriesPanel({
   setMode,
   actions,
   seriesKeys,
+  seriesAxes,
+  chartRange,
   onEdit,
   comparison,
   comparisonMode,
@@ -121,6 +63,8 @@ function SeriesPanel({
   setMode: (mode: "chart" | "table") => void;
   actions: ReactNode;
   seriesKeys: string[];
+  seriesAxes?: Record<string, MesaAxis>;
+  chartRange: ChartRange | null;
   onEdit: (series: Series) => void;
   editingDisabled?: boolean;
   comparison?: Comparison;
@@ -142,6 +86,157 @@ function SeriesPanel({
           ? "Embalse"
           : "Nodo hidráulico",
     }[component.entity_type] ?? "Componente";
+  const historicalSeries = (key: string) =>
+    comparison?.series.find(
+      (s) =>
+        s.entity_id === component.entity_id &&
+        s.entity_type === component.entity_type &&
+        s.signal_key === key &&
+        (s.linkable_object_id == null ||
+          s.linkable_object_id === component.linkable_object_id),
+    );
+  const chartEntries: MesaChartSeries[] = seriesKeys.flatMap((key) => {
+    if (comparisonMode) {
+      const historical = historicalSeries(key);
+      if (!historical || comparisonUnaligned(historical, comparisonMode))
+        return [];
+      return comparisonSides(historical, comparisonMode).map(
+        ({ label, series }) => ({
+          id: `${key}:${label}`,
+          signalKey: key,
+          series,
+          side: label,
+        }),
+      );
+    }
+    const series = available.find((s) => s.signal_key === key);
+    return series ? [{ id: key, signalKey: key, series }] : [];
+  });
+  const seriesDetails = seriesKeys.map((key) => {
+    if (comparisonMode) {
+      const historical = historicalSeries(key);
+      return historical ? (
+        <MesaComparisonSignal
+          key={key}
+          comparison={historical}
+          mode={comparisonMode}
+          presentation={mode}
+          detailsOnly
+        />
+      ) : (
+        <p key={key} role="status">
+          Serie no disponible en esta comparación · {key}.
+        </p>
+      );
+    }
+    const series = available.find((item) => item.signal_key === key);
+    if (!series)
+      return (
+        <p key={key} role="status">
+          Serie no disponible · {key}. Reconfigura la vista.
+        </p>
+      );
+    return (
+      <div className="mesa-signal" key={key}>
+        <div
+          className={
+            series.role === "support" ? "mesa-manual-summary" : undefined
+          }
+        >
+          {(mode === "table" ||
+            seriesKeys.length > 1 ||
+            series.status !== "available" ||
+            !series.points?.length ||
+            series.role === "support") && (
+            <p className="mesa-series-label">
+              {series.name} · {series.unit} ·{" "}
+              {series.role === "output"
+                ? "Salida"
+                : series.role === "support"
+                  ? "Apoyo manual"
+                  : "Entrada"}{" "}
+              ·{" "}
+              {series.editable || series.role === "support"
+                ? "Editable"
+                : "Solo lectura"}
+            </p>
+          )}
+          {series.role === "support" && (
+            <button
+              data-mesa-manual-manage={series.signal_id}
+              type="button"
+              disabled={editingDisabled}
+              onClick={() => onEdit(series)}
+            >
+              Gestionar serie manual
+            </button>
+          )}
+        </div>
+        {series.role === "support" && (
+          <p className="mesa-manual-status" role="status">
+            {series.message}
+          </p>
+        )}
+        {mode === "table" && series.editable && (
+          <button
+            type="button"
+            className="mesa-edit-entry"
+            disabled={editingDisabled}
+            onClick={() => onEdit(series)}
+          >
+            Editar entrada
+          </button>
+        )}
+        {series.status !== "available" || !series.points?.length ? (
+          (mode === "table" || seriesKeys.length > 1) && (
+            <p role="status">{series.message || "Sin datos disponibles."}</p>
+          )
+        ) : mode === "chart" ? null : (
+          <div
+            className="mesa-table-scroll"
+            tabIndex={0}
+            role="region"
+            aria-label={`Intervalos de ${series.name}`}
+          >
+            <table aria-label={`${series.name} · ${series.unit}`}>
+              <thead>
+                <tr>
+                  <th>Inicio</th>
+                  <th>
+                    {series.name} ({series.unit})
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {series.points.map((point) => (
+                  <tr key={point.start}>
+                    <td>{point.start}</td>
+                    <td>{point.value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <footer className="mesa-panel-footer">
+          <span>
+            Zona:{" "}
+            {series.timezone ??
+              (series.run_id
+                ? "no registrada; horas del snapshot"
+                : "sin fuente")}
+          </span>
+          <span>
+            {series.run_id
+              ? `Run #${series.run_id} · Snapshot #${series.scenario_version_id}`
+              : series.revision_number
+                ? `Revisión ${series.revision_number} · Fuente #${series.time_series_set_id}`
+                : "Preparación actual"}
+          </span>
+        </footer>
+      </div>
+    );
+  });
   return (
     <section className="mesa-panel" aria-label={`${family} · ${title}`}>
       <header className="mesa-panel-heading">
@@ -193,7 +288,7 @@ function SeriesPanel({
         role={seriesKeys.length > 1 ? "region" : undefined}
         aria-label={
           seriesKeys.length > 1
-            ? `Series con escalas independientes · ${title} · ${component.entity_id}`
+            ? `Series del gráfico · ${title} · ${component.entity_id}`
             : undefined
         }
       >
@@ -249,141 +344,38 @@ function SeriesPanel({
               </table>
             </details>
           )}
-        {seriesKeys.map((key) => {
-          if (comparisonMode) {
-            const historical = comparison?.series.find(
-              (s) =>
-                s.entity_id === component.entity_id &&
-                s.entity_type === component.entity_type &&
-                s.signal_key === key &&
-                (s.linkable_object_id == null ||
-                  s.linkable_object_id === component.linkable_object_id),
-            );
-            return historical ? (
-              <MesaComparisonSignal
-                key={key}
-                comparison={historical}
-                mode={comparisonMode}
-                presentation={mode}
-              />
-            ) : (
-              <p key={key} role="status">
-                Serie no disponible en esta comparación · {key}.
-              </p>
-            );
-          }
-          const series = available.find((item) => item.signal_key === key);
-          if (!series)
-            return (
-              <p key={key} role="status">
-                Serie no disponible · {key}. Reconfigura la vista.
-              </p>
-            );
-          return (
-            <div className="mesa-signal" key={key}>
-              <div
-                className={
-                  series.role === "support" ? "mesa-manual-summary" : undefined
-                }
-              >
-                <p className="mesa-series-label">
-                  {series.name} · {series.unit} ·{" "}
-                  {series.role === "output"
-                    ? "Salida"
-                    : series.role === "support"
-                      ? "Apoyo manual"
-                      : "Entrada"}{" "}
-                  ·{" "}
-                  {series.editable || series.role === "support"
-                    ? "Editable"
-                    : "Solo lectura"}
-                </p>
-                {series.role === "support" && (
-                  <button
-                    data-mesa-manual-manage={series.signal_id}
-                    type="button"
-                    disabled={editingDisabled}
-                    onClick={() => onEdit(series)}
-                  >
-                    Gestionar serie manual
-                  </button>
-                )}
-              </div>
-              {series.role === "support" && (
-                <p className="mesa-manual-status" role="status">
-                  {series.message}
-                </p>
-              )}
-              {mode === "table" && series.editable && (
-                <button
-                  type="button"
-                  className="mesa-edit-entry"
-                  disabled={editingDisabled}
-                  onClick={() => onEdit(series)}
-                >
-                  Editar entrada
-                </button>
-              )}
-              {series.status !== "available" || !series.points?.length ? (
-                <p role="status">
-                  {series.message || "Sin datos disponibles."}
-                </p>
-              ) : mode === "chart" ? (
-                <SeriesChart series={series} />
-              ) : (
-                <div
-                  className="mesa-table-scroll"
-                  tabIndex={0}
-                  role="region"
-                  aria-label={`Intervalos de ${series.name}`}
-                >
-                  <table aria-label={`${series.name} · ${series.unit}`}>
-                    <thead>
-                      <tr>
-                        <th>Inicio</th>
-                        <th>Fin (exclusivo)</th>
-                        <th>
-                          {series.name} ({series.unit})
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {series.points.map((point) => (
-                        <tr key={point.start}>
-                          <td>{point.start}</td>
-                          <td>{point.end}</td>
-                          <td>{point.value}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-              <footer className="mesa-panel-footer">
-                <span>
-                  Zona:{" "}
-                  {series.timezone ??
-                    (series.run_id
-                      ? "no registrada; horas del snapshot"
-                      : "sin fuente")}
-                </span>
-                <span>
-                  {series.run_id
-                    ? `Run #${series.run_id} · Snapshot #${series.scenario_version_id}`
-                    : series.revision_number
-                      ? `Revisión ${series.revision_number} · Fuente #${series.time_series_set_id}`
-                      : "Preparación actual"}
-                </span>
-              </footer>
-            </div>
-          );
-        })}
+        {mode === "chart" && chartEntries.length > 0 && (
+          <MesaChart
+            entries={chartEntries}
+            axes={seriesAxes}
+            range={chartRange}
+          />
+        )}
+        {mode === "chart" && seriesKeys.length > 1 ? (
+          <details className="mesa-series-details">
+            <summary>Detalle y procedencia de las series</summary>
+            {seriesDetails}
+          </details>
+        ) : (
+          <div
+            className={
+              mode === "chart" ? "mesa-series-details" : "mesa-series-tables"
+            }
+          >
+            {seriesDetails}
+          </div>
+        )}
       </div>
     </section>
   );
 }
 
 function MesaContent({ data, busy }: { data: Mesa; busy: boolean }) {
+  const [chartRange, setChartRange] = useState<ChartRange | null>(() =>
+    data.context.model_contract === "bess_system_dispatch.v3"
+      ? null
+      : executionChartRange(initialExecutionWindow(data)),
+  );
   const [manualCreate, setManualCreate] = useState(false);
   const [hydraulicEditor, setHydraulicEditor] = useState(false);
   const hydraulicTrigger = useRef<HTMLButtonElement>(null);
@@ -459,6 +451,7 @@ function MesaContent({ data, busy }: { data: Mesa; busy: boolean }) {
         {context.model_contract !== "bess_system_dispatch.v3" && (
           <MesaExecution
             data={data}
+            onRangeChange={setChartRange}
             editing={!!editor || hydraulicEditor || manualCreate}
             onResults={(runId) => {
               void queryClient.invalidateQueries({
@@ -473,6 +466,7 @@ function MesaContent({ data, busy }: { data: Mesa; busy: boolean }) {
         {context.model_contract === "bess_system_dispatch.v3" && (
           <MesaHydraulicExecution
             data={data}
+            onRangeChange={setChartRange}
             caseRevision={hydraulicRevision}
             editing={!!editor || hydraulicEditor || manualCreate}
             onResults={(runId) => {
@@ -725,6 +719,8 @@ function MesaContent({ data, busy }: { data: Mesa; busy: boolean }) {
               setMode={onMode}
               actions={actions}
               seriesKeys={panel.series_keys}
+              seriesAxes={panel.series_axes}
+              chartRange={chartRange}
               comparison={comparison.data}
               comparisonMode={comparisonMode}
               editingDisabled={hydraulicEditor}
