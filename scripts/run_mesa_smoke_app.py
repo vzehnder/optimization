@@ -31,13 +31,19 @@ def main():
     app = create_app(store=store, auth_enabled=True, artifact_root=artifact_dir.name)
 
     @app.get("/api/auth/mesa-fixture", include_in_schema=False)
-    async def mesa_test_fixture(case_name: str | None = None, with_replacement: bool = False, electrical: bool = False, with_run: bool = False, hydraulic: bool = False, executable: bool = False, hydraulic_execution: bool = False, comparison: bool = False):
+    async def mesa_test_fixture(case_name: str | None = None, with_replacement: bool = False, electrical: bool = False, with_run: bool = False, hydraulic: bool = False, executable: bool = False, hydraulic_execution: bool = False, comparison: bool = False, market_prices: bool = False):
         result = (seed_executable_hydraulic_mesa(store, name=case_name or "Ejecución hidráulica") if hydraulic_execution else
                   seed_executable_mesa(store, name=case_name or "Ejecución eléctrica") if executable or (comparison and not hydraulic) else
                   seed_hydraulic_mesa(store, name=case_name or "Consulta hidráulica") if hydraulic else
                   seed_mesa_case(store, name=case_name, variant_name="Demanda alternativa", electrical=electrical) if case_name else fixture)
         if with_run:
-            result["run"] = (seed_hydraulic_mesa_run if hydraulic else seed_mesa_run)(store, result, artifact_dir.name)
+            options = {}
+            if hydraulic and market_prices:
+                document = store.generate_hydraulic_v3_preview(result["scenario"]["id"])
+                for period, price in zip(document["time_series"], [-20, 80]):
+                    period["price_usd_per_mwh"] = price
+                options["document"] = document
+            result["run"] = (seed_hydraulic_mesa_run if hydraulic else seed_mesa_run)(store, result, artifact_dir.name, **options)
         if comparison and hydraulic:
             result["reference"] = seed_hydraulic_mesa_run(store, result, artifact_dir.name, volume=(10, 9), indexed=False)
             result["run"] = seed_hydraulic_mesa_run(store, result, artifact_dir.name)

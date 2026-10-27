@@ -370,6 +370,68 @@ def _hydraulic_output(series, *, item, column, selected, snapshot, table, range_
                           range_start=range_start, range_end=range_end)
 
 
+def _snapshot_market_price(selected, snapshot, range_start=None, range_end=None):
+    """The common exogenous price, read only from the selected execution."""
+    series = dict(signal_key="price_usd_per_mwh", name="Costo marginal", unit="USD/MWh",
+                  role="input", editable=False, status="unavailable", points=[],
+                  message="La ejecución no registra una serie de costo marginal.")
+    periods = snapshot.get("time_series", [])
+    # Separate electrical tariffs use the sale price for generation revenue.
+    key = next((key for key in ("price_usd_per_mwh", "export_price_usd_per_mwh")
+                if periods and all(p.get(key) is not None for p in periods)), None)
+    node = {"id": "market_price", "type": "market_price"}
+    rows = [{"asset_id": node["id"], "asset_type": node["type"], "timestamp": p["timestamp"],
+             "duration_hours": p["duration_hours"], "price_usd_per_mwh": p.get(key)} for p in periods] if key else []
+    result = _output_series(series, node=node, column="price_usd_per_mwh", selected=selected,
+        snapshot={**snapshot, "nodes": [node]}, table={"columns": ["price_usd_per_mwh"], "rows": rows},
+        range_start=range_start, range_end=range_end)
+    result["source"] = "executed_snapshot"
+    if result["status"] == "unavailable":
+        result["message"] = series["message"]
+    return result
+
+
+def _current_market_price(store, preparation, bindings, project_id, range_start, range_end):
+    series = dict(signal_key="price_usd_per_mwh", name="Costo marginal", unit="USD/MWh",
+                  role="input", editable=False, status="unbound", timezone=None, points=[],
+                  message="Sin fuente de costo marginal vinculada. Selecciona una ejecución con precios o prepara la fuente de precio de venta.")
+    candidates = [b for b in bindings if b["status"] == "active" and b["binding_role"]["key"] == "grid_export_price"]
+    if len(candidates) == 1:
+        binding = candidates[0]
+        revision = store.read_canonical_revision(binding["set_revision_id"])
+        return _cover_series({**series, "status": "available", "message": "", "source": "canonical_binding",
+            "timezone": revision["timezone"], "revision_id": binding["set_revision_id"],
+            "revision_number": revision["revision_number"], "content_hash": binding["bound_content_hash"],
+            "time_series_set_id": binding["time_series_set_id"], "signal_id": binding["signal"]["id"],
+            "binding_state": binding["state"],
+            "points": [{"start": _canonical_time(p["timestamp_start"], revision["timezone"]),
+                        "end": _canonical_time(p["timestamp_end"], revision["timezone"]), "value": value}
+                       for p, value in zip(revision["periods"], revision["values"][binding["signal"]["series_key"]])]},
+            range_start, range_end)
+    if preparation["binding_mode"] == "legacy":
+        candidates = [s for s in preparation["sources"] if s["signal_key"] in ("price_usd_per_mwh", "export_price_usd_per_mwh")]
+        if len(candidates) == 1:
+            ref = candidates[0]
+            source = store.get_time_series_set(project_id, ref["time_series_set_id"])
+            values = {v["period_index"]: v["value_numeric"] for v in source["values"] if v["signal_key"] == ref["signal_key"]}
+            return _cover_series({**series, "status": "available", "message": "", "source": "legacy_variant",
+                "timezone": source["timezone"], "revision_number": source["revision_number"],
+                "content_hash": source["content_hash"], "time_series_set_id": source["id"],
+                "points": [{"start": p["timestamp_start"], "end": p["timestamp_end"], "value": values[p["period_index"]]}
+                           for p in source["periods"] if p["period_index"] in values]}, range_start, range_end)
+    return series
+
+
+def _market_price_comparison(selected, snapshot, entity_id, entity_type, range_start, range_end):
+    frozen = _snapshot_market_price(selected, snapshot, range_start, range_end)
+    available = frozen["status"] == "available"
+    return dict(entity_id=entity_id, entity_type=entity_type, signal_key=frozen["signal_key"],
+                name=frozen["name"], unit=frozen["unit"], role="input",
+                status="unchanged_input" if available else "unavailable",
+                message="Entrada exógena de la ejecución seleccionada; no representa una mejora." if available else frozen["message"],
+                before=frozen, after=frozen, delta=[{**p, "value": 0} for p in frozen["points"]] if available else None)
+
+
 def read_mesa(store, *, scenario_id: int, case_id: int, variant_id: int,
               range_start: str | None = None, range_end: str | None = None,
               run_id: int | None = None, artifact_root=".") -> dict:
@@ -526,6 +588,12 @@ def read_mesa(store, *, scenario_id: int, case_id: int, variant_id: int,
         for series in [component["series"], *component.get("additional_series", [])]:
             series["editable"] = bool(series.get("role", "input") == "input" and series.get("revision_id")
                                       and series.get("binding_state") == "valid_current" and series["status"] == "available")
+    price = (_snapshot_market_price(selected, snapshot, range_start, range_end) if selected else
+             _current_market_price(store, preparation, bindings, project["id"], range_start, range_end))
+    for component in components:
+        if component["entity_type"] in ("component:hydro", "hydraulic_plant", "hydraulic_unit"):
+            component.setdefault("additional_series", []).append(price if component.get("is_active", True) else
+                {**price, "status": "unavailable", "points": [], "message": "Objeto inactivo en el caso o archivado. No se muestran muestras."})
     from app.mesa_manual_series import read_manual_components
     components.extend(read_manual_components(store, project_id=project["id"], case_id=case_id,
         components=components, bindings=bindings, range_start=range_start, range_end=range_end))

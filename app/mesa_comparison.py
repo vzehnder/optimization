@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
 
-from app.optimization_mesa import ELECTRICAL_OUTPUTS, HYDRAULIC_OUTPUTS, MesaComponent, MesaPoint, MesaRun, MesaSeries, _cover_series, _instant, _output_series, _run_outputs
+from app.optimization_mesa import ELECTRICAL_OUTPUTS, HYDRAULIC_OUTPUTS, MesaComponent, MesaPoint, MesaRun, MesaSeries, _cover_series, _instant, _output_series, _run_outputs, _market_price_comparison
 from app.result_indexing import DISPATCH_SIGNAL_KEY_CATALOG
 
 
@@ -157,6 +157,8 @@ def read_comparison(store, *, scenario_id, case_id, variant_id, run_id,
     components = []
     for node in snapshot.get("nodes", []):
         entity_type = f"component:{node['type']}"
+        if node["type"] == "hydro":
+            series.append(_market_price_comparison(selected, snapshot, node["id"], entity_type, range_start, range_end))
         signals = [s for s in series if s["entity_id"] == node["id"] and s["entity_type"] == entity_type]
         if signals:
             components.append(dict(entity_id=node["id"], entity_type=entity_type,

@@ -37,6 +37,43 @@ class MesaHydraulicComparisonTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
 
+    def test_market_price_is_selectable_for_plants_and_units_and_uses_the_selected_snapshot(self):
+        document = self.store.generate_hydraulic_v3_preview(self.fixture["scenario"]["id"])
+        for period, value in zip(document["time_series"], [-20, 80]):
+            period["price_usd_per_mwh"] = value
+        run = seed_hydraulic_mesa_run(self.store, self.fixture, self.temp.name, document=document)
+        for period in document["time_series"]:
+            period["price_usd_per_mwh"] = 999
+        reference = seed_hydraulic_mesa_run(self.store, self.fixture, self.temp.name, document=document)
+        for params, expected in (({}, [-20, 80]), ({"range_start": "2026-10-20T01:00:00Z", "range_end": "2026-10-20T02:00:00Z"}, [80])):
+            current = self.client.get(self.path, params={**self.params, "run_id": run["id"], **params})
+            self.assertEqual(current.status_code, 200, current.text)
+            body = self.comparison(run, reference_run_id=reference["id"], **params)
+            for entity in ("plant_1", "unit_1", "plant_2", "unit_2"):
+                for projection in (current.json(), body):
+                    component = next(c for c in projection["components"] if c["entity_id"] == entity)
+                    self.assertEqual(component["series"]["signal_key"], "hydro_generation_power_mw")
+                    price = next(s for s in component["additional_series"] if s["signal_key"] == "price_usd_per_mwh")
+                    self.assertEqual([p["value"] for p in price["points"]], expected)
+                    self.assertEqual(price["unit"], "USD/MWh")
+                    self.assertEqual(price["source"], "executed_snapshot")
+                    self.assertEqual(price["run_id"], run["id"])
+                    self.assertFalse(price["editable"])
+                signal = next(s for s in body["series"] if s["entity_id"] == entity and s["signal_key"] == "price_usd_per_mwh")
+                self.assertEqual(signal["status"], "unchanged_input")
+                self.assertEqual(signal["before"], signal["after"])
+
+    def test_missing_market_price_stays_selectable_without_inventing_samples(self):
+        run = seed_hydraulic_mesa_run(self.store, self.fixture, self.temp.name)
+        for run_params, expected in (({}, "unbound"), ({"run_id": run["id"]}, "unavailable")):
+            response = self.client.get(self.path, params={**self.params, **run_params})
+            self.assertEqual(response.status_code, 200, response.text)
+            for component in response.json()["components"]:
+                if component["entity_type"] in ("hydraulic_plant", "hydraulic_unit"):
+                    price = next(s for s in component["additional_series"] if s["signal_key"] == "price_usd_per_mwh")
+                    self.assertEqual(price["status"], expected)
+                    self.assertEqual(price["points"], [])
+
     def test_same_named_volume_and_flow_keep_entity_units_and_have_no_invented_reference(self):
         diagram = self.fixture["diagram"]
         diagram["nodes"][0]["display_name"] = "Agua"

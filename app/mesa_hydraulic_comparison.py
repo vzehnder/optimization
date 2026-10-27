@@ -1,6 +1,6 @@
 """Hydraulic comparison uses executed entities, never the mutable case inventory."""
 
-from app.optimization_mesa import HYDRAULIC_OUTPUTS, HYDRAULIC_PARAMETERS, _instant, _output_series, _run_outputs
+from app.optimization_mesa import HYDRAULIC_OUTPUTS, HYDRAULIC_PARAMETERS, _instant, _output_series, _run_outputs, _market_price_comparison
 
 
 def topology(snapshot):
@@ -73,6 +73,9 @@ def frozen_series(selected, snapshot, table, range_start, range_end):
             series.append(dict(entity_id=plant["id"], entity_type="hydraulic_plant", signal_key=key, name=name,
                 unit=unit, role="output", status="no_reference", message="Sin referencia previa",
                 before=None, after=output, delta=None))
+    for collection, kind in (("plants", "hydraulic_plant"), ("units", "hydraulic_unit")):
+        for entity in snapshot["hydraulic_network"].get(collection, []):
+            series.append(_market_price_comparison(selected, snapshot, entity["id"], kind, range_start, range_end))
     for signal in series:
         if signal["after"]["status"] != "available":
             signal.update(status="unavailable", message=signal["after"]["message"])

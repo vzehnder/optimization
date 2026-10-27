@@ -157,6 +157,30 @@ class HydraulicMesaApiTests(unittest.TestCase):
         component = next(c for c in self.read(run_id=run["id"])["components"] if c["entity_id"] == "hydro_1")
         power = next(s for s in component["additional_series"] if s["signal_key"] == "hydro_generation_power_mw")
         self.assertEqual([p["value"] for p in power["points"]], [0.5, 1])
+        price = next(s for s in component["additional_series"] if s["signal_key"] == "price_usd_per_mwh")
+        expected_prices = [p["export_price_usd_per_mwh"] for p in example["time_series"]]
+        self.assertEqual([p["value"] for p in price["points"]], expected_prices)
+        historical = self.client.get(self.path + "/comparison", params={**self.params, "run_id": run["id"]})
+        self.assertEqual(historical.status_code, 200, historical.text)
+        price = next(s for s in historical.json()["series"] if s["entity_id"] == "hydro_1" and s["signal_key"] == "price_usd_per_mwh")
+        self.assertEqual([p["value"] for p in price["after"]["points"]], expected_prices)
+        self.assertEqual(price["status"], "unchanged_input")
+
+    def test_simple_hydro_can_show_the_current_canonical_sale_price_without_a_run(self):
+        from tests.mesa_execution_fixture import seed_executable_mesa
+        self.fixture = seed_executable_mesa(self.store)
+        draft = self.store.get_scenario_draft(self.fixture["scenario"]["id"])["document"]
+        example = json.loads((Path(__file__).parents[1] / "data/cases/linear_hydro_system/system_case.json").read_text())
+        draft["assets"].append(next(n for n in example["nodes"] if n["type"] == "hydro"))
+        self.store.create_or_replace_scenario_draft(scenario_id=self.fixture["scenario"]["id"], document=draft)
+        self.store.materialize_project_linkable_objects(project_id=self.fixture["project"]["id"])
+        component = next(c for c in self.read()["components"] if c["entity_id"] == "hydro_1")
+        price = next(s for s in component["additional_series"] if s["signal_key"] == "price_usd_per_mwh")
+        self.assertEqual([p["value"] for p in price["points"]], [50, 100])
+        self.assertEqual(price["timezone"], "America/Santiago")
+        self.assertEqual(price["source"], "canonical_binding")
+        self.assertIsNotNone(price["revision_id"])
+        self.assertFalse(price["editable"])
 
     def test_non_modeled_plant_does_not_present_a_historical_run_as_currently_compatible(self):
         run = seed_hydraulic_mesa_run(self.store, self.fixture, self.artifact_root)
