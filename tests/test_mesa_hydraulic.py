@@ -74,7 +74,7 @@ class HydraulicMesaApiTests(unittest.TestCase):
         self.assertEqual((initial["value"], initial["unit"]), (10, "hm3"))
         self.assertNotIn("points", initial)
         self.assertEqual({s["signal_key"] for s in reservoir["additional_series"]},
-                         {"hydro_storage_volume_hm3", "hydro_reservoir_elevation_masl", "hydro_spill_flow_m3s"})
+                         {"hydro_storage_volume_hm3", "hydro_reservoir_elevation_masl", "hydro_spill_flow_m3s", "total_inflow_m3s"})
         for output in reservoir["additional_series"]:
             self.assertEqual(output["status"], "unavailable")
             self.assertEqual(output["points"], [])

@@ -106,6 +106,77 @@ class MesaHydraulicComparisonTests(unittest.TestCase):
         self.assertEqual(inflow["after"]["source"], "executed_snapshot")
         self.assertFalse(inflow["after"]["editable"])
 
+    def test_total_inflow_adds_arrivals_and_direct_discharges_without_replacing_existing_series(self):
+        document = self.store.generate_hydraulic_v3_preview(self.fixture["scenario"]["id"])
+        network = document["hydraulic_network"]
+        network["reaches"][0].update(from_node="intake", to_node="reservoir",
+                                    routing_method="fixed_delay", travel_time_hours=1)
+        network["reaches"].append({**network["reaches"][0], "id": "outgoing",
+                                  "from_node": "reservoir", "to_node": "outlet"})
+        for unit in network["units"]:
+            unit["discharge_node"] = "reservoir"
+        runs = []
+        for inflows in ([1, 1], [2, 4]):
+            for period, value in zip(document["time_series"], inflows):
+                period["natural_inflow_m3s"]["reservoir"] = value
+            run = seed_hydraulic_mesa_run(self.store, self.fixture, self.temp.name, document=document)
+            index = self.store.get_run_asset_dispatch_result_index(run["id"])
+            index["columns"].append("hydraulic_arrival_flow_m3s")
+            for row, arrival in zip([r for r in index["rows"] if r["asset_id"] == "reach"], [5, 7]):
+                row["hydraulic_arrival_flow_m3s"] = arrival
+            self.store.replace_run_asset_dispatch_result_index(run_id=run["id"],
+                scenario_version_id=run["scenario_version_id"], columns=index["columns"], rows=index["rows"])
+            runs.append(run)
+        reference, run = runs
+        for params, expected in (({}, [23, 35]),
+                ({"range_start": "2026-10-20T01:00:00Z", "range_end": "2026-10-20T02:00:00Z"}, [35])):
+            current = self.client.get(self.path, params={**self.params, "run_id": run["id"], **params})
+            self.assertEqual(current.status_code, 200, current.text)
+            comparison = self.comparison(run, reference_run_id=reference["id"], **params)
+            for projection in (current.json(), comparison):
+                reservoir = next(c for c in projection["components"] if c["entity_id"] == "reservoir")
+                self.assertEqual(reservoir["series"]["signal_key"], "natural_inflow_m3s")
+                signals = {s["signal_key"]: s for s in reservoir["additional_series"]}
+                self.assertEqual(set(signals), {"hydro_storage_volume_hm3", "hydro_reservoir_elevation_masl",
+                                               "hydro_spill_flow_m3s", "total_inflow_m3s"})
+                total = signals["total_inflow_m3s"]
+                self.assertEqual(total["name"], "Afluentes totales")
+                self.assertEqual(total["unit"], "m3/s")
+                self.assertEqual([p["value"] for p in total["points"]], expected)
+                self.assertEqual(total["run_id"], run["id"])
+                self.assertFalse(total["editable"])
+            total = next(s for s in comparison["series"] if s["signal_key"] == "total_inflow_m3s")
+            self.assertEqual(total["status"], "comparable")
+            self.assertEqual([p["value"] for p in total["before"]["points"]], [22, 32] if not params else [32])
+            self.assertEqual([p["value"] for p in total["delta"]], [1, 3] if not params else [3])
+
+    def test_total_inflow_uses_only_the_final_link_of_a_plant_discharge(self):
+        document = self.store.generate_hydraulic_v3_preview(self.fixture["scenario"]["id"])
+        # unit_1 discharges into outlet, which reaches the reservoir via a link.
+        document["hydraulic_network"]["reaches"][0].update(from_node="outlet", to_node="reservoir",
+            diagram_link={"plant_key": "plant_1", "node_key": "reservoir", "side": "discharge"})
+        run = seed_hydraulic_mesa_run(self.store, self.fixture, self.temp.name, document=document, indexed=False)
+        total = next(s for s in self.comparison(run)["series"] if s["signal_key"] == "total_inflow_m3s")
+        self.assertEqual([p["value"] for p in total["after"]["points"]], [18, 28])
+        self.assertEqual(total["status"], "no_reference")
+        self.assertIsNone(total["before"])
+
+    def test_total_inflow_never_shows_partial_sums_when_an_incoming_flow_is_missing(self):
+        for missing in ("arrival", "unit"):
+            with self.subTest(missing=missing):
+                document = self.store.generate_hydraulic_v3_preview(self.fixture["scenario"]["id"])
+                if missing == "arrival":
+                    document["hydraulic_network"]["reaches"][0].update(from_node="intake", to_node="reservoir",
+                        routing_method="fixed_delay", travel_time_hours=1)
+                else:
+                    unit = document["hydraulic_network"]["units"][0]
+                    document["hydraulic_network"]["units"].append({**unit, "id": "missing", "discharge_node": "reservoir"})
+                run = seed_hydraulic_mesa_run(self.store, self.fixture, self.temp.name, document=document)
+                total = next(s for s in self.comparison(run)["series"] if s["signal_key"] == "total_inflow_m3s")
+                self.assertEqual(total["status"], "unavailable")
+                self.assertEqual(total["after"]["points"], [])
+                self.assertIsNone(total["delta"])
+
     def test_homonymous_plants_aggregate_only_their_executed_units(self):
         run = seed_hydraulic_mesa_run(self.store, self.fixture, self.temp.name)
         series = self.comparison(run)["series"]

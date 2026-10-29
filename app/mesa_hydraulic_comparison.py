@@ -1,6 +1,6 @@
 """Hydraulic comparison uses executed entities, never the mutable case inventory."""
 
-from app.optimization_mesa import HYDRAULIC_OUTPUTS, HYDRAULIC_PARAMETERS, _instant, _output_series, _run_outputs, _market_price_comparison
+from app.optimization_mesa import HYDRAULIC_OUTPUTS, HYDRAULIC_PARAMETERS, _instant, _output_series, _run_outputs, _market_price_comparison, _reservoir_total_inflow
 
 
 def topology(snapshot):
@@ -58,6 +58,13 @@ def frozen_inputs(selected, snapshot, range_start, range_end):
 def frozen_series(selected, snapshot, table, range_start, range_end):
     series = list(frozen_inputs(selected, snapshot, range_start, range_end))
     series.extend(frozen_outputs(selected, snapshot, table, range_start, range_end))
+    for node in snapshot["hydraulic_network"].get("nodes", []):
+        if node["type"] != "reservoir":
+            continue
+        total = _reservoir_total_inflow(node["id"], selected, snapshot, table, range_start, range_end)
+        series.append(dict(entity_id=node["id"], entity_type="hydraulic_node",
+            signal_key=total["signal_key"], name=total["name"], unit=total["unit"], role=total["role"],
+            status="no_reference", message="Sin referencia previa", before=None, after=total, delta=None))
     for plant in snapshot["hydraulic_network"].get("plants", []):
         for _, key, name, unit in HYDRAULIC_OUTPUTS["plant"]:
             members = [s["after"] for s in series if s["entity_type"] == "hydraulic_unit"

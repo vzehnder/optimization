@@ -370,6 +370,57 @@ def _hydraulic_output(series, *, item, column, selected, snapshot, table, range_
                           range_start=range_start, range_end=range_end)
 
 
+def _reservoir_total_inflow(entity_id, selected, snapshot, table, range_start=None, range_end=None):
+    """Sum water actually entering the reservoir on the executed interval grid."""
+    total = dict(signal_key="total_inflow_m3s", name="Afluentes totales", unit="m3/s",
+                 role="output", editable=False, status="unavailable", points=[],
+                 source="derived:reservoir_inflows",
+                 message="Sin resultado disponible. Selecciona una ejecución exitosa.")
+    if selected is None:
+        return total
+    total.update(run_id=selected["id"], scenario_version_id=selected["scenario_version_id"],
+                 message="Sin datos completos de todas las entradas de agua al embalse.")
+    network = snapshot.get("hydraulic_network", {})
+    if not any(n["id"] == entity_id and n["type"] == "reservoir" for n in network.get("nodes", [])):
+        return total
+
+    def read_member(node_id, kind, column, source_table):
+        node = {"id": node_id, "type": kind}
+        return _output_series(total, node=node, column=column, selected=selected,
+                              snapshot={**snapshot, "nodes": [node]}, table=source_table,
+                              range_start=range_start, range_end=range_end)
+
+    inflow_key = "natural_inflow_m3s"
+    rows = [{"asset_id": entity_id, "asset_type": "hydraulic_node", "timestamp": p["timestamp"],
+             "duration_hours": p["duration_hours"], inflow_key: p.get(inflow_key, {}).get(entity_id)}
+            for p in snapshot.get("time_series", [])]
+    members = [read_member(entity_id, "hydraulic_node", inflow_key, {"columns": [inflow_key], "rows": rows})]
+    for reach in network.get("reaches", []):
+        if reach["to_node"] != entity_id:
+            continue
+        # Departures are only equivalent to arrivals for reaches without transit.
+        column = "hydraulic_arrival_flow_m3s"
+        if column not in (table or {}).get("columns", []):
+            if reach.get("travel_time_hours", 0):
+                return {**total, "message": "Falta el caudal de llegada de un tramo con tiempo de tránsito."}
+            column = "hydraulic_flow_m3s"
+        members.append(read_member(reach["id"], "hydraulic_reach", column, table))
+    for unit in network.get("units", []):
+        if unit["discharge_node"] == entity_id:
+            members.append(read_member(unit["id"], "hydraulic_unit", "hydro_turbine_flow_m3s", table))
+    if any(member["status"] != "available" for member in members):
+        return total
+    grid = lambda member: [(_instant(p["start"], member.get("timezone")),
+                            _instant(p["end"], member.get("timezone"))) for p in member["points"]]
+    if any(grid(member) != grid(members[0]) for member in members[1:]):
+        return {**total, "message": "Los intervalos de las entradas no coinciden; no se calcula un total parcial."}
+    points = [{**point, "value": sum(member["points"][i]["value"] for member in members)}
+              for i, point in enumerate(members[0]["points"])]
+    if any(not math.isfinite(point["value"]) for point in points):
+        return total
+    return {**total, "status": "available", "message": "", "timezone": members[0].get("timezone"), "points": points}
+
+
 def _snapshot_market_price(selected, snapshot, range_start=None, range_end=None):
     """The common exogenous price, read only from the selected execution."""
     series = dict(signal_key="price_usd_per_mwh", name="Costo marginal", unit="USD/MWh",
@@ -567,6 +618,8 @@ def read_mesa(store, *, scenario_id: int, case_id: int, variant_id: int,
         if item["entity_type"] == "hydraulic_node" or item.get("minimum_flow_series") or has_minimum_binding or has_minimum_source:
             series.insert(0, _hydraulic_input(store, item, project["id"], range_start, range_end, obj=obj, bindings=bindings,
                 allow_diagram=variant["is_default"] and preparation["binding_mode"] == "legacy", legacy_sources=legacy_sources))
+        if item["component_type"] == "reservoir":
+            series.append(_reservoir_total_inflow(item["technical_key"], selected, snapshot, table, range_start, range_end))
         active = bool(item["is_active"]) and (obj is None or obj["status"] == "active")
         if not active:
             series = [{**s, "status": "unavailable", "points": [], "message": "Objeto inactivo en el caso o archivado. No se muestran muestras."} for s in series]

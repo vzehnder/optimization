@@ -48,6 +48,13 @@ precio de su snapshot, también en Antes, Comparar y Después. Sin ejecución se
 consulta la fuente de precio de venta de la preparación. Si falta el precio,
 la serie permanece seleccionable y muestra un estado sin datos.
 
+En embalses puedes agregar **Afluentes totales · m3/s** junto con **Aporte natural**
+y las demás series. Suma, por intervalo, el aporte natural, los caudales de llegada
+de los tramos entrantes y las descargas directas de las unidades. Usa la red de la
+ejecución seleccionada y respeta los tiempos de tránsito, sin duplicar descargas
+que llegan por un tramo. Requiere una ejecución con datos completos; también
+permite comparar dos ejecuciones y exportar la suma.
+
 Arrastra el control del borde derecho de una fila hacia abajo para agrandar los
 gráficos que la ocupan. No hay un límite fijo de altura y la página se desplaza al llegar al
 borde de la ventana. También puedes enfocar la barra y usar las flechas arriba y
