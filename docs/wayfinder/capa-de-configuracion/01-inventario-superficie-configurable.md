@@ -131,7 +131,7 @@ Solo publicaciones con `status == 'published'` son visibles
 Todas son candidatas a parametrizacion; hoy ninguna es renombrable.
 
 **B.1 — Shell global, que el cliente tambien ve** (`frontend/src/App.tsx`):
-marca `"Z"` + `"BESS Workspace"` (229-233), badge que imprime el rol crudo
+marca `"Z"` + `"EnergyDispatch"` (229-233), badge que imprime el rol crudo
 (237), `"Salir"` (245), link `"Cliente"` (258).
 
 **B.2 — Portal cliente** (`frontend/src/ClientPortal.tsx`): `"Portal cliente"`

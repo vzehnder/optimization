@@ -22,7 +22,7 @@ REQUIRED_COLUMNS = (
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Generate plots/dispatch_report.html from a BESS dispatch run folder."
+        description="Generate plots/dispatch_report.html from an EnergyDispatch run folder."
     )
     parser.add_argument("run_output_dir", help="Folder containing dispatch.csv")
     args = parser.parse_args()
@@ -85,7 +85,7 @@ def build_html(rows: list[dict[str, str]]) -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>BESS Dispatch Report</title>
+  <title>EnergyDispatch Report</title>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <style>
     :root {{
@@ -122,7 +122,7 @@ def build_html(rows: list[dict[str, str]]) -> str:
 </head>
 <body>
   <main>
-    <h1>BESS Dispatch Report</h1>
+    <h1>EnergyDispatch Report</h1>
     <div id="price-dispatch" class="plot" aria-label="Price and dispatch plot"></div>
     <div id="energy-state" class="plot" aria-label="Stored energy plot"></div>
     <div id="period-economics" class="plot" aria-label="Period economics plot"></div>

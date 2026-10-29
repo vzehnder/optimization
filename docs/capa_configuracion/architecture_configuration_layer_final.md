@@ -849,7 +849,7 @@ La marca por proyecto tiene exactamente dos elementos:
 No se validan dimensiones; CSS limita el alto. SVG se rechaza. En rutas del
 portal, `<title>` usa `display_name` ya resuelto. Sin `display_name`, se usa
 `project.name`; sin logo, no se muestra ninguno. Nunca hay fallback a `Z` o
-`BESS Workspace`.
+`EnergyDispatch`.
 
 La marca no se versiona y su edición sobre una configuración activa es en vivo.
 Un informe histórico reabierto usa la marca vigente, mientras sus resultados
@@ -979,7 +979,7 @@ extremo:
 19. **Marca:** nombre configurado/fallback y ausencia de logo cumplen la regla;
     PNG/JPEG <= 256 KB funciona con ETag; SVG, otro MIME o exceso se rechaza;
     la ruta requiere acceso.
-20. **Regresión consciente:** `project.description`, `Z` y `BESS Workspace` no
+20. **Regresión consciente:** `project.description`, `Z` y `EnergyDispatch` no
     aparecen en el portal.
 21. **Ingeniero advertido:** guardar un caso enumera consolas activas afectadas
     sin bloquear el guardado; `request-review` marca `waiting_since`.

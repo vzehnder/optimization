@@ -195,7 +195,7 @@ Fijan el destino; no son tickets cerrados.
   producto. Enmienda declarada al sobre: `project { name }` pasa a
   `branding { display_name, logo_url }` con el fallback ya resuelto en backend,
   como `landing_path`. El ticket destapo que la marca del producto **no es un
-  activo sino el header del analista** (`Z` + "BESS Workspace"), asi que "usar la
+  activo sino el header del analista** (`Z` + "EnergyDispatch"), asi que "usar la
   del producto" nunca fue la opcion conservadora, y que `project.description` se
   cae del portal como regresion consciente. Sin versionado y con edicion en vivo.
 

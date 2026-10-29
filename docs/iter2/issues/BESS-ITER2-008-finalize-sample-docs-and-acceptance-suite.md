@@ -53,7 +53,7 @@ Also verified:
 
 ```powershell
 julia --project=. scripts\run_system_case.jl data\cases\hybrid_system\system_case.json --output-root outputs --run-timestamp 2026-01-02T03:04:05
-julia --project=. -e "using Dates, BESSDispatch; run_output = BESSDispatch.run_case(ARGS[1]; output_root = ARGS[2], run_timestamp = DateTime(ARGS[3])); println(run_output.output_dir)" data\cases\arbitrage_mvp outputs 2026-01-02T03:04:05
+julia --project=. -e "using Dates, EnergyDispatch; run_output = EnergyDispatch.run_case(ARGS[1]; output_root = ARGS[2], run_timestamp = DateTime(ARGS[3])); println(run_output.output_dir)" data\cases\arbitrage_mvp outputs 2026-01-02T03:04:05
 python python\plot_results.py outputs\arbitrage_mvp\20260102T030405000
 ```
 

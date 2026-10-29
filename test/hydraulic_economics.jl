@@ -1,4 +1,4 @@
-using Test, BESSDispatch, JSON3, CSV
+using Test, EnergyDispatch, JSON3, CSV
 
 @testset "Hydraulic generation follows CMg with limited water" begin
     mktempdir() do dir
@@ -11,7 +11,7 @@ using Test, BESSDispatch, JSON3, CSV
         end
         path = joinpath(dir, "case.json")
         write(path, JSON3.write(document))
-        output = BESSDispatch.run_system_case(path; output_root=dir)
+        output = EnergyDispatch.run_system_case(path; output_root=dir)
         rows = collect(CSV.File(output.dispatch_path))
         @test [row.total_hydro_power_mw for row in rows] ≈ [0.0, 30.0, 0.0, 0.0] atol=1e-6
         @test output.result.objective_value_usd ≈ 3000.0
@@ -44,7 +44,7 @@ end
             end
             path = joinpath(dir, "case.json")
             write(path, JSON3.write(document))
-            output = BESSDispatch.run_system_case(path; output_root=dir)
+            output = EnergyDispatch.run_system_case(path; output_root=dir)
             summary = JSON3.read(read(output.summary_path, String), Dict{String,Any})
             totals = summary["hydraulic_v3_totals"]
             @test totals["total_revenue_usd"] ≈ expected_revenue atol=1e-6
@@ -73,7 +73,7 @@ end
         path = joinpath(dir, "case.json")
         write(path, JSON3.write(document))
         solver_log_path = joinpath(dir, "solver.log")
-        output = BESSDispatch.run_system_case(path; output_root=dir, solver_log_path)
+        output = EnergyDispatch.run_system_case(path; output_root=dir, solver_log_path)
         @test output.result.objective_value_usd ≈ 3000.0
         @test occursin(r"Gap[^\n]*tolerance[^\n]*1%", read(solver_log_path, String))
     end

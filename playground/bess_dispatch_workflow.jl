@@ -7,7 +7,7 @@
 # `##` block, or select lines and run them in the REPL.
 
 ##
-using BESSDispatch
+using EnergyDispatch
 using CSV
 using JSON3
 

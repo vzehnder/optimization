@@ -1,8 +1,8 @@
-using Test, JSON3, BESSDispatch
+using Test, JSON3, EnergyDispatch
 
 @testset "Result artifacts record the solver's primal status" begin
     mktempdir() do dir
-        output = BESSDispatch.run_system_case(joinpath(@__DIR__, "..", "tests", "fixtures", "reg002_hydraulic.json"); output_root=dir)
+        output = EnergyDispatch.run_system_case(joinpath(@__DIR__, "..", "tests", "fixtures", "reg002_hydraulic.json"); output_root=dir)
         summary = JSON3.read(read(output.summary_path, String), Dict{String,Any})
         @test get(summary, "primal_status", nothing) == "FEASIBLE_POINT"
     end
@@ -16,7 +16,7 @@ end
         path = joinpath(dir, "infeasible.json")
         write(path, JSON3.write(document))
         caught = try
-            BESSDispatch.run_system_case(path; output_root=dir)
+            EnergyDispatch.run_system_case(path; output_root=dir)
             nothing
         catch error
             error

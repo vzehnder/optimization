@@ -1,4 +1,4 @@
-using Test, BESSDispatch, JSON3, CSV
+using Test, EnergyDispatch, JSON3, CSV
 
 function transit_case()
     document = JSON3.read(read(joinpath(@__DIR__, "../tests/fixtures/reg002_hydraulic.json"), String), Dict{String,Any})
@@ -18,14 +18,14 @@ end
     for timestamp in ("2026-01-01T00:15:00", "2026-01-01T00:45:00")
         document = transit_case()
         document["time_series"][2]["timestamp"] = timestamp
-        @test_throws ArgumentError BESSDispatch.validate_hydraulic_v3_system_case_document(document)
+        @test_throws ArgumentError EnergyDispatch.validate_hydraulic_v3_system_case_document(document)
     end
 end
 
 function solve_transit(document, dir, name="transit")
     path = joinpath(dir, name * ".json")
     write(path, JSON3.write(document))
-    BESSDispatch.run_system_case(path; output_root=joinpath(dir, name))
+    EnergyDispatch.run_system_case(path; output_root=joinpath(dir, name))
 end
 
 @testset "Fractional travel time conserves water across changing interval sizes" begin

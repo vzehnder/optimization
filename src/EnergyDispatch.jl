@@ -1,4 +1,4 @@
-module BESSDispatch
+module EnergyDispatch
 
 include("types.jl")
 include(joinpath("io", "loaders.jl"))

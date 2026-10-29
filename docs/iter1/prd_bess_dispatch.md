@@ -201,7 +201,7 @@ Recommended repository structure:
 ```text
 Project.toml
 src/
-  BESSDispatch.jl
+  EnergyDispatch.jl
   types.jl
   io/
     loaders.jl
@@ -455,7 +455,7 @@ The MVP does not require a web dashboard.
 
 The MVP is accepted when:
 
-- A Julia package with `Project.toml`, `src/BESSDispatch.jl`, and `test/runtests.jl` exists.
+- A Julia package with `Project.toml`, `src/EnergyDispatch.jl`, and `test/runtests.jl` exists.
 - A sample `arbitrage_mvp` case can be loaded from YAML and CSV.
 - The model solves with HiGHS.
 - The model produces the required output files.

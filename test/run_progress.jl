@@ -1,5 +1,5 @@
 using Test
-using BESSDispatch
+using EnergyDispatch
 using JSON3
 
 @testset "Live run progress preserves the result contract" begin

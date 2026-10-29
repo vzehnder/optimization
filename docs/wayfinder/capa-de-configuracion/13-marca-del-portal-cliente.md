@@ -62,7 +62,7 @@ que la marca tendria que viajar:
 
 **Navegacion y aterrizaje por perfil** le dio al portal un **layout propio**: tres
 raices hermanas que no comparten header, asi que el portal ya no cuelga del shell
-"BESS Workspace" del analista. Eso es precisamente lo que vuelve posible una marca
+"EnergyDispatch" del analista. Eso es precisamente lo que vuelve posible una marca
 por proyecto —con header compartido la marca seria global o no existiria—, y
 convierte a este ticket en quien llena ese layout. Tres consecuencias:
 
@@ -93,7 +93,7 @@ de alcance de mas abajo se tomo bajo ese criterio, no por falta de tiempo.
 - **Hoy no existe marca de ningun tipo, y la del producto no es un archivo sino
   texto.** `find -iname "*logo*"` sobre el repo vuelve vacio. La marca del
   producto son dos cadenas: un brand mark con la letra `Z` en un `<span>` mas
-  "BESS Workspace" (`frontend/src/App.tsx:229-233`), y el `<title>` hardcodeado
+  "EnergyDispatch" (`frontend/src/App.tsx:229-233`), y el `<title>` hardcodeado
   (`frontend/index.html:7`). Esto vuelve **no neutra** la opcion "que el portal
   use siempre la marca del producto": no existe tal marca lista para reusar; lo
   que existe es el header del analista, y ponerlo en el informe del cliente es
@@ -166,7 +166,7 @@ libres—, y eso es lo que queda afuera.
 
 ### 4. Titulo del documento por proyecto; favicon no
 
-El `<title>` hoy dice `BESS Workspace` hardcodeado, y en un informe entregado a
+El `<title>` hoy dice `EnergyDispatch` hardcodeado, y en un informe entregado a
 un cliente es el mismo vocabulario interno que el punto 1 rechaza. En las rutas
 del portal el titulo del documento pasa a ser el `display_name`.
 
@@ -239,7 +239,7 @@ Ninguna es silenciosa; ambas tienen que viajar al spec consolidado.
 ### Lo que este ticket destapo
 
 - **La marca del producto no es un activo, es texto en el header del analista**
-  (`Z` + "BESS Workspace"). Eso significa que "usar la marca del producto" nunca
+  (`Z` + "EnergyDispatch"). Eso significa que "usar la marca del producto" nunca
   fue la opcion conservadora: era exponer el shell interno en la superficie de
   entrega.
 - **El logo es el primer binario del sistema.** No hay precedente de

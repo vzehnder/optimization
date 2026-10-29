@@ -417,7 +417,7 @@ describe("client portal publication", () => {
     expect(
       screen.getByRole("link", { name: "Plan operativo Cliente Norte" }),
     ).toBeVisible();
-    expect(screen.queryByText("BESS Workspace")).toBeNull();
+    expect(screen.queryByText("EnergyDispatch")).toBeNull();
     expect(screen.queryByText("Z")).toBeNull();
     expect(document.title).toBe("Plan operativo Cliente Norte");
   });

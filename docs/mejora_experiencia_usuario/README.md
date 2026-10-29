@@ -1,4 +1,4 @@
-# Plan de simplificación de la experiencia de BESS Workspace
+# Plan de simplificación de la experiencia de EnergyDispatch
 
 Fecha de revisión del plan: 2026-09-12. Base del plan: `58cf602`.
 Última implementación: UX-009 sobre `902662a`, 2026-09-14.

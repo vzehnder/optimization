@@ -8,7 +8,7 @@ project_hash = "974613684b75287bbc0fd4bcc313adea49a3f1b9"
 uuid = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
 version = "1.11.0"
 
-[[deps.BESSDispatch]]
+[[deps.EnergyDispatch]]
 deps = ["CSV", "DataFrames", "Dates", "HiGHS", "JSON3", "JuMP", "PiecewiseLinearOpt", "YAML"]
 path = "."
 uuid = "f1db11d5-b65b-4df8-a261-d70e656fdd33"

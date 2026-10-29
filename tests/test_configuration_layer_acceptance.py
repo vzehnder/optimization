@@ -1884,7 +1884,7 @@ class ConfigurationLayerPortalAcceptanceTests(unittest.TestCase):
                 str(self.root),
                 "objective_value_usd",
                 "workspace_path",
-                "BESS Workspace",
+                "EnergyDispatch",
                 '"Z"',
             ):
                 self.assertNotIn(forbidden, serialized)

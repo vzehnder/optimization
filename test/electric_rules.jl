@@ -1,4 +1,4 @@
-using Test, BESSDispatch, JSON3
+using Test, EnergyDispatch, JSON3
 
 function electric_rule_case()
     document = JSON3.read(read(joinpath(@__DIR__, "../tests/fixtures/reg013_electric.json"), String), Dict{String,Any})
@@ -25,7 +25,7 @@ end
     row["terms"][2]["object_id"], row["terms"][2]["variable"] = 7, "importacion"
     block["rows"] = [row]
     document["component_rules"] = block
-    @test_throws ArgumentError BESSDispatch.validate_hydraulic_v3_system_case_document(document)
+    @test_throws ArgumentError EnergyDispatch.validate_hydraulic_v3_system_case_document(document)
 end
 
 @testset "Electric scalar bounds and known data are validated before solving" begin
@@ -41,9 +41,9 @@ end
             path = joinpath(dir, "bounds.json")
             write(path, JSON3.write(document))
             if valid
-                @test BESSDispatch.load_system_case(path).component_rules["rows"][1]["name"] == "fraccion"
+                @test EnergyDispatch.load_system_case(path).component_rules["rows"][1]["name"] == "fraccion"
             else
-                @test_throws ArgumentError BESSDispatch.load_system_case(path)
+                @test_throws ArgumentError EnergyDispatch.load_system_case(path)
             end
         end
     end
@@ -68,7 +68,7 @@ end
             mutate!(document)
             path = joinpath(dir, "invalid.json")
             write(path, JSON3.write(document))
-            @test_throws ArgumentError BESSDispatch.load_system_case(path)
+            @test_throws ArgumentError EnergyDispatch.load_system_case(path)
         end
     end
 end
@@ -78,7 +78,7 @@ end
         document = electric_rule_case()
         path = joinpath(dir, "electric.json")
         write(path, JSON3.write(document))
-        result = BESSDispatch.solve_system_dispatch(BESSDispatch.load_system_case(path))
+        result = EnergyDispatch.solve_system_dispatch(EnergyDispatch.load_system_case(path))
         @test vec(result.p_grid_export_mw) ≈ [2, 2, 0, 0]
         @test vec(result.p_grid_import_mw) ≈ [0, 0, 1, 2]
         @test vec(result.p_renewable_used_mw) ≈ [4, 4, 1, 0]
@@ -86,12 +86,12 @@ end
         @test vec(result.p_grid_import_mw + result.p_renewable_used_mw - result.p_grid_export_mw) ≈ [2, 2, 2, 2]
         @test vec(result.p_renewable_used_mw + result.p_renewable_curtailed_mw) ≈ [10, 8, 1, 0]
         @test all(abs.(result.p_grid_import_mw .* result.p_grid_export_mw) .< 1e-8)
-        run = BESSDispatch.run_system_case(path; output_root=joinpath(dir, "outputs"))
+        run = EnergyDispatch.run_system_case(path; output_root=joinpath(dir, "outputs"))
         @test JSON3.read(read(run.system_case_resolved_path, String), Dict{String,Any})["component_rules"] == document["component_rules"]
         @test JSON3.read(read(run.summary_path, String))["component_rule_adapter"] == "electric_system.v1"
         delete!(document, "component_rules")
         write(path, JSON3.write(document))
-        base = BESSDispatch.solve_system_dispatch(BESSDispatch.load_system_case(path))
+        base = EnergyDispatch.solve_system_dispatch(EnergyDispatch.load_system_case(path))
         @test vec(base.p_grid_export_mw) ≈ [6, 6, 0, 0]
         @test vec(base.p_renewable_curtailed_mw) ≈ [2, 0, 0, 0]
     end

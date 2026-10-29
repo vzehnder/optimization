@@ -29,7 +29,7 @@ Compute Engine (Google Cloud)
 | Proxy HTTPS (Caddy o Nginx)       |
 | FastAPI                           |
 | Cola local de una sola instancia  |
-| Julia + BESSDispatch + HiGHS      |
+| Julia + EnergyDispatch + HiGHS      |
 |                                   |
 | Persistent Disk                   |
 | - archivos CSV/XLSX               |
@@ -111,7 +111,7 @@ La imagen de produccion debe incluir:
 - Python y las dependencias de `requirements.txt`.
 - Julia en una version compatible con `Project.toml`.
 - Las dependencias fijadas en `Manifest.toml`.
-- El paquete local `BESSDispatch`.
+- El paquete local `EnergyDispatch`.
 - HiGHS y las dependencias del modelo.
 - FastAPI, Uvicorn y los scripts Julia.
 

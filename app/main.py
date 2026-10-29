@@ -1024,7 +1024,7 @@ def create_app(
                 local_run_queue.stop()
             analyst_store.close()
 
-    app = FastAPI(title="BESS Analyst App", lifespan=lifespan)
+    app = FastAPI(title="EnergyDispatch", lifespan=lifespan)
     from app.component_rules import rule_router
     app.include_router(rule_router(analyst_store))
     from app.rule_compliance import compliance_router

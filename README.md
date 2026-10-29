@@ -1,4 +1,4 @@
-# BESSDispatch
+# EnergyDispatch
 
 Julia package for the single-BESS price-taker dispatch MVP. The sample case
 lives in `data/cases/arbitrage_mvp` and reads scalar configuration from YAML
@@ -164,7 +164,7 @@ This command loads `data/cases/arbitrage_mvp`, solves the dispatch model with
 HiGHS, and writes a run folder under `outputs/arbitrage_mvp/<run_timestamp>/`.
 
 ```powershell
-julia --project=. -e "using BESSDispatch; run_output = BESSDispatch.run_case(ARGS[1]); println(run_output.output_dir)" data/cases/arbitrage_mvp
+julia --project=. -e "using EnergyDispatch; run_output = EnergyDispatch.run_case(ARGS[1]); println(run_output.output_dir)" data/cases/arbitrage_mvp
 ```
 
 Each run folder contains:
@@ -186,14 +186,14 @@ local load.
 Use the Julia API when embedding the optimizer in another Julia caller:
 
 ```powershell
-julia --project=. -e "using BESSDispatch; system_case = BESSDispatch.load_system_case(ARGS[1]); data = BESSDispatch.normalize_system_case(system_case); result = BESSDispatch.solve_system_dispatch(data); println(result.termination_status)" data/cases/hybrid_system/system_case.json
+julia --project=. -e "using EnergyDispatch; system_case = EnergyDispatch.load_system_case(ARGS[1]); data = EnergyDispatch.normalize_system_case(system_case); result = EnergyDispatch.solve_system_dispatch(data); println(result.termination_status)" data/cases/hybrid_system/system_case.json
 ```
 
-Use `BESSDispatch.run_system_case` to solve and persist machine-readable
+Use `EnergyDispatch.run_system_case` to solve and persist machine-readable
 outputs:
 
 ```powershell
-julia --project=. -e "using BESSDispatch; run_output = BESSDispatch.run_system_case(ARGS[1]; output_root = ARGS[2]); println(run_output.output_dir)" data/cases/hybrid_system/system_case.json outputs
+julia --project=. -e "using EnergyDispatch; run_output = EnergyDispatch.run_system_case(ARGS[1]; output_root = ARGS[2]); println(run_output.output_dir)" data/cases/hybrid_system/system_case.json outputs
 ```
 
 The process-friendly CLI for a future Python worker is:

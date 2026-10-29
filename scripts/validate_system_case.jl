@@ -1,5 +1,5 @@
 using JSON3
-using BESSDispatch
+using EnergyDispatch
 
 function usage()
     return "Usage: julia --project=. scripts/validate_system_case.jl SYSTEM_CASE_PATH"
@@ -13,16 +13,16 @@ function parse_cli_args(args::Vector{String})::String
     return args[1]
 end
 
-function system_validation_success_payload(data::BESSDispatch.SystemOptimizationData)
+function system_validation_success_payload(data::EnergyDispatch.SystemOptimizationData)
     return Dict{String,Any}(
         "status" => "ok",
         "case_name" => data.case_name,
         "schema_version" => data.schema_version,
         "bus_id" => data.bus_id,
         "period_count" => length(data.timestamp),
-        "component_rule_versions" => [BESSDispatch.COMPONENT_RULE_VERSION, BESSDispatch.HYDRAULIC_RULE_VERSION,
-                                      BESSDispatch.TEMPORAL_RULE_VERSION, BESSDispatch.BUDGET_RULE_VERSION],
-        "component_rule_adapters" => [BESSDispatch.SIMPLE_HYDRO_RULE_ADAPTER, BESSDispatch.BATTERY_RULE_ADAPTER, BESSDispatch.ELECTRIC_RULE_ADAPTER],
+        "component_rule_versions" => [EnergyDispatch.COMPONENT_RULE_VERSION, EnergyDispatch.HYDRAULIC_RULE_VERSION,
+                                      EnergyDispatch.TEMPORAL_RULE_VERSION, EnergyDispatch.BUDGET_RULE_VERSION],
+        "component_rule_adapters" => [EnergyDispatch.SIMPLE_HYDRO_RULE_ADAPTER, EnergyDispatch.BATTERY_RULE_ADAPTER, EnergyDispatch.ELECTRIC_RULE_ADAPTER],
         "asset_counts" => Dict{String,Any}(
             "battery" => length(data.batteries),
             "renewable" => length(data.renewables),
@@ -39,12 +39,12 @@ function main(args::Vector{String})::Int
         document = JSON3.read(read(system_case_path, String), Dict{String,Any})
         schema_version = string(get(document, "schema_version", ""))
         if schema_version == "bess_system_dispatch.v3"
-            JSON3.write(stdout, BESSDispatch.validate_hydraulic_v3_system_case_document(document))
+            JSON3.write(stdout, EnergyDispatch.validate_hydraulic_v3_system_case_document(document))
             println()
             return 0
         end
-        system_case = BESSDispatch.load_system_case(system_case_path)
-        optimization_data = BESSDispatch.normalize_system_case(system_case)
+        system_case = EnergyDispatch.load_system_case(system_case_path)
+        optimization_data = EnergyDispatch.normalize_system_case(system_case)
 
         JSON3.write(stdout, system_validation_success_payload(optimization_data))
         println()

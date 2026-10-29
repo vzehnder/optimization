@@ -1,4 +1,4 @@
-using Test, BESSDispatch, JSON3, CSV
+using Test, EnergyDispatch, JSON3, CSV
 
 function rule_case()
     document = JSON3.read(read(joinpath(@__DIR__, "../tests/fixtures/reg002_hydraulic.json"), String), Dict{String,Any})
@@ -18,7 +18,7 @@ end
 function solve_rule_case(document, dir, name)
     path = joinpath(dir, "$name.json")
     write(path, JSON3.write(document))
-    BESSDispatch.run_system_case(path; output_root=joinpath(dir, name))
+    EnergyDispatch.run_system_case(path; output_root=joinpath(dir, name))
 end
 
 @testset "Duration-weighted budgets constrain energy and water without changing balances" begin
@@ -60,7 +60,7 @@ end
                         d -> d["component_rules"]["rows"][1]["terms"][1]["period"] = 3)
             invalid = deepcopy(document)
             mutate!(invalid)
-            @test_throws ArgumentError BESSDispatch.validate_hydraulic_v3_system_case_document(invalid)
+            @test_throws ArgumentError EnergyDispatch.validate_hydraulic_v3_system_case_document(invalid)
         end
     end
 end
@@ -104,7 +104,7 @@ end
                         d -> d["component_rules"]["rows"][1]["terms"][1]["period"] = 2)
             invalid = deepcopy(document)
             mutate!(invalid)
-            @test_throws ArgumentError BESSDispatch.validate_hydraulic_v3_system_case_document(invalid)
+            @test_throws ArgumentError EnergyDispatch.validate_hydraulic_v3_system_case_document(invalid)
         end
     end
 end
@@ -178,7 +178,7 @@ end
         @test sum(row.total_hydro_turbine_flow_m3s for row in dispatch) ≈ 13.8888888889
         invalid = deepcopy(document)
         invalid["component_rules"]["objects"][2]["member_ids"] = [99]
-        @test_throws ArgumentError BESSDispatch.validate_hydraulic_v3_system_case_document(invalid)
+        @test_throws ArgumentError EnergyDispatch.validate_hydraulic_v3_system_case_document(invalid)
         for row in deepcopy(block["rows"])
             row["name"], row["unit"], row["constant"] = "spill", "m3_per_s", -2.0
             row["terms"][1]["variable"], row["terms"][1]["coefficient"] = "vertimiento", 1.0
@@ -188,7 +188,7 @@ end
         @test sum(row.total_hydro_turbine_flow_m3s for row in CSV.File(spilled.dispatch_path)) ≈ 5.8888888889
         impossible = deepcopy(document)
         impossible["component_rules"]["rows"][1]["constant"] = -40.0
-        @test_throws ArgumentError BESSDispatch.validate_hydraulic_v3_system_case_document(impossible)
+        @test_throws ArgumentError EnergyDispatch.validate_hydraulic_v3_system_case_document(impossible)
     end
 end
 
@@ -208,7 +208,7 @@ end
     )
         document = rule_case()
         mutate!(document)
-        @test_throws ArgumentError BESSDispatch.validate_hydraulic_v3_system_case_document(document)
+        @test_throws ArgumentError EnergyDispatch.validate_hydraulic_v3_system_case_document(document)
     end
 end
 
@@ -236,12 +236,12 @@ end
         @test all(row.total_hydro_turbine_flow_m3s ≈ 5 for row in CSV.File(result.dispatch_path))
         impossible = rule_case()
         impossible["hydraulic_network"]["units"][1]["min_flow_m3s"] = 6.0
-        @test_throws ArgumentError BESSDispatch.validate_hydraulic_v3_system_case_document(impossible)
+        @test_throws ArgumentError EnergyDispatch.validate_hydraulic_v3_system_case_document(impossible)
         @test_throws Exception solve_rule_case(impossible, dir, "infeasible")
         unsupported = rule_case()
         unsupported["schema_version"] = "bess_system_dispatch.v2"
         path = joinpath(dir, "unsupported.json")
         write(path, JSON3.write(unsupported))
-        @test_throws ArgumentError BESSDispatch.load_system_case(path)
+        @test_throws ArgumentError EnergyDispatch.load_system_case(path)
     end
 end

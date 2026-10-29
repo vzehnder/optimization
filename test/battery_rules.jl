@@ -1,4 +1,4 @@
-using Test, BESSDispatch, JSON3, CSV
+using Test, EnergyDispatch, JSON3, CSV
 
 function battery_rule_case()
     document = JSON3.read(read(joinpath(@__DIR__, "../tests/fixtures/reg012_battery.json"), String), Dict{String,Any})
@@ -33,7 +33,7 @@ end
             mutate!(document)
             path = joinpath(dir, "invalid.json")
             write(path, JSON3.write(document))
-            @test_throws ArgumentError BESSDispatch.load_system_case(path)
+            @test_throws ArgumentError EnergyDispatch.load_system_case(path)
         end
     end
 end
@@ -54,7 +54,7 @@ end
         document["component_rules"] = block
         path = joinpath(dir, "mixed.json")
         write(path, JSON3.write(document))
-        result = BESSDispatch.solve_system_dispatch(BESSDispatch.load_system_case(path))
+        result = EnergyDispatch.solve_system_dispatch(EnergyDispatch.load_system_case(path))
         @test vec(result.p_battery_discharge_mw + result.hydro_power_mw) ≈ [1, 1]
         @test vec(result.p_grid_export_mw) ≈ [1, 1]
         @test result.battery_energy_mwh[1, end] + sum(result.p_battery_discharge_mw) ≈ 5
@@ -81,7 +81,7 @@ end
         block["rows"] = [row]
         path = joinpath(dir, "budget.json")
         write(path, JSON3.write(document))
-        result = BESSDispatch.solve_system_dispatch(BESSDispatch.load_system_case(path))
+        result = EnergyDispatch.solve_system_dispatch(EnergyDispatch.load_system_case(path))
         @test sum(vec(result.p_battery_discharge_mw) .* [0.5, 1.5, 1, 1]) ≈ 1.2
         @test result.battery_energy_mwh[1, end] ≈ 2
     end
@@ -92,21 +92,21 @@ end
         document = battery_rule_case()
         path = joinpath(dir, "battery.json")
         write(path, JSON3.write(document))
-        graph = BESSDispatch.load_system_case(path)
-        data = BESSDispatch.normalize_system_case(graph)
-        result = BESSDispatch.solve_system_dispatch(data)
+        graph = EnergyDispatch.load_system_case(path)
+        data = EnergyDispatch.normalize_system_case(graph)
+        result = EnergyDispatch.solve_system_dispatch(data)
         @test vec(result.p_battery_charge_mw) ≈ [3, 0, 0, 1.25]
         @test vec(result.p_battery_discharge_mw) ≈ [0, 0.36, 2.7, 0]
         @test vec(result.battery_energy_mwh) ≈ [4.4, 4, 1, 2]
         @test result.objective_value_usd ≈ 208.95
         @test all(abs.(result.p_battery_charge_mw .* result.p_battery_discharge_mw) .< 1e-8)
         @test vec(result.p_grid_import_mw - result.p_grid_export_mw) ≈ [3, -0.36, -2.7, 1.25]
-        run = BESSDispatch.run_system_case(path; output_root=joinpath(dir, "outputs"))
+        run = EnergyDispatch.run_system_case(path; output_root=joinpath(dir, "outputs"))
         @test JSON3.read(read(run.system_case_resolved_path, String), Dict{String,Any})["component_rules"] == document["component_rules"]
         @test JSON3.read(read(run.summary_path, String))["component_rule_adapter"] == "battery_system.v1"
         delete!(document, "component_rules")
         write(path, JSON3.write(document))
-        base = BESSDispatch.solve_system_dispatch(BESSDispatch.load_system_case(path))
+        base = EnergyDispatch.solve_system_dispatch(EnergyDispatch.load_system_case(path))
         @test vec(base.p_battery_discharge_mw) ≈ [0, 4, 0.68, 0]
         @test base.battery_energy_mwh[1, end] ≈ 2
     end

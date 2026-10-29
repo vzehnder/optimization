@@ -1,5 +1,5 @@
 using Dates
-using BESSDispatch
+using EnergyDispatch
 using CSV
 using JSON3
 using JuMP
@@ -17,22 +17,22 @@ const ENERGY_TOLERANCE_MWH = 1e-6
 const OBJECTIVE_TOLERANCE_USD = 1e-5
 
 function valid_case_data(;
-    bess = BESSDispatch.BESSParameters(10.0, 10.0, 0.0, 40.0, 20.0, 0.95, 0.95, 2.0),
-    time_series = BESSDispatch.TimeSeriesData(
+    bess = EnergyDispatch.BESSParameters(10.0, 10.0, 0.0, 40.0, 20.0, 0.95, 0.95, 2.0),
+    time_series = EnergyDispatch.TimeSeriesData(
         [DateTime("2026-01-01T00:00:00"), DateTime("2026-01-01T01:00:00")],
         [40.0, 90.0],
         [1.0, 1.0],
     ),
-    constraints = BESSDispatch.ConstraintConfig(true, "equal_initial", nothing, true),
-    solver = BESSDispatch.SolverConfig("HiGHS", Dict{String,Any}()),
-    horizon = BESSDispatch.HorizonConfig("full_horizon", nothing, nothing, nothing, nothing),
+    constraints = EnergyDispatch.ConstraintConfig(true, "equal_initial", nothing, true),
+    solver = EnergyDispatch.SolverConfig("HiGHS", Dict{String,Any}()),
+    horizon = EnergyDispatch.HorizonConfig("full_horizon", nothing, nothing, nothing, nothing),
 )
-    return BESSDispatch.CaseData("test_case", bess, time_series, constraints, solver, horizon)
+    return EnergyDispatch.CaseData("test_case", bess, time_series, constraints, solver, horizon)
 end
 
 function validation_message(case_data)
     try
-        BESSDispatch.validate_case_data(case_data)
+        EnergyDispatch.validate_case_data(case_data)
         return nothing
     catch error
         return sprint(showerror, error)
@@ -55,7 +55,7 @@ function core_arbitrage_case(;
     period_durations = durations === nothing ? fill(1.0, length(prices)) : durations
 
     return valid_case_data(
-        bess = BESSDispatch.BESSParameters(
+        bess = EnergyDispatch.BESSParameters(
             10.0,
             10.0,
             0.0,
@@ -65,8 +65,8 @@ function core_arbitrage_case(;
             discharge_efficiency,
             degradation_cost_per_mwh_delta_soc,
         ),
-        time_series = BESSDispatch.TimeSeriesData(timestamps, prices, period_durations),
-        constraints = BESSDispatch.ConstraintConfig(
+        time_series = EnergyDispatch.TimeSeriesData(timestamps, prices, period_durations),
+        constraints = EnergyDispatch.ConstraintConfig(
             prevent_simultaneous_charge_discharge,
             terminal_condition,
             terminal_energy_min_mwh,
@@ -522,7 +522,7 @@ function system_case_validation_message(document)
     return mktempdir() do case_dir
         case_path = write_minimal_system_case_json(case_dir; document = document)
         try
-            BESSDispatch.load_system_case(case_path)
+            EnergyDispatch.load_system_case(case_path)
             return nothing
         catch error
             return sprint(showerror, error)
@@ -537,13 +537,13 @@ function invalid_system_case_error_text(mutator)
     return message === nothing ? "" : message
 end
 
-@testset "BESSDispatch package" begin
+@testset "EnergyDispatch package" begin
     @testset "can be imported" begin
-        @test BESSDispatch isa Module
+        @test EnergyDispatch isa Module
     end
 
     @testset "single-BESS MVP public contract remains available" begin
-        exported_names = Set(names(BESSDispatch))
+        exported_names = Set(names(EnergyDispatch))
         required_public_names = [
             :BESSParameters,
             :TimeSeriesData,
@@ -571,7 +571,7 @@ end
         @test !isfile(joinpath(case_dir, "system_case.json"))
 
         mktempdir() do output_root
-            run_output = BESSDispatch.run_case(
+            run_output = EnergyDispatch.run_case(
                 case_dir;
                 output_root = output_root,
                 run_timestamp = DateTime("2026-01-02T03:04:05"),
@@ -588,7 +588,7 @@ end
     @testset "loads the sample arbitrage case" begin
         case_dir = joinpath(@__DIR__, "..", "data", "cases", "arbitrage_mvp")
 
-        case_data = BESSDispatch.load_case(case_dir)
+        case_data = EnergyDispatch.load_case(case_dir)
 
         @test case_data.case_name == "arbitrage_mvp"
         @test case_data.bess.charge_power_max_mw == 10.0
@@ -648,7 +648,7 @@ end
 
     @testset "rejects nonpositive durations" begin
         case_data = valid_case_data(
-            time_series = BESSDispatch.TimeSeriesData(
+            time_series = EnergyDispatch.TimeSeriesData(
                 [DateTime("2026-01-01T00:00:00")],
                 [40.0],
                 [0.0],
@@ -660,7 +660,7 @@ end
 
     @testset "rejects missing prices" begin
         case_data = valid_case_data(
-            time_series = BESSDispatch.TimeSeriesData(
+            time_series = EnergyDispatch.TimeSeriesData(
                 [DateTime("2026-01-01T00:00:00"), DateTime("2026-01-01T01:00:00")],
                 [40.0],
                 [1.0, 1.0],
@@ -672,7 +672,7 @@ end
 
     @testset "rejects invalid prices" begin
         case_data = valid_case_data(
-            time_series = BESSDispatch.TimeSeriesData(
+            time_series = EnergyDispatch.TimeSeriesData(
                 [DateTime("2026-01-01T00:00:00")],
                 [NaN],
                 [1.0],
@@ -684,7 +684,7 @@ end
 
     @testset "rejects invalid energy bounds" begin
         case_data = valid_case_data(
-            bess = BESSDispatch.BESSParameters(10.0, 10.0, 40.0, 40.0, 20.0, 0.95, 0.95, 2.0),
+            bess = EnergyDispatch.BESSParameters(10.0, 10.0, 40.0, 40.0, 20.0, 0.95, 0.95, 2.0),
         )
 
         @test occursin("energy_min_mwh must be less than energy_max_mwh", validation_message(case_data))
@@ -692,7 +692,7 @@ end
 
     @testset "rejects invalid initial energy" begin
         case_data = valid_case_data(
-            bess = BESSDispatch.BESSParameters(10.0, 10.0, 0.0, 40.0, 50.0, 0.95, 0.95, 2.0),
+            bess = EnergyDispatch.BESSParameters(10.0, 10.0, 0.0, 40.0, 50.0, 0.95, 0.95, 2.0),
         )
 
         @test occursin("initial_energy_mwh must be within energy bounds", validation_message(case_data))
@@ -700,7 +700,7 @@ end
 
     @testset "rejects invalid charge efficiency" begin
         case_data = valid_case_data(
-            bess = BESSDispatch.BESSParameters(10.0, 10.0, 0.0, 40.0, 20.0, 0.0, 0.95, 2.0),
+            bess = EnergyDispatch.BESSParameters(10.0, 10.0, 0.0, 40.0, 20.0, 0.0, 0.95, 2.0),
         )
 
         @test occursin("charge_efficiency must be in (0, 1]", validation_message(case_data))
@@ -708,7 +708,7 @@ end
 
     @testset "rejects invalid discharge efficiency" begin
         case_data = valid_case_data(
-            bess = BESSDispatch.BESSParameters(10.0, 10.0, 0.0, 40.0, 20.0, 0.95, 1.1, 2.0),
+            bess = EnergyDispatch.BESSParameters(10.0, 10.0, 0.0, 40.0, 20.0, 0.95, 1.1, 2.0),
         )
 
         @test occursin("discharge_efficiency must be in (0, 1]", validation_message(case_data))
@@ -716,7 +716,7 @@ end
 
     @testset "rejects unknown terminal condition" begin
         case_data = valid_case_data(
-            constraints = BESSDispatch.ConstraintConfig(true, "target_energy", nothing, true),
+            constraints = EnergyDispatch.ConstraintConfig(true, "target_energy", nothing, true),
         )
 
         @test occursin("terminal_condition must be one of", validation_message(case_data))
@@ -724,7 +724,7 @@ end
 
     @testset "rejects missing min_terminal energy" begin
         case_data = valid_case_data(
-            constraints = BESSDispatch.ConstraintConfig(true, "min_terminal", nothing, true),
+            constraints = EnergyDispatch.ConstraintConfig(true, "min_terminal", nothing, true),
         )
 
         @test occursin("terminal_energy_min_mwh is required when terminal_condition is min_terminal", validation_message(case_data))
@@ -732,7 +732,7 @@ end
 
     @testset "rejects out-of-bounds min_terminal energy" begin
         case_data = valid_case_data(
-            constraints = BESSDispatch.ConstraintConfig(true, "min_terminal", 45.0, true),
+            constraints = EnergyDispatch.ConstraintConfig(true, "min_terminal", 45.0, true),
         )
 
         @test occursin("terminal_energy_min_mwh must be within energy bounds", validation_message(case_data))
@@ -740,7 +740,7 @@ end
 
     @testset "rejects unsorted timestamps" begin
         case_data = valid_case_data(
-            time_series = BESSDispatch.TimeSeriesData(
+            time_series = EnergyDispatch.TimeSeriesData(
                 [DateTime("2026-01-01T01:00:00"), DateTime("2026-01-01T00:00:00")],
                 [40.0, 90.0],
                 [1.0, 1.0],
@@ -752,14 +752,14 @@ end
 
     @testset "rejects negative charge power limit" begin
         case_data = valid_case_data(
-            bess = BESSDispatch.BESSParameters(-1.0, 10.0, 0.0, 40.0, 20.0, 0.95, 0.95, 2.0),
+            bess = EnergyDispatch.BESSParameters(-1.0, 10.0, 0.0, 40.0, 20.0, 0.95, 0.95, 2.0),
         )
 
         @test occursin("charge_power_max_mw must be nonnegative", validation_message(case_data))
     end
 
     @testset "solves low-high-low core arbitrage dispatch" begin
-        result = BESSDispatch.solve_dispatch(core_arbitrage_case())
+        result = EnergyDispatch.solve_dispatch(core_arbitrage_case())
 
         @test result.termination_status == "OPTIMAL"
         @test result.objective_value_usd ≈ 900.0 atol = 1e-6
@@ -772,7 +772,7 @@ end
     @testset "builds a JuMP model from the validated sample case" begin
         case_dir = joinpath(@__DIR__, "..", "data", "cases", "arbitrage_mvp")
 
-        dispatch_model = BESSDispatch.build_dispatch_model(BESSDispatch.load_case(case_dir))
+        dispatch_model = EnergyDispatch.build_dispatch_model(EnergyDispatch.load_case(case_dir))
 
         @test dispatch_model.model isa JuMP.Model
         @test length(dispatch_model.p_charge_mw) == 24
@@ -784,7 +784,7 @@ end
         case_dir = joinpath(@__DIR__, "..", "data", "cases", "arbitrage_mvp")
 
         mktempdir() do output_root
-            run_output = BESSDispatch.run_case(
+            run_output = EnergyDispatch.run_case(
                 case_dir;
                 output_root = output_root,
                 run_timestamp = DateTime("2026-01-02T03:04:05"),
@@ -836,7 +836,7 @@ end
             @test metadata.active_constraint_flags.degradation_linear_delta_soc == true
             @test string(metadata.unit_conventions.energy) == "MWh"
 
-            second_run_output = BESSDispatch.run_case(
+            second_run_output = EnergyDispatch.run_case(
                 case_dir;
                 output_root = output_root,
                 run_timestamp = DateTime("2026-01-02T03:04:05"),
@@ -852,11 +852,11 @@ end
         mktempdir() do case_dir
             case_path = write_minimal_system_case_json(case_dir)
 
-            system_case = BESSDispatch.load_system_case(case_path)
+            system_case = EnergyDispatch.load_system_case(case_path)
             @test system_case.schema_version == "bess_system_dispatch.v1"
             @test Set(node.id for node in system_case.nodes) == Set(["bus_1", "solar_1", "battery_1", "grid_1"])
 
-            optimization_case = BESSDispatch.normalize_system_case(system_case)
+            optimization_case = EnergyDispatch.normalize_system_case(system_case)
             @test optimization_case.case_name == "minimal_hybrid_system"
             @test optimization_case.bus_id == "bus_1"
             @test [asset.id for asset in optimization_case.renewables] == ["solar_1"]
@@ -865,12 +865,12 @@ end
             @test [asset.id for asset in optimization_case.grids] == ["grid_1"]
             @test optimization_case.renewable_available_power_mw == [5.0 0.0]
 
-            result = BESSDispatch.solve_system_dispatch(optimization_case)
+            result = EnergyDispatch.solve_system_dispatch(optimization_case)
             @test result.termination_status == "OPTIMAL"
             @test isapprox(result.objective_value_usd, 500.0; atol = OBJECTIVE_TOLERANCE_USD)
 
             output_root = joinpath(case_dir, "outputs")
-            run_output = BESSDispatch.run_system_case(
+            run_output = EnergyDispatch.run_system_case(
                 case_path;
                 output_root = output_root,
                 run_timestamp = DateTime("2026-01-02T03:04:05"),
@@ -950,18 +950,18 @@ end
                 document = bess_load_system_case_document(),
             )
 
-            system_case = BESSDispatch.load_system_case(case_path)
-            optimization_case = BESSDispatch.normalize_system_case(system_case)
+            system_case = EnergyDispatch.load_system_case(case_path)
+            optimization_case = EnergyDispatch.normalize_system_case(system_case)
             @test isempty(optimization_case.renewables)
             @test size(optimization_case.renewable_available_power_mw) == (0, 2)
             @test [asset.id for asset in optimization_case.loads] == ["load_1"]
 
-            result = BESSDispatch.solve_system_dispatch(optimization_case)
+            result = EnergyDispatch.solve_system_dispatch(optimization_case)
             @test result.termination_status == "OPTIMAL"
             @test isapprox(result.objective_value_usd, 300.0; atol = OBJECTIVE_TOLERANCE_USD)
 
             output_root = joinpath(case_dir, "outputs")
-            run_output = BESSDispatch.run_system_case(
+            run_output = EnergyDispatch.run_system_case(
                 case_path;
                 output_root = output_root,
                 run_timestamp = DateTime("2026-01-02T03:04:05"),
@@ -983,13 +983,13 @@ end
         mktempdir() do case_dir
             case_path = write_minimal_system_case_json(case_dir; document = separate_price_system_case_document())
 
-            system_case = BESSDispatch.load_system_case(case_path)
-            optimization_case = BESSDispatch.normalize_system_case(system_case)
+            system_case = EnergyDispatch.load_system_case(case_path)
+            optimization_case = EnergyDispatch.normalize_system_case(system_case)
             @test optimization_case.price_usd_per_mwh == [nothing, nothing]
             @test optimization_case.import_price_usd_per_mwh == [10.0, 80.0]
             @test optimization_case.export_price_usd_per_mwh == [5.0, 100.0]
 
-            result = BESSDispatch.solve_system_dispatch(optimization_case)
+            result = EnergyDispatch.solve_system_dispatch(optimization_case)
             @test result.termination_status == "OPTIMAL"
             @test isapprox(result.p_grid_import_mw[1, 1], 5.0; atol = POWER_TOLERANCE_MW)
             @test isapprox(result.p_grid_export_mw[1, 2], 5.0; atol = POWER_TOLERANCE_MW)
@@ -999,7 +999,7 @@ end
             @test isapprox(result.market_value_usd[2], 500.0; atol = OBJECTIVE_TOLERANCE_USD)
             @test isapprox(result.objective_value_usd, 450.0; atol = OBJECTIVE_TOLERANCE_USD)
 
-            run_output = BESSDispatch.run_system_case(
+            run_output = EnergyDispatch.run_system_case(
                 case_path;
                 output_root = joinpath(case_dir, "outputs"),
                 run_timestamp = DateTime("2026-01-02T03:04:05"),
@@ -1051,16 +1051,16 @@ end
         mktempdir() do case_dir
             case_path = write_minimal_system_case_json(case_dir; document = linear_hydro_system_case_document())
 
-            system_case = BESSDispatch.load_system_case(case_path)
+            system_case = EnergyDispatch.load_system_case(case_path)
             @test system_case.schema_version == "bess_system_dispatch.v2"
 
-            optimization_case = BESSDispatch.normalize_system_case(system_case)
+            optimization_case = EnergyDispatch.normalize_system_case(system_case)
             @test optimization_case.case_name == "linear_hydro_system"
             @test [asset.id for asset in optimization_case.hydros] == ["hydro_1"]
             @test optimization_case.hydro_inflow_m3s == [30.0 30.0]
             @test optimization_case.hydros[1].generation_mode == "linear"
 
-            result = BESSDispatch.solve_system_dispatch(optimization_case)
+            result = EnergyDispatch.solve_system_dispatch(optimization_case)
             @test result.termination_status == "OPTIMAL"
             @test all(result.hydro_turbine_flow_m3s .>= 1.0 - POWER_TOLERANCE_MW)
             @test all(isapprox.(
@@ -1072,7 +1072,7 @@ end
             @test result.p_grid_export_mw[1, 2] > POWER_TOLERANCE_MW
             @test result.hydro_terminal_water_value_usd[1] > 0.0
 
-            run_output = BESSDispatch.run_system_case(
+            run_output = EnergyDispatch.run_system_case(
                 case_path;
                 output_root = joinpath(case_dir, "outputs"),
                 run_timestamp = DateTime("2026-01-02T03:04:05"),
@@ -1109,20 +1109,20 @@ end
         sample_path = sample_linear_hydro_system_case_path()
         @test isfile(sample_path)
 
-        system_case = BESSDispatch.load_system_case(sample_path)
+        system_case = EnergyDispatch.load_system_case(sample_path)
         @test system_case.case_name == "linear_hydro_system"
         @test system_case.schema_version == "bess_system_dispatch.v2"
 
-        optimization_case = BESSDispatch.normalize_system_case(system_case)
+        optimization_case = EnergyDispatch.normalize_system_case(system_case)
         @test [asset.id for asset in optimization_case.hydros] == ["hydro_1"]
         @test optimization_case.hydro_inflow_m3s == [30.0 30.0]
 
-        result = BESSDispatch.solve_system_dispatch(optimization_case)
+        result = EnergyDispatch.solve_system_dispatch(optimization_case)
         @test result.termination_status == "OPTIMAL"
         @test any(result.hydro_power_mw .> POWER_TOLERANCE_MW)
 
         mktempdir() do output_root
-            run_output = BESSDispatch.run_system_case(
+            run_output = EnergyDispatch.run_system_case(
                 sample_path;
                 output_root = output_root,
                 run_timestamp = DateTime("2026-01-02T03:04:05"),
@@ -1147,11 +1147,11 @@ end
         sample_path = sample_piecewise_hydro_system_case_path()
         @test isfile(sample_path)
 
-        system_case = BESSDispatch.load_system_case(sample_path)
+        system_case = EnergyDispatch.load_system_case(sample_path)
         @test system_case.case_name == "piecewise_hydro_system"
         @test system_case.schema_version == "bess_system_dispatch.v2"
 
-        optimization_case = BESSDispatch.normalize_system_case(system_case)
+        optimization_case = EnergyDispatch.normalize_system_case(system_case)
         @test [asset.id for asset in optimization_case.hydros] == ["hydro_1"]
         @test optimization_case.hydros[1].generation_mode == "piecewise_linear"
         @test optimization_case.hydros[1].generation_curve == [
@@ -1164,7 +1164,7 @@ end
         @test maximum(point[2] for point in optimization_case.hydros[1].generation_curve) >
               optimization_case.hydros[1].power_max_mw
 
-        result = BESSDispatch.solve_system_dispatch(optimization_case)
+        result = EnergyDispatch.solve_system_dispatch(optimization_case)
         @test result.termination_status == "OPTIMAL"
         @test all(result.hydro_turbine_flow_m3s .>= -POWER_TOLERANCE_MW)
         @test all(result.hydro_turbine_flow_m3s .<= 12.0 + POWER_TOLERANCE_MW)
@@ -1174,7 +1174,7 @@ end
         @test all(result.hydro_reservoir_elevation_masl .<= 720.0 + ENERGY_TOLERANCE_MWH)
 
         mktempdir() do output_root
-            run_output = BESSDispatch.run_system_case(
+            run_output = EnergyDispatch.run_system_case(
                 sample_path;
                 output_root = output_root,
                 run_timestamp = DateTime("2026-01-02T03:04:05"),
@@ -1206,10 +1206,10 @@ end
         mktempdir() do case_dir
             case_path = write_minimal_system_case_json(case_dir; document = curtailment_system_case_document())
 
-            optimization_case = BESSDispatch.normalize_system_case(BESSDispatch.load_system_case(case_path))
+            optimization_case = EnergyDispatch.normalize_system_case(EnergyDispatch.load_system_case(case_path))
             @test optimization_case.renewables[1].curtailment_penalty_usd_per_mwh == 2.0
 
-            result = BESSDispatch.solve_system_dispatch(optimization_case)
+            result = EnergyDispatch.solve_system_dispatch(optimization_case)
             @test result.termination_status == "OPTIMAL"
             @test isapprox(result.p_renewable_used_mw[1, 1], 3.0; atol = POWER_TOLERANCE_MW)
             @test isapprox(result.p_renewable_curtailed_mw[1, 1], 7.0; atol = POWER_TOLERANCE_MW)
@@ -1217,7 +1217,7 @@ end
             @test isapprox(result.curtailment_penalty_usd[1, 1], 14.0; atol = OBJECTIVE_TOLERANCE_USD)
             @test isapprox(result.objective_value_usd, -14.0; atol = OBJECTIVE_TOLERANCE_USD)
 
-            run_output = BESSDispatch.run_system_case(
+            run_output = EnergyDispatch.run_system_case(
                 case_path;
                 output_root = joinpath(case_dir, "outputs"),
                 run_timestamp = DateTime("2026-01-02T03:04:05"),
@@ -1240,18 +1240,18 @@ end
         mktempdir() do case_dir
             case_path = write_minimal_system_case_json(case_dir; document = local_load_system_case_document())
 
-            system_case = BESSDispatch.load_system_case(case_path)
-            optimization_case = BESSDispatch.normalize_system_case(system_case)
+            system_case = EnergyDispatch.load_system_case(case_path)
+            optimization_case = EnergyDispatch.normalize_system_case(system_case)
             @test [asset.id for asset in optimization_case.loads] == ["load_1"]
             @test optimization_case.load_demand_mw == [5.0 2.0]
 
-            result = BESSDispatch.solve_system_dispatch(optimization_case)
+            result = EnergyDispatch.solve_system_dispatch(optimization_case)
             @test result.termination_status == "OPTIMAL"
             @test isapprox(result.p_renewable_used_mw[1, 1], 3.0; atol = POWER_TOLERANCE_MW)
             @test isapprox(result.p_grid_import_mw[1, 1], 2.0; atol = POWER_TOLERANCE_MW)
             @test isapprox(result.p_grid_import_mw[1, 2], 2.0; atol = POWER_TOLERANCE_MW)
 
-            run_output = BESSDispatch.run_system_case(
+            run_output = EnergyDispatch.run_system_case(
                 case_path;
                 output_root = joinpath(case_dir, "outputs"),
                 run_timestamp = DateTime("2026-01-02T03:04:05"),
@@ -1282,16 +1282,16 @@ end
         mktempdir() do case_dir
             case_path = write_minimal_system_case_json(case_dir; document = grid_limited_system_case_document())
 
-            optimization_case = BESSDispatch.normalize_system_case(BESSDispatch.load_system_case(case_path))
+            optimization_case = EnergyDispatch.normalize_system_case(EnergyDispatch.load_system_case(case_path))
             @test optimization_case.grids[1].import_power_max_mw == 2.0
             @test optimization_case.grids[1].export_power_max_mw == 2.0
             @test optimization_case.grids[1].prevent_simultaneous_grid_import_export == true
 
-            dispatch_model = BESSDispatch.build_system_dispatch_model(optimization_case)
+            dispatch_model = EnergyDispatch.build_system_dispatch_model(optimization_case)
             @test dispatch_model.is_grid_importing !== nothing
             @test all(JuMP.is_binary(dispatch_model.is_grid_importing[1, period]) for period in 1:2)
 
-            result = BESSDispatch.solve_system_dispatch(optimization_case)
+            result = EnergyDispatch.solve_system_dispatch(optimization_case)
             @test result.termination_status == "OPTIMAL"
             @test isapprox(result.p_grid_import_mw[1, 1], 2.0; atol = POWER_TOLERANCE_MW)
             @test isapprox(result.p_grid_export_mw[1, 1], 0.0; atol = POWER_TOLERANCE_MW)
@@ -1304,7 +1304,7 @@ end
                 ) for period in 1:2
             )
 
-            run_output = BESSDispatch.run_system_case(
+            run_output = EnergyDispatch.run_system_case(
                 case_path;
                 output_root = joinpath(case_dir, "outputs"),
                 run_timestamp = DateTime("2026-01-02T03:04:05"),
@@ -1332,16 +1332,16 @@ end
                 document = grid_anti_sim_disabled_system_case_document(),
             )
 
-            optimization_case = BESSDispatch.normalize_system_case(BESSDispatch.load_system_case(case_path))
+            optimization_case = EnergyDispatch.normalize_system_case(EnergyDispatch.load_system_case(case_path))
             @test optimization_case.grids[1].prevent_simultaneous_grid_import_export == false
 
-            dispatch_model = BESSDispatch.build_system_dispatch_model(optimization_case)
+            dispatch_model = EnergyDispatch.build_system_dispatch_model(optimization_case)
             @test dispatch_model.is_grid_importing === nothing
             @test isfinite(JuMP.upper_bound(dispatch_model.p_grid_import_mw[1, 1]))
             @test isfinite(JuMP.upper_bound(dispatch_model.p_grid_export_mw[1, 1]))
             @test all(!JuMP.is_binary(variable) for variable in JuMP.all_variables(dispatch_model.model))
 
-            result = BESSDispatch.solve_system_dispatch(optimization_case)
+            result = EnergyDispatch.solve_system_dispatch(optimization_case)
             @test result.termination_status == "OPTIMAL"
         end
     end
@@ -1350,11 +1350,11 @@ end
         sample_path = sample_hybrid_system_case_path()
         @test isfile(sample_path)
 
-        system_case = BESSDispatch.load_system_case(sample_path)
+        system_case = EnergyDispatch.load_system_case(sample_path)
         @test system_case.case_name == "hybrid_system"
         @test Set(node.id for node in system_case.nodes) == Set(["bus_1", "solar_1", "battery_1", "grid_1", "load_1"])
 
-        optimization_case = BESSDispatch.normalize_system_case(system_case)
+        optimization_case = EnergyDispatch.normalize_system_case(system_case)
         @test optimization_case.case_name == "hybrid_system"
         @test [asset.id for asset in optimization_case.renewables] == ["solar_1"]
         @test [asset.id for asset in optimization_case.batteries] == ["battery_1"]
@@ -1365,7 +1365,7 @@ end
         @test optimization_case.grids[1].export_power_max_mw == 4.0
         @test optimization_case.grids[1].prevent_simultaneous_grid_import_export
 
-        result = BESSDispatch.solve_system_dispatch(optimization_case)
+        result = EnergyDispatch.solve_system_dispatch(optimization_case)
         @test result.termination_status == "OPTIMAL"
         @test any(result.p_renewable_curtailed_mw .> POWER_TOLERANCE_MW)
         @test all(
@@ -1376,7 +1376,7 @@ end
         )
 
         mktempdir() do output_root
-            run_output = BESSDispatch.run_system_case(
+            run_output = EnergyDispatch.run_system_case(
                 sample_path;
                 output_root = output_root,
                 run_timestamp = DateTime("2026-01-02T03:04:05"),
@@ -1419,7 +1419,7 @@ end
     end
 
     @testset "system dispatch public API and CLI contract are stable" begin
-        exported_names = Set(names(BESSDispatch))
+        exported_names = Set(names(EnergyDispatch))
         required_public_names = [
             :SystemGraphData,
             :HydroAssetParameters,
@@ -1594,7 +1594,7 @@ end
         mktempdir() do case_dir
             document = minimal_hydraulic_v3_system_case_document()
             case_path = write_minimal_system_case_json(case_dir; document = document)
-            run_output = BESSDispatch.run_system_case(
+            run_output = EnergyDispatch.run_system_case(
                 case_path;
                 output_root = joinpath(case_dir, "outputs"),
                 run_timestamp = DateTime("2026-01-02T03:04:05"),
@@ -1660,7 +1660,7 @@ end
                 ),
             ]
             case_path = write_minimal_system_case_json(case_dir; document = document)
-            run_output = BESSDispatch.run_system_case(
+            run_output = EnergyDispatch.run_system_case(
                 case_path;
                 output_root = joinpath(case_dir, "outputs"),
                 run_timestamp = DateTime("2026-01-02T03:04:05"),
@@ -1712,7 +1712,7 @@ end
             document = minimal_hydraulic_v3_system_case_document()
             mutator(document)
             try
-                BESSDispatch.validate_hydraulic_v3_system_case_document(document)
+                EnergyDispatch.validate_hydraulic_v3_system_case_document(document)
                 return ""
             catch error
                 return sprint(showerror, error)
@@ -1746,7 +1746,7 @@ end
             document["hydraulic_network"]["nodes"][1]["reservoir"]["terminal_water_value_usd_per_hm3"] = 1000.0
             document["hydraulic_network"]["reaches"][1]["flow_min_m3s"] = 10.0
             case_path = write_minimal_system_case_json(case_dir; document = document)
-            run_output = BESSDispatch.run_system_case(
+            run_output = EnergyDispatch.run_system_case(
                 case_path;
                 output_root = joinpath(case_dir, "outputs"),
                 run_timestamp = DateTime("2026-01-02T03:04:05"),
@@ -1780,7 +1780,7 @@ end
                 ),
             )
             case_path = write_minimal_system_case_json(case_dir; document = document)
-            run_output = BESSDispatch.run_system_case(
+            run_output = EnergyDispatch.run_system_case(
                 case_path;
                 output_root = joinpath(case_dir, "outputs"),
                 run_timestamp = DateTime("2026-01-02T03:04:05"),
@@ -1816,7 +1816,7 @@ end
             ]
             document["hydraulic_network"]["reaches"][1]["flow_min_source"] = "series"
             case_path = write_minimal_system_case_json(case_dir; document = document)
-            run_output = BESSDispatch.run_system_case(
+            run_output = EnergyDispatch.run_system_case(
                 case_path;
                 output_root = joinpath(case_dir, "outputs"),
                 run_timestamp = DateTime("2026-01-02T03:04:05"),
@@ -2145,7 +2145,7 @@ end
         script_path = joinpath(@__DIR__, "..", "python", "plot_results.py")
 
         mktempdir() do output_root
-            run_output = BESSDispatch.run_case(
+            run_output = EnergyDispatch.run_case(
                 case_dir;
                 output_root = output_root,
                 run_timestamp = DateTime("2026-01-02T03:04:05"),
@@ -2169,7 +2169,7 @@ end
     end
 
     @testset "uses period duration in energy balance" begin
-        result = BESSDispatch.solve_dispatch(
+        result = EnergyDispatch.solve_dispatch(
             core_arbitrage_case(
                 prices = [10.0, 100.0],
                 durations = [0.5, 1.0],
@@ -2184,7 +2184,7 @@ end
     end
 
     @testset "enabled degradation reports absolute SOC movement and subtracts cost" begin
-        result = BESSDispatch.solve_dispatch(
+        result = EnergyDispatch.solve_dispatch(
             core_arbitrage_case(
                 prices = [10.0, 100.0, 10.0],
                 degradation_cost_per_mwh_delta_soc = 2.0,
@@ -2207,8 +2207,8 @@ end
             degradation_linear_delta_soc = false,
         )
 
-        dispatch_model = BESSDispatch.build_dispatch_model(case_data)
-        result = BESSDispatch.solve_dispatch(case_data)
+        dispatch_model = EnergyDispatch.build_dispatch_model(case_data)
+        result = EnergyDispatch.solve_dispatch(case_data)
 
         @test dispatch_model.delta_soc_abs_mwh === nothing
         @test result.termination_status == "OPTIMAL"
@@ -2218,7 +2218,7 @@ end
     end
 
     @testset "positive degradation avoids unnecessary cycling at constant prices" begin
-        result = BESSDispatch.solve_dispatch(
+        result = EnergyDispatch.solve_dispatch(
             core_arbitrage_case(
                 prices = [50.0, 50.0, 50.0],
                 initial_energy_mwh = 5.0,
@@ -2238,7 +2238,7 @@ end
     end
 
     @testset "terminal_condition none leaves final energy unconstrained" begin
-        result = BESSDispatch.solve_dispatch(
+        result = EnergyDispatch.solve_dispatch(
             core_arbitrage_case(
                 prices = [100.0, 10.0],
                 initial_energy_mwh = 10.0,
@@ -2251,7 +2251,7 @@ end
     end
 
     @testset "terminal_condition equal_initial returns final energy to initial energy" begin
-        result = BESSDispatch.solve_dispatch(
+        result = EnergyDispatch.solve_dispatch(
             core_arbitrage_case(
                 prices = [100.0, 10.0],
                 initial_energy_mwh = 10.0,
@@ -2264,7 +2264,7 @@ end
     end
 
     @testset "terminal_condition min_terminal returns final energy to configured minimum" begin
-        result = BESSDispatch.solve_dispatch(
+        result = EnergyDispatch.solve_dispatch(
             core_arbitrage_case(
                 prices = [100.0, 10.0],
                 initial_energy_mwh = 10.0,
@@ -2278,7 +2278,7 @@ end
     end
 
     @testset "enabled anti-simultaneity mode reports physically consistent dispatch modes" begin
-        result = BESSDispatch.solve_dispatch(
+        result = EnergyDispatch.solve_dispatch(
             core_arbitrage_case(
                 prices = [10.0, 100.0],
                 prevent_simultaneous_charge_discharge = true,
@@ -2301,7 +2301,7 @@ end
     end
 
     @testset "enabled anti-simultaneity mode prevents same-period lossy cycling" begin
-        result = BESSDispatch.solve_dispatch(
+        result = EnergyDispatch.solve_dispatch(
             core_arbitrage_case(
                 prices = [-10.0],
                 initial_energy_mwh = 5.0,
@@ -2325,8 +2325,8 @@ end
             terminal_condition = "equal_initial",
         )
 
-        dispatch_model = BESSDispatch.build_dispatch_model(case_data)
-        result = BESSDispatch.solve_dispatch(case_data)
+        dispatch_model = EnergyDispatch.build_dispatch_model(case_data)
+        result = EnergyDispatch.solve_dispatch(case_data)
 
         @test dispatch_model.is_charging === nothing
         @test all(!JuMP.is_binary(variable) for variable in JuMP.all_variables(dispatch_model.model))
@@ -2336,7 +2336,7 @@ end
 
     @testset "MVP acceptance scenario suite" begin
         @testset "constant prices with positive degradation do not cycle" begin
-            result = BESSDispatch.solve_dispatch(
+            result = EnergyDispatch.solve_dispatch(
                 core_arbitrage_case(
                     prices = [50.0, 50.0, 50.0],
                     initial_energy_mwh = 5.0,
@@ -2356,7 +2356,7 @@ end
         end
 
         @testset "low-high-low shape charges low and discharges high" begin
-            result = BESSDispatch.solve_dispatch(
+            result = EnergyDispatch.solve_dispatch(
                 core_arbitrage_case(
                     prices = [30.0, 10.0, 100.0, 30.0],
                     initial_energy_mwh = 0.0,
@@ -2374,7 +2374,7 @@ end
 
         @testset "equal_initial terminal energy is enforced" begin
             initial_energy_mwh = 10.0
-            result = BESSDispatch.solve_dispatch(
+            result = EnergyDispatch.solve_dispatch(
                 core_arbitrage_case(
                     prices = [100.0, 10.0],
                     initial_energy_mwh = initial_energy_mwh,
@@ -2387,7 +2387,7 @@ end
         end
 
         @testset "anti-simultaneity prevents same-period charge and discharge" begin
-            result = BESSDispatch.solve_dispatch(
+            result = EnergyDispatch.solve_dispatch(
                 core_arbitrage_case(
                     prices = [10.0, 100.0],
                     prevent_simultaneous_charge_discharge = true,
@@ -2406,7 +2406,7 @@ end
         end
 
         @testset "variable duration energy accounting uses MW times hours" begin
-            result = BESSDispatch.solve_dispatch(
+            result = EnergyDispatch.solve_dispatch(
                 core_arbitrage_case(
                     prices = [10.0, 100.0],
                     durations = [0.5, 1.0],
@@ -2431,7 +2431,7 @@ end
             readme = read(readme_path, String)
 
             @test occursin("julia --project=. -e \"import Pkg; Pkg.test()\"", readme)
-            @test occursin("BESSDispatch.run_case", readme)
+            @test occursin("EnergyDispatch.run_case", readme)
             @test occursin("data/cases/arbitrage_mvp", readme)
             @test occursin("python python/plot_results.py", readme)
             @test occursin("plots/dispatch_report.html", readme)
@@ -2446,8 +2446,8 @@ end
         if isfile(readme_path)
             readme = read(readme_path, String)
 
-            @test occursin("BESSDispatch.run_system_case", readme)
-            @test occursin("BESSDispatch.load_system_case", readme)
+            @test occursin("EnergyDispatch.run_system_case", readme)
+            @test occursin("EnergyDispatch.load_system_case", readme)
             @test occursin("scripts/run_system_case.jl", readme)
             @test occursin("data/cases/hybrid_system/system_case.json", readme)
             @test occursin("--output-root", readme)

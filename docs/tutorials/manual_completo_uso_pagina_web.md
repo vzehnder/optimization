@@ -1,4 +1,4 @@
-# Manual completo de uso de BESS Workspace
+# Manual completo de uso de EnergyDispatch
 
 > Tutorial operativo extremadamente detallado para una sesión guiada con un
 > experto. Este documento describe la interfaz React vigente, sus rutas, roles,
@@ -14,7 +14,7 @@
 Este manual permite que una persona experta en optimización, operación de
 sistemas eléctricos o análisis energético pueda guiar a otra persona en el uso
 de toda la aplicación web, aun si ninguna de las dos conoce previamente la
-estructura interna de BESS Workspace.
+estructura interna de EnergyDispatch.
 
 Al terminar el recorrido principal se debería poder:
 
@@ -96,9 +96,9 @@ Después del recorrido mínimo, practicar por separado:
 - portal externo;
 - schedules administrados.
 
-## 3. Qué es BESS Workspace y qué no es
+## 3. Qué es EnergyDispatch y qué no es
 
-BESS Workspace es una aplicación privada para configurar y ejecutar modelos de
+EnergyDispatch es una aplicación privada para configurar y ejecutar modelos de
 despacho económico de sistemas híbridos. La interfaz prepara un contrato
 `system_case.json`, el backend lo valida y el motor Julia lo resuelve.
 

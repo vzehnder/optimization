@@ -45,7 +45,7 @@ External issue tracker integration has not been configured, so each issue is sto
 | 2026-05-24 | All | Created | Initial local issue set generated from the PRD. |
 | 2026-05-24 | BESS-MVP-000 | Todo -> Done | Reviewed PRD and mathematical model together. Approved MVP modeling contract after clarifying terminal minimum configuration, mandatory core constraints, grid-side power convention, and disabled degradation reporting. |
 | 2026-05-24 | BESS-MVP-001 | Todo -> In Progress | Started Julia package bootstrap with a TDD smoke-test slice for importing the package. |
-| 2026-05-24 | BESS-MVP-001 | In Progress -> Done | Added `Project.toml`, `src/BESSDispatch.jl`, and `test/runtests.jl`. Verification passed with `julia --project=. -e "import Pkg; Pkg.test()"`. |
+| 2026-05-24 | BESS-MVP-001 | In Progress -> Done | Added `Project.toml`, `src/EnergyDispatch.jl`, and `test/runtests.jl`. Verification passed with `julia --project=. -e "import Pkg; Pkg.test()"`. |
 | 2026-05-24 | BESS-MVP-002 | Todo -> In Progress | Started YAML/CSV case loading and validation using TDD. |
 | 2026-05-24 | BESS-MVP-002 | In Progress -> Done | Added PRD structs, `load_case`, YAML/CSV sample case, validation for time series, BESS parameters, efficiencies, and terminal config. Verification passed with `julia --project=. -e "import Pkg; Pkg.test()"`. |
 | 2026-05-25 | BESS-MVP-003 | Todo -> In Progress | Started core full-horizon JuMP arbitrage model using TDD. |
@@ -61,7 +61,7 @@ External issue tracker integration has not been configured, so each issue is sto
 | 2026-05-25 | BESS-MVP-008 | Todo -> In Progress | Started Plotly dispatch report generation from persisted run output using TDD. |
 | 2026-05-25 | BESS-MVP-008 | In Progress -> Done | Added `python/plot_results.py` and a smoke test that runs it against a sample persisted run output and verifies `plots/dispatch_report.html` contains Plotly traces for price, dispatch, energy, profit, and degradation cost. Verification passed with `julia --project=. -e "import Pkg; Pkg.test()"` (126 tests). |
 | 2026-05-26 | BESS-MVP-009 | Todo -> In Progress | Started final MVP acceptance scenario suite and run instructions using TDD. |
-| 2026-05-26 | BESS-MVP-009 | In Progress -> Done | Added grouped MVP acceptance scenarios and README run instructions for tests, sample case execution, and Plotly report generation. Verification passed with `julia --project=. -e "import Pkg; Pkg.test()"` (153 tests), the documented `BESSDispatch.run_case` command, and `python python/plot_results.py outputs\arbitrage_mvp\20260526T100855145`. |
+| 2026-05-26 | BESS-MVP-009 | In Progress -> Done | Added grouped MVP acceptance scenarios and README run instructions for tests, sample case execution, and Plotly report generation. Verification passed with `julia --project=. -e "import Pkg; Pkg.test()"` (153 tests), the documented `EnergyDispatch.run_case` command, and `python python/plot_results.py outputs\arbitrage_mvp\20260526T100855145`. |
 
 ## How To Update This Tracker
 

@@ -1,6 +1,6 @@
 using Dates
 using JSON3
-using BESSDispatch
+using EnergyDispatch
 
 function usage()
     return "Usage: julia --project=. scripts/run_system_case.jl SYSTEM_CASE_PATH --output-root OUTPUT_ROOT [--run-timestamp ISO_DATETIME]"
@@ -51,7 +51,7 @@ function parse_cli_args(args::Vector{String})
     return system_case_path, output_root, run_timestamp
 end
 
-function system_cli_success_payload(run_output::BESSDispatch.SystemRunOutput)
+function system_cli_success_payload(run_output::EnergyDispatch.SystemRunOutput)
     return Dict{String,Any}(
         "case_name" => run_output.case_name,
         "run_timestamp" => run_output.run_timestamp,
@@ -65,7 +65,7 @@ end
 function main(args::Vector{String})::Int
     try
         system_case_path, output_root, run_timestamp = parse_cli_args(args)
-        run_output = BESSDispatch.run_system_case(
+        run_output = EnergyDispatch.run_system_case(
             system_case_path;
             output_root = output_root,
             run_timestamp = run_timestamp,
@@ -82,7 +82,7 @@ function main(args::Vector{String})::Int
             "code" => "SOLVE_ERROR",
             "message" => sprint(showerror, error),
         )
-        if error isa BESSDispatch.NoPrimalSolution
+        if error isa EnergyDispatch.NoPrimalSolution
             payload["termination_status"] = error.termination_status
             payload["primal_status"] = error.primal_status
             payload["code"] = error.termination_status == "INFEASIBLE" ? "SOLVER_INFEASIBLE" :

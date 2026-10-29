@@ -124,7 +124,7 @@ La navegacion global se parte en tres raices que no comparten header:
 | Consola | `/console`, `/console/:consoleId` | `external`+`operate`, y `admin`/`analyst` probando |
 | Portal | `/client/*` | `external`+`portal_view` |
 
-Se descarta el shell unico de hoy: el header actual —"BESS Workspace", brand
+Se descarta el shell unico de hoy: el header actual —"EnergyDispatch", brand
 mark `Z`, enlaces a Sistema y Admin— ya es un shell de analista disfrazado de
 global, y **Alcance de marca del portal cliente** puede ponerle marca por
 proyecto al portal, lo que lo volveria incompatible. Se descarta tambien colgar

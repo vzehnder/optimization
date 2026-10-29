@@ -1,4 +1,4 @@
-using Test, BESSDispatch, JSON3, CSV
+using Test, EnergyDispatch, JSON3, CSV
 
 function seepage_case()
     document = JSON3.read(read(joinpath(@__DIR__, "../tests/fixtures/reg002_hydraulic.json"), String), Dict{String,Any})
@@ -24,7 +24,7 @@ end
 function run_seepage_case(document, dir)
     path = joinpath(dir, "case.json")
     write(path, JSON3.write(document))
-    return BESSDispatch.run_system_case(path; output_root=dir)
+    return EnergyDispatch.run_system_case(path; output_root=dir)
 end
 
 @testset "Closing elevation is solved together with water balance and recorded in run metadata" begin

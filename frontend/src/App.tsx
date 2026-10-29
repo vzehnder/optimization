@@ -319,7 +319,7 @@ function AnalystRoot({ user, landingPath, canonicalCatalogRead }: RootProps) {
           <span className="brand-mark" aria-hidden="true">
             Z
           </span>
-          <span>BESS Workspace</span>
+          <span>EnergyDispatch</span>
         </Link>
         <IdentityStrip user={user} />
       </header>

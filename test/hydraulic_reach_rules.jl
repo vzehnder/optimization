@@ -1,10 +1,10 @@
-using Test, BESSDispatch, JSON3, CSV
+using Test, EnergyDispatch, JSON3, CSV
 
 reach_case() = JSON3.read(read(joinpath(@__DIR__, "../tests/fixtures/reg002_hydraulic.json"), String), Dict{String,Any})
 function solve_reaches(document, dir, name)
     path = joinpath(dir, name * ".json")
     write(path, JSON3.write(document))
-    BESSDispatch.run_system_case(path; output_root=joinpath(dir, name))
+    EnergyDispatch.run_system_case(path; output_root=joinpath(dir, name))
 end
 
 @testset "Independent non-generation flows obey sums and conserve reservoir water" begin
@@ -37,7 +37,7 @@ end
                         d -> push!(d["hydraulic_network"]["reaches"], deepcopy(d["hydraulic_network"]["reaches"][1])))
             invalid = deepcopy(document)
             mutate!(invalid)
-            @test_throws ArgumentError BESSDispatch.validate_hydraulic_v3_system_case_document(invalid)
+            @test_throws ArgumentError EnergyDispatch.validate_hydraulic_v3_system_case_document(invalid)
         end
     end
 end

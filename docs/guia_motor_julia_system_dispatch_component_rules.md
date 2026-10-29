@@ -31,14 +31,14 @@ Las fuentes principales son [system_dispatch.jl](../src/system_dispatch.jl) y [c
 
 `component_rules.jl` valida un bloque opcional de restricciones adicionales, llamado `component_rules`. Comprueba compatibilidad, identidad de los objetos, períodos, unidades, coeficientes y algunas contradicciones. Las restricciones ya llegan expresadas como sumas afines: una constante más una suma de variables multiplicadas por coeficientes numéricos.
 
-Ambos archivos se incluyen dentro del módulo `BESSDispatch`, junto con los tipos y utilidades compartidos. Aunque `component_rules.jl` se incluye después de `system_dispatch.jl`, las llamadas a sus funciones se realizan cuando el módulo ya terminó de cargarse.
+Ambos archivos se incluyen dentro del módulo `EnergyDispatch`, junto con los tipos y utilidades compartidos. Aunque `component_rules.jl` se incluye después de `system_dispatch.jl`, las llamadas a sus funciones se realizan cuando el módulo ya terminó de cargarse.
 
-**Extracto del código:** [BESSDispatch.jl, líneas 1–8](../src/BESSDispatch.jl#L1).
+**Extracto del código:** [EnergyDispatch.jl, líneas 1–8](../src/EnergyDispatch.jl#L1).
 
-<!-- source: ../src/BESSDispatch.jl:1-8 -->
+<!-- source: ../src/EnergyDispatch.jl:1-8 -->
 
 ```julia
-module BESSDispatch
+module EnergyDispatch
 
 include("types.jl")
 include(joinpath("io", "loaders.jl"))
@@ -1314,7 +1314,7 @@ Considérese la fila del ejemplo JSON de la sección 8:
 Este ejemplo de uso parte del fixture de batería del repositorio, construye límites de descarga de 2 MW para todos sus períodos y ejecuta el caso en una carpeta temporal. Debe ejecutarse desde la raíz con el proyecto Julia activado. El fixture original se lee y la copia modificada se escribe en el directorio temporal.
 
 ```julia
-using BESSDispatch, JSON3
+using EnergyDispatch, JSON3
 
 document = JSON3.read(
     read("tests/fixtures/reg012_battery.json", String),
@@ -1361,7 +1361,7 @@ document["component_rules"] = Dict{String,Any}(
 mktempdir() do dir
     case_path = joinpath(dir, "system_case.json")
     write(case_path, JSON3.write(document))
-    run = BESSDispatch.run_system_case(
+    run = EnergyDispatch.run_system_case(
         case_path;
         output_root = joinpath(dir, "outputs"),
     )
@@ -1378,7 +1378,7 @@ end
 Para inspeccionar un caso v1/v2 sin escribir resultados:
 
 ```julia
-using BESSDispatch
+using EnergyDispatch
 
 graph = load_system_case("data/cases/hybrid_system/system_case.json")
 data = normalize_system_case(graph)

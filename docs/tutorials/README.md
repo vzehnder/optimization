@@ -1,4 +1,4 @@
-# Tutoriales de BESS Workspace
+# Tutoriales de EnergyDispatch
 
 Revisados contra el código del repositorio el **2026-09-15**, con los cambios
 de interfaz UX-001 a UX-009 y los recorridos TS-7. La disponibilidad de las

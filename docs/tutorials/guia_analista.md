@@ -1,4 +1,4 @@
-# Guia Del Analista: Primeros Pasos Con BESS Workspace
+# Guia Del Analista: Primeros Pasos Con EnergyDispatch
 
 > Revisada contra el código del repositorio el 2026-09-15. Incluye los cambios
 > de interfaz UX-001 a UX-009 y los recorridos canónicos TS-7 disponibles.
@@ -18,7 +18,7 @@ explica el modelo mental; el manual detalla la operacion.
 
 ## 1. Que Es Esta Herramienta
 
-BESS Workspace es una aplicacion web privada para modelar y optimizar el
+EnergyDispatch es una aplicacion web privada para modelar y optimizar el
 despacho economico de sistemas hibridos (BESS, solar, eolica, hidraulica con
 regulacion y demanda local) conectados a un unico punto de conexion (PCC).
 

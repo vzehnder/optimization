@@ -80,7 +80,7 @@ describe("the three sibling application roots", () => {
     ).toBeVisible();
     expect(within(header).getByText("Olga Operadora")).toBeVisible();
     expect(within(header).getByRole("button", { name: "Salir" })).toBeVisible();
-    expect(screen.queryByText("BESS Workspace")).toBeNull();
+    expect(screen.queryByText("EnergyDispatch")).toBeNull();
     expect(screen.queryByRole("link", { name: "Proyectos" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Portal cliente" })).toBeNull();
   });
