@@ -66,6 +66,8 @@ def local_datetime(value, zone):
 
 def prepare(store, scenario_id, payload, *, revalidate_legacy=False):
     variant = context(store, scenario_id, payload.case_id, payload.variant_id)
+    if store.read_hydraulic_case_inventory(scenario_id):
+        raise ValueError("La preparación eléctrica no corresponde a la red hidráulica de este caso. Actualiza la mesa y usa Preparar ejecución hidráulica para seleccionar la versión fuente y validar la red.")
     preparation = store.read_input_variant_preparation(scenario_id=scenario_id, variant_id=payload.variant_id)
     if preparation.get("model_contract") not in {"bess_system_dispatch.v1", "bess_system_dispatch.v2"}:
         raise ValueError("La ejecución eléctrica admite modelos v1/v2. Este caso requiere su preparación hidráulica o completar el modelo.")

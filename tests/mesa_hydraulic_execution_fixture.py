@@ -1,7 +1,19 @@
 """One promoted plant/reservoir and independent CMg for real mesa execution."""
 
+import json
+from pathlib import Path
+
 from app.time_series_catalog import CatalogImportRequest, CatalogSignalMappingRequest, prepare_time_series_catalog_import
 from tests.mesa_hydraulic_fixture import seed_hydraulic_mesa
+from tests.test_ts3_case_variant_api import grid_battery_draft_document
+
+
+def add_unbound_electrical_draft(store, fixture):
+    draft = grid_battery_draft_document()
+    example = json.loads((Path(__file__).parents[1] / "data/cases/linear_hydro_system/system_case.json").read_text())
+    draft["assets"] = [next(node for node in example["nodes"] if node["type"] == "hydro")]
+    store.create_or_replace_scenario_draft(scenario_id=fixture["scenario"]["id"], document=draft)
+    return draft
 
 
 def seed_executable_hydraulic_mesa(store, *, name="Ejecución hidráulica"):

@@ -100,6 +100,15 @@ Revisa cualquier remuestreo indicado antes de **Validar red hidráulica** y
 **Ejecutar red hidráulica**. La red v3 se ejecuta por este camino; el hidro simple
 v2 participa en el caso eléctrico.
 
+Si el escenario contiene una red hidráulica y también un borrador eléctrico,
+la mesa usa la red hidráulica para preparar y ejecutar. El borrador eléctrico se
+conserva en su editor; sus componentes y vínculos pendientes no se mezclan con los
+de la red. Esto también se aplica al recargar la mesa sin un run seleccionado.
+Desde **Preparar ejecución hidráulica** puedes revisar los componentes de la
+versión fuente, seleccionar el CMg, validar el período, ejecutar y consultar los
+resultados sin salir de la mesa. La vista previa muestra los primeros 12
+intervalos; la validación comprueba la cobertura del período completo.
+
 El avance distingue cola, ejecución, guardado, éxito y fallo. Puedes recargar para
 recuperar el mismo run. Si se pierde la conexión, usa **Reintentar conexión**;
 una corrida fallida conserva las entradas y explica el error, sin ofrecer salidas.

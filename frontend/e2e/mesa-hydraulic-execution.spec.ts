@@ -171,10 +171,14 @@ test("La preparación hidráulica cambia con sus opciones y se recupera de una h
   await expect(execute).toBeDisabled();
 });
 
-async function openHydraulicMesa(page: Page, name: string) {
+async function openHydraulicMesa(
+  page: Page,
+  name: string,
+  electricalDraft = false,
+) {
   const fixture = await (
     await page.request.get(
-      `/api/auth/mesa-fixture?hydraulic_execution=true&case_name=${encodeURIComponent(name)}`,
+      `/api/auth/mesa-fixture?hydraulic_execution=true&electrical_draft=${electricalDraft}&case_name=${encodeURIComponent(name)}`,
     )
   ).json();
   const csrf = await (await page.request.get("/api/auth/csrf")).json();
@@ -193,7 +197,13 @@ test("Red v3 prepara, ejecuta y recupera potencia y volumen sin salir de la mesa
 }, testInfo) => {
   test.setTimeout(210000);
   await page.setViewportSize({ width: 1440, height: 900 });
-  const fixture = await openHydraulicMesa(page, "Red ejecutable");
+  const fixture = await openHydraulicMesa(page, "Red ejecutable", true);
+  await expect(
+    page.getByText("Preparar ejecución eléctrica", { exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Editar activos hidráulicos" }),
+  ).toBeVisible();
   await page
     .getByText("Preparar ejecución hidráulica", { exact: true })
     .click({ timeout: 5000 });

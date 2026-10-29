@@ -16,7 +16,8 @@ from app.main import create_app
 from app.persistence import AnalystStore
 from app.validation import JuliaValidationService
 from tests.auth_test_helpers import login_json_with_csrf, post_json_with_csrf
-from tests.mesa_hydraulic_execution_fixture import seed_executable_hydraulic_mesa
+from tests.mesa_hydraulic_execution_fixture import seed_executable_hydraulic_mesa, add_unbound_electrical_draft
+from tests.mesa_hydraulic_fixture import seed_hydraulic_mesa_run
 from tests.test_ts3_case_variant_api import RecordingRunQueue, StubValidationService
 
 
@@ -54,6 +55,42 @@ class MesaHydraulicExecutionTests(unittest.TestCase):
     def launch(self, prepared, key="hydraulic-request-1", **changes):
         return post_json_with_csrf(self.client, self.path + "/runs", {
             **self.payload, "expected_preparation_hash": prepared["preparation_hash"], "idempotency_key": key, **changes})
+
+    def test_network_mesa_ignores_unbound_electrical_draft_and_can_prepare_and_launch(self):
+        draft = add_unbound_electrical_draft(self.store, self.fixture)
+        scenario_id = self.fixture["scenario"]["id"]
+        variant_id = self.fixture["variant"]["id"]
+        run = seed_hydraulic_mesa_run(self.store, self.fixture, self.temp.name)
+        for selected in ({}, {"run_id": run["id"]}):
+            response = self.client.get(self.path.removesuffix("/hydraulic-execution"),
+                params={**self.params, "variant_id": variant_id, **selected})
+            self.assertEqual(response.status_code, 200, response.text)
+            mesa = response.json()
+            self.assertEqual(mesa["context"]["model_contract"], "bess_system_dispatch.v3")
+            self.assertIn("reservoir", [c["entity_id"] for c in mesa["components"]])
+            self.assertNotIn("hydro_1", [c["entity_id"] for c in mesa["components"]])
+        prepared = self.preview()
+        self.assertEqual(prepared["period_count"], 1)
+        self.assertEqual(prepared["preview_periods"][0]["natural_inflow_m3s"], {"reservoir": 3})
+        self.assertEqual(prepared["preview_periods"][0]["price_usd_per_mwh"], 50)
+        launched = self.launch(prepared)
+        self.assertEqual(launched.status_code, 201, launched.text)
+        snapshot = self.store.get_scenario_version(launched.json()["scenario_version_id"])
+        self.assertEqual(snapshot["system_case_json"]["schema_version"], "bess_system_dispatch.v3")
+        self.assertEqual(self.store.get_scenario_draft(scenario_id)["document"], draft)
+        self.assertEqual(self.store.list_case_time_series_bindings(variant_id), [])
+
+    def test_old_electrical_form_directs_a_network_case_back_to_hydraulic_preparation(self):
+        add_unbound_electrical_draft(self.store, self.fixture)
+        response = post_json_with_csrf(self.client, self.path.replace("/hydraulic-execution", "/execution") + "/preview", {
+            **self.params, "variant_id": self.fixture["variant"]["id"],
+            "range_start": self.payload["range_start"], "range_end": self.payload["range_end"],
+            "timezone": "UTC", "resolution_hours": 1,
+        })
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("Preparar ejecución hidráulica", response.json()["detail"])
+        self.assertNotIn("missing required bindings", response.text)
+        self.assertEqual(self.store.list_scenario_runs(self.fixture["scenario"]["id"]), [])
 
     def test_real_network_run_recovers_and_exposes_plant_power_and_reservoir_volume(self):
         with TestClient(create_app(store=self.store, auth_enabled=True, artifact_root=self.temp.name)) as client:

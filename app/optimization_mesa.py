@@ -499,12 +499,19 @@ def read_mesa(store, *, scenario_id: int, case_id: int, variant_id: int,
         if start.tzinfo is None or end.tzinfo is None or start >= end:
             raise ValueError("El período debe tener inicio anterior al fin e incluir zona horaria.")
     preparation = store.read_input_variant_preparation(scenario_id=scenario_id, variant_id=variant_id)
+    hydraulic_items = store.read_hydraulic_case_inventory(scenario_id)
+    # The electrical editor draft can coexist with the hydraulic diagram.
+    # A populated network owns the mesa's preparation/execution workflow;
+    # unrelated draft requirements must not turn it into an electrical desk.
+    model_contract = "bess_system_dispatch.v3" if hydraulic_items else preparation["model_contract"]
+    electrical_requirements = [] if hydraulic_items else preparation["required_signals"]
+    electrical_components = [] if hydraulic_items else preparation["model_components"]
     bindings = store.read_case_bindings(scenario_id=scenario_id, variant_id=variant_id)["items"]
     runs, selected, snapshot, table = _run_outputs(store, scenario_id=scenario_id, variant=variant, run_id=run_id, artifact_root=artifact_root)
     objects = {(o["object_type_key"], o["object_key"]): o
                for o in store.list_linkable_objects(project_id=project["id"], include_archived=True)}
     components = []
-    for requirement in preparation["required_signals"]:
+    for requirement in electrical_requirements:
         if requirement["signal_key"] not in ("load_demand_mw", "renewable_available_power_mw", "hydro_inflow_m3s"):
             continue
         signal_key = requirement["signal_key"]
@@ -561,7 +568,7 @@ def read_mesa(store, *, scenario_id: int, case_id: int, variant_id: int,
             "entity_type": requirement["entity_type"],
             "name": obj["display_name"] if obj else requirement["entity_id"], "series": series,
         })
-    for node in preparation["model_components"]:
+    for node in electrical_components:
         if node["type"] not in (*ELECTRICAL_OUTPUTS, "hydro"):
             continue
         obj = objects.get((f"component:{node['type']}", node["id"]))
@@ -593,7 +600,6 @@ def read_mesa(store, *, scenario_id: int, case_id: int, variant_id: int,
                                    for key, (name, unit) in parameter_descriptors.items() if node.get(key) is not None]
     hydraulic_objects = {(o["object_kind"], o["subtype_id"]): o
                          for o in store.list_linkable_objects(project_id=project["id"], include_archived=True)}
-    hydraulic_items = store.read_hydraulic_case_inventory(scenario_id)
     for item in hydraulic_items:
         obj = hydraulic_objects.get((item["entity_type"], item["base_entity_id"]))
         item["is_active"] = bool(item["is_active"]) and (obj is None or obj["status"] == "active")
@@ -654,7 +660,7 @@ def read_mesa(store, *, scenario_id: int, case_id: int, variant_id: int,
         "context": {"project_id": project["id"], "project_name": project["name"],
                     "scenario_id": scenario_id, "scenario_name": scenario["name"],
                     "case_id": case_id, "variant_id": variant_id, "variant_name": variant["display_name"],
-                    "model_contract": preparation["model_contract"]},
+                    "model_contract": model_contract},
         "components": components,
         "runs": runs, "selected_run": selected,
     }
